@@ -60,6 +60,6 @@ toxigen
 wmdp
 aya_redteaming
 polyglotoxicitypromptsllama_small
-realtoxicitypromptsllama_small
+# realtoxicitypromptsllama_small - causes errors due to task split
 # translations
 # wmt_translation - currently not supported due to dependency conflict for unbabel/comet

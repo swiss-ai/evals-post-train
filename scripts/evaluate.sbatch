@@ -274,10 +274,10 @@ if echo "$TASKS" | grep -q "ruler"; then
     fi
 fi
 
-INSTALL_CMD="pip install --no-cache-dir --upgrade \"git+https://github.com/swiss-ai/lm-evaluation-harness.git\" && \
+INSTALL_CMD="pip install --no-cache-dir --upgrade \"git+https://github.com/ymetz/lm-evaluation-harness.git@retry_feature\" && \
 pip install --no-cache-dir --upgrade \
     \"huggingface-hub>=1.3.0,<2.0\" \
-    \"transformers==5.1.0\" \
+    \"transformers==5.3.0\" \
     \"accelerate>=1.1.0\" \
     \"antlr4-python3-runtime==4.11\" \
     datasketch \
