@@ -27,6 +27,7 @@ WANDB_PROJECT="apertus-1.5-post-training-v0.0"
 TABLE_METRICS=""
 DEBUG=0
 MERGE_ONLY=0
+GROUP_SIZE=1
 TASK_FILE=""
 MODEL=""
 
@@ -41,6 +42,7 @@ while [[ $# -gt 0 ]]; do
         --wandb_entity) WANDB_ENTITY="$2"; shift 2 ;;
         --wandb_project) WANDB_PROJECT="$2"; shift 2 ;;
         --table_metrics) TABLE_METRICS="$2"; shift 2 ;;
+        --group_size) GROUP_SIZE="$2"; shift 2 ;;
         --debug) DEBUG=1; shift 1 ;;
         --merge_only) MERGE_ONLY=1; shift 1 ;;
         *) echo "Error: Unknown argument '$1'"; exit 1 ;;
@@ -59,8 +61,9 @@ SINGLE_HARNESS_DIR="$SINGLE_EVAL_PREFIX/$MODEL_BASENAME/harness"
 
 declare -a ORDERED_TASKS
 while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%%#*}"        # strip inline comments
     line=$(echo "$line" | xargs)
-    if [[ -n "$line" && ! "$line" =~ ^# ]]; then
+    if [[ -n "$line" ]]; then
         ORDERED_TASKS+=("$line")
     fi
 done < "$TASK_FILE"
@@ -169,27 +172,43 @@ fi
 
 declare -a JOB_IDS
 
-echo -e "\nLaunching missing tasks individually:"
-for task in "${MISSING_TASKS[@]}"; do
-    launch_cmd=("env" "WANDB_MODE=disabled" "bash" "scripts/launch_evaluations.sh" "single" "--task" "$task" "--model" "$MODEL" "--chat-template")
-    
+# Group missing tasks into batches of GROUP_SIZE
+declare -a TASK_GROUPS
+num_missing=${#MISSING_TASKS[@]}
+for (( i=0; i<num_missing; i+=GROUP_SIZE )); do
+    group=""
+    for (( j=i; j<i+GROUP_SIZE && j<num_missing; j++ )); do
+        if [[ -n "$group" ]]; then
+            group="${group},${MISSING_TASKS[$j]}"
+        else
+            group="${MISSING_TASKS[$j]}"
+        fi
+    done
+    TASK_GROUPS+=("$group")
+done
+
+num_groups=${#TASK_GROUPS[@]}
+echo -e "\nLaunching $num_missing missing tasks in $num_groups groups (group_size=$GROUP_SIZE):"
+for group in "${TASK_GROUPS[@]}"; do
+    launch_cmd=("env" "WANDB_MODE=disabled" "bash" "scripts/launch_evaluations.sh" "single" "--task" "$group" "--model" "$MODEL" "--chat-template")
+
     if [[ $DEBUG -eq 1 ]]; then
         echo "[DEBUG] Would launch: ${launch_cmd[*]}"
         JOB_IDS+=("999999")
         continue
     fi
-    
+
     set +e
     output=$("${launch_cmd[@]}" 2>&1)
     set -e
-    
+
     job_id=$(echo "$output" | grep -oE 'Submitted batch job [0-9]+' | awk '{print $4}' || true)
-    
+
     if [[ -n "$job_id" ]]; then
         JOB_IDS+=("$job_id")
-        echo " -> Submitted $task (Job ID: $job_id)"
+        echo " -> Submitted [$group] (Job ID: $job_id)"
     else
-        echo " -> Failed to submit $task:"
+        echo " -> Failed to submit [$group]:"
         echo "$output"
     fi
 done
@@ -202,7 +221,7 @@ if [[ ${#JOB_IDS[@]} -gt 0 ]]; then
     
     SELF_PATH=$(realpath "$0")
     
-    WRAP_CMD="bash $SELF_PATH --task_file \"$TASK_FILE\" --model \"$MODEL\" --eval_prefix \"$EVAL_PREFIX\" --account \"$ACCOUNT\" --reservation \"$RESERVATION\" --wandb_entity \"$WANDB_ENTITY\" --wandb_project \"$WANDB_PROJECT\""
+    WRAP_CMD="bash $SELF_PATH --task_file \"$TASK_FILE\" --model \"$MODEL\" --eval_prefix \"$EVAL_PREFIX\" --account \"$ACCOUNT\" --reservation \"$RESERVATION\" --wandb_entity \"$WANDB_ENTITY\" --wandb_project \"$WANDB_PROJECT\" --group_size \"$GROUP_SIZE\""
     
     if [[ -n "$TABLE_METRICS" ]]; then
         WRAP_CMD="$WRAP_CMD --table_metrics \"$TABLE_METRICS\""

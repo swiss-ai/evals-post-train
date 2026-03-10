@@ -8,6 +8,7 @@ LOGS_ROOT="${SCRATCH:-/tmp}/eval_logs_start/apertus/apertus-1.5-post-training-v0
 WANDB_ENTITY="apertus"
 WANDB_PROJECT="apertus-1.5-post-training-v0.0"
 DEBUG=0
+GROUP_SIZE=1
 BASE_DIR=""
 CONFIG_FILE=""
 TABLE_METRICS=""
@@ -27,6 +28,8 @@ while [[ $# -gt 0 ]]; do
         --wandb_entity=*) WANDB_ENTITY="${1#*=}"; shift 1 ;;
         --wandb_project) WANDB_PROJECT="$2"; shift 2 ;;
         --wandb_project=*) WANDB_PROJECT="${1#*=}"; shift 1 ;;
+        --group_size) GROUP_SIZE="$2"; shift 2 ;;
+        --group_size=*) GROUP_SIZE="${1#*=}"; shift 1 ;;
         --debug) DEBUG=1; shift 1 ;;
         *)
             echo "Error: Unknown argument '$1'"
@@ -55,12 +58,13 @@ for model_path in "${MODEL_DIRS[@]}"; do
     echo "============================================================"
 
     CMD=(
-        bash "scripts/launch_evaluations_gracefuly.sh" 
+        bash "scripts/launch_evaluations_gracefuly.sh"
         "--task_file" "$CONFIG_FILE"
         "--model" "$model_path"
         "--eval_prefix" "$LOGS_ROOT"
         "--wandb_entity" "$WANDB_ENTITY"
         "--wandb_project" "$WANDB_PROJECT"
+        "--group_size" "$GROUP_SIZE"
     )
     
     if [[ -n "$TABLE_METRICS" ]]; then
