@@ -1,0 +1,16 @@
+ifeval/prompt_level_strict_acc
+humaneval/pass@1
+gsm8k/exact_match,strict-match:
+truthfulqa_gen/bleu_max
+mgsm_direct/exact_match
+xcopa/acc
+mmlu_pro/exact_match
+bbh_cot_fewshot/exact_match
+drop/f1
+mmlu/acc
+hellaswag/acc
+arc_challenge/acc_norm
+winogrande/acc
+toxigen/acc
+minerva_math/exact_match
+gpqa_diamond_zeroshot/acc_norm

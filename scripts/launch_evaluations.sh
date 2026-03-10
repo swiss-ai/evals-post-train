@@ -108,7 +108,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Validate mode ---
-VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" non-gated "single")
+VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" non-gated "single" "custom")
 if [[ ! " ${VALID_MODES[*]} " =~ " ${EVAL_MODE} " ]]; then
     echo "Error: Invalid mode '$EVAL_MODE'"
     echo "Valid modes: ${VALID_MODES[*]}"
@@ -213,6 +213,8 @@ case "$EVAL_MODE" in
         export TASKS="$SINGLE_TASK"
         export TABLE_METRICS="$SINGLE_TASK"
         export WANDB_PROJECT="${WANDB_PROJECT}-single"
+        ;;
+    "custom")
         ;;
 esac
 
