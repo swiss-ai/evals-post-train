@@ -1,0 +1,18 @@
+agieval
+arc_challenge_chat
+mmlu_flan_cot_zeroshot
+truthfulqa_mc2
+hellaswag
+gsm8k_cot
+hendrycks_math
+mgsm_en_cot
+mathqa
+humaneval_instruct
+# mbpp_instruct
+acp_bench
+bbh
+drop
+ifeval
+multi-if
+# harmbench
+toxigen

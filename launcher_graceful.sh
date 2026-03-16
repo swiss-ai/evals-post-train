@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# bash launcher_graceful.sh --base_dir $SCRATCH/aper_mods6 --config_file ./configs/apertus/tasks_posttrain.txt --table_metrics ./configs/apertus/tasks_posttrain_main_table.txt
+
 # Exit on error, undefined variable, or pipeline failure
 set -euo pipefail
 
@@ -79,6 +81,6 @@ for model_path in "${MODEL_DIRS[@]}"; do
     fi
     #if [[ $model_name == "/iopsstor/scratch/cscs/dmelikidze/aper_mods2/baseline-Olmo-3-7B-SFT2" ]]; then
     echo "Reached debug model, exiting after first iteration."
-    exit 0
+    # exit 0
     #fi
 done

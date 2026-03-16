@@ -1,0 +1,18 @@
+agieval/acc
+arc_challenge_chat/exact_match
+mmlu_flan_cot_zeroshot/exact_match,ordered-extract
+truthfulqa_mc2/acc
+hellaswag/acc_norm
+gsm8k_cot/exact_match
+hendrycks_math/math_verify
+mgsm_en_cot_en/exact_match
+mathqa/acc
+humaneval_instruct/pass@10
+# mbpp_instruct/pass_at_1
+acp_bench/exact_match
+bbh/exact_match
+drop/f1
+ifeval/prompt_level_loose_acc
+multi-if/prompt_level_loose_acc
+# harmbench/score
+toxigen/acc
