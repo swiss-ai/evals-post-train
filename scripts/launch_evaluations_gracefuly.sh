@@ -190,16 +190,17 @@ done
 num_groups=${#TASK_GROUPS[@]}
 echo -e "\nLaunching $num_missing missing tasks in $num_groups groups (group_size=$GROUP_SIZE):"
 for group in "${TASK_GROUPS[@]}"; do
-    launch_cmd=("env" "WANDB_MODE=disabled" "SBATCH_ACCOUNT=$ACCOUNT" "SBATCH_RESERVATION=$RESERVATION" "bash" "scripts/launch_evaluations.sh" "single" "--task" "$group" "--model" "$MODEL" "--chat-template")
+    launch_cmd=("bash" "scripts/launch_evaluations.sh" "single" "--task" "$group" "--model" "$MODEL" "--chat-template")
 
     if [[ $DEBUG -eq 1 ]]; then
-        echo "[DEBUG] Would launch: ${launch_cmd[*]}"
+        echo "[DEBUG] Would launch: WANDB_MODE=disabled SBATCH_ACCOUNT=$ACCOUNT SBATCH_RESERVATION=$RESERVATION ${launch_cmd[*]}"
         JOB_IDS+=("999999")
         continue
     fi
 
     set +e
-    output=$("${launch_cmd[@]}" 2>&1)
+    output=$(export WANDB_MODE=disabled && export SBATCH_ACCOUNT="$ACCOUNT" && export SBATCH_RESERVATION="$RESERVATION" && "${launch_cmd[@]}" 2>&1)
+    rc=$?
     set -e
 
     job_id=$(echo "$output" | grep -oE 'Submitted batch job [0-9]+' | awk '{print $4}' || true)
