@@ -1,3 +1,0 @@
-minerva_math
-gpqa_diamond_zeroshot
-toxigen

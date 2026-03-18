@@ -10,7 +10,7 @@
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --exclusive
 #SBATCH --partition=normal
-#SBATCH --time=11:59:00
+#SBATCH --time=03:59:00
 #SBATCH --exclude=nid006784
 #SBATCH --exclude=nid007014
 #SBATCH --exclude=nid007127

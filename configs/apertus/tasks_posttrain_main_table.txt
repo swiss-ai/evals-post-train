@@ -16,3 +16,4 @@ ifeval/prompt_level_loose_acc
 multi-if/prompt_level_loose_acc
 # harmbench/score
 toxigen/acc
+alpaca_eval/length_controlled_winrate

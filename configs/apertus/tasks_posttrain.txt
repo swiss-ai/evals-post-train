@@ -16,3 +16,4 @@ ifeval
 multi-if
 # harmbench
 toxigen
+alpaca_eval
