@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=a-infra01-1
+#SBATCH --account=infra01
 #SBATCH --cpus-per-task=200
 #SBATCH --gres=gpu:4
 #SBATCH --job-name=evaluation
@@ -332,6 +332,8 @@ elif [[ $LM_EVAL_BACKEND == "vllm" ]]; then
     unset SSL_CERT_FILE
 
     $INSTALL_CMD
+    # Fix alpaca_eval endpoint URL
+    sed -i 's|https://api.swissai.cscs.ch/v1|https://api.swissai.svc.cscs.ch/v1|' /usr/local/lib/python3.12/dist-packages/lm_eval/tasks/alpaca_eval/metric.py
     # Make torch CUDA libs discoverable for vllm._C import
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
     $CMD

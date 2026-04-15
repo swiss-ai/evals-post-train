@@ -21,7 +21,7 @@ mkdir -p "$HF_HOME" "$HF_DATASETS_CACHE" "$NLTK_DATA" "$TRITON_CACHE_DIR" "$WAND
 # --- Defaults ---
 EVAL_PREFIX="$SCRATCH/eval_logs_start/apertus/apertus-1.5-post-training-v0.0/"
 ACCOUNT="infra01"
-RESERVATION="PA-2338-RL"
+RESERVATION="SD-69241-apertus-1-5-6"
 WANDB_ENTITY="apertus"
 WANDB_PROJECT="apertus-1.5-post-training-v0.0"
 TABLE_METRICS=""
@@ -30,6 +30,7 @@ MERGE_ONLY=0
 GROUP_SIZE=1
 TASK_FILE=""
 MODEL=""
+FORCE_TASKS=""
 
 # --- Argument Parsing ---
 while [[ $# -gt 0 ]]; do
@@ -45,6 +46,7 @@ while [[ $# -gt 0 ]]; do
         --group_size) GROUP_SIZE="$2"; shift 2 ;;
         --debug) DEBUG=1; shift 1 ;;
         --merge_only) MERGE_ONLY=1; shift 1 ;;
+        --force_tasks) FORCE_TASKS="$2"; shift 2 ;;
         *) echo "Error: Unknown argument '$1'"; exit 1 ;;
     esac
 done
@@ -143,6 +145,22 @@ submit_aggregator() {
     fi
 }
 
+# Force re-evaluation: remove specified tasks from COMPLETED_MAP
+# FORCE_TASKS is a comma-separated list of task substrings (e.g. "mbpp_instruct,humaneval_instruct")
+if [[ -n "$FORCE_TASKS" ]]; then
+    IFS=',' read -ra FORCE_LIST <<< "$FORCE_TASKS"
+    for task in "${ORDERED_TASKS[@]}"; do
+        for force_pat in "${FORCE_LIST[@]}"; do
+            if [[ "$task" == *"$force_pat"* ]]; then
+                if [[ -n "${COMPLETED_MAP[$task]:-}" ]]; then
+                    echo "Forcing re-evaluation of: $task (matched pattern '$force_pat')"
+                    unset "COMPLETED_MAP[$task]"
+                fi
+            fi
+        done
+    done
+fi
+
 if [[ $MERGE_ONLY -eq 1 ]]; then
     echo "--- Running Post-Eval Cleanup for $MODEL_BASENAME ---"
     rebuild_split_markers
@@ -227,7 +245,11 @@ if [[ ${#JOB_IDS[@]} -gt 0 ]]; then
     if [[ -n "$TABLE_METRICS" ]]; then
         WRAP_CMD="$WRAP_CMD --table_metrics \"$TABLE_METRICS\""
     fi
-    
+
+    if [[ -n "$FORCE_TASKS" ]]; then
+        WRAP_CMD="$WRAP_CMD --force_tasks \"$FORCE_TASKS\""
+    fi
+
     WRAP_CMD="$WRAP_CMD --merge_only"
     
     merge_launch_cmd=("sbatch" "--account" "$ACCOUNT" "--reservation" "$RESERVATION" "--dependency=$dep_str" "--wrap" "$WRAP_CMD")
