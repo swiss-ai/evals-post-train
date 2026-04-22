@@ -8,3 +8,5 @@ include_base_new_45_gen_0shot
 cultural_bench
 switzerland_qa_0shot
 multi-if
+aya_redteaming
+polyglotoxicitypromptsllama_small

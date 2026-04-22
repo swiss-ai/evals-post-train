@@ -18,3 +18,5 @@ switzerland_qa/acc
 switzerland_qa_0shot/exact_match
 switzerland_qa_0shot_cot/exact_match
 multi-if/prompt_level_loose_acc
+aya_redteaming/score
+polyglotoxicitypromptsllama_small/score

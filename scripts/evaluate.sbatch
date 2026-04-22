@@ -39,9 +39,10 @@ usage() {
 	echo " TASKS: Tasks to run with lm eval harness."
 	echo " WANDB_ENTITY: WandB entity name for uploading results (default: apertus)."
 	echo " WANDB_PROJECT: WandB project name for uploading results (default: swissai-evals)."
-    echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: hf). - options are: hf, vllm, megatron_lm"
+	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: hf). - options are: hf, vllm, megatron_lm"
     echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
+    echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from swiss-ai/lm-evaluation-harness (default: repository default branch)."
 	echo "For more information see the README: https://github.com/swiss-ai/evals?tab=readme-ov-file."
 }
 die() {
@@ -73,6 +74,7 @@ WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
 LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-true}
 HARNESS_LIMIT=${HARNESS_LIMIT:-""}
+LM_EVAL_HARNESS_BRANCH=${LM_EVAL_HARNESS_BRANCH:-""}
 
 export HF_TOKEN="${HF_TOKEN:-$(tr -d '\r\n' < ./scripts/hf_token.txt)}"
 export WANDB_API_KEY="${WANDB_API_KEY:-$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)}"
@@ -98,7 +100,7 @@ warn_if_empty CSCS_SERVING_API \
 
 # optional eval arguments
 MAX_LENGTH=${MAX_LENGTH:-4096}
-MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-512}
+MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
 NUM_FEWSHOT=${NUM_FEWSHOT:-""}
 
 # Task splitting support: set NUM_SPLITS and SPLIT_INDEX to distribute tasks across jobs
@@ -138,7 +140,7 @@ GPUS_PER_NODE=4
 
 # Print configuration.
 echo "Configuration set:"
-printf "MODEL=$MODEL\nNAME=$NAME\nTOKENIZER=$TOKENIZER\nBS=$BS\nREVISION=$REVISION\nSIZE=$SIZE\nHARNESS_LIMIT=$HARNESS_LIMIT\nBOS=$BOS\nTASKS=$TASKS\nMAX_LENGTH=$MAX_LENGTH\nWANDB_ENTITY=$WANDB_ENTITY\nWANDB_PROJECT=$WANDB_PROJECT\nLM_EVAL_BACKEND=$LM_EVAL_BACKEND\nLHF_HOME=$HF_HOME\n\n"
+printf "MODEL=$MODEL\nNAME=$NAME\nTOKENIZER=$TOKENIZER\nBS=$BS\nREVISION=$REVISION\nSIZE=$SIZE\nHARNESS_LIMIT=$HARNESS_LIMIT\nLM_EVAL_HARNESS_BRANCH=$LM_EVAL_HARNESS_BRANCH\nBOS=$BOS\nTASKS=$TASKS\nMAX_LENGTH=$MAX_LENGTH\nWANDB_ENTITY=$WANDB_ENTITY\nWANDB_PROJECT=$WANDB_PROJECT\nLM_EVAL_BACKEND=$LM_EVAL_BACKEND\nLHF_HOME=$HF_HOME\n\n"
 
 # Generic envs.
 export MASTER_ADDR=$(hostname)
@@ -274,7 +276,12 @@ if echo "$TASKS" | grep -q "ruler"; then
     fi
 fi
 
-INSTALL_CMD="pip install --no-cache-dir --upgrade "git+https://github.com/swiss-ai/lm-evaluation-harness.git" && \
+LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/swiss-ai/lm-evaluation-harness.git"
+if [[ -n "$LM_EVAL_HARNESS_BRANCH" ]]; then
+    LM_EVAL_HARNESS_PIP_SPEC="${LM_EVAL_HARNESS_PIP_SPEC}@${LM_EVAL_HARNESS_BRANCH}"
+fi
+
+INSTALL_CMD="pip install --no-cache-dir --upgrade \"$LM_EVAL_HARNESS_PIP_SPEC\" && \
 pip install --no-cache-dir --upgrade \
     \"huggingface-hub>=1.3.0,<2.0\" \
     \"transformers==5.1.0\" \
@@ -293,6 +300,7 @@ pip install --no-cache-dir --upgrade \
     immutabledict \
     langdetect \
     hf-transfer \
+    subset2evaluate \
     \"alpaca-eval>=0.6.2\" \
     \"peft>=0.18.0\"  "
 

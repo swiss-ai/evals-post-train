@@ -1,7 +1,7 @@
 gsm8k_cot/exact_match
 minerva_math/exact_match
 hendrycks_math500/math_verify
-humaneval/pass_at_1
+humaneval_instruct/pass_at_1
 mbpp/pass_at_1
 humaneval_infilling/pass@1
 arc_challenge/acc

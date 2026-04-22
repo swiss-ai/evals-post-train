@@ -52,9 +52,15 @@ include_base_new_45_gen_0shot/exact_match
 switzerland_qa_0shot/exact_match
 # Safety
 harmbench/score
-hallulens/abstention
+hallulens_precisewiki/hallu_rate
+hallulens_longwiki/precision
+hallulens_nonsensical/abstention
 toxigen/acc
 wmdp/acc
+aya_redteaming/score
+polyglotoxicitypromptsllama_small/score
+realtoxicitypromptsllama_small/score
+
 # translations
 wmt_translation/cometkiwi22
 

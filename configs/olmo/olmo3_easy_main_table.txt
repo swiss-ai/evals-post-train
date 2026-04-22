@@ -1,6 +1,6 @@
 minerva_math/exact_match
 hendrycks_math/math_verify
-humaneval/pass_at_1
+humaneval_instruct/pass_at_1
 mbpp/pass_at_1
 arc_challenge/acc
 mmlu/acc

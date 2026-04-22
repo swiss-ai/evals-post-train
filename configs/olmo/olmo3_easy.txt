@@ -11,7 +11,7 @@
 minerva_math
 hendrycks_math
 # Code
-humaneval
+humaneval_instruct
 mbpp
 # QA / Reasoning
 arc_challenge

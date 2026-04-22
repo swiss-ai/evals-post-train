@@ -102,7 +102,8 @@ bash scripts/launch_evaluations.sh olmo-safety \
 ## Notes
 
 > [!NOTE]
-> **vLLM vs HF inference**: Generation task results (gsm8k, squadv2) may differ slightly between backends (for instruction-tuned models).. Only compare results across models using the same backend. We recommend to perform all evaluations with the `vllm` backend (default) to ensure reproducability. 
+> **vLLM vs HF inference**: Generation task results (gsm8k, squadv2) may differ slightly between backends (for instruction-tuned models).. Only compare results across models using the same backend. We recommend to perform all evaluations with the `vllm` backend (default) to ensure reproducability.
+- **Megatron-LM** If you want to run Megatron-LM models natively, you need clone the [Nvdia Megatron-LM repository](https://github.com/NVIDIA/Megatron-LM) to the evals-post-train directory (or change the location with the launch script):
 - **Time limits**: The default 12h SLURM limit works for most evaluations. For large suites on large models, use `--splits` to parallelize.
 - **WANDB_API_KEY**: Must be available either as an environment variable or in `scripts/wandb_api_key.txt`.
 - **HF_TOKEN**: Must be available either as an environment variable or in  `scripts/hf_token.txt`.

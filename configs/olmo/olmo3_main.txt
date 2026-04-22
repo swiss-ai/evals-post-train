@@ -12,7 +12,7 @@ gsm8k_cot
 minerva_math
 hendrycks_math500
 # Code
-humaneval
+humaneval_instruct
 mbpp
 # Code FIM (fill-in-the-middle)
 humaneval_infilling

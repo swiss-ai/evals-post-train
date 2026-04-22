@@ -10,7 +10,7 @@ minerva_math
 hendrycks_math
 hendrycks_math500
 # Code
-humaneval
+humaneval_instruct
 mbpp
 humaneval_infilling
 # QA - Multiple Choice

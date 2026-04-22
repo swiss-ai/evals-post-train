@@ -49,12 +49,18 @@ bbq
 blend_sample
 cultural_bench
 include_base_44_gen_0shot
+# include_45 and switzerland_qa are only available in internal benchmarks - disable without access to CSCS
 include_base_new_45_gen_0shot
 switzerland_qa_0shot
 # Safety
 harmbench
-hallulens # - todo: evaluate
+hallulens_precisewiki
+hallulens_longwiki
+hallulens_nonsensical
 toxigen
 wmdp
+aya_redteaming
+polyglotoxicitypromptsllama_small
+realtoxicitypromptsllama_small
 # translations
 # wmt_translation - currently not supported due to dependency conflict for unbabel/comet

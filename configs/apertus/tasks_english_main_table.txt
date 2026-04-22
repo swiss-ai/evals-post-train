@@ -12,4 +12,8 @@ mbpp/pass_at_1
 ifeval/prompt_level_loose_acc
 toxigen/acc_norm
 bbq/acc
-realtoxicityprompts/score
+harmbench/score
+hallulens_precisewiki/hallu_rate
+hallulens_longwiki/precision
+hallulens_nonsensical/abstention
+realtoxicitypromptsllama_small/score
