@@ -27,3 +27,14 @@ include_base_44_gen_0shot
 # include_base_new_45_gen_0shot # gated dataset
 mlogiqa_gen
 truthfulqa_multilingual_mc2
+# arena_hard_v01
+
+#OOD:
+# nq_open
+# triviaqa
+# coqa
+# hallulens
+# pubmedqa
+# meqsum
+# meddialog_qsumm
+# aime

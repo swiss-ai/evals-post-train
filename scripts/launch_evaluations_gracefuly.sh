@@ -21,7 +21,7 @@ mkdir -p "$HF_HOME" "$HF_DATASETS_CACHE" "$NLTK_DATA" "$TRITON_CACHE_DIR" "$WAND
 # --- Defaults ---
 EVAL_PREFIX="$SCRATCH/eval_logs_start/apertus/apertus-1.5-post-training-v0.0/"
 ACCOUNT="infra01"
-RESERVATION="SD-69241-apertus-1-5-6"
+RESERVATION="SD-69241-apertus-1-5"
 WANDB_ENTITY="apertus"
 WANDB_PROJECT="apertus-1.5-post-training-v0.0"
 TABLE_METRICS=""
@@ -217,7 +217,7 @@ for group in "${TASK_GROUPS[@]}"; do
     fi
 
     set +e
-    output=$(export WANDB_MODE=disabled && export SBATCH_ACCOUNT="$ACCOUNT" && export SBATCH_RESERVATION="$RESERVATION" && "${launch_cmd[@]}" 2>&1)
+    output=$(export WANDB_MODE=disabled && export SBATCH_ACCOUNT="$ACCOUNT" && export SBATCH_RESERVATION="$RESERVATION" && export WANDB_ENTITY="$WANDB_ENTITY" && export WANDB_PROJECT="$WANDB_PROJECT" && "${launch_cmd[@]}" 2>&1)
     rc=$?
     set -e
 

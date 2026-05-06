@@ -187,9 +187,9 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
             main_log_data[eval_metric] = log_data[eval_metric]
     
     run_id_suffix = "-001"
-    
+    wandb_id = (model_eval.model_name + run_id_suffix)[:110]
     with wandb.init(
-        id=model_eval.model_name + run_id_suffix,
+        id=wandb_id,
         resume="allow",
         entity=entity,
         project=project,
@@ -199,7 +199,7 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
         run.log({"main_results": create_wandb_table(model_eval.model_name, main_log_data)})
         run.log(log_data)
         run.log({"eval_duration": eval_duration})
-        
+
         # Upload samples as a table directly from the structured data
         for task in model_eval.tasks:
             if not task.samples:
@@ -207,8 +207,11 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
                 continue
 
             samples_table = upload_structured_samples_as_table(task)
+            # Cap key length so artifact name "run-{id}-{key}" stays under 128
+            samples_key = f"samples/{wandb_name}/{task.task_name}"
+            samples_key = samples_key[:128 - len("run-") - len(wandb_id) - 1]
             try:
-                run.log({f"samples/{model_eval.model_name}/{task.task_name}": samples_table})
+                run.log({samples_key: samples_table})
             except Exception as e:
                 print(f"  - Failed to log samples for task {task.task_name}: {e}")
 

@@ -112,7 +112,7 @@ def parse_model_info(name, method_filter=None):
     Returns: (formatted_name, dataset_sort_order, norm_string, learning_rate_float)
     """
     if name == BASE_MODEL_NAME:
-        return "apertus1-base-sft", 0, "", 0.0
+        return "Official Apertus-1.0-8B-SFT", 0, "", 0.0
     
     # 1. Extract beta
     beta_match = re.search(r'beta([0-9.]+)', name)
@@ -193,7 +193,7 @@ def main():
                         help="Only include model directories whose name contains this substring")
     parser.add_argument("--entity", default="apertus")
     parser.add_argument("--project", default="apertus-1.5-post-training-v0.0")
-    parser.add_argument("--metrics-file", default="./configs/apertus/tasks_posttrain_main_table.txt",
+    parser.add_argument("--metrics-file", default=["./configs/apertus/tasks_posttrain_main_table.txt"],
                         nargs="+", help="One or more metrics files (all are merged)")
     parser.add_argument("--output", default="/iopsstor/scratch/cscs/dmelikidze/evals-post-train/eval_output",
                         help="Output directory (created if it doesn't exist)")
@@ -219,12 +219,18 @@ def main():
                         help="W&B run name to use as an additional baseline row (placed after the DPO baseline)")
     parser.add_argument("--extra-baseline-name", default=None,
                         help="Display name for the extra baseline (defaults to the run name)")
-    parser.add_argument("--extra-run", default=None,
-                        help="W&B run name to append at the end of the table")
-    parser.add_argument("--extra-run-name", default=None,
-                        help="Display name for the extra run (defaults to the run name)")
+    parser.add_argument("--extra-run", default=None, nargs="+",
+                        help="One or more W&B run names to append at the end of the table")
+    parser.add_argument("--extra-run-name", default=None, nargs="+",
+                        help="Display names for extra runs (defaults to the run names)")
     parser.add_argument("--complete-only", action="store_true",
                         help="Only keep rows with no N/A values")
+    parser.add_argument("--baseline", default=None,
+                        help="Override the base model W&B run name (default: baseline-apertus-1-sft)")
+    parser.add_argument("--no-dpo-baseline", action="store_true",
+                        help="Skip the DPO baseline row")
+    parser.add_argument("--absolute", action="store_true",
+                        help="Show absolute scores instead of delta improvements from the baseline")
 
     args = parser.parse_args()
 
@@ -232,6 +238,9 @@ def main():
     for pair in args.rename:
         old, new = pair.split("=", 1)
         rename_map[old] = new
+
+    base_model_name = args.baseline if args.baseline else BASE_MODEL_NAME
+    skip_dpo_baseline = args.no_dpo_baseline
 
     metrics = []
     for mf in args.metrics_file:
@@ -257,15 +266,37 @@ def main():
 
     print("Models found:", models)
 
-    runs = {r.name: r for r in api.runs(f"{args.entity}/{args.project}")}
+    project_path = f"{args.entity}/{args.project}"
     summaries = {}
 
+    # Collect all run names we need to fetch
+    needed_runs = set([base_model_name]) | set(models)
+    if not skip_dpo_baseline:
+        needed_runs.add(BASE_DPO_MODEL_NAME)
+    if args.extra_baseline:
+        needed_runs.add(args.extra_baseline)
+    if args.extra_run:
+        needed_runs.update(args.extra_run)
+
+    # Fetch only the runs we need, one at a time
+    runs = {}
+    for name in needed_runs:
+        try:
+            matched = list(api.runs(project_path, filters={"display_name": name}, order="-created_at", per_page=1))
+            if matched:
+                runs[name] = matched[0]
+        except Exception as e:
+            print(f"Warning: failed to fetch run '{name}': {e}")
+
     # Always fetch baseline runs directly from W&B (they may not be dirs in base-model-path)
-    for baseline in [BASE_MODEL_NAME, BASE_DPO_MODEL_NAME]:
+    baselines_to_fetch = [base_model_name]
+    if not skip_dpo_baseline:
+        baselines_to_fetch.append(BASE_DPO_MODEL_NAME)
+    for baseline in baselines_to_fetch:
         if baseline in runs:
             summaries[baseline] = dict(runs[baseline].summary)
         else:
-            print(f"Warning: baseline '{baseline}' not found in W&B project {args.entity}/{args.project}")
+            print(f"Warning: baseline '{baseline}' not found in W&B project {project_path}")
 
     for model in models:
         if model not in runs:
@@ -274,10 +305,10 @@ def main():
         summaries[model] = dict(runs[model].summary)
 
 
-    if BASE_MODEL_NAME not in summaries:
-        raise RuntimeError(f"Base model run '{BASE_MODEL_NAME}' not found in W&B project {args.entity}/{args.project}!")
+    if base_model_name not in summaries:
+        raise RuntimeError(f"Base model run '{base_model_name}' not found in W&B project {args.entity}/{args.project}!")
 
-    base_summary = summaries[BASE_MODEL_NAME]
+    base_summary = summaries[base_model_name]
 
     if args.debug:
         print("\n=== W&B summary keys for base model ===")
@@ -296,9 +327,9 @@ def main():
 
     # Optionally add DPO baseline if present
     dpo_row = None
-    if BASE_DPO_MODEL_NAME in summaries:
+    if not skip_dpo_baseline and BASE_DPO_MODEL_NAME in summaries:
         dpo_summary = summaries[BASE_DPO_MODEL_NAME]
-        dpo_row = {"Model": BASE_DPO_MODEL_NAME if args.raw_names else "apertus1-8b-instruct"}
+        dpo_row = {"Model": "Official Apertus-1.0-8B-Instruct"}
         deltas = []
         for metric in metrics:
             val = normalize_score(get_metric(dpo_summary, metric))
@@ -306,34 +337,51 @@ def main():
             short_metric = simplify_metric_name(metric)
             if val is None:
                 dpo_row[short_metric] = "N/A"
+            elif args.absolute:
+                dpo_row[short_metric] = f"{val:.4f}"
+                if base_val is not None:
+                    deltas.append(val - base_val)
             elif base_val is not None:
                 delta = val - base_val
                 dpo_row[short_metric] = f"{delta:+.4f}"
                 deltas.append(delta)
             else:
                 dpo_row[short_metric] = f"{val:.4f}"
-        dpo_row["Avg_Imp"] = round(sum(deltas) / len(deltas), 4) if deltas else "N/A"
+        if args.absolute:
+            abs_vals = [normalize_score(get_metric(dpo_summary, m)) for m in metrics]
+            abs_vals = [v for v in abs_vals if v is not None]
+            dpo_row["Avg_Score"] = round(sum(abs_vals) / len(abs_vals), 4) if abs_vals else "N/A"
+        else:
+            dpo_row["Avg_Imp"] = round(sum(deltas) / len(deltas), 4) if deltas else "N/A"
 
     raw_rows = []
 
     # Add base model row first
-    if args.raw_names:
-        short_model_name = BASE_MODEL_NAME
+    if args.raw_names or args.baseline:
+        short_model_name = base_model_name
         ds_order, norm_str, lr_val = 0, "", 0.0
     else:
-        short_model_name, ds_order, norm_str, lr_val = parse_model_info(BASE_MODEL_NAME, method_filter=args.filter)
+        short_model_name, ds_order, norm_str, lr_val = parse_model_info(base_model_name, method_filter=args.filter)
+    if base_model_name in rename_map:
+        short_model_name = rename_map[base_model_name]
     base_row = {
         "Model": short_model_name,
         "_ds_order": 0,
         "_norm_str": norm_str,
         "_lr_val": lr_val,
-        "_orig_model": BASE_MODEL_NAME,
+        "_orig_model": base_model_name,
     }
     for metric in metrics:
         val = normalize_score(get_metric(base_summary, metric))
         short_metric = simplify_metric_name(metric)
         base_row[short_metric] = f"{val:.4f}" if val is not None else "N/A"
-    base_row["Avg_Imp"] = 0.0
+    avg_col = "Avg_Score" if args.absolute else "Avg_Imp"
+    if args.absolute:
+        base_vals_list = [normalize_score(get_metric(base_summary, m)) for m in metrics]
+        base_vals_list = [v for v in base_vals_list if v is not None]
+        base_row[avg_col] = round(sum(base_vals_list) / len(base_vals_list), 4) if base_vals_list else "N/A"
+    else:
+        base_row[avg_col] = 0.0
     raw_rows.append(base_row)
 
     # Add DPO baseline row second if present
@@ -358,20 +406,29 @@ def main():
                 short_metric = simplify_metric_name(metric)
                 if val is None:
                     eb_row[short_metric] = "N/A"
+                elif args.absolute:
+                    eb_row[short_metric] = f"{val:.4f}"
+                    if base_val is not None:
+                        deltas.append(val - base_val)
                 elif base_val is not None:
                     delta = val - base_val
                     eb_row[short_metric] = f"{delta:+.4f}"
                     deltas.append(delta)
                 else:
                     eb_row[short_metric] = f"{val:.4f}"
-            eb_row["Avg_Imp"] = round(sum(deltas) / len(deltas), 4) if deltas else "N/A"
+            if args.absolute:
+                abs_vals = [normalize_score(get_metric(eb_summary, m)) for m in metrics]
+                abs_vals = [v for v in abs_vals if v is not None]
+                eb_row["Avg_Score"] = round(sum(abs_vals) / len(abs_vals), 4) if abs_vals else "N/A"
+            else:
+                eb_row["Avg_Imp"] = round(sum(deltas) / len(deltas), 4) if deltas else "N/A"
             raw_rows.append(eb_row)
         else:
             print(f"Warning: extra baseline '{args.extra_baseline}' not found in W&B project")
 
     # Add all other models
     for model in models:
-        if model == BASE_MODEL_NAME or model == BASE_DPO_MODEL_NAME:
+        if model == base_model_name or model == BASE_DPO_MODEL_NAME:
             continue
         summary = summaries.get(model)
         # Unpack the parsing results including hidden sorting keys
@@ -401,16 +458,24 @@ def main():
                 row[short_metric] = "N/A"
                 continue
             base_val = base_values[metric]
-            if base_val is not None:
+            if args.absolute:
+                row[short_metric] = f"{val:.4f}"
+                if base_val is not None:
+                    deltas.append(val - base_val)
+            elif base_val is not None:
                 delta = val - base_val
                 row[short_metric] = f"{delta:+.4f}"
                 deltas.append(delta)
             else:
                 row[short_metric] = f"{val:.4f}"
-        if deltas:
-            row["Avg_Imp"] = round(sum(deltas) / len(deltas), 4)
+        if args.absolute:
+            abs_vals = [normalize_score(get_metric(summary, m)) for m in metrics if summary is not None] if summary else []
+            abs_vals = [v for v in abs_vals if v is not None]
+            row[avg_col] = round(sum(abs_vals) / len(abs_vals), 4) if abs_vals else "N/A"
+        elif deltas:
+            row[avg_col] = round(sum(deltas) / len(deltas), 4)
         else:
-            row["Avg_Imp"] = "N/A"
+            row[avg_col] = "N/A"
         raw_rows.append(row)
 
     # Filter to top N by Avg_Imp if requested (baselines always kept)
@@ -419,7 +484,7 @@ def main():
         non_baseline_rows = [r for r in raw_rows if r["_ds_order"] >= 1]
         # Sort non-baselines by Avg_Imp descending (treat "N/A" as -inf)
         non_baseline_rows.sort(
-            key=lambda x: x["Avg_Imp"] if isinstance(x["Avg_Imp"], (int, float)) else float('-inf'),
+            key=lambda x: x[avg_col] if isinstance(x[avg_col], (int, float)) else float('-inf'),
             reverse=True
         )
         non_baseline_rows = non_baseline_rows[:args.top_n]
@@ -435,33 +500,52 @@ def main():
     else:
         def sort_key(x):
             is_baseline = x["_ds_order"] < 1
-            avg = x["Avg_Imp"] if isinstance(x["Avg_Imp"], (int, float)) else float('-inf')
+            avg = x[avg_col] if isinstance(x[avg_col], (int, float)) else float('-inf')
             return (0 if is_baseline else 1, x["_ds_order"] if is_baseline else -avg)
     raw_rows.sort(key=sort_key)
 
-    # Append extra run at the end if requested
+    # Append extra runs at the end if requested
     if args.extra_run:
-        if args.extra_run in runs:
-            extra_summary = dict(runs[args.extra_run].summary)
-            display_name = args.extra_run_name or args.extra_run
-            extra_row = {"Model": display_name}
-            deltas = []
-            for metric in metrics:
-                val = normalize_score(get_metric(extra_summary, metric))
-                base_val = base_values[metric]
-                short_metric = simplify_metric_name(metric)
-                if val is None:
-                    extra_row[short_metric] = "N/A"
-                elif base_val is not None:
-                    delta = val - base_val
-                    extra_row[short_metric] = f"{delta:+.4f}"
-                    deltas.append(delta)
+        extra_names = args.extra_run_name or []
+        for i, er in enumerate(args.extra_run):
+            if er in runs:
+                extra_summary = dict(runs[er].summary)
+                if args.debug:
+                    print(f"\n=== W&B summary keys for extra run '{er}' ===")
+                    for k in sorted(extra_summary.keys()):
+                        print(f"  {k}: {extra_summary[k]}")
+                    for m in metrics:
+                        val = get_metric(extra_summary, m)
+                        print(f"  Metric '{m}' -> {val}")
+                    print()
+                display_name = extra_names[i] if i < len(extra_names) else rename_map.get(er, er)
+                extra_row = {"Model": display_name}
+                deltas = []
+                for metric in metrics:
+                    val = normalize_score(get_metric(extra_summary, metric))
+                    base_val = base_values[metric]
+                    short_metric = simplify_metric_name(metric)
+                    if val is None:
+                        extra_row[short_metric] = "N/A"
+                    elif args.absolute:
+                        extra_row[short_metric] = f"{val:.4f}"
+                        if base_val is not None:
+                            deltas.append(val - base_val)
+                    elif base_val is not None:
+                        delta = val - base_val
+                        extra_row[short_metric] = f"{delta:+.4f}"
+                        deltas.append(delta)
+                    else:
+                        extra_row[short_metric] = f"{val:.4f}"
+                if args.absolute:
+                    abs_vals = [normalize_score(get_metric(extra_summary, m)) for m in metrics]
+                    abs_vals = [v for v in abs_vals if v is not None]
+                    extra_row[avg_col] = round(sum(abs_vals) / len(abs_vals), 4) if abs_vals else "N/A"
                 else:
-                    extra_row[short_metric] = f"{val:.4f}"
-            extra_row["Avg_Imp"] = round(sum(deltas) / len(deltas), 4) if deltas else "N/A"
-            raw_rows.append(extra_row)
-        else:
-            print(f"Warning: extra run '{args.extra_run}' not found in W&B project")
+                    extra_row[avg_col] = round(sum(deltas) / len(deltas), 4) if deltas else "N/A"
+                raw_rows.append(extra_row)
+            else:
+                print(f"Warning: extra run '{er}' not found in W&B project")
 
     # Clean up the hidden sorting keys before building the DataFrame
     for r in raw_rows:
@@ -479,19 +563,7 @@ def main():
 
     os.makedirs(args.output, exist_ok=True)
 
-    # 1. Output LaTeX
-    tex_path = os.path.join(args.output, "eval_table.tex")
-    latex = df.to_latex(escape=False)
-    with open(tex_path, "w") as f:
-        f.write(latex)
-    print("Saved LaTeX table to", tex_path)
 
-    # 2. Output CSV
-    csv_path = os.path.join(args.output, "eval_table.csv")
-    df.to_csv(csv_path)
-    print("Saved CSV table to", csv_path)
-
-    # 3. Output PNG Layout
     n_rows = len(df)
     n_cols = len(df.columns)
     fig_width = max(30, 2 + n_cols * 2.5)
@@ -499,7 +571,7 @@ def main():
 
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     ax.axis('off')
-    ax.set_title(args.title, fontsize=16, fontweight='bold', pad=20)
+    fig.suptitle(args.title, fontsize=16, fontweight='bold', y=0.98)
 
     table_data = df.reset_index()
     num_cols = len(table_data.columns)
@@ -523,16 +595,24 @@ def main():
         tbl[0, col_idx].set_facecolor('#4472C4')
         tbl[0, col_idx].set_text_props(color='white', fontweight='bold')
 
-    # Color-code Avg_Imp column values
-    avg_col_idx = list(table_data.columns).index("Avg_Imp")
+    # Alternating row colors for readability
+    row_colors = ['#FFFFFF', '#DCE6F1']
+    for row_idx in range(1, n_rows + 1):
+        bg = row_colors[(row_idx - 1) % 2]
+        for col_idx in range(num_cols):
+            tbl[row_idx, col_idx].set_facecolor(bg)
+
+    # Color-code Avg column values (overrides row stripe)
+    avg_col_idx = list(table_data.columns).index(avg_col)
     for row_idx in range(1, n_rows + 1):
         cell = tbl[row_idx, avg_col_idx]
         try:
-            val = float(table_data.iloc[row_idx - 1]["Avg_Imp"])
-            if val > 0:
-                cell.set_facecolor('#C6EFCE')  # green
-            elif val < 0:
-                cell.set_facecolor('#FFC7CE')  # red
+            val = float(table_data.iloc[row_idx - 1][avg_col])
+            if not args.absolute:
+                if val > 0:
+                    cell.set_facecolor('#C6EFCE')  # green
+                elif val < 0:
+                    cell.set_facecolor('#FFC7CE')  # red
         except (ValueError, TypeError):
             pass
 
@@ -544,6 +624,10 @@ def main():
     plt.savefig(png_path, dpi=200, bbox_inches='tight')
     plt.close(fig)
     print("Saved PNG table to", png_path)
+
+    csv_path = os.path.join(args.output, "eval_table.csv")
+    df.to_csv(csv_path)
+    print("Saved CSV table to", csv_path)
 
 
 if __name__ == "__main__":

@@ -327,6 +327,7 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
   srun -n 1 --mpi=pmix -ul --environment=./containers/env_vllm.toml bash -lc "
     set -euo pipefail
     unset SSL_CERT_FILE
+    export HF_DATASETS_TRUST_REMOTE_CODE=1
 
     $INSTALL_CMD
     # Make torch CUDA libs discoverable for vllm._C import
@@ -338,6 +339,7 @@ elif [[ $LM_EVAL_BACKEND == "vllm" ]]; then
   srun -n 1 --mpi=pmix -ul --environment=./containers/env_vllm.toml bash -lc "
     set -euo pipefail
     unset SSL_CERT_FILE
+    export HF_DATASETS_TRUST_REMOTE_CODE=1
 
     $INSTALL_CMD
     # Fix alpaca_eval endpoint URL
@@ -351,6 +353,7 @@ else
   srun -n 1 --mpi=pmix -ul --environment=./containers/env.toml --export=ALL,HF_TOKEN,HF_HOME,WANDB_API_KEY bash -lc "
     set -euo pipefail
     unset SSL_CERT_FILE
+    export HF_DATASETS_TRUST_REMOTE_CODE=1
 
     $INSTALL_CMD
 
