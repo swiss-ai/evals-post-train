@@ -1,45 +1,50 @@
-# General ability & Knowledge
-agieval/acc
-arc_challenge_chat/exact_match
-commonsense_qa/acc
-hellaswag/acc_norm
+# Knowledge
 mmlu_flan_cot_zeroshot/exact_match,ordered-extract
 mmlu_pro/exact_match
-squadv2/f1
+agieval/acc
+arc_challenge_chat/exact_match
 truthfulqa_mc2/acc
+commonsense_qa/acc
+squadv2/f1
+hellaswag/acc_norm
+# Instruction Following
+ifeval/prompt_level_loose_acc
+multi-if/prompt_level_loose_acc
+# Chat
+alpaca_eval/length_controlled_winrate
 # Math
 gsm8k_cot/exact_match
-gsm8k_platinum_cot_zeroshot/exact_match
 hendrycks_math/math_verify
-mathqa/acc
 minerva_math/exact_match
+mathqa/acc
+gsm8k_platinum_cot_zeroshot/exact_match
+minerva_math500/exact_match
+aime24/exact_match
+aime25/exact_match
 # Coding
 humaneval_instruct/pass@10
 mbpp_instruct/pass_at_1
 # Reasoning
+bbh/exact_match
 gpqa_main_cot_zeroshot/exact_match,ordered-extract
 acp_bench/exact_match
 drop/f1
-bbh/exact_match
 # Multilingual
-mgsm_en_cot_en/exact_match
 global_mmlu_gen_0shot/exact_match
+mgsm_en_cot_en/exact_match
 truthfulqa_multilingual_mc2/acc
-arc_multilingual/acc
-mlogiqa_gen/exact_match
-xnli/acc
 include_base_44_gen_0shot/exact_match
 include_base_new_45_gen_0shot/exact_match
-# Instruction Following
-alpaca_eval/length_controlled_winrate
-ifeval/prompt_level_loose_acc
-multi-if/prompt_level_loose_acc
+mlogiqa_gen/exact_match
+xnli/acc
+arc_multilingual/acc
 # Cultural knowledge
 blend_sample/acc_norm
 cultural_bench/acc_norm
 switzerland_qa_0shot/exact_match
 # Safety & Bias
 bbq/acc
-aya_redteaming/score
 toxigen/acc
 wmdp/acc
+aya_redteaming/score
+# Tool Use

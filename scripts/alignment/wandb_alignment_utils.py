@@ -186,7 +186,7 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
         if eval_metric in log_data:
             main_log_data[eval_metric] = log_data[eval_metric]
     
-    run_id_suffix = "-006"
+    run_id_suffix = "-007"
     wandb_id = (model_eval.model_name + run_id_suffix)[:110]
     with wandb.init(
         id=wandb_id,

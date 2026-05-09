@@ -1,45 +1,50 @@
-# General ability & Knowledge
-agieval
-arc_challenge_chat
-commonsense_qa
-hellaswag
+# Knowledge
 mmlu_flan_cot_zeroshot
 mmlu_pro
-squadv2
+agieval
+arc_challenge_chat
 truthfulqa_mc2
+commonsense_qa
+squadv2
+hellaswag
+# Instruction Following
+ifeval
+multi-if
+# Chat
+alpaca_eval
 # Math
 gsm8k_cot
-gsm8k_platinum_cot_zeroshot
 hendrycks_math
-mathqa
 minerva_math
+mathqa
+gsm8k_platinum_cot_zeroshot
+minerva_math500
+aime24
+aime25
 # Coding
 humaneval_instruct
 mbpp_instruct
 # Reasoning
+bbh
 gpqa_main_cot_zeroshot
 acp_bench
 drop
-bbh
 # Multilingual
-mgsm_en_cot
 global_mmlu_gen_0shot
+mgsm_en_cot
 truthfulqa_multilingual_mc2
-arc_multilingual
-mlogiqa_gen
-xnli
 include_base_44_gen_0shot
 include_base_new_45_gen_0shot
-# Instruction Following
-alpaca_eval
-ifeval
-multi-if
+mlogiqa_gen
+xnli
+arc_multilingual
 # Cultural knowledge
 blend_sample
 cultural_bench
 switzerland_qa_0shot
 # Safety & Bias
 bbq
-aya_redteaming
 toxigen
 wmdp
+aya_redteaming
+# Tool Use

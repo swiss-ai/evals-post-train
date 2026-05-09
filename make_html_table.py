@@ -106,7 +106,7 @@ def _prepare_group_data(groups, models, scores, metric_filter):
 
     for group_name, metric_list in groups:
         filtered = [(k, d) for k, d in metric_list if metric_filter(k)]
-        if not filtered:
+        if not filtered and metric_list:
             continue
         group_scores = {m: [] for m in models}
         benchmarks = []
@@ -136,66 +136,59 @@ def _render_table(html, table_id, models, group_data, overall_avgs, n_models, in
     """Render one table-box with the given group_data."""
     html.append(f'<div class="table-box" id="{table_id}">\n')
     html.append('  <div class="grid-row header-row">\n    <div class="cell">Category / Benchmark</div>\n')
-    for model in models:
-        html.append(f'    <div class="cell">{model}</div>\n')
+    for i, model in enumerate(models):
+        html.append(f'    <div class="cell" data-col="{i+1}">{model}</div>\n')
     html.append("  </div>\n")
 
     for group_name, benchmarks, group_avgs in group_data:
-        valid_gavgs = [v for v in group_avgs.values() if v is not None]
-        best_gavg = max(valid_gavgs) if valid_gavgs else None
+        if not benchmarks:
+            html.append('  <div class="section"><div class="grid-row empty-group">\n')
+            html.append(f'    <div class="cell">{group_name}</div>\n')
+            for i, model in enumerate(models):
+                html.append(f'    <div class="cell na" data-col="{i+1}">-</div>\n')
+            html.append("  </div></div>\n")
+            continue
 
-        html.append('  <div class="section"><details>\n  <summary class="grid-row">\n')
+        html.append('  <div class="section"><details>\n  <summary class="grid-row score-row">\n')
         html.append(f'    <div class="cell"><span class="arrow">&#9654;</span>{group_name}</div>\n')
-        for model in models:
+        for i, model in enumerate(models):
             avg = group_avgs[model]
             if avg is None:
-                html.append('    <div class="cell na">-</div>\n')
+                html.append(f'    <div class="cell na" data-col="{i+1}">-</div>\n')
             else:
-                is_best = (best_gavg is not None and abs(avg - best_gavg) < 1e-6 and len(valid_gavgs) > 1)
-                content = f'<span class="best-badge">{avg * 100:.1f}</span>' if is_best else f'{avg * 100:.1f}'
-                html.append(f'    <div class="cell">{content}</div>\n')
+                html.append(f'    <div class="cell" data-col="{i+1}" data-val="{avg * 100:.1f}">{avg * 100:.1f}</div>\n')
         html.append('  </summary>\n  <div class="bench-rows">\n')
 
         for display_name, row_vals in benchmarks:
-            valid_vals = [v for v in row_vals.values() if v is not None]
-            best_val = max(valid_vals) if valid_vals else None
-
-            html.append(f'    <div class="bench-row">\n      <div class="cell">{display_name}</div>\n')
-            for model in models:
+            html.append(f'    <div class="bench-row score-row">\n      <div class="cell">{display_name}</div>\n')
+            for i, model in enumerate(models):
                 val = row_vals[model]
                 if val is None:
-                    html.append('      <div class="cell na">-</div>\n')
+                    html.append(f'      <div class="cell na" data-col="{i+1}">-</div>\n')
                 else:
-                    is_best = (best_val is not None and abs(val - best_val) < 1e-6 and len(valid_vals) > 1)
-                    content = f'<span class="best-badge">{val * 100:.1f}</span>' if is_best else f'{val * 100:.1f}'
-                    html.append(f'      <div class="cell">{content}</div>\n')
+                    html.append(f'      <div class="cell" data-col="{i+1}" data-val="{val * 100:.1f}">{val * 100:.1f}</div>\n')
             html.append("    </div>\n")
 
         html.append("  </div>\n  </details></div>\n")
 
-    valid_overall = [v for v in overall_avgs.values() if v is not None]
-    best_overall = max(valid_overall) if valid_overall else None
-
-    html.append('  <div class="grid-row overall">\n    <div class="cell">Overall Average</div>\n')
-    for model in models:
+    html.append('  <div class="grid-row overall score-row">\n    <div class="cell">Overall Average</div>\n')
+    for i, model in enumerate(models):
         avg = overall_avgs[model]
         if avg is None:
-            html.append('    <div class="cell na">-</div>\n')
+            html.append(f'    <div class="cell na" data-col="{i+1}">-</div>\n')
         else:
-            is_best = (best_overall is not None and abs(avg - best_overall) < 1e-6 and len(valid_overall) > 1)
-            content = f'<span class="best-badge">{avg * 100:.1f}</span>' if is_best else f'{avg * 100:.1f}'
-            html.append(f'    <div class="cell">{content}</div>\n')
+            html.append(f'    <div class="cell" data-col="{i+1}" data-val="{avg * 100:.1f}">{avg * 100:.1f}</div>\n')
     html.append("  </div>\n")
 
     if info_rows:
         for label, row_vals in info_rows:
             html.append(f'  <div class="grid-row info-row">\n    <div class="cell">{label}</div>\n')
-            for model in models:
+            for i, model in enumerate(models):
                 val = row_vals.get(model)
                 if val is None:
-                    html.append('    <div class="cell na">-</div>\n')
+                    html.append(f'    <div class="cell na" data-col="{i+1}">-</div>\n')
                 else:
-                    html.append(f'    <div class="cell">{val:.1f}</div>\n')
+                    html.append(f'    <div class="cell" data-col="{i+1}">{val:.1f}</div>\n')
             html.append("  </div>\n")
 
     html.append("</div>\n")
@@ -331,6 +324,25 @@ body {{
 
 .section {{ border-bottom: 1px solid var(--border-color); }}
 .section:last-child {{ border-bottom: none; }}
+
+.empty-group {{ background: #f5f7fa; }}
+.empty-group .cell {{
+  padding: 14px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid var(--border-color);
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-muted);
+}}
+.empty-group .cell:first-child {{
+  justify-content: flex-start;
+  border-left: none;
+  font-family: 'Inter', sans-serif;
+  color: var(--text-main);
+}}
 
 details {{ margin: 0; padding: 0; width: 100%; }}
 
@@ -469,12 +481,24 @@ details[open] .arrow {{ transform: rotate(90deg); }}
       <button id="btn-train" class="active">Training</button>
       <button id="btn-test">Test</button>
     </div>
-    <button id="btn-collapse">Collapse All</button>
-    <button id="btn-expand" class="primary">Expand All</button>
+    <div class="toggle-group">
+      <button id="btn-all" class="active">All</button>
+      <button id="btn-sft">SFT</button>
+      <button id="btn-instruct">Instruct</button>
+    </div>
+    <div class="toggle-group">
+      <button id="btn-collapse">Collapse</button>
+      <button id="btn-expand">Expand</button>
+    </div>
   </div>
 </div>
 
 """)
+
+    model_types_js = '[' + ','.join(
+        f'"sft"' if 'sft' in m.lower() and 'instruct' not in m.lower() and 'dpo' not in m.lower()
+        else f'"instruct"' for m in models
+    ) + ']'
 
     html.append('<div id="wrap-train">\n')
     _render_table(html, "table-train", models, train_group_data, train_overall, n_models, info_rows=info_rows)
@@ -484,34 +508,86 @@ details[open] .arrow {{ transform: rotate(90deg); }}
     _render_table(html, "table-test", models, test_group_data, test_overall, n_models, info_rows=info_rows)
     html.append('</div>\n')
 
-    html.append("""
+    html.append(f"""
 <script>
   var wrapTrain = document.getElementById('wrap-train');
   var wrapTest = document.getElementById('wrap-test');
   var btnTrain = document.getElementById('btn-train');
   var btnTest = document.getElementById('btn-test');
+  var modelTypes = {model_types_js};
+  var nModels = modelTypes.length;
 
-  btnTrain.addEventListener('click', function() {
+  btnTrain.addEventListener('click', function() {{
     wrapTrain.style.display = '';
     wrapTest.style.display = 'none';
     btnTrain.classList.add('active');
     btnTest.classList.remove('active');
-  });
-  btnTest.addEventListener('click', function() {
+  }});
+  btnTest.addEventListener('click', function() {{
     wrapTrain.style.display = 'none';
     wrapTest.style.display = '';
     btnTest.classList.add('active');
     btnTrain.classList.remove('active');
-  });
+  }});
 
-  document.getElementById('btn-expand').addEventListener('click', function() {
+  document.getElementById('btn-expand').addEventListener('click', function() {{
     var visible = wrapTrain.style.display !== 'none' ? wrapTrain : wrapTest;
-    visible.querySelectorAll('details').forEach(function(d) { d.open = true; });
-  });
-  document.getElementById('btn-collapse').addEventListener('click', function() {
+    visible.querySelectorAll('details').forEach(function(d) {{ d.open = true; }});
+  }});
+  document.getElementById('btn-collapse').addEventListener('click', function() {{
     var visible = wrapTrain.style.display !== 'none' ? wrapTrain : wrapTest;
-    visible.querySelectorAll('details').forEach(function(d) { d.open = false; });
-  });
+    visible.querySelectorAll('details').forEach(function(d) {{ d.open = false; }});
+  }});
+
+  function filterModels(type) {{
+    document.getElementById('btn-all').classList.toggle('active', type === 'all');
+    document.getElementById('btn-sft').classList.toggle('active', type === 'sft');
+    document.getElementById('btn-instruct').classList.toggle('active', type === 'instruct');
+
+    var visibleCols = [];
+    for (var i = 0; i < nModels; i++) {{
+      if (type === 'all' || modelTypes[i] === type) visibleCols.push(i + 1);
+    }}
+
+    var template = '280px repeat(' + visibleCols.length + ', minmax(0, 1fr))';
+    document.querySelectorAll('.table-box').forEach(function(box) {{
+      box.style.setProperty('--col-template', template);
+    }});
+
+    document.querySelectorAll('[data-col]').forEach(function(cell) {{
+      var col = parseInt(cell.getAttribute('data-col'));
+      cell.style.display = visibleCols.indexOf(col) !== -1 ? '' : 'none';
+    }});
+    updateBest();
+  }}
+
+  function updateBest() {{
+    document.querySelectorAll('.score-row').forEach(function(row) {{
+      var cells = row.querySelectorAll('[data-val]');
+      var visible = [];
+      cells.forEach(function(c) {{
+        if (c.style.display !== 'none') visible.push(c);
+      }});
+      var maxVal = -Infinity;
+      visible.forEach(function(c) {{
+        var v = parseFloat(c.getAttribute('data-val'));
+        if (v > maxVal) maxVal = v;
+      }});
+      visible.forEach(function(c) {{
+        var v = parseFloat(c.getAttribute('data-val'));
+        if (visible.length > 1 && Math.abs(v - maxVal) < 0.01) {{
+          c.innerHTML = '<span class="best-badge">' + v.toFixed(1) + '</span>';
+        }} else {{
+          c.textContent = v.toFixed(1);
+        }}
+      }});
+    }});
+  }}
+
+  updateBest();
+  document.getElementById('btn-all').addEventListener('click', function() {{ filterModels('all'); }});
+  document.getElementById('btn-sft').addEventListener('click', function() {{ filterModels('sft'); }});
+  document.getElementById('btn-instruct').addEventListener('click', function() {{ filterModels('instruct'); }});
 </script>
 </body>
 </html>""")
@@ -524,12 +600,12 @@ details[open] .arrow {{ transform: rotate(90deg); }}
 PINNED_PREFIX = [
     ("baseline-apertus-1-sft", "Apertus 1.0 8B SFT"),
     ("baseline-apertus-1-instruct", "Apertus 1.0 8B Instruct"),
-    ("ap-1p5-cooldown-sft-21-04-lr-8e-5", "Apertus 1.5 SFT"),
+    ("ap-1p5-cooldown-sft-21-04-lr-8e-5", "Apertus 1.5 8B SFT"),
 ]
 
 OPTIONAL_INSTRUCT_BASELINE = (
     "apertus-v1.5-sft-1.5--DPO-1.5--online-DPO-R16-beta0.1-bs256-lnF-lr5e-6-ml2048",
-    "Apertus 1.5 Instruct",
+    "Apertus 1.5 8B Instruct",
 )
 
 OPTIONAL_OLMO_BASELINES = [
