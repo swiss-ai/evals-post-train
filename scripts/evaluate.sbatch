@@ -136,6 +136,19 @@ fi
 
 # export HF_HOME=${HF_HOME:-/capstor/store/cscs/swissai/infra01/hf_home/}
 export HF_HOME=${HF_HOME:-/iopsstor/scratch/cscs/$USER/huggingface}
+
+# Redirect all caches to SCRATCH to avoid filling up HOME
+CACHE_ROOT="${SCRATCH:-/tmp}/.cache"
+export HF_DATASETS_CACHE="$CACHE_ROOT/huggingface/datasets"
+export NLTK_DATA="$CACHE_ROOT/nltk_data"
+export TRITON_CACHE_DIR="$CACHE_ROOT/triton"
+export TIKTOKEN_CACHE_DIR="$CACHE_ROOT/tiktoken"
+export PYTHONUSERBASE="$CACHE_ROOT/python_userbase"
+export MPLCONFIGDIR="$CACHE_ROOT/matplotlib"
+export SPACY_DATA="$CACHE_ROOT/spacy"
+export XDG_CACHE_HOME="$CACHE_ROOT"
+mkdir -p "$HF_DATASETS_CACHE" "$NLTK_DATA" "$TRITON_CACHE_DIR" "$TIKTOKEN_CACHE_DIR" "$PYTHONUSERBASE" "$MPLCONFIGDIR" "$SPACY_DATA"
+
 GPUS_PER_NODE=4
 
 # Print configuration.
@@ -323,11 +336,26 @@ echo "Final command: $CMD"
 echo "Starting timing for installation and evaluation..."
 START_TIME=$(date +%s)
 
+# Cache redirection exports to pass into the container
+CACHE_EXPORTS="
+export HF_HOME=$HF_HOME
+export HF_DATASETS_CACHE=$HF_DATASETS_CACHE
+export NLTK_DATA=$NLTK_DATA
+export TRITON_CACHE_DIR=$TRITON_CACHE_DIR
+export TIKTOKEN_CACHE_DIR=$TIKTOKEN_CACHE_DIR
+export PYTHONUSERBASE=$PYTHONUSERBASE
+export MPLCONFIGDIR=$MPLCONFIGDIR
+export SPACY_DATA=$SPACY_DATA
+export XDG_CACHE_HOME=$XDG_CACHE_HOME
+mkdir -p $HF_DATASETS_CACHE $NLTK_DATA $TRITON_CACHE_DIR $TIKTOKEN_CACHE_DIR $PYTHONUSERBASE $MPLCONFIGDIR $SPACY_DATA
+"
+
 if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
   srun -n 1 --mpi=pmix -ul --environment=./containers/env_vllm.toml bash -lc "
     set -euo pipefail
     unset SSL_CERT_FILE
     export HF_DATASETS_TRUST_REMOTE_CODE=1
+    $CACHE_EXPORTS
 
     $INSTALL_CMD
     # Make torch CUDA libs discoverable for vllm._C import
@@ -340,6 +368,7 @@ elif [[ $LM_EVAL_BACKEND == "vllm" ]]; then
     set -euo pipefail
     unset SSL_CERT_FILE
     export HF_DATASETS_TRUST_REMOTE_CODE=1
+    $CACHE_EXPORTS
 
     $INSTALL_CMD
     # Fix alpaca_eval endpoint URL
@@ -354,6 +383,7 @@ else
     set -euo pipefail
     unset SSL_CERT_FILE
     export HF_DATASETS_TRUST_REMOTE_CODE=1
+    $CACHE_EXPORTS
 
     $INSTALL_CMD
 

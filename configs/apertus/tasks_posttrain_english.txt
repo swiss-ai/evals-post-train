@@ -20,7 +20,7 @@ multi-if/prompt_level_loose_acc
 toxigen/acc
 alpaca_eval/length_controlled_winrate
 # Multilingual
-#arc_multilingual/acc
+# arc_multilingual/acc
 # global_mmlu_gen_0shot/exact_match
 # hellaswag_multilingual/acc_norm
 # include_base_44_gen_0shot/exact_match

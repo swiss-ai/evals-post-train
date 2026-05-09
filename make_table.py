@@ -231,6 +231,8 @@ def main():
                         help="Skip the DPO baseline row")
     parser.add_argument("--absolute", action="store_true",
                         help="Show absolute scores instead of delta improvements from the baseline")
+    parser.add_argument("--wordcount", action="store_true",
+                        help="Append an avg_word_count column (alpaca_eval/avg_word_count) with plain values, no deltas")
 
     args = parser.parse_args()
 
@@ -510,6 +512,7 @@ def main():
         for i, er in enumerate(args.extra_run):
             if er in runs:
                 extra_summary = dict(runs[er].summary)
+                summaries[er] = extra_summary
                 if args.debug:
                     print(f"\n=== W&B summary keys for extra run '{er}' ===")
                     for k in sorted(extra_summary.keys()):
@@ -519,7 +522,7 @@ def main():
                         print(f"  Metric '{m}' -> {val}")
                     print()
                 display_name = extra_names[i] if i < len(extra_names) else rename_map.get(er, er)
-                extra_row = {"Model": display_name}
+                extra_row = {"Model": display_name, "_orig_model": er}
                 deltas = []
                 for metric in metrics:
                     val = normalize_score(get_metric(extra_summary, metric))
@@ -546,6 +549,27 @@ def main():
                 raw_rows.append(extra_row)
             else:
                 print(f"Warning: extra run '{er}' not found in W&B project")
+
+    # Append plain wordcount column if requested
+    if args.wordcount:
+        wc_metric = "alpaca_eval/avg_word_count"
+        for r in raw_rows:
+            orig = r.get("_orig_model")
+            if orig and orig in summaries:
+                wc_val = get_metric(summaries[orig], wc_metric)
+                if wc_val is not None:
+                    r["avg_word_count"] = f"{float(wc_val):.1f}"
+                else:
+                    r["avg_word_count"] = "N/A"
+            elif orig and orig in runs:
+                s = dict(runs[orig].summary)
+                wc_val = get_metric(s, wc_metric)
+                if wc_val is not None:
+                    r["avg_word_count"] = f"{float(wc_val):.1f}"
+                else:
+                    r["avg_word_count"] = "N/A"
+            else:
+                r["avg_word_count"] = "N/A"
 
     # Clean up the hidden sorting keys before building the DataFrame
     for r in raw_rows:

@@ -12,16 +12,16 @@ hendrycks_math500
 # Code
 humaneval_instruct
 mbpp
-humaneval_infilling
+# humaneval_infilling
 # QA - Multiple Choice
 arc_challenge
 mmlu
 commonsense_qa
 piqa
-siqa
+# siqa
 sciq
 medmcqa
-medqa
+# medqa
 # QA - Generative
 drop
 nq_open
@@ -37,3 +37,6 @@ harmbench
 toxigen
 wmdp
 bbq
+
+# lengths
+alpaca_eval

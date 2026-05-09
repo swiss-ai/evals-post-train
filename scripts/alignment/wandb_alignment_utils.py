@@ -186,7 +186,7 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
         if eval_metric in log_data:
             main_log_data[eval_metric] = log_data[eval_metric]
     
-    run_id_suffix = "-001"
+    run_id_suffix = "-006"
     wandb_id = (model_eval.model_name + run_id_suffix)[:110]
     with wandb.init(
         id=wandb_id,
@@ -208,7 +208,7 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
 
             samples_table = upload_structured_samples_as_table(task)
             # Cap key length so artifact name "run-{id}-{key}" stays under 128
-            samples_key = f"samples/{wandb_name}/{task.task_name}"
+            samples_key = f"samples/{model_eval.model_name}/{task.task_name}"
             samples_key = samples_key[:128 - len("run-") - len(wandb_id) - 1]
             try:
                 run.log({samples_key: samples_table})

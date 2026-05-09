@@ -180,6 +180,7 @@ echo -e "\nModel: $MODEL_BASENAME"
 echo "Total expected tasks: ${#ORDERED_TASKS[@]}"
 echo "Successfully completed tasks: ${#COMPLETED_MAP[@]}"
 echo "Missing tasks: ${#MISSING_TASKS[@]}"
+echo "Completed benchmarks: ${!COMPLETED_MAP[*]}"
 
 if [[ ${#MISSING_TASKS[@]} -eq 0 ]]; then
     echo -e "\nAll tasks completed! Triggering marker rebuild and aggregation."
