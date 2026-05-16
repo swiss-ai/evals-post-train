@@ -1,0 +1,8 @@
+# Small benchmark suite for Claritas experiments
+mmlu_pro
+gpqa_main_cot_zeroshot
+humaneval_instruct
+mbpp_instruct
+arc_multilingual
+bbh
+multi-if

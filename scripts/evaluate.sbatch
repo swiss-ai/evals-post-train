@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=infra01
+#SBATCH --account=a127
 #SBATCH --cpus-per-task=200
 #SBATCH --gres=gpu:4
 #SBATCH --job-name=evaluation
@@ -276,7 +276,7 @@ if echo "$TASKS" | grep -q "ruler"; then
     fi
 fi
 
-LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/swiss-ai/lm-evaluation-harness.git"
+LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/ymetz/lm-evaluation-harness.git"
 if [[ -n "$LM_EVAL_HARNESS_BRANCH" ]]; then
     LM_EVAL_HARNESS_PIP_SPEC="${LM_EVAL_HARNESS_PIP_SPEC}@${LM_EVAL_HARNESS_BRANCH}"
 fi
@@ -284,7 +284,7 @@ fi
 INSTALL_CMD="pip install --no-cache-dir --upgrade \"$LM_EVAL_HARNESS_PIP_SPEC\" && \
 pip install --no-cache-dir --upgrade \
     \"huggingface-hub>=1.3.0,<2.0\" \
-    \"transformers==5.1.0\" \
+    \"transformers==5.6.2\" \
     \"accelerate>=1.1.0\" \
     \"antlr4-python3-runtime==4.11\" \
     datasketch \
@@ -342,6 +342,7 @@ elif [[ $LM_EVAL_BACKEND == "vllm" ]]; then
     $INSTALL_CMD
     # Make torch CUDA libs discoverable for vllm._C import
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
+    export SWISS_AI_CHARTER_JUDGE_MODEL=zai-org/GLM-4.7-Flash
     $CMD
     "
 else

@@ -111,7 +111,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Validate mode ---
-VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "non-gated" "single")
+VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "non-gated" "single" "claritas")
 if [[ ! " ${VALID_MODES[*]} " =~ " ${EVAL_MODE} " ]]; then
     echo "Error: Invalid mode '$EVAL_MODE'"
     echo "Valid modes: ${VALID_MODES[*]}"
@@ -211,6 +211,11 @@ case "$EVAL_MODE" in
     "non-gated")
         export TASKS=./configs/apertus/tasks_non_gated.txt
         export TABLE_METRICS=./configs/olmo/eval_debug_main_table.txt
+        ;;
+    "claritas")
+        export TASKS=./configs/apertus/tasks_claritas.txt
+        export TABLE_METRICS=./configs/olmo/eval_debug_main_table.txt
+        export WANDB_PROJECT="claritas-benchmarks"
         ;;
     "single")
         export TASKS="$SINGLE_TASK"
