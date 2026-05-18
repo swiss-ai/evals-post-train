@@ -46,5 +46,4 @@ switzerland_qa_0shot/exact_match
 bbq/acc
 toxigen/acc
 wmdp/acc
-aya_redteaming/score
 # Tool Use

@@ -12,8 +12,8 @@ WANDB_PROJECT="apertus-1.5-post-training-v0.0"
 DEBUG=0
 GROUP_SIZE=1
 BASE_DIR=""
-CONFIG_FILE=""
-TABLE_METRICS=""
+CONFIG_FILE="./configs/apertus/tasks_posttrain_final.txt"
+TABLE_METRICS="./configs/apertus/tasks_posttrain_final_main_table.txt"
 FORCE_TASKS=""
 
 # --- Argument Parsing ---
@@ -43,8 +43,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "$BASE_DIR" || -z "$CONFIG_FILE" ]]; then
-    echo "Error: --base_dir and --config_file are required."
+if [[ -z "$BASE_DIR" ]]; then
+    echo "Error: --base_dir is required."
     exit 1
 fi
 

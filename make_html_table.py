@@ -1,9 +1,25 @@
 #!/usr/bin/env python3
 
 import os
+import json
 import argparse
 import wandb
+import wandb.sdk.lib.server
 import re
+
+_orig_query_with_timeout = wandb.sdk.lib.server.Server.query_with_timeout
+
+def _patched_query_with_timeout(self):
+    try:
+        _orig_query_with_timeout(self)
+    except TypeError:
+        if hasattr(self, "_viewer") and self._viewer:
+            flags = self._viewer.get("flags")
+            self._flags = json.loads(flags) if isinstance(flags, str) else {}
+        else:
+            self._flags = {}
+
+wandb.sdk.lib.server.Server.query_with_timeout = _patched_query_with_timeout
 
 
 TEST_BENCHMARKS = {
@@ -132,44 +148,56 @@ def _prepare_group_data(groups, models, scores, metric_filter):
     return group_data, overall_avgs
 
 
-def _render_table(html, table_id, models, group_data, overall_avgs, n_models, info_rows=None):
+def _render_table(html, table_id, models, group_data, overall_avgs, n_models, info_rows=None, flat=False):
     """Render one table-box with the given group_data."""
     html.append(f'<div class="table-box" id="{table_id}">\n')
-    html.append('  <div class="grid-row header-row">\n    <div class="cell">Category / Benchmark</div>\n')
+    html.append(f'  <div class="grid-row header-row">\n    <div class="cell">{"Benchmark" if flat else "Category / Benchmark"}</div>\n')
     for i, model in enumerate(models):
         html.append(f'    <div class="cell" data-col="{i+1}">{model}</div>\n')
     html.append("  </div>\n")
 
-    for group_name, benchmarks, group_avgs in group_data:
-        if not benchmarks:
-            html.append('  <div class="section"><div class="grid-row empty-group">\n')
-            html.append(f'    <div class="cell">{group_name}</div>\n')
-            for i, model in enumerate(models):
-                html.append(f'    <div class="cell na" data-col="{i+1}">-</div>\n')
-            html.append("  </div></div>\n")
-            continue
+    if flat:
+        for _, benchmarks, _ in group_data:
+            for display_name, row_vals in benchmarks:
+                html.append(f'  <div class="bench-row score-row">\n    <div class="cell">{display_name}</div>\n')
+                for i, model in enumerate(models):
+                    val = row_vals[model]
+                    if val is None:
+                        html.append(f'    <div class="cell na" data-col="{i+1}">-</div>\n')
+                    else:
+                        html.append(f'    <div class="cell" data-col="{i+1}" data-val="{val * 100:.1f}">{val * 100:.1f}</div>\n')
+                html.append("  </div>\n")
+    else:
+        for group_name, benchmarks, group_avgs in group_data:
+            if not benchmarks:
+                html.append('  <div class="section"><div class="grid-row empty-group">\n')
+                html.append(f'    <div class="cell">{group_name}</div>\n')
+                for i, model in enumerate(models):
+                    html.append(f'    <div class="cell na" data-col="{i+1}">-</div>\n')
+                html.append("  </div></div>\n")
+                continue
 
-        html.append('  <div class="section"><details>\n  <summary class="grid-row score-row">\n')
-        html.append(f'    <div class="cell"><span class="arrow">&#9654;</span>{group_name}</div>\n')
-        for i, model in enumerate(models):
-            avg = group_avgs[model]
-            if avg is None:
-                html.append(f'    <div class="cell na" data-col="{i+1}">-</div>\n')
-            else:
-                html.append(f'    <div class="cell" data-col="{i+1}" data-val="{avg * 100:.1f}">{avg * 100:.1f}</div>\n')
-        html.append('  </summary>\n  <div class="bench-rows">\n')
-
-        for display_name, row_vals in benchmarks:
-            html.append(f'    <div class="bench-row score-row">\n      <div class="cell">{display_name}</div>\n')
+            html.append('  <div class="section"><details>\n  <summary class="grid-row score-row">\n')
+            html.append(f'    <div class="cell"><span class="arrow">&#9654;</span>{group_name}</div>\n')
             for i, model in enumerate(models):
-                val = row_vals[model]
-                if val is None:
-                    html.append(f'      <div class="cell na" data-col="{i+1}">-</div>\n')
+                avg = group_avgs[model]
+                if avg is None:
+                    html.append(f'    <div class="cell na" data-col="{i+1}">-</div>\n')
                 else:
-                    html.append(f'      <div class="cell" data-col="{i+1}" data-val="{val * 100:.1f}">{val * 100:.1f}</div>\n')
-            html.append("    </div>\n")
+                    html.append(f'    <div class="cell" data-col="{i+1}" data-val="{avg * 100:.1f}">{avg * 100:.1f}</div>\n')
+            html.append('  </summary>\n  <div class="bench-rows">\n')
 
-        html.append("  </div>\n  </details></div>\n")
+            for display_name, row_vals in benchmarks:
+                html.append(f'    <div class="bench-row score-row">\n      <div class="cell">{display_name}</div>\n')
+                for i, model in enumerate(models):
+                    val = row_vals[model]
+                    if val is None:
+                        html.append(f'      <div class="cell na" data-col="{i+1}">-</div>\n')
+                    else:
+                        html.append(f'      <div class="cell" data-col="{i+1}" data-val="{val * 100:.1f}">{val * 100:.1f}</div>\n')
+                html.append("    </div>\n")
+
+            html.append("  </div>\n  </details></div>\n")
 
     html.append('  <div class="grid-row overall score-row">\n    <div class="cell">Overall Average</div>\n')
     for i, model in enumerate(models):
@@ -194,16 +222,25 @@ def _render_table(html, table_id, models, group_data, overall_avgs, n_models, in
     html.append("</div>\n")
 
 
-def build_html(groups, models, scores, output_path, info_rows=None):
+def build_html(groups, models, scores, output_path, info_rows=None, olmo_default_hidden=False, apertus_default_hidden=False, apertus_baselines=None, no_split=False, flat=False, title="Evaluation Results"):
     """Generate a self-contained HTML file with collapsible skill groups and train/test toggle."""
 
-    train_group_data, train_overall = _prepare_group_data(
-        groups, models, scores, lambda k: k not in TEST_BENCHMARKS)
-    test_group_data, test_overall = _prepare_group_data(
-        groups, models, scores, lambda k: k in TEST_BENCHMARKS)
+    if no_split:
+        all_group_data, all_overall = _prepare_group_data(
+            groups, models, scores, lambda k: True)
+        total_benchmarks = sum(len(b) for _, b, _ in all_group_data)
+    else:
+        train_group_data, train_overall = _prepare_group_data(
+            groups, models, scores, lambda k: k not in TEST_BENCHMARKS)
+        test_group_data, test_overall = _prepare_group_data(
+            groups, models, scores, lambda k: k in TEST_BENCHMARKS)
 
-    train_benchmarks = sum(len(b) for _, b, _ in train_group_data)
-    test_benchmarks = sum(len(b) for _, b, _ in test_group_data)
+    if no_split:
+        train_benchmarks = total_benchmarks
+        test_benchmarks = 0
+    else:
+        train_benchmarks = sum(len(b) for _, b, _ in train_group_data)
+        test_benchmarks = sum(len(b) for _, b, _ in test_group_data)
 
     n_models = len(models)
 
@@ -213,7 +250,7 @@ def build_html(groups, models, scores, output_path, info_rows=None):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Evaluation Dashboard</title>
+<title>{title}</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root {{
@@ -473,23 +510,19 @@ details[open] .arrow {{ transform: rotate(90deg); }}
 
 <div class="header-container">
   <div class="title-area">
-    <h1>Evaluation Results</h1>
-    <p class="subtitle">{len(models)} models &middot; {train_benchmarks} train benchmarks &middot; {test_benchmarks} test benchmarks</p>
+    <h1>{title}</h1>
+    <p class="subtitle">{len(models)} models &middot; {f'{total_benchmarks} benchmarks' if no_split else f'{train_benchmarks} train benchmarks &middot; {test_benchmarks} test benchmarks'}</p>
   </div>
   <div class="controls">
-    <div class="toggle-group">
-      <button id="btn-train" class="active">Training</button>
-      <button id="btn-test">Test</button>
-    </div>
+    {'<div class="toggle-group"><button id="btn-train" class="active">Training</button><button id="btn-test">Test</button></div>' if not no_split else ''}
     <div class="toggle-group">
       <button id="btn-all" class="active">All</button>
       <button id="btn-sft">SFT</button>
       <button id="btn-instruct">Instruct</button>
     </div>
-    <div class="toggle-group">
-      <button id="btn-collapse">Collapse</button>
-      <button id="btn-expand">Expand</button>
-    </div>
+    <button id="btn-apertus" class="{'active' if not apertus_default_hidden else ''}">Apertus</button>
+    <button id="btn-olmo" class="{'active' if not olmo_default_hidden else ''}">OLMo</button>
+    {'<div class="toggle-group"><button id="btn-collapse">Collapse</button><button id="btn-expand">Expand</button></div>' if not flat else ''}
   </div>
 </div>
 
@@ -500,53 +533,95 @@ details[open] .arrow {{ transform: rotate(90deg); }}
         else f'"instruct"' for m in models
     ) + ']'
 
-    html.append('<div id="wrap-train">\n')
-    _render_table(html, "table-train", models, train_group_data, train_overall, n_models, info_rows=info_rows)
-    html.append('</div>\n')
+    is_olmo_js = '[' + ','.join(
+        'true' if 'olmo' in m.lower() else 'false' for m in models
+    ) + ']'
 
-    html.append('<div id="wrap-test" style="display:none;">\n')
-    _render_table(html, "table-test", models, test_group_data, test_overall, n_models, info_rows=info_rows)
-    html.append('</div>\n')
+    _apertus_set = apertus_baselines or set()
+    is_apertus_js = '[' + ','.join(
+        'true' if m in _apertus_set else 'false' for m in models
+    ) + ']'
+
+    if no_split:
+        html.append('<div id="wrap-all">\n')
+        _render_table(html, "table-all", models, all_group_data, all_overall, n_models, info_rows=info_rows, flat=flat)
+        html.append('</div>\n')
+    else:
+        html.append('<div id="wrap-train">\n')
+        _render_table(html, "table-train", models, train_group_data, train_overall, n_models, info_rows=info_rows, flat=flat)
+        html.append('</div>\n')
+
+        html.append('<div id="wrap-test" style="display:none;">\n')
+        _render_table(html, "table-test", models, test_group_data, test_overall, n_models, info_rows=info_rows, flat=flat)
+        html.append('</div>\n')
 
     html.append(f"""
 <script>
+  var noSplit = {'true' if no_split else 'false'};
   var wrapTrain = document.getElementById('wrap-train');
   var wrapTest = document.getElementById('wrap-test');
+  var wrapAll = document.getElementById('wrap-all');
   var btnTrain = document.getElementById('btn-train');
   var btnTest = document.getElementById('btn-test');
+  var btnOlmo = document.getElementById('btn-olmo');
+  var btnApertus = document.getElementById('btn-apertus');
   var modelTypes = {model_types_js};
+  var isOlmo = {is_olmo_js};
+  var isApertusBaseline = {is_apertus_js};
   var nModels = modelTypes.length;
+  var currentTypeFilter = 'all';
+  var showOlmo = {'false' if olmo_default_hidden else 'true'};
+  var showApertus = {'false' if apertus_default_hidden else 'true'};
 
-  btnTrain.addEventListener('click', function() {{
-    wrapTrain.style.display = '';
-    wrapTest.style.display = 'none';
-    btnTrain.classList.add('active');
-    btnTest.classList.remove('active');
-  }});
-  btnTest.addEventListener('click', function() {{
-    wrapTrain.style.display = 'none';
-    wrapTest.style.display = '';
-    btnTest.classList.add('active');
-    btnTrain.classList.remove('active');
+  if (!noSplit) {{
+    btnTrain.addEventListener('click', function() {{
+      wrapTrain.style.display = '';
+      wrapTest.style.display = 'none';
+      btnTrain.classList.add('active');
+      btnTest.classList.remove('active');
+    }});
+    btnTest.addEventListener('click', function() {{
+      wrapTrain.style.display = 'none';
+      wrapTest.style.display = '';
+      btnTest.classList.add('active');
+      btnTrain.classList.remove('active');
+    }});
+  }}
+
+  var btnExpand = document.getElementById('btn-expand');
+  var btnCollapse = document.getElementById('btn-collapse');
+  if (btnExpand) {{
+    btnExpand.addEventListener('click', function() {{
+      var target = noSplit ? wrapAll : (wrapTrain.style.display !== 'none' ? wrapTrain : wrapTest);
+      target.querySelectorAll('details').forEach(function(d) {{ d.open = true; }});
+    }});
+  }}
+  if (btnCollapse) {{
+    btnCollapse.addEventListener('click', function() {{
+      var target = noSplit ? wrapAll : (wrapTrain.style.display !== 'none' ? wrapTrain : wrapTest);
+      target.querySelectorAll('details').forEach(function(d) {{ d.open = false; }});
+    }});
+  }}
+
+  btnOlmo.addEventListener('click', function() {{
+    showOlmo = !showOlmo;
+    btnOlmo.classList.toggle('active', showOlmo);
+    applyFilters();
   }});
 
-  document.getElementById('btn-expand').addEventListener('click', function() {{
-    var visible = wrapTrain.style.display !== 'none' ? wrapTrain : wrapTest;
-    visible.querySelectorAll('details').forEach(function(d) {{ d.open = true; }});
-  }});
-  document.getElementById('btn-collapse').addEventListener('click', function() {{
-    var visible = wrapTrain.style.display !== 'none' ? wrapTrain : wrapTest;
-    visible.querySelectorAll('details').forEach(function(d) {{ d.open = false; }});
+  btnApertus.addEventListener('click', function() {{
+    showApertus = !showApertus;
+    btnApertus.classList.toggle('active', showApertus);
+    applyFilters();
   }});
 
-  function filterModels(type) {{
-    document.getElementById('btn-all').classList.toggle('active', type === 'all');
-    document.getElementById('btn-sft').classList.toggle('active', type === 'sft');
-    document.getElementById('btn-instruct').classList.toggle('active', type === 'instruct');
-
+  function applyFilters() {{
     var visibleCols = [];
     for (var i = 0; i < nModels; i++) {{
-      if (type === 'all' || modelTypes[i] === type) visibleCols.push(i + 1);
+      var typeMatch = (currentTypeFilter === 'all' || modelTypes[i] === currentTypeFilter);
+      var olmoMatch = (showOlmo || !isOlmo[i]);
+      var apertusMatch = (showApertus || !isApertusBaseline[i]);
+      if (typeMatch && olmoMatch && apertusMatch) visibleCols.push(i + 1);
     }}
 
     var template = '280px repeat(' + visibleCols.length + ', minmax(0, 1fr))';
@@ -559,6 +634,14 @@ details[open] .arrow {{ transform: rotate(90deg); }}
       cell.style.display = visibleCols.indexOf(col) !== -1 ? '' : 'none';
     }});
     updateBest();
+  }}
+
+  function filterModels(type) {{
+    currentTypeFilter = type;
+    document.getElementById('btn-all').classList.toggle('active', type === 'all');
+    document.getElementById('btn-sft').classList.toggle('active', type === 'sft');
+    document.getElementById('btn-instruct').classList.toggle('active', type === 'instruct');
+    applyFilters();
   }}
 
   function updateBest() {{
@@ -584,7 +667,7 @@ details[open] .arrow {{ transform: rotate(90deg); }}
     }});
   }}
 
-  updateBest();
+  applyFilters();
   document.getElementById('btn-all').addEventListener('click', function() {{ filterModels('all'); }});
   document.getElementById('btn-sft').addEventListener('click', function() {{ filterModels('sft'); }});
   document.getElementById('btn-instruct').addEventListener('click', function() {{ filterModels('instruct'); }});
@@ -597,6 +680,8 @@ details[open] .arrow {{ transform: rotate(90deg); }}
     print(f"Saved HTML table to {output_path}")
 
 
+BASELINE_PROJECT = "apertus/apertus-1.5-post-training-v0.0"
+
 PINNED_PREFIX = [
     ("baseline-apertus-1-sft", "Apertus 1.0 8B SFT"),
     ("baseline-apertus-1-instruct", "Apertus 1.0 8B Instruct"),
@@ -608,12 +693,9 @@ OPTIONAL_INSTRUCT_BASELINE = (
     "Apertus 1.5 8B Instruct",
 )
 
-OPTIONAL_OLMO_BASELINES = [
+PINNED_SUFFIX = [
     ("OLMO-3-7B-SFT", "OLMo 3 7B SFT"),
     ("OLMO-3-7B-DPO", "OLMo 3 7B DPO"),
-]
-
-PINNED_SUFFIX = [
     ("OLMO-3-7B-Instruct", "OLMo 3 7B Instruct"),
 ]
 
@@ -656,6 +738,8 @@ def main():
                         help="Metrics file with # group headers (e.g. tasks_posttrain_final_main_table.txt)")
     parser.add_argument("--models", nargs="*", default=[],
                         help="Additional W&B run names to include between pinned columns")
+    parser.add_argument("--models-file", default=None,
+                        help="Path to a txt file with one W&B run name per line")
     parser.add_argument("--entity", default="apertus")
     parser.add_argument("--project", default="apertus-1.5-post-training-v0.0")
     parser.add_argument("--output", default="eval_table.html", help="Output HTML file path")
@@ -663,12 +747,30 @@ def main():
                         help="Rename models for display: 'long-run-name=Short Name'")
     parser.add_argument("--instruct-baseline", action="store_true",
                         help="Include Apertus-1.5-Instruct column after Apertus-1.5-SFT")
-    parser.add_argument("--olmo-baselines", action="store_true",
-                        help="Include Olmo-3-7B-SFT and Olmo-3-7B-DPO columns")
     parser.add_argument("--show-word-count", action="store_true",
                         help="Show alpaca_eval avg_word_count as an info row")
+    parser.add_argument("--show-orbench", action="store_true",
+                        help="Show orbench refusal and degeneration rates as info rows")
+    parser.add_argument("--no-baselines", action="store_true",
+                        help="Skip all baseline models; only use models from --models / --models-file")
+    parser.add_argument("--no-split", action="store_true",
+                        help="Disable train/test split; show all benchmarks in a single table")
+    parser.add_argument("--flat", action="store_true",
+                        help="Show all benchmarks as plain rows without group headers")
+    parser.add_argument("--title", default="Evaluation Results",
+                        help="Page title for the HTML report")
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--sft-baseline", default=None,
+                        help="Override the Apertus 1.5 8B SFT baseline run name")
     args = parser.parse_args()
+
+    all_models = list(args.models)
+    if args.models_file:
+        with open(args.models_file) as f:
+            for line in f:
+                name = line.strip()
+                if name and not name.startswith("#"):
+                    all_models.append(name)
 
     rename_map = {}
     for pair in args.rename:
@@ -684,48 +786,62 @@ def main():
     summaries = {}
     display_names = []
     fetched_runs = set()
+    apertus_baselines = set()
 
-    for run_name, display in PINNED_PREFIX:
-        if fetch_model(api, project_path, run_name, display, groups, scores, args.debug, summaries):
-            display_names.append(display)
-            fetched_runs.add(run_name)
+    if args.sft_baseline:
+        PINNED_PREFIX[2] = (args.sft_baseline, "Apertus 1.5 8B SFT")
 
-    if args.instruct_baseline:
-        run_name, display = OPTIONAL_INSTRUCT_BASELINE
-        if fetch_model(api, project_path, run_name, display, groups, scores, args.debug, summaries):
-            display_names.append(display)
-            fetched_runs.add(run_name)
+    if not args.no_baselines:
+        for run_name, display in PINNED_PREFIX:
+            if fetch_model(api, BASELINE_PROJECT, run_name, display, groups, scores, args.debug, summaries):
+                display_names.append(display)
+                fetched_runs.add(run_name)
+                apertus_baselines.add(display)
 
-    for model_name in args.models:
+        if args.instruct_baseline:
+            run_name, display = OPTIONAL_INSTRUCT_BASELINE
+            if fetch_model(api, BASELINE_PROJECT, run_name, display, groups, scores, args.debug, summaries):
+                display_names.append(display)
+                fetched_runs.add(run_name)
+                apertus_baselines.add(display)
+
+    for model_name in all_models:
         if model_name in fetched_runs or model_name in ALWAYS_PINNED:
             continue
         display = rename_map.get(model_name, model_name)
         if fetch_model(api, project_path, model_name, display, groups, scores, args.debug, summaries):
             display_names.append(display)
 
-    if args.olmo_baselines:
-        for run_name, display in OPTIONAL_OLMO_BASELINES:
-            if fetch_model(api, project_path, run_name, display, groups, scores, args.debug, summaries):
-                display_names.append(display)
-
     for run_name, display in PINNED_SUFFIX:
-        if fetch_model(api, project_path, run_name, display, groups, scores, args.debug, summaries):
+        if fetch_model(api, BASELINE_PROJECT, run_name, display, groups, scores, args.debug, summaries):
             display_names.append(display)
 
     if not display_names:
         print("No models found. Nothing to render.")
         return
 
-    info_rows = None
+    info_rows = []
     if args.show_word_count:
         row_vals = {}
         for display in display_names:
             summary = summaries.get(display, {})
             val = get_metric(summary, "alpaca_eval/avg_word_count")
             row_vals[display] = float(val) if val is not None else None
-        info_rows = [("Alpaca Eval Avg Word Count", row_vals)]
+        info_rows.append(("Alpaca Eval Avg Word Count", row_vals))
+    if args.show_orbench:
+        for metric_key, label in [("orbench/refusal", "ORBench Refusal"), ("orbench/degeneration", "ORBench Degeneration")]:
+            row_vals = {}
+            for display in display_names:
+                summary = summaries.get(display, {})
+                val = get_metric(summary, metric_key)
+                row_vals[display] = float(val) if val is not None else None
+            info_rows.append((label, row_vals))
+    if not info_rows:
+        info_rows = None
 
-    build_html(groups, display_names, scores, args.output, info_rows=info_rows)
+    build_html(groups, display_names, scores, args.output, info_rows=info_rows,
+               olmo_default_hidden=args.no_baselines, apertus_baselines=apertus_baselines,
+               no_split=args.no_split, flat=args.flat, title=args.title)
 
 
 if __name__ == "__main__":

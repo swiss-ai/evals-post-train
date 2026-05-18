@@ -21,7 +21,7 @@ mkdir -p "$HF_HOME" "$HF_DATASETS_CACHE" "$NLTK_DATA" "$TRITON_CACHE_DIR" "$WAND
 # --- Defaults ---
 EVAL_PREFIX="$SCRATCH/eval_logs_start/apertus/apertus-1.5-post-training-v0.0/"
 ACCOUNT="infra01"
-RESERVATION="SD-69241-apertus-1-5"
+RESERVATION="SD-69241-apertus-1-5-0"
 WANDB_ENTITY="apertus"
 WANDB_PROJECT="apertus-1.5-post-training-v0.0"
 TABLE_METRICS=""
@@ -135,7 +135,9 @@ submit_aggregator() {
     export LOGS_ROOT="$CLEAN_PREFIX"
     
     # Pass positional arguments to aggregate_splits.sbatch
-    local agg_cmd=("sbatch" "--account" "$ACCOUNT" "--reservation" "$RESERVATION" "scripts/aggregate_splits.sbatch" "$MODEL" "$MODEL_BASENAME")
+    local agg_cmd=("sbatch" "--account" "$ACCOUNT")
+    if [[ -n "$RESERVATION" ]]; then agg_cmd+=("--reservation" "$RESERVATION"); fi
+    agg_cmd+=("scripts/aggregate_splits.sbatch" "$MODEL" "$MODEL_BASENAME")
     
     if [[ $DEBUG -eq 1 ]]; then
         echo -e "\n[DEBUG] Would submit aggregator: ${agg_cmd[*]}"
@@ -218,7 +220,7 @@ for group in "${TASK_GROUPS[@]}"; do
     fi
 
     set +e
-    output=$(export WANDB_MODE=disabled && export SBATCH_ACCOUNT="$ACCOUNT" && export SBATCH_RESERVATION="$RESERVATION" && export WANDB_ENTITY="$WANDB_ENTITY" && export WANDB_PROJECT="$WANDB_PROJECT" && "${launch_cmd[@]}" 2>&1)
+    output=$(export WANDB_MODE=disabled && export SBATCH_ACCOUNT="$ACCOUNT" && { [[ -n "$RESERVATION" ]] && export SBATCH_RESERVATION="$RESERVATION" || unset SBATCH_RESERVATION; } && export WANDB_ENTITY="$WANDB_ENTITY" && export WANDB_PROJECT="$WANDB_PROJECT" && "${launch_cmd[@]}" 2>&1)
     rc=$?
     set -e
 
@@ -241,7 +243,10 @@ if [[ ${#JOB_IDS[@]} -gt 0 ]]; then
     
     SELF_PATH=$(realpath "$0")
     
-    WRAP_CMD="bash $SELF_PATH --task_file \"$TASK_FILE\" --model \"$MODEL\" --eval_prefix \"$EVAL_PREFIX\" --account \"$ACCOUNT\" --reservation \"$RESERVATION\" --wandb_entity \"$WANDB_ENTITY\" --wandb_project \"$WANDB_PROJECT\" --group_size \"$GROUP_SIZE\""
+    WRAP_CMD="bash $SELF_PATH --task_file \"$TASK_FILE\" --model \"$MODEL\" --eval_prefix \"$EVAL_PREFIX\" --account \"$ACCOUNT\" --wandb_entity \"$WANDB_ENTITY\" --wandb_project \"$WANDB_PROJECT\" --group_size \"$GROUP_SIZE\""
+    if [[ -n "$RESERVATION" ]]; then
+        WRAP_CMD="$WRAP_CMD --reservation \"$RESERVATION\""
+    fi
     
     if [[ -n "$TABLE_METRICS" ]]; then
         WRAP_CMD="$WRAP_CMD --table_metrics \"$TABLE_METRICS\""
@@ -253,7 +258,9 @@ if [[ ${#JOB_IDS[@]} -gt 0 ]]; then
 
     WRAP_CMD="$WRAP_CMD --merge_only"
     
-    merge_launch_cmd=("sbatch" "--account" "$ACCOUNT" "--reservation" "$RESERVATION" "--dependency=$dep_str" "--wrap" "$WRAP_CMD")
+    merge_launch_cmd=("sbatch" "--account" "$ACCOUNT")
+    if [[ -n "$RESERVATION" ]]; then merge_launch_cmd+=("--reservation" "$RESERVATION"); fi
+    merge_launch_cmd+=("--dependency=$dep_str" "--wrap" "$WRAP_CMD")
     
     if [[ $DEBUG -eq 1 ]]; then
         echo -e "\n[DEBUG] Would queue the marker reconstructor and aggregator using:"

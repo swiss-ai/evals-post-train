@@ -4,10 +4,26 @@ Contains common functions for collecting, processing, and uploading evaluation r
 """
 
 import json
+import os
 import random
 import wandb
+import wandb.sdk.lib.server
 from pathlib import Path
 from typing import List, Tuple
+
+_orig_query_with_timeout = wandb.sdk.lib.server.Server.query_with_timeout
+
+def _patched_query_with_timeout(self):
+    try:
+        _orig_query_with_timeout(self)
+    except TypeError:
+        if hasattr(self, "_viewer") and self._viewer:
+            flags = self._viewer.get("flags")
+            self._flags = json.loads(flags) if isinstance(flags, str) else {}
+        else:
+            self._flags = {}
+
+wandb.sdk.lib.server.Server.query_with_timeout = _patched_query_with_timeout
 from collections import defaultdict
 
 from .data_structures import Sample, Metric, Task, ModelEvaluation
@@ -175,8 +191,6 @@ def upload_multi_model_results(entity: str, project: str, model_evaluations: Lis
 
 def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: ModelEvaluation, main_metrics: List[str], eval_duration: int):
     """Upload ModelEvaluation data to W&B with structured samples."""
-    wandb.login()
-    
     # Get flattened metrics for W&B logging
     log_data = model_eval.get_flattened_metrics()
     
