@@ -12,6 +12,8 @@ ifeval/prompt_level_loose_acc
 multi-if/prompt_level_loose_acc
 # Chat
 alpaca_eval/length_controlled_winrate
+arena_hard_v01/arena_hard_score
+arena_hard_v2/arena_hard_score
 # Math
 gsm8k_cot/exact_match
 hendrycks_math/math_verify

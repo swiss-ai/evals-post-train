@@ -12,6 +12,8 @@ ifeval
 multi-if
 # Chat
 alpaca_eval
+arena_hard_v01
+arena_hard_v2
 # Math
 gsm8k_cot
 hendrycks_math
