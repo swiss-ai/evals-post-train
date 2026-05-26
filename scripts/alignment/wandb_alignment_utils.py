@@ -5,7 +5,6 @@ Contains common functions for collecting, processing, and uploading evaluation r
 
 import json
 import random
-import wandb
 from pathlib import Path
 from typing import List, Tuple
 from collections import defaultdict
@@ -14,7 +13,16 @@ from .data_structures import Sample, Metric, Task, ModelEvaluation
 
 
 # Binary metrics that indicate per-sample correctness (1.0 = correct, 0.0 = incorrect)
-BINARY_METRICS = {"acc", "accuracy", "exact_match", "exact_match_strict", "pass@1", "em"}
+BINARY_METRICS = {
+    "acc",
+    "accuracy",
+    "exact_match",
+    "exact_match_strict",
+    "pass@1",
+    "em",
+    "resolved",
+    "success",
+}
 
 
 def _select_stratified_samples(
@@ -143,8 +151,9 @@ def create_model_evaluation_from_results(
     return ModelEvaluation(model_name=model_name, tasks=tasks)
 
 
-def create_wandb_table(run_id: str, main_log_data: dict) -> wandb.Table:
+def create_wandb_table(run_id: str, main_log_data: dict):
     """Create a W&B table for a single model run."""
+    wandb = _require_wandb()
     columns = ["model"] + list(main_log_data.keys())
     table_data = [[run_id] + list(main_log_data.values())]
     return wandb.Table(data=table_data, columns=columns)
@@ -175,6 +184,7 @@ def upload_multi_model_results(entity: str, project: str, model_evaluations: Lis
 
 def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: ModelEvaluation, main_metrics: List[str], eval_duration: int):
     """Upload ModelEvaluation data to W&B with structured samples."""
+    wandb = _require_wandb()
     wandb.login()
     
     # Get flattened metrics for W&B logging
@@ -217,7 +227,10 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
 
 def upload_structured_samples_as_table(task: Task):
     """Create and return a W&B table with samples from a single task."""
+    wandb = _require_wandb()
     all_rows = [_flatten_dict(sample.sample_data) for sample in task.samples]
+    if not all_rows:
+        return wandb.Table(data=[], columns=["task_name"])
     columns = list(all_rows[0].keys())
     table_data = [[row.get(col) for col in columns] for row in all_rows]
     return wandb.Table(data=table_data, columns=columns)
@@ -237,3 +250,13 @@ def _flatten_dict(d, parent_key='', sep='/'):
             items.append((new_key, v))
     return dict(items)
 
+
+def _require_wandb():
+    try:
+        import wandb
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "wandb is required for uploading evaluation results. "
+            "Install the project dependencies or run inside the evaluation container."
+        ) from exc
+    return wandb
