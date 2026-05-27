@@ -261,6 +261,7 @@ Useful standalone options:
 | `--local-registry-home <path>` | Optional path to a local-registry checkout containing `env-registry`; omit when `registry` is already on `PATH` |
 | `--local-registry-dir <path>` | Per-job local registry data directory |
 | `PODMAN_SERVICE_PORT` | Optional fixed localhost port for the per-job Podman API service |
+| `PODMAN_SERVICE_HOST` | Optional hostname/IP advertised to the EDF container for the Podman API service |
 
 ### SWE-bench Verified
 
