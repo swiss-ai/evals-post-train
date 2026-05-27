@@ -14,7 +14,6 @@
 #   eval-debug       - Small set of loglikelihood and generative benchmarks to test eval script
 #   single           - Run a single task (requires --task <task_name>)
 #   non-gated        - Subset of default with non swiss-ai gated datasets (todo: full access)
-#   standalone       - Run standalone/sandboxed benchmark runners with normalized logging
 
 #
 # Olmo3:
@@ -128,28 +127,22 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Validate mode ---
-VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "non-gated" "single" "claritas" "standalone")
+VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "non-gated" "single" "claritas")
 if [[ ! " ${VALID_MODES[*]} " =~ " ${EVAL_MODE} " ]]; then
     echo "Error: Invalid mode '$EVAL_MODE'"
     echo "Valid modes: ${VALID_MODES[*]}"
     exit 1
 fi
 
-# --- Validate task override mode ---
+# --- Validate single mode ---
 if [[ "$EVAL_MODE" == "single" ]]; then
     if [[ -z "$SINGLE_TASK" ]]; then
         echo "Error: 'single' mode requires --task <task_name>"
         echo "Example: bash launch_evaluations.sh single --task hellaswag --model meta-llama/Llama-3.1-8B"
         exit 1
     fi
-elif [[ "$EVAL_MODE" == "standalone" ]]; then
-    if [[ -z "$SINGLE_TASK" && -z "${TASKS:-}" ]]; then
-        echo "Error: 'standalone' mode requires --task <task_name_or_file> or TASKS=<task_file>"
-        echo "Example: bash launch_evaluations.sh standalone --task swebench_verified --model meta-llama/Llama-3.1-8B"
-        exit 1
-    fi
 elif [[ -n "$SINGLE_TASK" ]]; then
-    echo "Error: --task can only be used with 'single' or 'standalone' mode"
+    echo "Error: --task can only be used with 'single' mode"
     exit 1
 fi
 
@@ -166,11 +159,6 @@ fi
 # Can't specify both --model and --script
 if [[ -n "$MODEL_PATH" && -n "$SCRIPT_PATH" ]]; then
     echo "Error: --model and --script are mutually exclusive"
-    exit 1
-fi
-
-if [[ "$EVAL_MODE" == "standalone" && -z "$MODEL_PATH" && -z "$SCRIPT_PATH" ]]; then
-    echo "Error: standalone mode requires --model or --script"
     exit 1
 fi
 
@@ -250,10 +238,6 @@ case "$EVAL_MODE" in
         export TASKS="$SINGLE_TASK"
         export TABLE_METRICS="$SINGLE_TASK"
         export WANDB_PROJECT="${WANDB_PROJECT}-single"
-        ;;
-    "standalone")
-        export TASKS="${SINGLE_TASK:-${TASKS:-}}"
-        export WANDB_PROJECT="${WANDB_PROJECT}-standalone"
         ;;
 esac
 
@@ -353,11 +337,6 @@ while IFS= read -r task_name; do
         LM_EVAL_TASK_COUNT=$((LM_EVAL_TASK_COUNT + 1))
     fi
 done < <(read_task_list "$TASKS")
-
-if [[ "$EVAL_MODE" == "standalone" && "$LM_EVAL_TASK_COUNT" -gt 0 ]]; then
-    echo "Error: standalone mode received non-standalone task(s): $(join_by_comma "${LM_EVAL_TASK_ITEMS[@]}")"
-    exit 1
-fi
 
 if (( STANDALONE_TASK_COUNT > 0 )); then
     export RUN_STANDALONE=true

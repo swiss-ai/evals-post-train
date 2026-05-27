@@ -93,7 +93,7 @@ bash scripts/launch_evaluations.sh olmo-safety \
   --script runners/hf_eval_multiple_other_models.sh --splits 4
 
 # Smoke-test the standalone/sandboxed benchmark path
-bash scripts/launch_evaluations.sh standalone \
+bash scripts/launch_evaluations.sh single \
   --task smoke_standalone --model meta-llama/Llama-3.1-8B-Instruct
 ```
 
@@ -211,10 +211,10 @@ Use `--num-fewshot 5` to match the OLMo3 paper settings. Tasks with hardcoded ex
 
 ## Standalone Benchmarks
 
-Some benchmarks evaluate an agent or artifact inside an external environment rather than a single model completion. For those, use `standalone` mode. It keeps the same launcher and W&B upload flow, but dispatches to `scripts/evaluate_standalone.sbatch` instead of `lm_eval`.
+Some benchmarks evaluate an agent or artifact inside an external environment rather than a single model completion. They still use the normal launcher task interface: if a task is registered in `configs/standalone/benchmarks/*.toml`, the launcher routes it to `scripts/evaluate_standalone.sbatch`; otherwise it routes it to `scripts/evaluate.sbatch`.
 
 ```bash
-bash scripts/launch_evaluations.sh standalone \
+bash scripts/launch_evaluations.sh single \
   --task smoke_standalone \
   --model meta-llama/Llama-3.1-8B-Instruct \
   --name Llama-Standalone-Smoke
@@ -245,7 +245,7 @@ will launch `gsm8k_cot,mmlu` through `scripts/evaluate.sbatch` and `swebench_ver
 On CSCS, standalone jobs enter containers through per-step `srun --environment="$STANDALONE_EDF"` calls. The batch script itself does not use `#SBATCH --environment`, following CE guidance to avoid nested containers and non-host execution surprises. The default EDF is `./containers/env.toml`; override it with:
 
 ```bash
-bash scripts/launch_evaluations.sh standalone \
+bash scripts/launch_evaluations.sh single \
   --task smoke_standalone \
   --standalone-edf ./containers/env.toml \
   --model my-model
@@ -266,7 +266,7 @@ Useful standalone options:
 SWE-bench Verified is wired as a standalone benchmark around lm-eval model loading and the official SWE-bench harness. By default the runner loads the requested model through lm-eval, generates an intermediate `predictions.jsonl`, then evaluates those patches in the SWE-bench runtime.
 
 ```bash
-bash scripts/launch_evaluations.sh standalone \
+bash scripts/launch_evaluations.sh single \
   --task swebench_verified \
   --model my-model \
   --name my-model-swebench-verified \
