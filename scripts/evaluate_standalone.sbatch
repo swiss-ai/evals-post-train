@@ -43,7 +43,7 @@ STANDALONE_EDF=${STANDALONE_EDF:-./containers/env.toml}
 STANDALONE_LIMIT=${STANDALONE_LIMIT:-}
 SANDBOX_BACKEND=${SANDBOX_BACKEND:-none}
 CONTAINER_CACHE_BACKEND=${CONTAINER_CACHE_BACKEND:-none}
-LOCAL_REGISTRY_HOME=${LOCAL_REGISTRY_HOME:-./local-registry-reference}
+LOCAL_REGISTRY_HOME=${LOCAL_REGISTRY_HOME:-}
 LOCAL_REGISTRY_DIR=${LOCAL_REGISTRY_DIR:-${RUN_ROOT:-/tmp}/local_registry_${SLURM_JOBID:-local}}
 PODMAN_SERVICE_PORT=${PODMAN_SERVICE_PORT:-}
 LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
@@ -208,13 +208,18 @@ if [[ "$STANDALONE_TASKS" == *"swebench_verified"* ]]; then
 fi
 
 if [[ "$CONTAINER_CACHE_BACKEND" == "local_registry" ]]; then
-    if [[ ! -f "$LOCAL_REGISTRY_HOME/env-registry" ]]; then
-        echo "ERROR: LOCAL_REGISTRY_HOME does not contain env-registry: $LOCAL_REGISTRY_HOME" >&2
+    if [[ -n "$LOCAL_REGISTRY_HOME" ]]; then
+        if [[ ! -f "$LOCAL_REGISTRY_HOME/env-registry" ]]; then
+            echo "ERROR: LOCAL_REGISTRY_HOME does not contain env-registry: $LOCAL_REGISTRY_HOME" >&2
+            exit 1
+        fi
+        # shellcheck disable=SC1090
+        . "$LOCAL_REGISTRY_HOME/env-registry"
+    elif ! command -v registry >/dev/null 2>&1; then
+        echo "ERROR: CONTAINER_CACHE_BACKEND=local_registry requires either --local-registry-home or registry on PATH." >&2
         exit 1
     fi
     mkdir -p "$LOCAL_REGISTRY_DIR"
-    # shellcheck disable=SC1090
-    . "$LOCAL_REGISTRY_HOME/env-registry"
     LOCAL_REGISTRY="$(registry up "$LOCAL_REGISTRY_DIR")"
     export LOCAL_REGISTRY
     export SWE_USE_PODMAN_CACHED=${SWE_USE_PODMAN_CACHED:-true}
