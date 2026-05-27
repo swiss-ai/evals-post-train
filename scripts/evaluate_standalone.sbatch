@@ -161,9 +161,14 @@ choose_podman_service_port() {
 }
 
 start_podman_docker_api() {
-    if [[ -n "${DOCKER_HOST:-}" ]]; then
+    if [[ "${DOCKER_HOST:-}" == tcp://* || "${DOCKER_HOST:-}" == http://* || "${DOCKER_HOST:-}" == https://* ]]; then
         echo "Using existing DOCKER_HOST=$DOCKER_HOST"
         return 0
+    fi
+    if [[ -n "${DOCKER_HOST:-}" ]]; then
+        echo "Ignoring preexisting non-TCP DOCKER_HOST=$DOCKER_HOST; CE payloads need a socket reachable inside the EDF container."
+        unset DOCKER_HOST
+        unset CONTAINER_HOST
     fi
     if ! command -v podman >/dev/null 2>&1; then
         echo "ERROR: SWE-bench requires a Docker-compatible API, but neither DOCKER_HOST nor podman is available." >&2
