@@ -258,7 +258,7 @@ Useful standalone options:
 | `--standalone-edf <path-or-name>` | CSCS CE Environment Definition File used by `srun --environment` |
 | `--sandbox-backend <name>` | Runner hint such as `none`, `docker`, `apptainer`, `enroot`, or `remote` |
 | `--container-cache-backend <name>` | Container build cache backend, currently `none` or `local_registry` |
-| `--local-registry-home <path>` | Path to a local-registry checkout containing `env-registry` |
+| `--local-registry-home <path>` | Optional path to a local-registry checkout containing `env-registry`; omit when `registry` is already on `PATH` |
 | `--local-registry-dir <path>` | Per-job local registry data directory |
 | `PODMAN_SERVICE_PORT` | Optional fixed localhost port for the per-job Podman API service |
 
@@ -272,8 +272,7 @@ bash scripts/launch_evaluations.sh single \
   --model my-model \
   --name my-model-swebench-verified \
   --sandbox-backend podman \
-  --container-cache-backend local_registry \
-  --local-registry-home ./local-registry-reference
+  --container-cache-backend local_registry
 ```
 
 `SWE_PREDICTIONS_PATH` is still supported as an override when you want to evaluate pre-generated patches. The predictions file must use the official SWE-bench format:
@@ -301,7 +300,7 @@ Useful SWE-bench environment variables:
 | `MAX_NEW_TOKENS` | `2048` | Token budget for patch generation |
 | `APPLY_CHAT_TEMPLATE` | launcher-derived | Whether to apply the model chat template |
 
-When `--container-cache-backend local_registry` is used, the standalone sbatch script starts `local-registry-reference/registry` on the allocated node, exports `LOCAL_REGISTRY`, and stops it on exit. This caches image build layers for the duration of the Slurm job. The local `swe-bench-reference` checkout has been adapted to honor `SWE_USE_PODMAN_CACHED=true` in its image build function; container execution still uses the Docker-compatible API used by the official harness.
+When `--container-cache-backend local_registry` is used, the standalone sbatch script starts `registry` on the allocated node, exports `LOCAL_REGISTRY`, and stops it on exit. If `registry` is not already on `PATH`, pass `--local-registry-home /path/to/local-registry` so the script can source `env-registry`. This caches image build layers for the duration of the Slurm job. The local `swe-bench-reference` checkout has been adapted to honor `SWE_USE_PODMAN_CACHED=true` in its image build function; container execution still uses the Docker-compatible API used by the official harness.
 
 ### Adding Custom Task Suites
 
