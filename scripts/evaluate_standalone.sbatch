@@ -46,6 +46,7 @@ CONTAINER_CACHE_BACKEND=${CONTAINER_CACHE_BACKEND:-none}
 LOCAL_REGISTRY_HOME=${LOCAL_REGISTRY_HOME:-}
 LOCAL_REGISTRY_DIR=${LOCAL_REGISTRY_DIR:-${RUN_ROOT:-/tmp}/local_registry_${SLURM_JOBID:-local}}
 PODMAN_SERVICE_PORT=${PODMAN_SERVICE_PORT:-}
+PODMAN_SERVICE_HOST=${PODMAN_SERVICE_HOST:-}
 LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 BS=${BS:-auto:20}
 BOS=${BOS:-false}
@@ -160,6 +161,14 @@ choose_podman_service_port() {
     return 1
 }
 
+choose_podman_service_host() {
+    if [[ -n "$PODMAN_SERVICE_HOST" ]]; then
+        echo "$PODMAN_SERVICE_HOST"
+    else
+        hostname -f 2>/dev/null || hostname
+    fi
+}
+
 start_podman_docker_api() {
     if [[ "${DOCKER_HOST:-}" == tcp://* || "${DOCKER_HOST:-}" == http://* || "${DOCKER_HOST:-}" == https://* ]]; then
         echo "Using existing DOCKER_HOST=$DOCKER_HOST"
@@ -182,10 +191,12 @@ start_podman_docker_api() {
         }
     fi
 
-    PODMAN_SERVICE_URI="tcp://127.0.0.1:${PODMAN_SERVICE_PORT}"
+    PODMAN_SERVICE_HOST=$(choose_podman_service_host)
+    PODMAN_SERVICE_BIND_URI="tcp://0.0.0.0:${PODMAN_SERVICE_PORT}"
+    PODMAN_SERVICE_URI="tcp://${PODMAN_SERVICE_HOST}:${PODMAN_SERVICE_PORT}"
     PODMAN_SERVICE_LOG="$EVAL_DIR/podman_service.log"
     echo "Starting Podman Docker-compatible API at $PODMAN_SERVICE_URI"
-    podman system service --time=0 "$PODMAN_SERVICE_URI" >"$PODMAN_SERVICE_LOG" 2>&1 &
+    podman system service --time=0 "$PODMAN_SERVICE_BIND_URI" >"$PODMAN_SERVICE_LOG" 2>&1 &
     PODMAN_SERVICE_PID=$!
 
     for _ in $(seq 1 60); do
