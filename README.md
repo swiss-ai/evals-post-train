@@ -263,6 +263,7 @@ Useful standalone options:
 | `PODMAN_SERVICE_PORT` | Optional fixed localhost port for the per-job Podman API service |
 | `PODMAN_SERVICE_HOST` | Optional hostname/IP advertised for the per-job Podman API service |
 | `PODMAN_SERVICE_USE_EXTERNAL` | Set to `true` only to reuse an existing TCP `DOCKER_HOST`; by default SWE-bench starts a fresh per-job service |
+| `HOST_PYTHON` | Host-side Python used for the SWE-bench harness phase; defaults to `python` and creates a per-job virtualenv |
 
 ### SWE-bench Verified
 

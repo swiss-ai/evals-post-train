@@ -266,13 +266,14 @@ if [[ -n "$STANDALONE_LIMIT" ]]; then
 fi
 RUN_CMD=(python -m scripts.standalone.run "${RUN_ARGS[@]}")
 GEN_RUN_CMD=(python -m scripts.standalone.run "${RUN_ARGS[@]}" --phase generate)
-EVAL_RUN_CMD=(python -m scripts.standalone.run "${RUN_ARGS[@]}" --phase evaluate)
 printf -v RUN_CMD_STR '%q ' "${RUN_CMD[@]}"
 printf -v GEN_RUN_CMD_STR '%q ' "${GEN_RUN_CMD[@]}"
 printf -v WORKDIR_Q '%q' "$PWD"
 
 HOST_PYTHON=${HOST_PYTHON:-python}
+HOST_VENV=$EVAL_DIR/host_venv
 HOST_SITE=$EVAL_DIR/host_python
+HOST_EXTRA_PYTHONPATH=""
 HOST_DEPS=(
     docker
     datasets
@@ -287,7 +288,34 @@ HOST_DEPS=(
     GitPython
     rich
 )
-HOST_INSTALL_CMD=("$HOST_PYTHON" -m pip install --upgrade --target "$HOST_SITE" "${HOST_DEPS[@]}")
+
+install_host_python_deps() {
+    if [[ ! -x "$HOST_VENV/bin/python" ]]; then
+        if ! "$HOST_PYTHON" -m venv "$HOST_VENV"; then
+            if command -v uv >/dev/null 2>&1; then
+                mkdir -p "$HOST_SITE"
+                uv pip install --python "$HOST_PYTHON" --upgrade --target "$HOST_SITE" "${HOST_DEPS[@]}"
+                HOST_EXTRA_PYTHONPATH="$HOST_SITE"
+                return 0
+            fi
+            echo "ERROR: Could not create host virtualenv at $HOST_VENV and uv is not on PATH." >&2
+            echo "Set HOST_PYTHON to a Python with venv support, or provide uv on PATH." >&2
+            exit 1
+        fi
+    fi
+    HOST_PYTHON="$HOST_VENV/bin/python"
+
+    if "$HOST_PYTHON" -m pip --version >/dev/null 2>&1; then
+        "$HOST_PYTHON" -m pip install --upgrade pip
+        "$HOST_PYTHON" -m pip install --upgrade "${HOST_DEPS[@]}"
+    elif command -v uv >/dev/null 2>&1; then
+        uv pip install --python "$HOST_PYTHON" --upgrade "${HOST_DEPS[@]}"
+    else
+        echo "ERROR: Could not install host Python dependencies: no pip in $HOST_VENV and uv is not on PATH." >&2
+        echo "Set HOST_PYTHON to a Python with venv/pip support, or pre-create a virtualenv at $HOST_VENV." >&2
+        exit 1
+    fi
+}
 
 echo "START TIME: $(date)"
 echo "Standalone configuration:"
@@ -325,11 +353,10 @@ if [[ "$IS_SWEBENCH" == "true" ]]; then
     echo "SWE-bench phase 2/2: running official harness on host with Podman/Docker"
     start_podman_docker_api
     start_local_registry
-    mkdir -p "$HOST_SITE"
-    "${HOST_INSTALL_CMD[@]}"
-    export PYTHONPATH="$PWD:$PWD/swe-bench-reference:$HOST_SITE:${PYTHONPATH:-}"
-    python -c 'import docker, os; print("docker module", getattr(docker, "__file__", None), getattr(docker, "__path__", None)); assert hasattr(docker, "from_env"), "Imported docker module is not the Docker SDK"; client = docker.from_env(); print("Docker API reachable", client.version().get("ApiVersion"), "via", os.environ.get("DOCKER_HOST"))'
-    "${EVAL_RUN_CMD[@]}"
+    install_host_python_deps
+    export PYTHONPATH="$PWD:$PWD/swe-bench-reference${HOST_EXTRA_PYTHONPATH:+:$HOST_EXTRA_PYTHONPATH}:${PYTHONPATH:-}"
+    "$HOST_PYTHON" -c 'import docker, os; print("docker module", getattr(docker, "__file__", None), getattr(docker, "__path__", None)); assert hasattr(docker, "from_env"), "Imported docker module is not the Docker SDK"; client = docker.from_env(); print("Docker API reachable", client.version().get("ApiVersion"), "via", os.environ.get("DOCKER_HOST"))'
+    "$HOST_PYTHON" -m scripts.standalone.run "${RUN_ARGS[@]}" --phase evaluate
 else
     srun -n 1 --mpi=pmix -ul --environment="$STANDALONE_EDF" --export=ALL,HF_TOKEN,WANDB_API_KEY,MODEL_API_BASE,MODEL_API_KEY,MODEL_API_MODEL,SANDBOX_BACKEND bash -lc "
         set -euo pipefail
