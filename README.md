@@ -297,6 +297,7 @@ Useful SWE-bench environment variables:
 | `SWE_TIMEOUT` | `1800` | Per-instance timeout in seconds |
 | `SWE_CACHE_LEVEL` | `env` | Official harness cache level |
 | `SWE_NAMESPACE` | `none` | Image namespace. `none` builds images locally; set `swebench` only when remote prebuilt image pulls are desired and authenticated/mirrored |
+| `SWE_ARCH` | host architecture | Container image architecture, normalized to `arm64` on AArch64 hosts and `x86_64` on x86 hosts |
 | `SWE_USE_PODMAN_BUILD` | `true` | Build SWE-bench images with host `podman build` instead of the Docker API build endpoint |
 | `SWE_PODMAN_BUILD_STORAGE_OPTS` | `ignore_chown_errors=true` | Storage options passed to `podman build`; useful on rootless CSCS nodes without broad subuid/subgid mappings |
 | `PODMAN_SERVICE_STORAGE_OPTS` | `ignore_chown_errors=true` | Storage options used when starting the per-job Podman Docker-compatible API service |

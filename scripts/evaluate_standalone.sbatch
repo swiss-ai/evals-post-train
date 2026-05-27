@@ -51,6 +51,14 @@ PODMAN_SERVICE_USE_EXTERNAL=${PODMAN_SERVICE_USE_EXTERNAL:-false}
 PODMAN_SERVICE_STORAGE_OPTS=${PODMAN_SERVICE_STORAGE_OPTS:-ignore_chown_errors=true}
 export SWE_USE_PODMAN_BUILD=${SWE_USE_PODMAN_BUILD:-true}
 export SWE_PODMAN_BUILD_STORAGE_OPTS=${SWE_PODMAN_BUILD_STORAGE_OPTS:-ignore_chown_errors=true}
+detect_swe_arch() {
+    case "$(uname -m)" in
+        aarch64|arm64) echo arm64 ;;
+        x86_64|amd64) echo x86_64 ;;
+        *) uname -m ;;
+    esac
+}
+export SWE_ARCH=${SWE_ARCH:-$(detect_swe_arch)}
 LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 BS=${BS:-auto:20}
 BOS=${BOS:-false}
@@ -354,6 +362,7 @@ if [[ "$IS_SWEBENCH" == "true" ]]; then
     echo "  SWE_MAX_WORKERS=$SWE_MAX_WORKERS"
     echo "  SWE_CACHE_LEVEL=${SWE_CACHE_LEVEL:-env}"
     echo "  SWE_TIMEOUT=${SWE_TIMEOUT:-1800}"
+    echo "  SWE_ARCH=$SWE_ARCH"
     echo "  SWE_USE_PODMAN_BUILD=$SWE_USE_PODMAN_BUILD"
     echo "  SWE_PODMAN_BUILD_STORAGE_OPTS=$SWE_PODMAN_BUILD_STORAGE_OPTS"
 fi
