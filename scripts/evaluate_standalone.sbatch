@@ -59,6 +59,7 @@ detect_swe_arch() {
     esac
 }
 export SWE_ARCH=${SWE_ARCH:-$(detect_swe_arch)}
+export SWE_RELAX_CONDA_BUILDS=${SWE_RELAX_CONDA_BUILDS:-auto}
 LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 BS=${BS:-auto:20}
 BOS=${BOS:-false}
@@ -363,6 +364,7 @@ if [[ "$IS_SWEBENCH" == "true" ]]; then
     echo "  SWE_CACHE_LEVEL=${SWE_CACHE_LEVEL:-env}"
     echo "  SWE_TIMEOUT=${SWE_TIMEOUT:-1800}"
     echo "  SWE_ARCH=$SWE_ARCH"
+    echo "  SWE_RELAX_CONDA_BUILDS=$SWE_RELAX_CONDA_BUILDS"
     echo "  SWE_USE_PODMAN_BUILD=$SWE_USE_PODMAN_BUILD"
     echo "  SWE_PODMAN_BUILD_STORAGE_OPTS=$SWE_PODMAN_BUILD_STORAGE_OPTS"
 fi

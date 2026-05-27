@@ -113,6 +113,51 @@ def clean_environment_yml(yml_text: str) -> str:
     return prefix + pip_portion + suffix
 
 
+def relax_environment_yml_for_arch(yml_text: str) -> str:
+    """
+    Remove conda build strings from environment.yml on non-x86 platforms.
+
+    Several cached SWE-bench environments are linux-64 lockfiles with entries
+    like ``bzip2==1.0.8=h5eee18b_6``. Those exact build strings do not exist on
+    linux-aarch64, but the version usually does. Keep the package/version pin
+    and drop only the architecture-specific build suffix.
+    """
+    if os.environ.get("SWE_RELAX_CONDA_BUILDS", "auto").lower() in {"0", "false", "no", "off"}:
+        return yml_text
+    swe_arch = os.environ.get("SWE_ARCH", "x86_64").lower()
+    if swe_arch not in {"arm64", "aarch64"} and os.environ.get("SWE_RELAX_CONDA_BUILDS", "auto").lower() == "auto":
+        return yml_text
+
+    relaxed = []
+    in_pip_section = False
+    pip_indent = 0
+    for line in yml_text.splitlines():
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        if in_pip_section and stripped and indent <= pip_indent:
+            in_pip_section = False
+        if re.match(r"^-\s+pip\s*:", stripped):
+            in_pip_section = True
+            pip_indent = indent
+            relaxed.append(line)
+            continue
+        if not in_pip_section:
+            line = _relax_conda_dependency_line(line)
+        relaxed.append(line)
+    return "\n".join(relaxed)
+
+
+def _relax_conda_dependency_line(line: str) -> str:
+    match = re.match(
+        r"^(\s*-\s*)([A-Za-z0-9_.-]+)(==|=)([^=\s#]+)=([A-Za-z0-9_.*+.-]+)(\s*(?:#.*)?)$",
+        line,
+    )
+    if not match:
+        return line
+    prefix, package, operator, version, _build, suffix = match.groups()
+    return f"{prefix}{package}{operator}{version}{suffix}"
+
+
 def get_environment_yml(instance: SWEbenchInstance, env_name: str) -> str:
     """
     Get environment.yml for given task instance
@@ -131,6 +176,7 @@ def get_environment_yml(instance: SWEbenchInstance, env_name: str) -> str:
     )
     yml_text = get_environment_yml_by_commit(instance["repo"], commit, env_name)
     yml_text = clean_environment_yml(yml_text)
+    yml_text = relax_environment_yml_for_arch(yml_text)
     return yml_text
 
 
@@ -321,6 +367,7 @@ def make_env_script_list_py_from_conda(
     instance, specs, env_name, cached_environment_yml
 ) -> list:
     HEREDOC_DELIMITER = "EOF_59812759871"
+    cached_environment_yml = relax_environment_yml_for_arch(cached_environment_yml)
     reqs_commands = [
         "source /opt/miniconda3/bin/activate",
         f"cat <<'{HEREDOC_DELIMITER}' > /root/environment.yml\n{cached_environment_yml}\n{HEREDOC_DELIMITER}",
