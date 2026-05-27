@@ -18,7 +18,7 @@ DEFAULT_DATASET = "princeton-nlp/SWE-bench_Verified"
 DEFAULT_SPLIT = "test"
 
 
-def run(spec: BenchmarkSpec, context: RunContext) -> BenchmarkResult:
+def run(spec: BenchmarkSpec, context: RunContext) -> BenchmarkResult | None:
     settings = _load_settings(context)
     reference_dir = settings["reference_dir"]
     _prepare_swebench_import(reference_dir)
@@ -26,11 +26,20 @@ def run(spec: BenchmarkSpec, context: RunContext) -> BenchmarkResult:
     work_dir = context.output_dir / "artifacts" / "swebench"
     work_dir.mkdir(parents=True, exist_ok=True)
 
+    phase = str(context.metadata.get("phase") or os.environ.get("STANDALONE_PHASE") or "full")
     predictions_path = settings["predictions_path"]
+    if phase == "evaluate" and not predictions_path:
+        predictions_path = str(work_dir / "predictions.jsonl")
+
     if predictions_path:
         normalized_predictions_path = _prepare_predictions(predictions_path, work_dir)
     else:
         normalized_predictions_path = _generate_predictions(spec, context, settings, work_dir)
+
+    if phase == "generate":
+        _write_generation_manifest(work_dir, normalized_predictions_path, settings)
+        return None
+
     run_id = settings["run_id"] or context.output_dir.name
 
     with _working_directory(work_dir):
@@ -230,6 +239,22 @@ def _generate_predictions(
         pass
 
     return str(predictions_path)
+
+
+def _write_generation_manifest(
+    work_dir: Path,
+    predictions_path: str,
+    settings: dict[str, Any],
+) -> None:
+    manifest = {
+        "predictions_path": predictions_path,
+        "dataset_name": settings["dataset_name"],
+        "split": settings["split"],
+        "instance_ids": settings["instance_ids"],
+    }
+    with (work_dir / "generation_manifest.json").open("w") as handle:
+        json.dump(manifest, handle, indent=2, sort_keys=True)
+        handle.write("\n")
 
 
 def _build_prompt(instance: dict[str, Any]) -> str:
