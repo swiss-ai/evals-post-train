@@ -293,9 +293,10 @@ Useful SWE-bench environment variables:
 | `SWE_DATASET_NAME` | `princeton-nlp/SWE-bench_Verified` | Dataset passed to the harness |
 | `SWE_SPLIT` | `test` | Dataset split |
 | `SWE_INSTANCE_IDS` | unset | Space- or comma-separated subset for smoke runs |
-| `SWE_MAX_WORKERS` | `4` | Harness worker count |
+| `SWE_MAX_WORKERS` | `75% of SLURM_CPUS_PER_TASK, else 4` | Harness worker count for image builds and test containers |
 | `SWE_TIMEOUT` | `1800` | Per-instance timeout in seconds |
 | `SWE_CACHE_LEVEL` | `env` | Official harness cache level |
+| `SWE_NAMESPACE` | `none` | Image namespace. `none` builds images locally; set `swebench` only when remote prebuilt image pulls are desired and authenticated/mirrored |
 | `SWE_USE_PODMAN_CACHED` | set by local registry mode | Tell the local `swe-bench-reference` harness to use `podman-cached` for image builds |
 | `LM_EVAL_BACKEND` | `vllm` | lm-eval backend used for patch generation |
 | `LM_EVAL_MODEL_ARGS` | launcher-built | lm-eval model args used for patch generation |

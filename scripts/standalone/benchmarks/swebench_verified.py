@@ -36,6 +36,9 @@ def run(spec: BenchmarkSpec, context: RunContext) -> BenchmarkResult | None:
     else:
         normalized_predictions_path = _generate_predictions(spec, context, settings, work_dir)
 
+    predictions = _load_predictions(normalized_predictions_path)
+    _print_prediction_summary(normalized_predictions_path, predictions)
+
     if phase == "generate":
         _write_generation_manifest(work_dir, normalized_predictions_path, settings)
         return None
@@ -62,8 +65,8 @@ def run(spec: BenchmarkSpec, context: RunContext) -> BenchmarkResult | None:
             modal=settings["modal"],
         )
 
-    predictions = _load_predictions(normalized_predictions_path)
     report = _load_report(report_path, work_dir, predictions, run_id)
+    _print_report_error_summary(work_dir, report, predictions, run_id)
     samples = _build_samples(
         spec.name,
         work_dir,
@@ -119,11 +122,11 @@ def _load_settings(context: RunContext) -> dict[str, Any]:
         "dataset_name": os.environ.get("SWE_DATASET_NAME", DEFAULT_DATASET),
         "split": os.environ.get("SWE_SPLIT", DEFAULT_SPLIT),
         "run_id": os.environ.get("SWE_RUN_ID"),
-        "max_workers": int(os.environ.get("SWE_MAX_WORKERS", "4")),
+        "max_workers": _default_max_workers(),
         "timeout": int(os.environ.get("SWE_TIMEOUT", "1800")),
         "cache_level": os.environ.get("SWE_CACHE_LEVEL", "env"),
         "clean": _env_bool("SWE_CLEAN", False),
-        "namespace": _optional_str(os.environ.get("SWE_NAMESPACE", "swebench")),
+        "namespace": _optional_str(os.environ.get("SWE_NAMESPACE", "none")),
         "instance_ids": instance_ids,
         "force_rebuild": _env_bool("SWE_FORCE_REBUILD", False),
         "rewrite_reports": _env_bool("SWE_REWRITE_REPORTS", False),
@@ -148,6 +151,18 @@ def _prepare_swebench_import(reference_dir: Path) -> None:
     ref = str(reference_dir)
     if ref not in sys.path:
         sys.path.insert(0, ref)
+
+
+def _default_max_workers() -> int:
+    configured = os.environ.get("SWE_MAX_WORKERS")
+    if configured:
+        return int(configured)
+
+    allocated_cpus = os.environ.get("SLURM_CPUS_PER_TASK")
+    if allocated_cpus:
+        return max(1, (int(allocated_cpus) * 3 + 3) // 4)
+
+    return 4
 
 
 def _prepare_predictions(predictions_path: str, work_dir: Path) -> str:
@@ -352,6 +367,91 @@ def _load_predictions(predictions_path: str) -> dict[str, dict[str, Any]]:
     else:
         rows = []
     return {row["instance_id"]: row for row in rows}
+
+
+def _print_prediction_summary(
+    predictions_path: str,
+    predictions: dict[str, dict[str, Any]],
+) -> None:
+    if predictions_path == "gold":
+        print("SWE-bench prediction summary: using gold predictions.")
+        return
+
+    total = len(predictions)
+    empty = 0
+    diff_like = 0
+    nonempty_non_diff: list[tuple[str, str]] = []
+    for instance_id, prediction in predictions.items():
+        patch = prediction.get("model_patch") or ""
+        stripped = patch.strip()
+        if not stripped:
+            empty += 1
+            continue
+        if "diff --git " in stripped or stripped.startswith("--- "):
+            diff_like += 1
+        elif len(nonempty_non_diff) < 3:
+            nonempty_non_diff.append((instance_id, " ".join(stripped.split())[:180]))
+
+    print(
+        "SWE-bench prediction summary: "
+        f"{total} submitted, {empty} empty, {diff_like} diff-like, "
+        f"{total - empty - diff_like} non-empty/non-diff."
+    )
+    if nonempty_non_diff:
+        print("SWE-bench non-diff prediction samples:")
+        for instance_id, preview in nonempty_non_diff:
+            print(f"  {instance_id}: {preview}")
+
+
+def _print_report_error_summary(
+    work_dir: Path,
+    report: dict[str, Any],
+    predictions: dict[str, dict[str, Any]],
+    run_id: str,
+) -> None:
+    submitted = int(report.get("submitted_instances", 0))
+    completed = int(report.get("completed_instances", 0))
+    errors = list(report.get("error_ids", []))
+    empty = list(report.get("empty_patch_ids", []))
+    print(
+        "SWE-bench report summary: "
+        f"{completed}/{submitted} completed, {len(errors)} errors, {len(empty)} empty patches."
+    )
+    if not errors:
+        return
+
+    print("SWE-bench error samples:")
+    for instance_id in errors[:5]:
+        prediction = predictions.get(instance_id, {})
+        model_name = prediction.get("model_name_or_path", "None").replace("/", "__")
+        log_file = work_dir / "logs" / "run_evaluation" / run_id / model_name / instance_id / "run_instance.log"
+        reason = _extract_error_reason(log_file)
+        print(f"  {instance_id}: {reason}")
+
+
+def _extract_error_reason(log_file: Path) -> str:
+    if not log_file.exists():
+        return f"missing run log: {log_file}"
+
+    lines = log_file.read_text(errors="replace").splitlines()
+    markers = (
+        "Failed to apply patch",
+        "APPLY_PATCH_FAIL",
+        "EvaluationError",
+        "BuildImageError",
+        "Test timed out",
+        "Timeout error",
+        "Error in evaluating model",
+        "docker.errors",
+    )
+    matches = [line.strip() for line in lines if any(marker in line for marker in markers)]
+    if matches:
+        return matches[-1][:240]
+    for line in reversed(lines):
+        stripped = line.strip()
+        if stripped:
+            return stripped[:240]
+    return "run log is empty"
 
 
 def _load_report(
