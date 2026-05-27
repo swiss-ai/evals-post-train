@@ -244,6 +244,8 @@ fi
 RUN_CMD=(python -m scripts.standalone.run "${RUN_ARGS[@]}")
 printf -v RUN_CMD_STR '%q ' "${RUN_CMD[@]}"
 printf -v WORKDIR_Q '%q' "$PWD"
+printf -v DOCKER_HOST_Q '%q' "${DOCKER_HOST:-}"
+printf -v CONTAINER_HOST_Q '%q' "${CONTAINER_HOST:-}"
 
 echo "START TIME: $(date)"
 echo "Standalone configuration:"
@@ -269,8 +271,14 @@ srun -n 1 --mpi=pmix -ul --environment="$STANDALONE_EDF" --export=ALL,HF_TOKEN,W
     set -euo pipefail
     cd $WORKDIR_Q
     unset SSL_CERT_FILE
+    export DOCKER_HOST=$DOCKER_HOST_Q
+    export CONTAINER_HOST=$CONTAINER_HOST_Q
     $INSTALL_CMD
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
+    if [[ -n \"\${DOCKER_HOST:-}\" ]]; then
+        echo \"In-container DOCKER_HOST=\$DOCKER_HOST\"
+        python -c 'import docker, os; client = docker.from_env(); print(\"Docker API reachable\", client.version().get(\"ApiVersion\"), \"via\", os.environ.get(\"DOCKER_HOST\"))'
+    fi
     $RUN_CMD_STR
 "
 
