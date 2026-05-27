@@ -242,7 +242,7 @@ swebench_verified
 
 will launch `gsm8k_cot,mmlu` through `scripts/evaluate.sbatch` and `swebench_verified` through `scripts/evaluate_standalone.sbatch`.
 
-On CSCS, standalone jobs enter containers through per-step `srun --environment="$STANDALONE_EDF"` calls. The batch script itself does not use `#SBATCH --environment`, following CE guidance to avoid nested containers and non-host execution surprises. For SWE-bench, the batch script also starts a per-job Podman Docker-compatible API service and exports `DOCKER_HOST` into the CE step, because the Python Docker SDK cannot use the `docker` CLI shim directly. The default EDF is `./containers/env.toml`; override it with:
+On CSCS, standalone jobs enter containers through per-step `srun --environment="$STANDALONE_EDF"` calls. The batch script itself does not use `#SBATCH --environment`, following CE guidance to avoid nested containers and non-host execution surprises. SWE-bench is split into two phases: prediction generation runs inside the EDF, then the official sandbox harness runs on the host compute node where Podman/Docker are available. The default EDF is `./containers/env.toml`; override it with:
 
 ```bash
 bash scripts/launch_evaluations.sh single \
@@ -261,7 +261,8 @@ Useful standalone options:
 | `--local-registry-home <path>` | Optional path to a local-registry checkout containing `env-registry`; omit when `registry` is already on `PATH` |
 | `--local-registry-dir <path>` | Per-job local registry data directory |
 | `PODMAN_SERVICE_PORT` | Optional fixed localhost port for the per-job Podman API service |
-| `PODMAN_SERVICE_HOST` | Optional hostname/IP advertised to the EDF container for the Podman API service |
+| `PODMAN_SERVICE_HOST` | Optional hostname/IP advertised for the per-job Podman API service |
+| `PODMAN_SERVICE_USE_EXTERNAL` | Set to `true` only to reuse an existing TCP `DOCKER_HOST`; by default SWE-bench starts a fresh per-job service |
 
 ### SWE-bench Verified
 

@@ -19,6 +19,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--name", required=True, help="Stable run/model display name.")
     parser.add_argument("--output-dir", type=Path, required=True, help="Directory for normalized artifacts.")
     parser.add_argument("--limit", type=int, help="Optional per-benchmark instance limit.")
+    parser.add_argument(
+        "--phase",
+        choices=("full", "generate", "evaluate"),
+        default=os.environ.get("STANDALONE_PHASE", "full"),
+        help="Execution phase for runners that split generation from sandbox evaluation.",
+    )
     parser.add_argument("--sandbox-backend", default=os.environ.get("SANDBOX_BACKEND", "none"))
     parser.add_argument("--model-api-base", default=os.environ.get("MODEL_API_BASE"))
     parser.add_argument("--model-api-key", default=os.environ.get("MODEL_API_KEY"))
@@ -36,16 +42,21 @@ def main(argv: Sequence[str] | None = None) -> None:
         model_api_key=args.model_api_key,
         model_api_model=args.model_api_model,
         sandbox_backend=args.sandbox_backend,
-        metadata={"pid": os.getpid()},
+        metadata={"pid": os.getpid(), "phase": args.phase},
     )
 
     results: list[BenchmarkResult] = []
     for spec in specs:
         module = importlib.import_module(f"scripts.standalone.benchmarks.{spec.runner}")
-        results.append(module.run(spec, context))
+        result = module.run(spec, context)
+        if result is not None:
+            results.append(result)
 
-    result_path = write_standalone_artifacts(context, results)
-    print(f"Wrote standalone results: {result_path}")
+    if results:
+        result_path = write_standalone_artifacts(context, results)
+        print(f"Wrote standalone results: {result_path}")
+    else:
+        print(f"Standalone phase '{args.phase}' completed without final result artifacts.")
 
 
 if __name__ == "__main__":

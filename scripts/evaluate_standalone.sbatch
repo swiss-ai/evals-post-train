@@ -47,6 +47,7 @@ LOCAL_REGISTRY_HOME=${LOCAL_REGISTRY_HOME:-}
 LOCAL_REGISTRY_DIR=${LOCAL_REGISTRY_DIR:-${RUN_ROOT:-/tmp}/local_registry_${SLURM_JOBID:-local}}
 PODMAN_SERVICE_PORT=${PODMAN_SERVICE_PORT:-}
 PODMAN_SERVICE_HOST=${PODMAN_SERVICE_HOST:-}
+PODMAN_SERVICE_USE_EXTERNAL=${PODMAN_SERVICE_USE_EXTERNAL:-false}
 LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 BS=${BS:-auto:20}
 BOS=${BOS:-false}
@@ -90,6 +91,11 @@ fi
 
 export LM_EVAL_MODEL_ARGS=${LM_EVAL_MODEL_ARGS:-$COMMON_MODEL_ARGS}
 export MAX_BATCH_SIZE=${MAX_BATCH_SIZE:-32}
+
+IS_SWEBENCH=false
+if [[ ",$STANDALONE_TASKS," == *",swebench_verified,"* ]]; then
+    IS_SWEBENCH=true
+fi
 
 LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/ymetz/lm-evaluation-harness.git"
 if [[ -n "${LM_EVAL_HARNESS_BRANCH:-}" ]]; then
@@ -164,18 +170,20 @@ choose_podman_service_port() {
 choose_podman_service_host() {
     if [[ -n "$PODMAN_SERVICE_HOST" ]]; then
         echo "$PODMAN_SERVICE_HOST"
+    elif command -v hostname >/dev/null 2>&1 && [[ -n "$(hostname -I 2>/dev/null | awk '{print $1}')" ]]; then
+        hostname -I | awk '{print $1}'
     else
         hostname -f 2>/dev/null || hostname
     fi
 }
 
 start_podman_docker_api() {
-    if [[ "${DOCKER_HOST:-}" == tcp://* || "${DOCKER_HOST:-}" == http://* || "${DOCKER_HOST:-}" == https://* ]]; then
+    if [[ "$PODMAN_SERVICE_USE_EXTERNAL" == "true" && ( "${DOCKER_HOST:-}" == tcp://* || "${DOCKER_HOST:-}" == http://* || "${DOCKER_HOST:-}" == https://* ) ]]; then
         echo "Using existing DOCKER_HOST=$DOCKER_HOST"
         return 0
     fi
     if [[ -n "${DOCKER_HOST:-}" ]]; then
-        echo "Ignoring preexisting non-TCP DOCKER_HOST=$DOCKER_HOST; CE payloads need a socket reachable inside the EDF container."
+        echo "Ignoring preexisting DOCKER_HOST=$DOCKER_HOST; starting per-job Podman API service."
         unset DOCKER_HOST
         unset CONTAINER_HOST
     fi
@@ -219,11 +227,10 @@ start_podman_docker_api() {
     exit 1
 }
 
-if [[ "$STANDALONE_TASKS" == *"swebench_verified"* ]]; then
-    start_podman_docker_api
-fi
-
-if [[ "$CONTAINER_CACHE_BACKEND" == "local_registry" ]]; then
+start_local_registry() {
+    if [[ "$CONTAINER_CACHE_BACKEND" != "local_registry" ]]; then
+        return 0
+    fi
     if [[ -n "$LOCAL_REGISTRY_HOME" ]]; then
         if [[ ! -f "$LOCAL_REGISTRY_HOME/env-registry" ]]; then
             echo "ERROR: LOCAL_REGISTRY_HOME does not contain env-registry: $LOCAL_REGISTRY_HOME" >&2
@@ -242,7 +249,7 @@ if [[ "$CONTAINER_CACHE_BACKEND" == "local_registry" ]]; then
     LOCAL_REGISTRY_STARTED=1
     echo "Local container registry: $LOCAL_REGISTRY"
     registry status
-fi
+}
 
 RUN_ARGS=(
     --model "$MODEL"
@@ -258,10 +265,29 @@ if [[ -n "$STANDALONE_LIMIT" ]]; then
     RUN_ARGS+=(--limit "$STANDALONE_LIMIT")
 fi
 RUN_CMD=(python -m scripts.standalone.run "${RUN_ARGS[@]}")
+GEN_RUN_CMD=(python -m scripts.standalone.run "${RUN_ARGS[@]}" --phase generate)
+EVAL_RUN_CMD=(python -m scripts.standalone.run "${RUN_ARGS[@]}" --phase evaluate)
 printf -v RUN_CMD_STR '%q ' "${RUN_CMD[@]}"
+printf -v GEN_RUN_CMD_STR '%q ' "${GEN_RUN_CMD[@]}"
 printf -v WORKDIR_Q '%q' "$PWD"
-printf -v DOCKER_HOST_Q '%q' "${DOCKER_HOST:-}"
-printf -v CONTAINER_HOST_Q '%q' "${CONTAINER_HOST:-}"
+
+HOST_PYTHON=${HOST_PYTHON:-python}
+HOST_SITE=$EVAL_DIR/host_python
+HOST_DEPS=(
+    docker
+    datasets
+    unidiff
+    python-dotenv
+    tqdm
+    modal
+    tenacity
+    beautifulsoup4
+    chardet
+    ghapi
+    GitPython
+    rich
+)
+HOST_INSTALL_CMD=("$HOST_PYTHON" -m pip install --upgrade --target "$HOST_SITE" "${HOST_DEPS[@]}")
 
 echo "START TIME: $(date)"
 echo "Standalone configuration:"
@@ -283,20 +309,37 @@ echo "  W&B=$WANDB_ENTITY/$WANDB_PROJECT"
 
 START_TIME=$(date +%s)
 
-srun -n 1 --mpi=pmix -ul --environment="$STANDALONE_EDF" --export=ALL,HF_TOKEN,WANDB_API_KEY,MODEL_API_BASE,MODEL_API_KEY,MODEL_API_MODEL,SANDBOX_BACKEND,LOCAL_REGISTRY,SWE_USE_PODMAN_CACHED,DOCKER_HOST,CONTAINER_HOST bash -lc "
-    set -euo pipefail
-    cd $WORKDIR_Q
-    unset SSL_CERT_FILE
-    export DOCKER_HOST=$DOCKER_HOST_Q
-    export CONTAINER_HOST=$CONTAINER_HOST_Q
-    $INSTALL_CMD
-    export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
-    if [[ -n \"\${DOCKER_HOST:-}\" ]]; then
-        echo \"In-container DOCKER_HOST=\$DOCKER_HOST\"
-        python -c 'import docker, os; client = docker.from_env(); print(\"Docker API reachable\", client.version().get(\"ApiVersion\"), \"via\", os.environ.get(\"DOCKER_HOST\"))'
-    fi
-    $RUN_CMD_STR
-"
+if [[ "$IS_SWEBENCH" == "true" ]]; then
+    echo "SWE-bench phase 1/2: generating predictions inside $STANDALONE_EDF"
+    srun -n 1 --mpi=pmix -ul --environment="$STANDALONE_EDF" --export=ALL,HF_TOKEN,WANDB_API_KEY,MODEL_API_BASE,MODEL_API_KEY,MODEL_API_MODEL,SANDBOX_BACKEND bash -lc "
+        set -euo pipefail
+        cd $WORKDIR_Q
+        unset SSL_CERT_FILE
+        unset DOCKER_HOST
+        unset CONTAINER_HOST
+        $INSTALL_CMD
+        export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
+        $GEN_RUN_CMD_STR
+    "
+
+    echo "SWE-bench phase 2/2: running official harness on host with Podman/Docker"
+    start_podman_docker_api
+    start_local_registry
+    mkdir -p "$HOST_SITE"
+    "${HOST_INSTALL_CMD[@]}"
+    export PYTHONPATH="$PWD:$PWD/swe-bench-reference:$HOST_SITE:${PYTHONPATH:-}"
+    python -c 'import docker, os; print("docker module", getattr(docker, "__file__", None), getattr(docker, "__path__", None)); assert hasattr(docker, "from_env"), "Imported docker module is not the Docker SDK"; client = docker.from_env(); print("Docker API reachable", client.version().get("ApiVersion"), "via", os.environ.get("DOCKER_HOST"))'
+    "${EVAL_RUN_CMD[@]}"
+else
+    srun -n 1 --mpi=pmix -ul --environment="$STANDALONE_EDF" --export=ALL,HF_TOKEN,WANDB_API_KEY,MODEL_API_BASE,MODEL_API_KEY,MODEL_API_MODEL,SANDBOX_BACKEND bash -lc "
+        set -euo pipefail
+        cd $WORKDIR_Q
+        unset SSL_CERT_FILE
+        $INSTALL_CMD
+        export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
+        $RUN_CMD_STR
+    "
+fi
 
 END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))
