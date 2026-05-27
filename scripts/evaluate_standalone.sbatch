@@ -45,6 +45,7 @@ SANDBOX_BACKEND=${SANDBOX_BACKEND:-none}
 CONTAINER_CACHE_BACKEND=${CONTAINER_CACHE_BACKEND:-none}
 LOCAL_REGISTRY_HOME=${LOCAL_REGISTRY_HOME:-./local-registry-reference}
 LOCAL_REGISTRY_DIR=${LOCAL_REGISTRY_DIR:-${RUN_ROOT:-/tmp}/local_registry_${SLURM_JOBID:-local}}
+PODMAN_SERVICE_PORT=${PODMAN_SERVICE_PORT:-}
 LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 BS=${BS:-auto:20}
 BOS=${BOS:-false}
@@ -132,13 +133,79 @@ if [[ "${LOCAL_REGISTRY_DIR}" == "/tmp/local_registry_"* || "${LOCAL_REGISTRY_DI
 fi
 
 LOCAL_REGISTRY_STARTED=0
-cleanup_local_registry() {
+PODMAN_SERVICE_PID=""
+cleanup_container_services() {
     if (( LOCAL_REGISTRY_STARTED == 1 )); then
         echo "Stopping local container registry"
         registry down || true
     fi
+    if [[ -n "$PODMAN_SERVICE_PID" ]]; then
+        echo "Stopping Podman API service: $PODMAN_SERVICE_PID"
+        kill "$PODMAN_SERVICE_PID" >/dev/null 2>&1 || true
+        wait "$PODMAN_SERVICE_PID" >/dev/null 2>&1 || true
+    fi
 }
-trap cleanup_local_registry EXIT
+trap cleanup_container_services EXIT
+
+choose_podman_service_port() {
+    local base offset port
+    base=$((24000 + (${SLURM_JOBID:-0} % 20000)))
+    for offset in $(seq 0 199); do
+        port=$((base + offset))
+        if ! (: >/dev/tcp/127.0.0.1/"$port") >/dev/null 2>&1; then
+            echo "$port"
+            return 0
+        fi
+    done
+    return 1
+}
+
+start_podman_docker_api() {
+    if [[ -n "${DOCKER_HOST:-}" ]]; then
+        echo "Using existing DOCKER_HOST=$DOCKER_HOST"
+        return 0
+    fi
+    if ! command -v podman >/dev/null 2>&1; then
+        echo "ERROR: SWE-bench requires a Docker-compatible API, but neither DOCKER_HOST nor podman is available." >&2
+        exit 1
+    fi
+
+    if [[ -z "$PODMAN_SERVICE_PORT" ]]; then
+        PODMAN_SERVICE_PORT=$(choose_podman_service_port) || {
+            echo "ERROR: Could not find an available localhost port for podman system service." >&2
+            exit 1
+        }
+    fi
+
+    PODMAN_SERVICE_URI="tcp://127.0.0.1:${PODMAN_SERVICE_PORT}"
+    PODMAN_SERVICE_LOG="$EVAL_DIR/podman_service.log"
+    echo "Starting Podman Docker-compatible API at $PODMAN_SERVICE_URI"
+    podman system service --time=0 "$PODMAN_SERVICE_URI" >"$PODMAN_SERVICE_LOG" 2>&1 &
+    PODMAN_SERVICE_PID=$!
+
+    for _ in $(seq 1 60); do
+        if curl --silent --fail "http://127.0.0.1:${PODMAN_SERVICE_PORT}/_ping" >/dev/null 2>&1; then
+            export DOCKER_HOST="$PODMAN_SERVICE_URI"
+            export CONTAINER_HOST="$PODMAN_SERVICE_URI"
+            echo "Podman API service is ready: DOCKER_HOST=$DOCKER_HOST"
+            return 0
+        fi
+        if ! kill -0 "$PODMAN_SERVICE_PID" >/dev/null 2>&1; then
+            echo "ERROR: podman system service exited early. Log:" >&2
+            cat "$PODMAN_SERVICE_LOG" >&2 || true
+            exit 1
+        fi
+        sleep 1
+    done
+
+    echo "ERROR: Timed out waiting for podman system service. Log:" >&2
+    cat "$PODMAN_SERVICE_LOG" >&2 || true
+    exit 1
+}
+
+if [[ "$STANDALONE_TASKS" == *"swebench_verified"* ]]; then
+    start_podman_docker_api
+fi
 
 if [[ "$CONTAINER_CACHE_BACKEND" == "local_registry" ]]; then
     if [[ ! -f "$LOCAL_REGISTRY_HOME/env-registry" ]]; then
@@ -183,6 +250,7 @@ echo "  SANDBOX_BACKEND=$SANDBOX_BACKEND"
 echo "  CONTAINER_CACHE_BACKEND=$CONTAINER_CACHE_BACKEND"
 echo "  LOCAL_REGISTRY_HOME=$LOCAL_REGISTRY_HOME"
 echo "  LOCAL_REGISTRY_DIR=$LOCAL_REGISTRY_DIR"
+echo "  DOCKER_HOST=${DOCKER_HOST:-}"
 echo "  LM_EVAL_BACKEND=$LM_EVAL_BACKEND"
 echo "  LM_EVAL_MODEL_ARGS=$LM_EVAL_MODEL_ARGS"
 echo "  APPLY_CHAT_TEMPLATE=$APPLY_CHAT_TEMPLATE"
@@ -192,7 +260,7 @@ echo "  W&B=$WANDB_ENTITY/$WANDB_PROJECT"
 
 START_TIME=$(date +%s)
 
-srun -n 1 --mpi=pmix -ul --environment="$STANDALONE_EDF" --export=ALL,HF_TOKEN,WANDB_API_KEY,MODEL_API_BASE,MODEL_API_KEY,MODEL_API_MODEL,SANDBOX_BACKEND,LOCAL_REGISTRY,SWE_USE_PODMAN_CACHED bash -lc "
+srun -n 1 --mpi=pmix -ul --environment="$STANDALONE_EDF" --export=ALL,HF_TOKEN,WANDB_API_KEY,MODEL_API_BASE,MODEL_API_KEY,MODEL_API_MODEL,SANDBOX_BACKEND,LOCAL_REGISTRY,SWE_USE_PODMAN_CACHED,DOCKER_HOST,CONTAINER_HOST bash -lc "
     set -euo pipefail
     cd $WORKDIR_Q
     unset SSL_CERT_FILE

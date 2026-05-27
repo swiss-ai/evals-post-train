@@ -242,7 +242,7 @@ swebench_verified
 
 will launch `gsm8k_cot,mmlu` through `scripts/evaluate.sbatch` and `swebench_verified` through `scripts/evaluate_standalone.sbatch`.
 
-On CSCS, standalone jobs enter containers through per-step `srun --environment="$STANDALONE_EDF"` calls. The batch script itself does not use `#SBATCH --environment`, following CE guidance to avoid nested containers and non-host execution surprises. The default EDF is `./containers/env.toml`; override it with:
+On CSCS, standalone jobs enter containers through per-step `srun --environment="$STANDALONE_EDF"` calls. The batch script itself does not use `#SBATCH --environment`, following CE guidance to avoid nested containers and non-host execution surprises. For SWE-bench, the batch script also starts a per-job Podman Docker-compatible API service and exports `DOCKER_HOST` into the CE step, because the Python Docker SDK cannot use the `docker` CLI shim directly. The default EDF is `./containers/env.toml`; override it with:
 
 ```bash
 bash scripts/launch_evaluations.sh single \
@@ -260,6 +260,7 @@ Useful standalone options:
 | `--container-cache-backend <name>` | Container build cache backend, currently `none` or `local_registry` |
 | `--local-registry-home <path>` | Path to a local-registry checkout containing `env-registry` |
 | `--local-registry-dir <path>` | Per-job local registry data directory |
+| `PODMAN_SERVICE_PORT` | Optional fixed localhost port for the per-job Podman API service |
 
 ### SWE-bench Verified
 
