@@ -91,6 +91,10 @@ bash scripts/launch_evaluations.sh default \
 # Run all models from a batch script on the safety suite
 bash scripts/launch_evaluations.sh olmo-safety \
   --script runners/hf_eval_multiple_other_models.sh --splits 4
+
+# Smoke-test the standalone/sandboxed benchmark path
+bash scripts/launch_evaluations.sh single \
+  --task smoke_standalone --model meta-llama/Llama-3.1-8B-Instruct
 ```
 
 #### Deprecated option:
@@ -204,6 +208,99 @@ lm-eval-harness uses a three-level hierarchy for `num_fewshot`:
 3. **Explicit `num_fewshot: 0`** -- tasks like `coqa`, `lambada_openai` that explicitly set 0 are **never** overridden by the CLI flag
 
 Use `--num-fewshot 5` to match the OLMo3 paper settings. Tasks with hardcoded examples (e.g., `gsm8k_cot` has 8 chain-of-thought examples baked into its prompt template) are unaffected.
+
+## Standalone Benchmarks
+
+Some benchmarks evaluate an agent or artifact inside an external environment rather than a single model completion. They still use the normal launcher task interface: if a task is registered in `configs/standalone/benchmarks/*.toml`, the launcher routes it to `scripts/evaluate_standalone.sbatch`; otherwise it routes it to `scripts/evaluate.sbatch`.
+
+```bash
+bash scripts/launch_evaluations.sh single \
+  --task smoke_standalone \
+  --model meta-llama/Llama-3.1-8B-Instruct \
+  --name Llama-Standalone-Smoke
+```
+
+Standalone benchmark definitions live in `configs/standalone/benchmarks/*.toml`. They are selected through the normal task-list mechanism: pass a single registered task with `--task`, or pass a task-list file with one task name per line. Each runner emits normalized artifacts:
+
+```
+standalone/eval_<timestamp>_<jobid>/
+├── run_manifest.json
+├── results_<timestamp>.json
+├── samples_<benchmark>_<timestamp>.jsonl
+└── artifacts/
+```
+
+The `results_*.json` file intentionally mirrors the shape produced by `lm-eval`, so `scripts/alignment/update_wandb_alignment.py` can upload static and standalone benchmarks through the same path.
+
+Standalone benchmarks can also be mixed into ordinary task lists. The launcher checks `configs/standalone/benchmarks/*.toml`, partitions registered standalone task names out of `TASKS`, and submits the right backend jobs for the same model. For example:
+
+```text
+gsm8k_cot
+mmlu
+swebench_verified
+```
+
+will launch `gsm8k_cot,mmlu` through `scripts/evaluate.sbatch` and `swebench_verified` through `scripts/evaluate_standalone.sbatch`.
+
+On CSCS, standalone jobs enter containers through per-step `srun --environment="$STANDALONE_EDF"` calls. The batch script itself does not use `#SBATCH --environment`, following CE guidance to avoid nested containers and non-host execution surprises. The default EDF is `./containers/env.toml`; override it with:
+
+```bash
+bash scripts/launch_evaluations.sh single \
+  --task smoke_standalone \
+  --standalone-edf ./containers/env.toml \
+  --model my-model
+```
+
+Useful standalone options:
+
+| Flag | Description |
+|------|-------------|
+| `--standalone-edf <path-or-name>` | CSCS CE Environment Definition File used by `srun --environment` |
+| `--sandbox-backend <name>` | Runner hint such as `none`, `docker`, `apptainer`, `enroot`, or `remote` |
+| `--container-cache-backend <name>` | Container build cache backend, currently `none` or `local_registry` |
+| `--local-registry-home <path>` | Path to a local-registry checkout containing `env-registry` |
+| `--local-registry-dir <path>` | Per-job local registry data directory |
+
+### SWE-bench Verified
+
+SWE-bench Verified is wired as a standalone benchmark around lm-eval model loading and the official SWE-bench harness. By default the runner loads the requested model through lm-eval, generates an intermediate `predictions.jsonl`, then evaluates those patches in the SWE-bench runtime.
+
+```bash
+bash scripts/launch_evaluations.sh single \
+  --task swebench_verified \
+  --model my-model \
+  --name my-model-swebench-verified \
+  --sandbox-backend podman \
+  --container-cache-backend local_registry \
+  --local-registry-home ./local-registry-reference
+```
+
+`SWE_PREDICTIONS_PATH` is still supported as an override when you want to evaluate pre-generated patches. The predictions file must use the official SWE-bench format:
+
+```json
+{"instance_id": "sympy__sympy-20590", "model_name_or_path": "my-model", "model_patch": "diff --git ..."}
+```
+
+Useful SWE-bench environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SWE_PREDICTIONS_PATH` | unset | Optional path to `.json`/`.jsonl` predictions, or `gold`; if unset, predictions are generated first |
+| `SWE_BENCH_REFERENCE_DIR` | `swe-bench-reference` | Local SWE-bench checkout used for the official harness |
+| `SWE_DATASET_NAME` | `princeton-nlp/SWE-bench_Verified` | Dataset passed to the harness |
+| `SWE_SPLIT` | `test` | Dataset split |
+| `SWE_INSTANCE_IDS` | unset | Space- or comma-separated subset for smoke runs |
+| `SWE_MAX_WORKERS` | `4` | Harness worker count |
+| `SWE_TIMEOUT` | `1800` | Per-instance timeout in seconds |
+| `SWE_CACHE_LEVEL` | `env` | Official harness cache level |
+| `SWE_USE_PODMAN_CACHED` | set by local registry mode | Tell the local `swe-bench-reference` harness to use `podman-cached` for image builds |
+| `LM_EVAL_BACKEND` | `vllm` | lm-eval backend used for patch generation |
+| `LM_EVAL_MODEL_ARGS` | launcher-built | lm-eval model args used for patch generation |
+| `BS` | `auto:20` | lm-eval batch size used for patch generation |
+| `MAX_NEW_TOKENS` | `2048` | Token budget for patch generation |
+| `APPLY_CHAT_TEMPLATE` | launcher-derived | Whether to apply the model chat template |
+
+When `--container-cache-backend local_registry` is used, the standalone sbatch script starts `local-registry-reference/registry` on the allocated node, exports `LOCAL_REGISTRY`, and stops it on exit. This caches image build layers for the duration of the Slurm job. The local `swe-bench-reference` checkout has been adapted to honor `SWE_USE_PODMAN_CACHED=true` in its image build function; container execution still uses the Docker-compatible API used by the official harness.
 
 ### Adding Custom Task Suites
 
@@ -418,4 +515,3 @@ swissai_eval (100%)
 ```
 
 Rule of thumb for fitting within the 12h limit: ensure `2.5 * percentage * model_size_B < 100`.
-

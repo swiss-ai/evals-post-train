@@ -1,0 +1,229 @@
+#!/bin/bash
+#SBATCH --account=a127
+#SBATCH --cpus-per-task=16
+#SBATCH --gres=gpu:4
+#SBATCH --job-name=standalone-evaluation
+#SBATCH --mem=64000
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
+#SBATCH --partition=normal
+#SBATCH --time=02:00:00
+
+# evaluate_standalone.sbatch - Run normalized standalone benchmarks under CSCS CE.
+#
+# Usage: sbatch evaluate_standalone.sbatch <model> <name>
+#
+# The batch script itself intentionally does not use #SBATCH --environment.
+# Per CSCS CE guidance, each payload step enters the EDF through srun
+# --environment to avoid nested or non-host execution surprises.
+
+set -euo pipefail
+
+usage() {
+    echo "Usage: sbatch evaluate_standalone.sbatch <model> <name>"
+    echo "Required env: STANDALONE_TASKS"
+}
+
+if (( $# != 2 )); then
+    usage
+    exit 1
+fi
+
+MODEL=$1
+NAME=$2
+
+LOGS_ROOT=${LOGS_ROOT:-/capstor/store/cscs/swissai/infra01/eval-logs}
+WANDB_ENTITY=${WANDB_ENTITY:-apertus}
+WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-standalone}
+TABLE_METRICS=${TABLE_METRICS:-configs/standalone/smoke_main_table.txt}
+STANDALONE_TASKS=${STANDALONE_TASKS:-}
+STANDALONE_EDF=${STANDALONE_EDF:-./containers/env.toml}
+STANDALONE_LIMIT=${STANDALONE_LIMIT:-}
+SANDBOX_BACKEND=${SANDBOX_BACKEND:-none}
+CONTAINER_CACHE_BACKEND=${CONTAINER_CACHE_BACKEND:-none}
+LOCAL_REGISTRY_HOME=${LOCAL_REGISTRY_HOME:-./local-registry-reference}
+LOCAL_REGISTRY_DIR=${LOCAL_REGISTRY_DIR:-${RUN_ROOT:-/tmp}/local_registry_${SLURM_JOBID:-local}}
+LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
+BS=${BS:-auto:20}
+BOS=${BOS:-false}
+MAX_LENGTH=${MAX_LENGTH:-4096}
+MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
+APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-true}
+REVISION=${REVISION:-}
+VLLM_MEMORY_FRACTION=${VLLM_MEMORY_FRACTION:-0.75}
+GPUS_PER_NODE=${GPUS_PER_NODE:-4}
+
+export WANDB_API_KEY="${WANDB_API_KEY:-$(tr -d '\r\n' < ./scripts/wandb_api_key.txt 2>/dev/null || true)}"
+export HF_TOKEN="${HF_TOKEN:-$(tr -d '\r\n' < ./scripts/hf_token.txt 2>/dev/null || true)}"
+
+if [[ -z "$STANDALONE_TASKS" ]]; then
+    echo "ERROR: Set STANDALONE_TASKS."
+    exit 1
+fi
+
+if [[ -z "${TOKENIZER:-}" ]]; then
+    TOKENIZER=$MODEL
+fi
+
+COMMON_MODEL_ARGS="dtype=bfloat16"
+if [[ $BOS = true ]]; then
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
+fi
+if [[ -n "$REVISION" ]]; then
+    MAYBE_REVISION=",revision=$REVISION"
+else
+    MAYBE_REVISION=""
+fi
+
+if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$MODEL,tokenizer=$TOKENIZER$MAYBE_REVISION,tensor_parallel_size=${GPUS_PER_NODE:-4},gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=False"
+elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$MODEL,tokenizer=$TOKENIZER$MAYBE_REVISION"
+else
+    echo "ERROR: Unsupported standalone LM_EVAL_BACKEND: $LM_EVAL_BACKEND" >&2
+    exit 1
+fi
+
+export LM_EVAL_MODEL_ARGS=${LM_EVAL_MODEL_ARGS:-$COMMON_MODEL_ARGS}
+export MAX_BATCH_SIZE=${MAX_BATCH_SIZE:-32}
+
+LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/ymetz/lm-evaluation-harness.git"
+if [[ -n "${LM_EVAL_HARNESS_BRANCH:-}" ]]; then
+    LM_EVAL_HARNESS_PIP_SPEC="${LM_EVAL_HARNESS_PIP_SPEC}@${LM_EVAL_HARNESS_BRANCH}"
+fi
+
+INSTALL_CMD="pip install --no-cache-dir --upgrade \"$LM_EVAL_HARNESS_PIP_SPEC\" && \
+pip install --no-cache-dir --upgrade \
+    \"huggingface-hub>=1.3.0,<2.0\" \
+    \"transformers==5.6.2\" \
+    \"accelerate>=1.1.0\" \
+    \"tokenizers==0.22.2\" \
+    datasets \
+    docker \
+    unidiff \
+    python-dotenv \
+    tqdm \
+    modal \
+    tenacity \
+    beautifulsoup4 \
+    chardet \
+    ghapi \
+    GitPython \
+    rich"
+
+if [[ -d "swe-bench-reference" ]]; then
+    INSTALL_CMD="$INSTALL_CMD && pip install --no-cache-dir --upgrade --no-deps -e swe-bench-reference"
+fi
+
+if [ -f "$TABLE_METRICS" ]; then
+    echo "Reading table metrics from file: $TABLE_METRICS"
+    TABLE_METRICS=$(grep -v '^\s*#' "$TABLE_METRICS" | grep -v '^\s*$' | paste -sd' ' -)
+fi
+
+RUN_ROOT=$LOGS_ROOT/$WANDB_ENTITY/$WANDB_PROJECT/$NAME
+STANDALONE_DIR=$RUN_ROOT/standalone
+EVAL_DIR=$STANDALONE_DIR/eval_$(date +%Y%m%d_%H%M%S)_${SLURM_JOBID:-local}
+mkdir -p "$EVAL_DIR"
+export WANDB_DIR=$RUN_ROOT
+if [[ "${LOCAL_REGISTRY_DIR}" == "/tmp/local_registry_"* || "${LOCAL_REGISTRY_DIR}" == "/tmp/local_registry_local" ]]; then
+    LOCAL_REGISTRY_DIR="$RUN_ROOT/local_registry_${SLURM_JOBID:-local}"
+fi
+
+LOCAL_REGISTRY_STARTED=0
+cleanup_local_registry() {
+    if (( LOCAL_REGISTRY_STARTED == 1 )); then
+        echo "Stopping local container registry"
+        registry down || true
+    fi
+}
+trap cleanup_local_registry EXIT
+
+if [[ "$CONTAINER_CACHE_BACKEND" == "local_registry" ]]; then
+    if [[ ! -f "$LOCAL_REGISTRY_HOME/env-registry" ]]; then
+        echo "ERROR: LOCAL_REGISTRY_HOME does not contain env-registry: $LOCAL_REGISTRY_HOME" >&2
+        exit 1
+    fi
+    mkdir -p "$LOCAL_REGISTRY_DIR"
+    # shellcheck disable=SC1090
+    . "$LOCAL_REGISTRY_HOME/env-registry"
+    LOCAL_REGISTRY="$(registry up "$LOCAL_REGISTRY_DIR")"
+    export LOCAL_REGISTRY
+    export SWE_USE_PODMAN_CACHED=${SWE_USE_PODMAN_CACHED:-true}
+    LOCAL_REGISTRY_STARTED=1
+    echo "Local container registry: $LOCAL_REGISTRY"
+    registry status
+fi
+
+RUN_ARGS=(
+    --model "$MODEL"
+    --name "$NAME"
+    --output-dir "$EVAL_DIR"
+    --sandbox-backend "$SANDBOX_BACKEND"
+)
+
+if [[ -n "$STANDALONE_TASKS" ]]; then
+    RUN_ARGS+=(--tasks "$STANDALONE_TASKS")
+fi
+if [[ -n "$STANDALONE_LIMIT" ]]; then
+    RUN_ARGS+=(--limit "$STANDALONE_LIMIT")
+fi
+RUN_CMD=(python -m scripts.standalone.run "${RUN_ARGS[@]}")
+printf -v RUN_CMD_STR '%q ' "${RUN_CMD[@]}"
+printf -v WORKDIR_Q '%q' "$PWD"
+
+echo "START TIME: $(date)"
+echo "Standalone configuration:"
+echo "  MODEL=$MODEL"
+echo "  NAME=$NAME"
+echo "  STANDALONE_TASKS=$STANDALONE_TASKS"
+echo "  STANDALONE_EDF=$STANDALONE_EDF"
+echo "  SANDBOX_BACKEND=$SANDBOX_BACKEND"
+echo "  CONTAINER_CACHE_BACKEND=$CONTAINER_CACHE_BACKEND"
+echo "  LOCAL_REGISTRY_HOME=$LOCAL_REGISTRY_HOME"
+echo "  LOCAL_REGISTRY_DIR=$LOCAL_REGISTRY_DIR"
+echo "  LM_EVAL_BACKEND=$LM_EVAL_BACKEND"
+echo "  LM_EVAL_MODEL_ARGS=$LM_EVAL_MODEL_ARGS"
+echo "  APPLY_CHAT_TEMPLATE=$APPLY_CHAT_TEMPLATE"
+echo "  MAX_NEW_TOKENS=$MAX_NEW_TOKENS"
+echo "  EVAL_DIR=$EVAL_DIR"
+echo "  W&B=$WANDB_ENTITY/$WANDB_PROJECT"
+
+START_TIME=$(date +%s)
+
+srun -n 1 --mpi=pmix -ul --environment="$STANDALONE_EDF" --export=ALL,HF_TOKEN,WANDB_API_KEY,MODEL_API_BASE,MODEL_API_KEY,MODEL_API_MODEL,SANDBOX_BACKEND,LOCAL_REGISTRY,SWE_USE_PODMAN_CACHED bash -lc "
+    set -euo pipefail
+    cd $WORKDIR_Q
+    unset SSL_CERT_FILE
+    $INSTALL_CMD
+    export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
+    $RUN_CMD_STR
+"
+
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
+echo "Standalone evaluation finished in ${DURATION} seconds"
+
+if [[ -n "${WANDB_API_KEY:-}" ]]; then
+    echo "Uploading standalone results to wandb"
+    WANDB_ARGS=(
+        python -m scripts.alignment.update_wandb_alignment
+        --entity "$WANDB_ENTITY"
+        --project "$WANDB_PROJECT"
+        --logs_root "$EVAL_DIR"
+        --name "$NAME"
+        --main_metrics $TABLE_METRICS
+        --eval_duration "$DURATION"
+    )
+    printf -v WANDB_CMD_STR '%q ' "${WANDB_ARGS[@]}"
+    WANDB_CMD="cd $WORKDIR_Q && $WANDB_CMD_STR"
+    echo "Running command to upload results to wandb:"
+    echo "$WANDB_CMD"
+    srun -n 1 --mpi=pmix -ul --environment="$STANDALONE_EDF" --export=ALL,WANDB_API_KEY bash -lc "$WANDB_CMD"
+else
+    echo "WANDB_API_KEY is empty; skipping W&B upload."
+fi
+
+echo "Results in: $EVAL_DIR"
+echo "END TIME: $(date)"

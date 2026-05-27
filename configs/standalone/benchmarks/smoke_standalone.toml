@@ -1,0 +1,21 @@
+name = "smoke_standalone"
+backend = "standalone"
+runner = "smoke"
+version = "0.1"
+description = "Tiny benchmark used to validate standalone launch, artifact, and W&B plumbing."
+main_metric = "success"
+
+[[metrics]]
+name = "success"
+higher_is_better = true
+
+[[metrics]]
+name = "num_instances"
+higher_is_better = true
+
+[requires]
+gpu = false
+sandbox = "none"
+network = false
+model_api = "none"
+

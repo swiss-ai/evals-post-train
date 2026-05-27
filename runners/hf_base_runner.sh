@@ -18,15 +18,24 @@ export WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals}
 export APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-false}
 NUM_SPLITS=${NUM_SPLITS:-1}
 
-# Allow overriding the sbatch script (e.g. evaluate.sbatch)
+# Allow overriding the sbatch scripts.
 SBATCH_SCRIPT=${SBATCH_SCRIPT:-scripts/evaluate.sbatch}
+STANDALONE_SBATCH_SCRIPT=${STANDALONE_SBATCH_SCRIPT:-scripts/evaluate_standalone.sbatch}
+RUN_LM_EVAL=${RUN_LM_EVAL:-true}
+RUN_STANDALONE=${RUN_STANDALONE:-false}
 
 # Launch evaluation jobs for each model
 echo "Launching evaluation jobs for ${#MODEL_CHECKPOINTS[@]} ${MODEL_TYPE_DESC}..."
 echo "WANDB Project: ${WANDB_PROJECT}"
 echo "Apply Chat Template: ${APPLY_CHAT_TEMPLATE}"
-echo "Sbatch script: ${SBATCH_SCRIPT}"
-if (( NUM_SPLITS > 1 )); then
+if [[ "$RUN_LM_EVAL" == "true" ]]; then
+    echo "lm-eval sbatch script: ${SBATCH_SCRIPT}"
+fi
+if [[ "$RUN_STANDALONE" == "true" ]]; then
+    echo "Standalone sbatch script: ${STANDALONE_SBATCH_SCRIPT}"
+    echo "Standalone tasks: ${STANDALONE_TASKS:-}"
+fi
+if [[ "$RUN_LM_EVAL" == "true" && "$NUM_SPLITS" -gt 1 ]]; then
     echo "Task splits: ${NUM_SPLITS} parallel nodes per model"
 fi
 echo ""
@@ -50,12 +59,12 @@ for MODEL in "${!MODEL_CHECKPOINTS[@]}"; do
     echo "  Checkpoint path: $CKPT_PATH"
     echo "  Checkpoint iter: $CKPT_ITER (only applies to local Megatron checkpoints)"
 
-    if (( NUM_SPLITS <= 1 )); then
+    if [[ "$RUN_LM_EVAL" == "true" && "$NUM_SPLITS" -le 1 ]]; then
         # Single-node execution (original behavior)
         sbatch --job-name eval-$MODEL \
             --export=ALL,CKPT_ITER=$CKPT_ITER \
             "$SBATCH_SCRIPT" "$CKPT_PATH" "$MODEL"
-    else
+    elif [[ "$RUN_LM_EVAL" == "true" ]]; then
         # Submit K split jobs, then one aggregation job with dependency
         SPLIT_JOB_IDS=()
         for (( i=0; i<NUM_SPLITS; i++ )); do
@@ -78,6 +87,12 @@ for MODEL in "${!MODEL_CHECKPOINTS[@]}"; do
             --export=ALL,NUM_SPLITS=$NUM_SPLITS \
             scripts/aggregate_splits.sbatch "$CKPT_PATH" "$MODEL")
         echo "  Aggregation job submitted: job $AGG_JOB_ID (depends on splits)"
+    fi
+
+    if [[ "$RUN_STANDALONE" == "true" ]]; then
+        sbatch --job-name standalone-eval-$MODEL \
+            --export=ALL,CKPT_ITER=$CKPT_ITER \
+            "$STANDALONE_SBATCH_SCRIPT" "$CKPT_PATH" "$MODEL"
     fi
 
     # Add a small delay between submissions to avoid overwhelming the scheduler

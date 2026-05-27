@@ -46,6 +46,11 @@
 #   --splits K           - Split tasks across K parallel nodes per model
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
+#   --standalone-edf E   - CSCS CE Environment Definition File for standalone jobs
+#   --sandbox-backend B  - Sandbox provider hint for standalone benchmarks
+#   --container-cache-backend B - Container cache backend for standalone jobs
+#   --local-registry-home P - Path to local-registry checkout
+#   --local-registry-dir P  - Local registry data directory for this job
 #
 # Examples:
 #   # Single HF model, auto-detect everything
@@ -85,6 +90,12 @@ HARNESS_LIMIT=""
 MEGATRON_ITER=""
 SINGLE_TASK=""
 HARNESS_BRANCH=""
+STANDALONE_TASKS=""
+STANDALONE_EDF=""
+SANDBOX_BACKEND_FLAG=""
+CONTAINER_CACHE_BACKEND_FLAG=""
+LOCAL_REGISTRY_HOME_FLAG=""
+LOCAL_REGISTRY_DIR_FLAG=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -102,6 +113,11 @@ while [[ $# -gt 0 ]]; do
         --megatron-iter) MEGATRON_ITER="$2";            shift 2 ;;
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --harness-branch) HARNESS_BRANCH="$2";        shift 2 ;;
+        --standalone-edf) STANDALONE_EDF="$2"; shift 2 ;;
+        --sandbox-backend) SANDBOX_BACKEND_FLAG="$2"; shift 2 ;;
+        --container-cache-backend) CONTAINER_CACHE_BACKEND_FLAG="$2"; shift 2 ;;
+        --local-registry-home) LOCAL_REGISTRY_HOME_FLAG="$2"; shift 2 ;;
+        --local-registry-dir) LOCAL_REGISTRY_DIR_FLAG="$2"; shift 2 ;;
         *)
             echo "Error: Unknown option '$1'"
             echo "Run with no arguments for usage."
@@ -151,6 +167,7 @@ export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 export WANDB_PROJECT=${WANDB_PROJECT:-apertus-1.5-post-training-v0.0}
 export NUM_SPLITS
 export SBATCH_SCRIPT=${SBATCH_SCRIPT:-scripts/evaluate.sbatch}
+export STANDALONE_SBATCH_SCRIPT=${STANDALONE_SBATCH_SCRIPT:-scripts/evaluate_standalone.sbatch}
 # Global checkpoint iteration override for Megatron checkpoints.
 # Consumed by the runner and forwarded to evaluate.sbatch as CKPT_ITER.
 [[ -n "$MEGATRON_ITER" ]] && export CKPT_ITERATION="$MEGATRON_ITER"
@@ -224,8 +241,157 @@ case "$EVAL_MODE" in
         ;;
 esac
 
+read_task_list() {
+    local source="$1"
+    if [[ -f "$source" ]]; then
+        grep -v '^\s*#' "$source" | grep -v '^\s*$'
+    else
+        echo "$source" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$'
+    fi
+}
+
+standalone_registry_names() {
+    for cfg in configs/standalone/benchmarks/*.toml; do
+        [[ -f "$cfg" ]] || continue
+        sed -n 's/^name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$cfg" | head -n 1
+    done
+}
+
+is_standalone_task() {
+    local task="$1"
+    local registered
+    for registered in "${REGISTERED_STANDALONE_TASKS[@]}"; do
+        [[ "$task" == "$registered" ]] && return 0
+    done
+    return 1
+}
+
+join_by_comma() {
+    local IFS=,
+    echo "$*"
+}
+
+standalone_metric_specs() {
+    local task="$1"
+    local cfg metric
+    for cfg in configs/standalone/benchmarks/*.toml; do
+        [[ -f "$cfg" ]] || continue
+        if [[ "$(sed -n 's/^name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$cfg" | head -n 1)" != "$task" ]]; then
+            continue
+        fi
+        while IFS= read -r metric; do
+            [[ -n "$metric" ]] && echo "$task/$metric"
+        done < <(awk '
+            /^\[\[metrics\]\]/ { in_metric=1; next }
+            /^\[/ && $0 !~ /^\[\[metrics\]\]/ { in_metric=0 }
+            in_metric && /^name[[:space:]]*=/ {
+                gsub(/"/, "", $3)
+                print $3
+            }
+        ' "$cfg")
+    done
+}
+
+standalone_table_metrics_file() {
+    if [[ "${STANDALONE_TASKS:-}" == *"swebench_verified"* ]]; then
+        echo configs/standalone/swebench_main_table.txt
+    else
+        echo configs/standalone/smoke_main_table.txt
+    fi
+}
+
+configure_standalone_runtime_defaults() {
+    if [[ -z "$STANDALONE_EDF" ]]; then
+        if [[ "${BACKEND_FLAG:-${LM_EVAL_BACKEND:-vllm}}" == "vllm" ]]; then
+            export STANDALONE_EDF=./containers/env_vllm.toml
+        else
+            export STANDALONE_EDF=./containers/env.toml
+        fi
+    else
+        export STANDALONE_EDF
+    fi
+    export STANDALONE_LIMIT="$HARNESS_LIMIT"
+    export SANDBOX_BACKEND=${SANDBOX_BACKEND_FLAG:-none}
+    export CONTAINER_CACHE_BACKEND=${CONTAINER_CACHE_BACKEND_FLAG:-none}
+    [[ -n "$LOCAL_REGISTRY_HOME_FLAG" ]] && export LOCAL_REGISTRY_HOME="$LOCAL_REGISTRY_HOME_FLAG"
+    [[ -n "$LOCAL_REGISTRY_DIR_FLAG" ]] && export LOCAL_REGISTRY_DIR="$LOCAL_REGISTRY_DIR_FLAG"
+    return 0
+}
+
+LM_EVAL_TASK_ITEMS=()
+STANDALONE_TASK_ITEMS=()
+LM_EVAL_TASK_COUNT=0
+STANDALONE_TASK_COUNT=0
+
+REGISTERED_STANDALONE_TASKS=()
+while IFS= read -r registered_task; do
+    [[ -n "$registered_task" ]] && REGISTERED_STANDALONE_TASKS+=("$registered_task")
+done < <(standalone_registry_names)
+
+while IFS= read -r task_name; do
+    if is_standalone_task "$task_name"; then
+        STANDALONE_TASK_ITEMS+=("$task_name")
+        STANDALONE_TASK_COUNT=$((STANDALONE_TASK_COUNT + 1))
+    else
+        LM_EVAL_TASK_ITEMS+=("$task_name")
+        LM_EVAL_TASK_COUNT=$((LM_EVAL_TASK_COUNT + 1))
+    fi
+done < <(read_task_list "$TASKS")
+
+if (( STANDALONE_TASK_COUNT > 0 )); then
+    export RUN_STANDALONE=true
+    STANDALONE_TASKS=$(join_by_comma "${STANDALONE_TASK_ITEMS[@]}")
+    export STANDALONE_TASKS
+    configure_standalone_runtime_defaults
+else
+    export RUN_STANDALONE=false
+    if [[ -n "$STANDALONE_EDF" || -n "$SANDBOX_BACKEND_FLAG" || -n "$CONTAINER_CACHE_BACKEND_FLAG" || -n "$LOCAL_REGISTRY_HOME_FLAG" || -n "$LOCAL_REGISTRY_DIR_FLAG" ]]; then
+        echo "Error: standalone options were provided, but no standalone tasks were requested."
+        exit 1
+    fi
+fi
+
+if (( LM_EVAL_TASK_COUNT > 0 )); then
+    export RUN_LM_EVAL=true
+    if (( STANDALONE_TASK_COUNT > 0 )); then
+        PARTITION_DIR=logs/task_partitions
+        mkdir -p "$PARTITION_DIR"
+        LM_TASKS_FILE="$PARTITION_DIR/${EVAL_MODE}_lm_eval_$$_tasks.txt"
+        printf "%s\n" "${LM_EVAL_TASK_ITEMS[@]}" > "$LM_TASKS_FILE"
+        export TASKS="$LM_TASKS_FILE"
+    fi
+else
+    export RUN_LM_EVAL=false
+    export TASKS=""
+fi
+
+if [[ "$RUN_STANDALONE" == "true" && ( "$RUN_LM_EVAL" == "false" || -z "${TABLE_METRICS:-}" ) ]]; then
+    TABLE_METRICS=$(standalone_table_metrics_file)
+    export TABLE_METRICS
+fi
+
+if [[ "$RUN_LM_EVAL" == "true" && "$RUN_STANDALONE" == "true" ]]; then
+    PARTITION_DIR=logs/task_partitions
+    mkdir -p "$PARTITION_DIR"
+    COMBINED_TABLE_METRICS="$PARTITION_DIR/${EVAL_MODE}_mixed_$$_main_table.txt"
+    if [[ -f "$TABLE_METRICS" ]]; then
+        grep -v '^\s*#' "$TABLE_METRICS" | grep -v '^\s*$' > "$COMBINED_TABLE_METRICS"
+    else
+        echo "$TABLE_METRICS" | tr ' ' '\n' | grep -v '^$' > "$COMBINED_TABLE_METRICS"
+    fi
+    for standalone_task in "${STANDALONE_TASK_ITEMS[@]}"; do
+        standalone_metric_specs "$standalone_task" >> "$COMBINED_TABLE_METRICS"
+    done
+    export TABLE_METRICS="$COMBINED_TABLE_METRICS"
+fi
+
 # --- Validate split count vs task count ---
-if (( NUM_SPLITS > 1 )); then
+if [[ "$RUN_LM_EVAL" == "false" && "$RUN_STANDALONE" == "true" && "$NUM_SPLITS" -gt 1 ]]; then
+    echo "Error: standalone-only launches do not support --splits yet. Use benchmark-native sharding once a runner exposes it."
+    exit 1
+fi
+
+if [[ "$RUN_LM_EVAL" == "true" && "$NUM_SPLITS" -gt 1 ]]; then
     TASK_COUNT=$(grep -v '^\s*#' "$TASKS" | grep -v '^\s*$' | wc -l | tr -d ' ')
     if (( TASK_COUNT < NUM_SPLITS )); then
         echo "WARNING: Only $TASK_COUNT tasks but $NUM_SPLITS splits requested. Reducing."
@@ -275,6 +441,15 @@ echo "======================================"
 echo "Apertus Evaluation Launcher"
 echo "  Mode:   $EVAL_MODE"
 [[ "$EVAL_MODE" == "single" ]] && echo "  Task:   $SINGLE_TASK"
+if [[ "$RUN_STANDALONE" == "true" ]]; then
+    [[ -n "${STANDALONE_TASKS:-}" ]] && echo "  Standalone tasks: $STANDALONE_TASKS"
+    [[ "$RUN_LM_EVAL" == "true" ]] && echo "  LM tasks: $LM_EVAL_TASK_COUNT"
+    echo "  EDF:    $STANDALONE_EDF"
+    echo "  Sandbox: $SANDBOX_BACKEND"
+    echo "  Cache:  $CONTAINER_CACHE_BACKEND"
+    [[ -n "${LOCAL_REGISTRY_HOME:-}" ]] && echo "  Local registry home: $LOCAL_REGISTRY_HOME"
+    [[ -n "${LOCAL_REGISTRY_DIR:-}" ]] && echo "  Local registry dir: $LOCAL_REGISTRY_DIR"
+fi
 echo "  Splits: $NUM_SPLITS"
 
 # --- Few-shot override ---
@@ -314,9 +489,8 @@ if [[ -n "$MODEL_PATH" ]]; then
     echo "======================================"
 
     # Build a single-model checkpoint array and source the runner
-    declare -A MODEL_CHECKPOINTS=(
-        ["$MODEL_NAME"]="$MODEL_PATH"
-    )
+    declare -A MODEL_CHECKPOINTS
+    MODEL_CHECKPOINTS["$MODEL_NAME"]="$MODEL_PATH"
     source runners/hf_base_runner.sh "model"
 
 elif [[ -n "$SCRIPT_PATH" ]]; then

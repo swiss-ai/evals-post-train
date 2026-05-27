@@ -1,0 +1,33 @@
+name = "swebench_verified"
+backend = "standalone"
+runner = "swebench_verified"
+version = "verified"
+description = "SWE-bench Verified evaluation through the official SWE-bench harness."
+main_metric = "resolved"
+
+[[metrics]]
+name = "resolved"
+higher_is_better = true
+
+[[metrics]]
+name = "completed"
+higher_is_better = true
+
+[[metrics]]
+name = "error_rate"
+higher_is_better = false
+
+[[metrics]]
+name = "empty_patch_rate"
+higher_is_better = false
+
+[[metrics]]
+name = "num_instances"
+higher_is_better = true
+
+[requires]
+gpu = false
+sandbox = "docker_or_podman"
+network = true
+model_api = "predictions_file"
+
