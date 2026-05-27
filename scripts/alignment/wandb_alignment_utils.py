@@ -4,10 +4,26 @@ Contains common functions for collecting, processing, and uploading evaluation r
 """
 
 import json
+import os
 import random
 import wandb
+import wandb.sdk.lib.server
 from pathlib import Path
 from typing import List, Tuple
+
+_orig_query_with_timeout = wandb.sdk.lib.server.Server.query_with_timeout
+
+def _patched_query_with_timeout(self):
+    try:
+        _orig_query_with_timeout(self)
+    except TypeError:
+        if hasattr(self, "_viewer") and self._viewer:
+            flags = self._viewer.get("flags")
+            self._flags = json.loads(flags) if isinstance(flags, str) else {}
+        else:
+            self._flags = {}
+
+wandb.sdk.lib.server.Server.query_with_timeout = _patched_query_with_timeout
 from collections import defaultdict
 
 from .data_structures import Sample, Metric, Task, ModelEvaluation
@@ -175,8 +191,6 @@ def upload_multi_model_results(entity: str, project: str, model_evaluations: Lis
 
 def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: ModelEvaluation, main_metrics: List[str], eval_duration: int):
     """Upload ModelEvaluation data to W&B with structured samples."""
-    wandb.login()
-    
     # Get flattened metrics for W&B logging
     log_data = model_eval.get_flattened_metrics()
     
@@ -187,9 +201,9 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
             main_log_data[eval_metric] = log_data[eval_metric]
     
     run_id_suffix = "-001"
-    
+    wandb_id = (model_eval.model_name + run_id_suffix)[:110]
     with wandb.init(
-        id=model_eval.model_name + run_id_suffix,
+        id=wandb_id,
         resume="allow",
         entity=entity,
         project=project,
@@ -199,7 +213,7 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
         run.log({"main_results": create_wandb_table(model_eval.model_name, main_log_data)})
         run.log(log_data)
         run.log({"eval_duration": eval_duration})
-        
+
         # Upload samples as a table directly from the structured data
         for task in model_eval.tasks:
             if not task.samples:
@@ -207,8 +221,11 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
                 continue
 
             samples_table = upload_structured_samples_as_table(task)
+            # Cap key length so artifact name "run-{id}-{key}" stays under 128
+            samples_key = f"samples/{model_eval.model_name}/{task.task_name}"
+            samples_key = samples_key[:128 - len("run-") - len(wandb_id) - 1]
             try:
-                run.log({f"samples/{model_eval.model_name}/{task.task_name}": samples_table})
+                run.log({samples_key: samples_table})
             except Exception as e:
                 print(f"  - Failed to log samples for task {task.task_name}: {e}")
 
@@ -236,4 +253,3 @@ def _flatten_dict(d, parent_key='', sep='/'):
         else:
             items.append((new_key, v))
     return dict(items)
-
