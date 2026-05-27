@@ -4,6 +4,7 @@ import docker
 import docker.errors
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -115,8 +116,8 @@ def build_image(
         logger.info(
             f"Building docker image {image_name} in {build_dir} with platform {platform}"
         )
-        if _env_flag("SWE_USE_PODMAN_CACHED", False):
-            _build_image_with_podman_cached(
+        if _env_flag("SWE_USE_PODMAN_BUILD", False) or _env_flag("SWE_USE_PODMAN_CACHED", False):
+            _build_image_with_podman(
                 image_name=image_name,
                 platform=platform,
                 client=client,
@@ -182,7 +183,7 @@ def _write_build_context(
         f.write(dockerfile)
 
 
-def _build_image_with_podman_cached(
+def _build_image_with_podman(
     image_name: str,
     platform: str,
     client: docker.DockerClient,
@@ -190,20 +191,34 @@ def _build_image_with_podman_cached(
     nocache: bool,
     logger: logging.Logger,
 ) -> None:
-    podman_cached = shutil.which("podman-cached")
-    if podman_cached is None:
+    use_cached = _env_flag("SWE_USE_PODMAN_CACHED", False)
+    podman_cached = shutil.which("podman-cached") if use_cached else None
+    if use_cached and podman_cached is None:
         raise RuntimeError(
             "SWE_USE_PODMAN_CACHED is set, but podman-cached is not on PATH. "
             "Source local-registry/env-registry before running SWE-bench."
         )
 
-    command = [
-        podman_cached,
-        "--platform",
-        platform,
-        "--tag",
-        image_name,
-    ]
+    build_storage_opts = _env_words("SWE_PODMAN_BUILD_STORAGE_OPTS", "ignore_chown_errors=true")
+
+    if podman_cached is not None:
+        command = [podman_cached]
+        cached_storage_opts = _env_words(
+            "SWE_PODMAN_CACHED_STORAGE_OPTS",
+            " ".join(build_storage_opts),
+        )
+        for storage_opt in cached_storage_opts:
+            command.extend(["--storage-opt", storage_opt])
+    else:
+        podman = shutil.which("podman")
+        if podman is None:
+            raise RuntimeError("SWE_USE_PODMAN_BUILD is set, but podman is not on PATH.")
+        command = [podman]
+        for storage_opt in build_storage_opts:
+            command.extend(["--storage-opt", storage_opt])
+        command.append("build")
+
+    command.extend(["--platform", platform, "--tag", image_name])
     if nocache:
         command.append("--no-cache")
     command.append(str(build_dir))
@@ -230,6 +245,11 @@ def _env_flag(name: str, default: bool) -> bool:
     if value is None:
         return default
     return value.lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _env_words(name: str, default: str) -> list[str]:
+    value = os.environ.get(name, default)
+    return shlex.split(value) if value else []
 
 
 def build_base_images(

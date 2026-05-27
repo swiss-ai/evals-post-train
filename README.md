@@ -297,6 +297,9 @@ Useful SWE-bench environment variables:
 | `SWE_TIMEOUT` | `1800` | Per-instance timeout in seconds |
 | `SWE_CACHE_LEVEL` | `env` | Official harness cache level |
 | `SWE_NAMESPACE` | `none` | Image namespace. `none` builds images locally; set `swebench` only when remote prebuilt image pulls are desired and authenticated/mirrored |
+| `SWE_USE_PODMAN_BUILD` | `true` | Build SWE-bench images with host `podman build` instead of the Docker API build endpoint |
+| `SWE_PODMAN_BUILD_STORAGE_OPTS` | `ignore_chown_errors=true` | Storage options passed to `podman build`; useful on rootless CSCS nodes without broad subuid/subgid mappings |
+| `PODMAN_SERVICE_STORAGE_OPTS` | `ignore_chown_errors=true` | Storage options used when starting the per-job Podman Docker-compatible API service |
 | `SWE_USE_PODMAN_CACHED` | set by local registry mode | Tell the local `swe-bench-reference` harness to use `podman-cached` for image builds |
 | `LM_EVAL_BACKEND` | `vllm` | lm-eval backend used for patch generation |
 | `LM_EVAL_MODEL_ARGS` | launcher-built | lm-eval model args used for patch generation |
