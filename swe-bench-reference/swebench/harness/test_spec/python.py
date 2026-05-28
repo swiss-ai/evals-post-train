@@ -148,14 +148,30 @@ def relax_environment_yml_for_arch(yml_text: str) -> str:
 
 
 def _relax_conda_dependency_line(line: str) -> str:
-    match = re.match(
+    package_pin_match = re.match(
+        r"^(\s*-\s*)([A-Za-z0-9_.-]+)(?:==|=|[<>!~]=?)([^#\s]+)(\s*(?:#.*)?)$",
+        line,
+    )
+    if package_pin_match:
+        prefix, package, _version, suffix = package_pin_match.groups()
+        if package.lower() in _relaxed_conda_package_pins():
+            return f"{prefix}{package}{suffix}"
+
+    build_match = re.match(
         r"^(\s*-\s*)([A-Za-z0-9_.-]+)(==|=)([^=\s#]+)=([A-Za-z0-9_.*+.-]+)(\s*(?:#.*)?)$",
         line,
     )
-    if not match:
+    if not build_match:
         return line
-    prefix, package, operator, version, _build, suffix = match.groups()
+    prefix, package, operator, version, _build, suffix = build_match.groups()
     return f"{prefix}{package}{operator}{version}{suffix}"
+
+
+def _relaxed_conda_package_pins() -> set[str]:
+    value = os.environ.get("SWE_RELAX_CONDA_PACKAGE_PINS", "setuptools")
+    if value.lower() in {"0", "false", "no", "off", "none"}:
+        return set()
+    return {package.strip().lower() for package in value.replace(",", " ").split() if package.strip()}
 
 
 def get_environment_yml(instance: SWEbenchInstance, env_name: str) -> str:
