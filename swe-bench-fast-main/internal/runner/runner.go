@@ -207,6 +207,19 @@ func evalTask(ctx context.Context, cfg Config, task dataset.MergeTask) (grading.
 		report.DurationMS = time.Since(start).Milliseconds()
 		return report, nil
 	}
+	time.Sleep(500 * time.Millisecond)
+	if state, running, err := docker.State(ctx, containerID); err == nil && !running {
+		report.Error = fmt.Sprintf(
+			"container exited after start: image=%s platform=%s container=%s state=%s logs=%s",
+			image,
+			platform,
+			containerID,
+			state,
+			truncate(docker.Logs(ctx, containerID), 2000),
+		)
+		report.DurationMS = time.Since(start).Milliseconds()
+		return report, nil
+	}
 
 	// Copy prediction patch into container
 	if err := docker.CopyTo(ctx, containerID, pred.ModelPatch, "/tmp/patch.diff"); err != nil {
@@ -226,7 +239,19 @@ func evalTask(ctx context.Context, cfg Config, task dataset.MergeTask) (grading.
 	// Execute compound script (single exec replaces patch + eval)
 	stdout, stderr, _, err := docker.Exec(ctx, containerID, "/bin/bash /tmp/eval_compound.sh", cfg.Timeout)
 	if err != nil {
-		report.Error = fmt.Sprintf("eval exec: %v", err)
+		state, _, stateErr := docker.State(ctx, containerID)
+		if stateErr != nil {
+			state = stateErr.Error()
+		}
+		report.Error = fmt.Sprintf(
+			"eval exec: %v; image=%s platform=%s container=%s state=%s logs=%s",
+			err,
+			image,
+			platform,
+			containerID,
+			state,
+			truncate(docker.Logs(ctx, containerID), 2000),
+		)
 		report.DurationMS = time.Since(start).Milliseconds()
 		return report, nil
 	}
@@ -281,6 +306,13 @@ func archToPlatform(arch string) string {
 func sanitizeName(s string) string {
 	r := strings.NewReplacer("/", "-", "__", "-", ".", "-")
 	return r.Replace(s)
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "...<truncated>"
 }
 
 // Summary holds aggregate statistics for a run.

@@ -195,7 +195,7 @@ func (c *Client) ImageRemove(ctx context.Context, ref string) error {
 func (c *Client) ContainerCreate(ctx context.Context, opts ContainerOpts) (string, error) {
 	cmd := opts.Cmd
 	if len(cmd) == 0 {
-		cmd = []string{"sleep", "infinity"}
+		cmd = []string{"/bin/bash", "-lc", "trap 'exit 0' TERM INT; while true; do sleep 3600; done"}
 	}
 	cfg := &container.Config{
 		Image:      opts.Image,
@@ -249,6 +249,50 @@ func (c *Client) ContainerStart(ctx context.Context, id string) error {
 		return fmt.Errorf("container start %s: %w", id, err)
 	}
 	return nil
+}
+
+// ContainerState returns a compact container state summary and whether it is running.
+func (c *Client) ContainerState(ctx context.Context, id string) (string, bool, error) {
+	inspect, err := c.api.ContainerInspect(ctx, id)
+	if err != nil {
+		return "", false, fmt.Errorf("container inspect %s: %w", id, err)
+	}
+	state := inspect.State
+	if state == nil {
+		return "state=<nil>", false, nil
+	}
+	summary := fmt.Sprintf(
+		"status=%s running=%t paused=%t restarting=%t oom_killed=%t dead=%t exit_code=%d error=%q started_at=%s finished_at=%s",
+		state.Status,
+		state.Running,
+		state.Paused,
+		state.Restarting,
+		state.OOMKilled,
+		state.Dead,
+		state.ExitCode,
+		state.Error,
+		state.StartedAt,
+		state.FinishedAt,
+	)
+	return summary, state.Running, nil
+}
+
+// ContainerLogs returns recent stdout/stderr logs for diagnostics.
+func (c *Client) ContainerLogs(ctx context.Context, id string) string {
+	reader, err := c.api.ContainerLogs(ctx, id, container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Tail:       "80",
+	})
+	if err != nil {
+		return fmt.Sprintf("container logs %s: %v", id, err)
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return fmt.Sprintf("container logs read %s: %v", id, err)
+	}
+	return string(data)
 }
 
 // ContainerExec runs a command inside a running container and returns the result.

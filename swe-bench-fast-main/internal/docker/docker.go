@@ -90,6 +90,24 @@ func Start(ctx context.Context, id string) error {
 	return c.ContainerStart(ctx, id)
 }
 
+// State returns a compact container state summary and whether it is running.
+func State(ctx context.Context, id string) (string, bool, error) {
+	c, err := getClient()
+	if err != nil {
+		return "", false, fmt.Errorf("docker client: %w", err)
+	}
+	return c.ContainerState(ctx, id)
+}
+
+// Logs returns recent container logs for diagnostics.
+func Logs(ctx context.Context, id string) string {
+	c, err := getClient()
+	if err != nil {
+		return fmt.Sprintf("docker client: %v", err)
+	}
+	return c.ContainerLogs(ctx, id)
+}
+
 // Exec runs a command inside a running container and returns stdout, stderr, and exit code.
 func Exec(ctx context.Context, id, command string, timeout time.Duration) (stdout, stderr string, exitCode int, err error) {
 	c, cErr := getClient()
