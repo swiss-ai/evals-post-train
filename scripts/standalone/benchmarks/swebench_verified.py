@@ -391,16 +391,18 @@ def _run_fast_harness(
         "--output",
         str(report_path),
     ]
-    print("Running swe-bench-fast: " + " ".join(command))
-    completed = subprocess.run(
-        command,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
-    log_path.write_text(completed.stdout)
-    print(completed.stdout)
+    print("Running swe-bench-fast: " + " ".join(command), flush=True)
+    print(f"swe-bench-fast log: {log_path}", flush=True)
+    with log_path.open("w") as log_handle:
+        log_handle.write("Running swe-bench-fast: " + " ".join(command) + "\n")
+        log_handle.flush()
+        completed = subprocess.run(
+            command,
+            text=True,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
     if completed.returncode != 0:
         raise RuntimeError(f"swe-bench-fast failed with exit code {completed.returncode}; see {log_path}")
     return report_path

@@ -380,8 +380,11 @@ printf -v GEN_RUN_CMD_STR '%q ' "${GEN_RUN_CMD[@]}"
 printf -v WORKDIR_Q '%q' "$PWD"
 
 HOST_PYTHON=${HOST_PYTHON:-python}
-HOST_VENV=$EVAL_DIR/host_venv
-HOST_SITE=$EVAL_DIR/host_python
+HOST_ENV_ROOT=${HOST_ENV_ROOT:-$RUN_ROOT/host_python}
+HOST_VENV=${HOST_VENV:-$HOST_ENV_ROOT/venv}
+HOST_SITE=${HOST_SITE:-$HOST_ENV_ROOT/site}
+HOST_DEPS_MARKER=$HOST_ENV_ROOT/deps.v1.done
+HOST_DEPS_REFRESH=${HOST_DEPS_REFRESH:-false}
 HOST_EXTRA_PYTHONPATH=""
 HOST_DEPS=(
     docker
@@ -399,12 +402,25 @@ HOST_DEPS=(
 )
 
 install_host_python_deps() {
+    mkdir -p "$HOST_ENV_ROOT"
+    if [[ "$HOST_DEPS_REFRESH" != "true" && -f "$HOST_DEPS_MARKER" ]]; then
+        if [[ -x "$HOST_VENV/bin/python" ]]; then
+            HOST_PYTHON="$HOST_VENV/bin/python"
+            return 0
+        fi
+        if [[ -d "$HOST_SITE" ]]; then
+            HOST_EXTRA_PYTHONPATH="$HOST_SITE"
+            return 0
+        fi
+    fi
+
     if [[ ! -x "$HOST_VENV/bin/python" ]]; then
         if ! "$HOST_PYTHON" -m venv "$HOST_VENV"; then
             if command -v uv >/dev/null 2>&1; then
                 mkdir -p "$HOST_SITE"
                 uv pip install --python "$HOST_PYTHON" --upgrade --target "$HOST_SITE" "${HOST_DEPS[@]}"
                 HOST_EXTRA_PYTHONPATH="$HOST_SITE"
+                touch "$HOST_DEPS_MARKER"
                 return 0
             fi
             echo "ERROR: Could not create host virtualenv at $HOST_VENV and uv is not on PATH." >&2
@@ -417,8 +433,10 @@ install_host_python_deps() {
     if "$HOST_PYTHON" -m pip --version >/dev/null 2>&1; then
         "$HOST_PYTHON" -m pip install --upgrade pip
         "$HOST_PYTHON" -m pip install --upgrade "${HOST_DEPS[@]}"
+        touch "$HOST_DEPS_MARKER"
     elif command -v uv >/dev/null 2>&1; then
         uv pip install --python "$HOST_PYTHON" --upgrade "${HOST_DEPS[@]}"
+        touch "$HOST_DEPS_MARKER"
     else
         echo "ERROR: Could not install host Python dependencies: no pip in $HOST_VENV and uv is not on PATH." >&2
         echo "Set HOST_PYTHON to a Python with venv/pip support, or pre-create a virtualenv at $HOST_VENV." >&2
@@ -452,6 +470,8 @@ if [[ "$IS_SWEBENCH" == "true" ]]; then
     echo "  SWE_RELAX_CONDA_PACKAGE_PINS=$SWE_RELAX_CONDA_PACKAGE_PINS"
     echo "  SWE_USE_PODMAN_BUILD=$SWE_USE_PODMAN_BUILD"
     echo "  SWE_PODMAN_BUILD_STORAGE_OPTS=$SWE_PODMAN_BUILD_STORAGE_OPTS"
+    echo "  HOST_ENV_ROOT=$HOST_ENV_ROOT"
+    echo "  HOST_DEPS_REFRESH=$HOST_DEPS_REFRESH"
 fi
 echo "  EVAL_DIR=$EVAL_DIR"
 echo "  W&B=$WANDB_ENTITY/$WANDB_PROJECT"
