@@ -296,6 +296,7 @@ Useful SWE-bench environment variables:
 | `SWE_BENCH_FAST_BIN` | auto | Binary path used when `SWE_EVALUATOR=fast`; auto-detects `dist/` and `bin/` under `swe-bench-fast-main`, `swe-bench-fast`, `external/swe-bench-fast`, then `PATH` |
 | `SWE_BENCH_FAST_SOURCE_DIR` | auto | Optional `swe-bench-fast` source checkout; auto-detects `swe-bench-fast-main`, `swe-bench-fast`, then `external/swe-bench-fast` |
 | `SWE_BENCH_FAST_AUTO_BUILD` | `true` | Build `swe-bench-fast` with `make build` when the source checkout exists but the binary does not |
+| `SWE_BENCH_FAST_ARM64_REGISTRY` | `docker.io/greynewell/swe-bench-arm64` | ARM64 image registry for `swe-bench-fast`; tags use sanitized instance IDs such as `sympy-sympy-22005` |
 | `SWE_INSTANCE_IDS` | unset | Space- or comma-separated subset for smoke runs |
 | `SWE_MAX_WORKERS` | `75% of SLURM_CPUS_PER_TASK, else 4` | Harness worker count for image builds and test containers |
 | `SWE_TIMEOUT` | `1800` | Per-instance timeout in seconds |

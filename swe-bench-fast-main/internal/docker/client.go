@@ -15,6 +15,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/strslice"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-units"
@@ -197,8 +198,9 @@ func (c *Client) ContainerCreate(ctx context.Context, opts ContainerOpts) (strin
 		cmd = []string{"sleep", "infinity"}
 	}
 	cfg := &container.Config{
-		Image: opts.Image,
-		Cmd:   cmd,
+		Image:      opts.Image,
+		Entrypoint: strslice.StrSlice{},
+		Cmd:        cmd,
 	}
 
 	hostCfg := &container.HostConfig{}

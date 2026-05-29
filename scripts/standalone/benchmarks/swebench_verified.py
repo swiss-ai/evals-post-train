@@ -481,7 +481,7 @@ def _write_fast_config(config_path: Path, max_workers: int, timeout: int) -> Non
         "timeout": int(os.environ.get("SWE_BENCH_FAST_TIMEOUT", str(timeout))),
         "arch": arch,
         "checkpoint_dir": os.environ.get("SWE_BENCH_FAST_CHECKPOINT_DIR", ".checkpoints"),
-        "arm64_registry": os.environ.get("SWE_BENCH_FAST_ARM64_REGISTRY", "docker.io/greynewell/swe-bench-fast"),
+        "arm64_registry": os.environ.get("SWE_BENCH_FAST_ARM64_REGISTRY", "docker.io/greynewell/swe-bench-arm64"),
         "x86_registry": os.environ.get("SWE_BENCH_FAST_X86_REGISTRY", "ghcr.io/epoch-research"),
         "x86_prefix": os.environ.get("SWE_BENCH_FAST_X86_PREFIX", "swe-bench.eval"),
         "mem_limit": os.environ.get("SWE_BENCH_FAST_MEM_LIMIT", "4g"),
