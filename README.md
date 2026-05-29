@@ -297,6 +297,8 @@ Useful SWE-bench environment variables:
 | `SWE_BENCH_FAST_SOURCE_DIR` | auto | Optional `swe-bench-fast` source checkout; auto-detects `swe-bench-fast-main`, `swe-bench-fast`, then `external/swe-bench-fast` |
 | `SWE_BENCH_FAST_AUTO_BUILD` | `true` | Build `swe-bench-fast` with `make build` when the source checkout exists but the binary does not |
 | `SWE_BENCH_FAST_ARM64_REGISTRY` | `docker.io/greynewell/swe-bench-arm64` | ARM64 image registry for `swe-bench-fast`; tags use sanitized instance IDs such as `sympy-sympy-22005` |
+| `SWE_BENCH_FAST_ALLOW_X86_EMULATION` | `false` | On ARM hosts, allow `swe-bench-fast` to run x86-only fallback images. Keep `false` on CSCS ARM nodes without amd64 emulation so unsupported IDs are skipped explicitly |
+| `SWE_BENCH_FAST_ARM64_DATASET` | auto | Optional path to `swe-bench-arm64.jsonl`, used to identify ARM-supported instances and skip x86-only cases |
 | `SWE_INSTANCE_IDS` | unset | Space- or comma-separated subset for smoke runs |
 | `SWE_MAX_WORKERS` | `75% of SLURM_CPUS_PER_TASK, else 4` | Harness worker count for image builds and test containers |
 | `SWE_TIMEOUT` | `1800` | Per-instance timeout in seconds |

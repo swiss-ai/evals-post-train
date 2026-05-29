@@ -57,6 +57,7 @@ def run(spec: BenchmarkSpec, context: RunContext) -> BenchmarkResult | None:
                 timeout=settings["timeout"],
                 instance_ids=settings["instance_ids"],
                 work_dir=work_dir,
+                allow_x86_emulation=settings["allow_x86_emulation"],
             )
         report = _load_fast_report(report_path, predictions)
     elif settings["evaluator"] == "official":
@@ -113,6 +114,7 @@ def run(spec: BenchmarkSpec, context: RunContext) -> BenchmarkResult | None:
             "relax_conda_package_pins": settings["relax_conda_package_pins"],
             "sandbox_backend": context.sandbox_backend,
             "swe_bench_fast_bin": settings["fast_bin"],
+            "allow_x86_emulation": settings["allow_x86_emulation"],
             "use_podman_build": settings["use_podman_build"],
             "use_podman_cached": settings["use_podman_cached"],
             "podman_build_storage_opts": settings["podman_build_storage_opts"],
@@ -123,9 +125,11 @@ def run(spec: BenchmarkSpec, context: RunContext) -> BenchmarkResult | None:
             "completed": True,
             "error_rate": False,
             "empty_patch_rate": False,
+            "unsupported_x86_on_arm": False,
             "num_instances": True,
+            "num_requested_instances": True,
         },
-        original_samples=int(report.get("submitted_instances") or len(predictions)),
+        original_samples=int(report.get("requested_instances") or len(predictions)),
     )
 
 
@@ -147,6 +151,7 @@ def _load_settings(context: RunContext) -> dict[str, Any]:
         "run_id": os.environ.get("SWE_RUN_ID"),
         "evaluator": os.environ.get("SWE_EVALUATOR", "official").lower(),
         "fast_bin": os.environ.get("SWE_BENCH_FAST_BIN", "swe-bench-fast"),
+        "allow_x86_emulation": _env_bool("SWE_BENCH_FAST_ALLOW_X86_EMULATION", False),
         "max_workers": _default_max_workers(),
         "timeout": int(os.environ.get("SWE_TIMEOUT", "1800")),
         "cache_level": os.environ.get("SWE_CACHE_LEVEL", "env"),
@@ -351,6 +356,7 @@ def _run_fast_harness(
     timeout: int,
     instance_ids: list[str] | None,
     work_dir: Path,
+    allow_x86_emulation: bool,
 ) -> Path:
     if predictions_path == "gold":
         raise ValueError("SWE_EVALUATOR=fast requires a predictions JSONL file; SWE_PREDICTIONS_PATH=gold is only supported by the official harness.")
@@ -361,17 +367,23 @@ def _run_fast_harness(
             f"SWE_EVALUATOR=fast requires swe-bench-fast on PATH or SWE_BENCH_FAST_BIN, got: {fast_bin}"
         )
 
-    configured_dataset_path = os.environ.get("SWE_BENCH_FAST_DATASET_PATH")
-    if not configured_dataset_path:
-        dataset_path = work_dir / "dataset.jsonl"
-        _write_fast_dataset(dataset_name, split, instance_ids, dataset_path)
-    else:
-        dataset_path = Path(configured_dataset_path).expanduser().resolve()
+    dataset_path, predictions_path, evaluated_ids = _prepare_fast_inputs(
+        dataset_name=dataset_name,
+        split=split,
+        instance_ids=instance_ids,
+        predictions_path=predictions_path,
+        work_dir=work_dir,
+        allow_x86_emulation=allow_x86_emulation,
+    )
 
     config_path = work_dir / "swe-bench-fast.toml"
     _write_fast_config(config_path, max_workers, timeout)
 
     report_path = work_dir / f"swe-bench-fast.{run_id}.json"
+    if not evaluated_ids:
+        _write_empty_fast_report(report_path)
+        return report_path
+
     log_path = work_dir / f"swe-bench-fast.{run_id}.log"
     command = [
         fast_bin,
@@ -408,16 +420,153 @@ def _run_fast_harness(
     return report_path
 
 
-def _write_fast_dataset(
+def _prepare_fast_inputs(
+    *,
     dataset_name: str,
     split: str,
     instance_ids: list[str] | None,
-    dataset_path: Path,
-) -> None:
-    dataset = _load_swebench_dataset(dataset_name, split, instance_ids)
+    predictions_path: str,
+    work_dir: Path,
+    allow_x86_emulation: bool,
+) -> tuple[Path, str, set[str]]:
+    configured_dataset_path = os.environ.get("SWE_BENCH_FAST_DATASET_PATH")
+    source_dataset_name = str(Path(configured_dataset_path).expanduser().resolve()) if configured_dataset_path else dataset_name
+    dataset = _load_swebench_dataset(source_dataset_name, split, instance_ids)
+    predictions = _load_prediction_rows(predictions_path)
+
+    unsupported_ids = _unsupported_fast_ids_on_this_host(dataset, allow_x86_emulation)
+    evaluated_dataset = [instance for instance in dataset if instance["instance_id"] not in unsupported_ids]
+    evaluated_ids = {instance["instance_id"] for instance in evaluated_dataset}
+    evaluated_predictions = [row for row in predictions if row["instance_id"] in evaluated_ids]
+
+    _write_unsupported_fast_artifacts(work_dir, unsupported_ids)
+
+    dataset_path = work_dir / "dataset.fast.jsonl"
     with dataset_path.open("w") as handle:
-        for instance in dataset:
+        for instance in evaluated_dataset:
             handle.write(json.dumps(dict(instance), sort_keys=True) + "\n")
+
+    filtered_predictions_path = work_dir / "predictions.fast.jsonl"
+    with filtered_predictions_path.open("w") as handle:
+        for prediction in evaluated_predictions:
+            handle.write(json.dumps(prediction, sort_keys=True) + "\n")
+
+    if unsupported_ids:
+        print(
+            "SWE-bench-fast ARM filter: "
+            f"skipping {len(unsupported_ids)} x86-only instances; "
+            f"evaluating {len(evaluated_dataset)} instances."
+        )
+    return dataset_path, str(filtered_predictions_path), evaluated_ids
+
+
+def _load_prediction_rows(predictions_path: str) -> list[dict[str, Any]]:
+    path = Path(predictions_path)
+    if path.suffix == ".jsonl":
+        return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    if path.suffix == ".json":
+        payload = json.loads(path.read_text())
+        return list(payload.values()) if isinstance(payload, dict) else payload
+    raise ValueError(f"Predictions path must be .json or .jsonl, got: {predictions_path}")
+
+
+def _unsupported_fast_ids_on_this_host(
+    dataset: list[dict[str, Any]],
+    allow_x86_emulation: bool,
+) -> set[str]:
+    arch = os.environ.get("SWE_BENCH_FAST_ARCH") or os.environ.get("SWE_ARCH", "x86_64")
+    if allow_x86_emulation or arch not in {"arm64", "aarch64"}:
+        return set()
+
+    supported_ids = _load_fast_arm64_supported_ids()
+    if supported_ids is None:
+        return set()
+
+    return {
+        instance["instance_id"]
+        for instance in dataset
+        if instance["instance_id"] not in supported_ids
+    }
+
+
+def _load_fast_arm64_supported_ids() -> set[str] | None:
+    explicit = os.environ.get("SWE_BENCH_FAST_ARM64_DATASET")
+    candidates: list[Path] = []
+    if explicit:
+        candidates.append(Path(explicit).expanduser())
+
+    source_dir = os.environ.get("SWE_BENCH_FAST_SOURCE_DIR")
+    if source_dir:
+        candidates.append(Path(source_dir).expanduser() / "swe-bench-arm64.jsonl")
+
+    fast_bin = os.environ.get("SWE_BENCH_FAST_BIN")
+    if fast_bin:
+        bin_path = Path(fast_bin).expanduser()
+        candidates.extend([
+            bin_path.parent / "swe-bench-arm64.jsonl",
+            bin_path.parent.parent / "swe-bench-arm64.jsonl",
+        ])
+
+    candidates.extend([
+        Path("swe-bench-fast-main/swe-bench-arm64.jsonl"),
+        Path("swe-bench-fast/swe-bench-arm64.jsonl"),
+        Path("external/swe-bench-fast/swe-bench-arm64.jsonl"),
+    ])
+
+    for candidate in candidates:
+        if candidate.exists():
+            return {
+                json.loads(line)["instance_id"]
+                for line in candidate.read_text().splitlines()
+                if line.strip()
+            }
+
+    print(
+        "WARNING: could not find swe-bench-fast ARM64 support list; "
+        "x86-only filtering is disabled."
+    )
+    return None
+
+
+def _write_unsupported_fast_artifacts(work_dir: Path, unsupported_ids: set[str]) -> None:
+    txt_path = work_dir / "x86_unsupported_ids.txt"
+    json_path = work_dir / "x86_unsupported.json"
+    sorted_ids = sorted(unsupported_ids)
+    txt_path.write_text("\n".join(sorted_ids) + ("\n" if sorted_ids else ""))
+    json_path.write_text(
+        json.dumps(
+            {
+                "count": len(sorted_ids),
+                "ids": sorted_ids,
+                "reason": "x86-only SWE-bench-fast image on ARM host without x86 emulation",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+
+def _write_empty_fast_report(report_path: Path) -> None:
+    report_path.write_text(
+        json.dumps(
+            {
+                "reports": [],
+                "summary": {
+                    "total": 0,
+                    "resolved": 0,
+                    "partial": 0,
+                    "unresolved": 0,
+                    "errors": 0,
+                    "resolved_pct": 0,
+                    "total_time_ms": 0,
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
 
 
 def _load_swebench_dataset(
@@ -425,8 +574,6 @@ def _load_swebench_dataset(
     split: str,
     instance_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    from datasets import load_dataset, load_from_disk
-
     if name.lower() in {"swe-bench", "swebench", "swe_bench"}:
         name = "SWE-bench/SWE-bench"
     elif name.lower() in {
@@ -445,8 +592,12 @@ def _load_swebench_dataset(
     elif name.endswith(".jsonl"):
         raw_dataset = [json.loads(line) for line in Path(name).read_text().splitlines() if line.strip()]
     elif name.endswith(".parquet"):
+        from datasets import load_dataset
+
         raw_dataset = load_dataset("parquet", data_files=name, split="train")
     else:
+        from datasets import load_dataset, load_from_disk
+
         parquet_path = Path(name) / f"{split}.parquet"
         disk_path = Path(name) / split
         if parquet_path.exists():
@@ -565,10 +716,13 @@ def _load_fast_report(
     payload = json.loads(report_path.read_text())
     reports = payload.get("reports", [])
     by_id = {row.get("instance_id"): row for row in reports if row.get("instance_id")}
-    submitted_ids = sorted(predictions)
+    unsupported_ids = _load_unsupported_ids(report_path.parent)
+    requested_ids = sorted(predictions)
+    submitted_ids = sorted(by_id)
     empty_patch_ids = {
         instance_id
         for instance_id, prediction in predictions.items()
+        if instance_id in by_id
         if not (prediction.get("model_patch") or "").strip()
     }
     error_ids = {
@@ -588,18 +742,22 @@ def _load_fast_report(
     }
     unresolved_ids = set(submitted_ids) - resolved_ids - error_ids - empty_patch_ids
     return {
+        "requested_instances": len(requested_ids),
         "submitted_instances": len(submitted_ids),
         "completed_instances": len(completed_ids),
         "resolved_instances": len(resolved_ids),
         "unresolved_instances": len(unresolved_ids),
         "empty_patch_instances": len(empty_patch_ids),
         "error_instances": len(error_ids),
+        "unsupported_x86_instances": len(unsupported_ids),
+        "requested_ids": requested_ids,
         "submitted_ids": submitted_ids,
         "completed_ids": sorted(completed_ids),
         "resolved_ids": sorted(resolved_ids),
         "unresolved_ids": sorted(unresolved_ids),
         "empty_patch_ids": sorted(empty_patch_ids),
         "error_ids": sorted(error_ids),
+        "unsupported_x86_ids": unsupported_ids,
         "fast_report_path": str(report_path),
         "fast_summary": payload.get("summary", {}),
         "fast_errors": {
@@ -608,6 +766,14 @@ def _load_fast_report(
             if row.get("error")
         },
     }
+
+
+def _load_unsupported_ids(work_dir: Path) -> list[str]:
+    path = work_dir / "x86_unsupported.json"
+    if not path.exists():
+        return []
+    payload = json.loads(path.read_text())
+    return list(payload.get("ids", []))
 
 
 def _print_prediction_summary(
@@ -652,11 +818,13 @@ def _print_report_error_summary(
 ) -> None:
     submitted = int(report.get("submitted_instances", 0))
     completed = int(report.get("completed_instances", 0))
+    unsupported = int(report.get("unsupported_x86_instances", 0))
     errors = list(report.get("error_ids", []))
     empty = list(report.get("empty_patch_ids", []))
     print(
         "SWE-bench report summary: "
-        f"{completed}/{submitted} completed, {len(errors)} errors, {len(empty)} empty patches."
+        f"{completed}/{submitted} completed, {len(errors)} errors, "
+        f"{len(empty)} empty patches, {unsupported} unsupported x86-only skipped."
     )
     if not errors:
         return
@@ -723,17 +891,21 @@ def _load_report(
 
 def _build_metrics(report: dict[str, Any]) -> dict[str, float]:
     submitted = int(report.get("submitted_instances", 0))
+    requested = int(report.get("requested_instances", submitted))
     completed = int(report.get("completed_instances", 0))
     resolved = int(report.get("resolved_instances", 0))
     errors = int(report.get("error_instances", 0))
     empty = int(report.get("empty_patch_instances", 0))
+    unsupported = int(report.get("unsupported_x86_instances", 0))
     denominator = submitted or 1
     return {
         "resolved": resolved / denominator,
         "completed": completed / denominator,
         "error_rate": errors / denominator,
         "empty_patch_rate": empty / denominator,
+        "unsupported_x86_on_arm": float(unsupported),
         "num_instances": float(submitted),
+        "num_requested_instances": float(requested),
     }
 
 
