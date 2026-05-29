@@ -1,0 +1,248 @@
+name: Build and Push SWE-bench Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: "Which images to build"
+        required: true
+        type: choice
+        options:
+          - arm64
+          - x86
+          - both
+        default: arm64
+      chunks:
+        description: "Number of parallel matrix jobs"
+        required: true
+        type: number
+        default: 10
+      workers:
+        description: "Parallel Docker builds per job"
+        required: true
+        type: number
+        default: 4
+      skip_existing:
+        description: "Skip images already on Docker Hub"
+        required: true
+        type: boolean
+        default: true
+      force_rebuild:
+        description: "Force rebuild even if image exists locally"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  # ── Generate matrix indices ──────────────────────────────────────────
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      arm64_chunks: ${{ steps.matrix.outputs.arm64_chunks }}
+      x86_chunks: ${{ steps.matrix.outputs.x86_chunks }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute chunk matrices
+        id: matrix
+        run: |
+          make_chunks() {
+            local total
+            total=$(wc -l < "$1")
+            local n=${{ inputs.chunks }}
+            if [ "$n" -gt "$total" ]; then n=$total; fi
+            local out="["
+            for i in $(seq 0 $((n - 1))); do
+              [ "$i" -gt 0 ] && out="${out},"
+              out="${out}${i}"
+            done
+            echo "${out}]"
+          }
+
+          if [ "${{ inputs.dataset }}" = "arm64" ] || [ "${{ inputs.dataset }}" = "both" ]; then
+            echo "arm64_chunks=$(make_chunks swe-bench-arm64.jsonl)" >> "$GITHUB_OUTPUT"
+          else
+            echo 'arm64_chunks=[]' >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "${{ inputs.dataset }}" = "x86" ] || [ "${{ inputs.dataset }}" = "both" ]; then
+            echo "x86_chunks=$(make_chunks swe-bench-x86.jsonl)" >> "$GITHUB_OUTPUT"
+          else
+            echo 'x86_chunks=[]' >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── ARM64 builds (native on arm64 runner) ───────────────────────────
+  build-arm64:
+    needs: prepare
+    if: inputs.dataset == 'arm64' || inputs.dataset == 'both'
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      matrix:
+        chunk: ${{ fromJson(needs.prepare.outputs.arm64_chunks) }}
+      fail-fast: false
+      max-parallel: 5
+    timeout-minutes: 720
+    env:
+      REGISTRY: docker.io/greynewell/swe-bench-arm64
+      DATASET: swe-bench-arm64.jsonl
+      ARCH: aarch64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+        env:
+          GONOSUMCHECK: github.com/greynewell/*
+          GONOSUMDB: github.com/greynewell/*
+          GOPRIVATE: github.com/greynewell/*
+
+      - name: Build swe-bench-fast
+        run: make build
+        env:
+          GONOSUMCHECK: github.com/greynewell/*
+          GONOSUMDB: github.com/greynewell/*
+          GOPRIVATE: github.com/greynewell/*
+
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+      - name: Extract chunk
+        run: |
+          total=$(wc -l < "$DATASET")
+          n=${{ inputs.chunks }}
+          size=$(( (total + n - 1) / n ))
+          start=$(( ${{ matrix.chunk }} * size + 1 ))
+          end=$(( start + size - 1 ))
+          [ "$end" -gt "$total" ] && end=$total
+          sed -n "${start},${end}p" "$DATASET" > chunk.jsonl
+          echo "chunk=${{ matrix.chunk }} lines=${start}-${end} instances=$(wc -l < chunk.jsonl)"
+
+      - name: Filter already-pushed images
+        if: inputs.skip_existing
+        run: |
+          python3 .github/scripts/filter-existing.py chunk.jsonl chunk_filtered.jsonl "$REGISTRY"
+          mv chunk_filtered.jsonl chunk.jsonl
+
+      - name: Build and push
+        run: |
+          count=$(wc -l < chunk.jsonl)
+          if [ "$count" -eq 0 ]; then
+            echo "All images in this chunk already exist, nothing to build."
+            exit 0
+          fi
+          echo "Building $count instances..."
+          FORCE=""
+          if [ "${{ inputs.force_rebuild }}" = "true" ]; then FORCE="--force"; fi
+          ./dist/swe-bench-fast build \
+            --dataset chunk.jsonl \
+            --arch "$ARCH" \
+            --push "$REGISTRY" \
+            --workers ${{ inputs.workers }} \
+            $FORCE
+
+  # ── x86 builds (QEMU on arm64, or native on x86 runner) ────────────
+  build-x86:
+    needs: prepare
+    if: inputs.dataset == 'x86' || inputs.dataset == 'both'
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      matrix:
+        chunk: ${{ fromJson(needs.prepare.outputs.x86_chunks) }}
+      fail-fast: false
+      max-parallel: 3
+    timeout-minutes: 1440
+    env:
+      REGISTRY: docker.io/greynewell/swe-bench-x86
+      DATASET: swe-bench-x86.jsonl
+      ARCH: x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+        env:
+          GONOSUMCHECK: github.com/greynewell/*
+          GONOSUMDB: github.com/greynewell/*
+          GOPRIVATE: github.com/greynewell/*
+
+      - name: Build swe-bench-fast
+        run: make build
+        env:
+          GONOSUMCHECK: github.com/greynewell/*
+          GONOSUMDB: github.com/greynewell/*
+          GOPRIVATE: github.com/greynewell/*
+
+      - name: Set up QEMU for x86 emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64
+
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+      - name: Extract chunk
+        run: |
+          total=$(wc -l < "$DATASET")
+          n=${{ inputs.chunks }}
+          size=$(( (total + n - 1) / n ))
+          start=$(( ${{ matrix.chunk }} * size + 1 ))
+          end=$(( start + size - 1 ))
+          [ "$end" -gt "$total" ] && end=$total
+          sed -n "${start},${end}p" "$DATASET" > chunk.jsonl
+          echo "chunk=${{ matrix.chunk }} lines=${start}-${end} instances=$(wc -l < chunk.jsonl)"
+
+      - name: Filter already-pushed images
+        if: inputs.skip_existing
+        run: |
+          python3 .github/scripts/filter-existing.py chunk.jsonl chunk_filtered.jsonl "$REGISTRY"
+          mv chunk_filtered.jsonl chunk.jsonl
+
+      - name: Build and push
+        run: |
+          count=$(wc -l < chunk.jsonl)
+          if [ "$count" -eq 0 ]; then
+            echo "All images in this chunk already exist, nothing to build."
+            exit 0
+          fi
+          echo "Building $count instances..."
+          FORCE=""
+          if [ "${{ inputs.force_rebuild }}" = "true" ]; then FORCE="--force"; fi
+          ./dist/swe-bench-fast build \
+            --dataset chunk.jsonl \
+            --arch "$ARCH" \
+            --push "$REGISTRY" \
+            --workers ${{ inputs.workers }} \
+            $FORCE
+
+  # ── Create multi-arch manifests in swe-bench-fast ───────────────────
+  # Runs after both build jobs (even if one was skipped). For each instance
+  # that has at least one arch image built, creates/updates an OCI manifest
+  # list in swe-bench-fast so `docker pull greynewell/swe-bench-fast:<tag>`
+  # automatically selects the right architecture.
+  create-manifests:
+    needs: [build-arm64, build-x86]
+    if: |
+      always() &&
+      (needs.build-arm64.result == 'success' || needs.build-x86.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+      - name: Create multi-arch manifests
+        run: |
+          SKIP_FLAG=""
+          if [ "${{ inputs.skip_existing }}" = "true" ]; then SKIP_FLAG="--skip-existing"; fi
+          python3 .github/scripts/create-manifests.py \
+            --arm64-dataset swe-bench-arm64.jsonl \
+            --x86-dataset swe-bench-x86.jsonl \
+            --arm64-registry docker.io/greynewell/swe-bench-arm64 \
+            --x86-registry docker.io/greynewell/swe-bench-x86 \
+            --target-registry docker.io/greynewell/swe-bench-fast \
+            $SKIP_FLAG

@@ -1,0 +1,18 @@
+# Binaries
+/swe-bench-fast
+/dist/
+
+# Test and benchmark data
+testdata/
+benchmarks/
+reports/
+logs/
+
+# Checkpoints
+.checkpoints/
+
+# IDE / tool config
+.claude/
+
+# OS
+.DS_Store

@@ -289,9 +289,13 @@ Useful SWE-bench environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SWE_PREDICTIONS_PATH` | unset | Optional path to `.json`/`.jsonl` predictions, or `gold`; if unset, predictions are generated first |
-| `SWE_BENCH_REFERENCE_DIR` | `swe-bench-reference` | Local SWE-bench checkout used for the official harness |
+| `SWE_BENCH_REFERENCE_DIR` | `swe-bench-reference` | Local SWE-bench checkout used only when `SWE_EVALUATOR=official` |
 | `SWE_DATASET_NAME` | `princeton-nlp/SWE-bench_Verified` | Dataset passed to the harness |
 | `SWE_SPLIT` | `test` | Dataset split |
+| `SWE_EVALUATOR` | auto | Evaluator backend. The launcher uses `fast` when a `swe-bench-fast` binary or checkout is available, otherwise `official` |
+| `SWE_BENCH_FAST_BIN` | auto | Binary path used when `SWE_EVALUATOR=fast`; auto-detects `dist/` and `bin/` under `swe-bench-fast-main`, `swe-bench-fast`, `external/swe-bench-fast`, then `PATH` |
+| `SWE_BENCH_FAST_SOURCE_DIR` | auto | Optional `swe-bench-fast` source checkout; auto-detects `swe-bench-fast-main`, `swe-bench-fast`, then `external/swe-bench-fast` |
+| `SWE_BENCH_FAST_AUTO_BUILD` | `true` | Build `swe-bench-fast` with `make build` when the source checkout exists but the binary does not |
 | `SWE_INSTANCE_IDS` | unset | Space- or comma-separated subset for smoke runs |
 | `SWE_MAX_WORKERS` | `75% of SLURM_CPUS_PER_TASK, else 4` | Harness worker count for image builds and test containers |
 | `SWE_TIMEOUT` | `1800` | Per-instance timeout in seconds |
@@ -299,7 +303,7 @@ Useful SWE-bench environment variables:
 | `SWE_NAMESPACE` | `none` | Image namespace. `none` builds images locally; set `swebench` only when remote prebuilt image pulls are desired and authenticated/mirrored |
 | `SWE_ARCH` | host architecture | Container image architecture, normalized to `arm64` on AArch64 hosts and `x86_64` on x86 hosts |
 | `SWE_RELAX_CONDA_BUILDS` | `auto` | On ARM, strip architecture-specific conda build strings from SWE-bench environment files while keeping version pins |
-| `SWE_RELAX_CONDA_PACKAGE_PINS` | `setuptools` | On ARM, strip version pins for selected conda packages that are commonly unavailable on `linux-aarch64` |
+| `SWE_RELAX_CONDA_PACKAGE_PINS` | `setuptools pip python` | On ARM, strip version pins for selected conda packages that are commonly unavailable on `linux-aarch64` |
 | `SWE_USE_PODMAN_BUILD` | `true` | Build SWE-bench images with host `podman build` instead of the Docker API build endpoint |
 | `SWE_PODMAN_BUILD_STORAGE_OPTS` | `ignore_chown_errors=true` | Storage options passed to `podman build`; useful on rootless CSCS nodes without broad subuid/subgid mappings |
 | `PODMAN_SERVICE_STORAGE_OPTS` | `ignore_chown_errors=true` | Storage options used when starting the per-job Podman Docker-compatible API service |

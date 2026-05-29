@@ -168,7 +168,7 @@ def _relax_conda_dependency_line(line: str) -> str:
 
 
 def _relaxed_conda_package_pins() -> set[str]:
-    value = os.environ.get("SWE_RELAX_CONDA_PACKAGE_PINS", "setuptools")
+    value = os.environ.get("SWE_RELAX_CONDA_PACKAGE_PINS", "setuptools pip python")
     if value.lower() in {"0", "false", "no", "off", "none"}:
         return set()
     return {package.strip().lower() for package in value.replace(",", " ").split() if package.strip()}

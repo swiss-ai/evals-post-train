@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 import gc
 from contextlib import contextmanager
@@ -20,8 +21,8 @@ DEFAULT_SPLIT = "test"
 
 def run(spec: BenchmarkSpec, context: RunContext) -> BenchmarkResult | None:
     settings = _load_settings(context)
-    reference_dir = settings["reference_dir"]
-    _prepare_swebench_import(reference_dir)
+    if settings["evaluator"] == "official":
+        _prepare_swebench_import(settings["reference_dir"])
 
     work_dir = context.output_dir / "artifacts" / "swebench"
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -45,27 +46,42 @@ def run(spec: BenchmarkSpec, context: RunContext) -> BenchmarkResult | None:
 
     run_id = settings["run_id"] or context.output_dir.name
 
-    with _working_directory(work_dir):
-        report_path = _run_official_harness(
-            dataset_name=settings["dataset_name"],
-            split=settings["split"],
-            predictions_path=normalized_predictions_path,
-            run_id=run_id,
-            max_workers=settings["max_workers"],
-            timeout=settings["timeout"],
-            cache_level=settings["cache_level"],
-            clean=settings["clean"],
-            namespace=settings["namespace"],
-            instance_ids=settings["instance_ids"],
-            force_rebuild=settings["force_rebuild"],
-            rewrite_reports=settings["rewrite_reports"],
-            open_file_limit=settings["open_file_limit"],
-            instance_image_tag=settings["instance_image_tag"],
-            env_image_tag=settings["env_image_tag"],
-            modal=settings["modal"],
-        )
-
-    report = _load_report(report_path, work_dir, predictions, run_id)
+    if settings["evaluator"] == "fast":
+        with _working_directory(work_dir):
+            report_path = _run_fast_harness(
+                dataset_name=settings["dataset_name"],
+                split=settings["split"],
+                predictions_path=normalized_predictions_path,
+                run_id=run_id,
+                max_workers=settings["max_workers"],
+                timeout=settings["timeout"],
+                instance_ids=settings["instance_ids"],
+                work_dir=work_dir,
+            )
+        report = _load_fast_report(report_path, predictions)
+    elif settings["evaluator"] == "official":
+        with _working_directory(work_dir):
+            report_path = _run_official_harness(
+                dataset_name=settings["dataset_name"],
+                split=settings["split"],
+                predictions_path=normalized_predictions_path,
+                run_id=run_id,
+                max_workers=settings["max_workers"],
+                timeout=settings["timeout"],
+                cache_level=settings["cache_level"],
+                clean=settings["clean"],
+                namespace=settings["namespace"],
+                instance_ids=settings["instance_ids"],
+                force_rebuild=settings["force_rebuild"],
+                rewrite_reports=settings["rewrite_reports"],
+                open_file_limit=settings["open_file_limit"],
+                instance_image_tag=settings["instance_image_tag"],
+                env_image_tag=settings["env_image_tag"],
+                modal=settings["modal"],
+            )
+        report = _load_report(report_path, work_dir, predictions, run_id)
+    else:
+        raise ValueError(f"Unsupported SWE_EVALUATOR: {settings['evaluator']}")
     _print_report_error_summary(work_dir, report, predictions, run_id)
     samples = _build_samples(
         spec.name,
@@ -86,6 +102,7 @@ def run(spec: BenchmarkSpec, context: RunContext) -> BenchmarkResult | None:
             "dataset_name": settings["dataset_name"],
             "split": settings["split"],
             "run_id": run_id,
+            "evaluator": settings["evaluator"],
             "max_workers": settings["max_workers"],
             "timeout": settings["timeout"],
             "cache_level": settings["cache_level"],
@@ -95,6 +112,7 @@ def run(spec: BenchmarkSpec, context: RunContext) -> BenchmarkResult | None:
             "relax_conda_builds": settings["relax_conda_builds"],
             "relax_conda_package_pins": settings["relax_conda_package_pins"],
             "sandbox_backend": context.sandbox_backend,
+            "swe_bench_fast_bin": settings["fast_bin"],
             "use_podman_build": settings["use_podman_build"],
             "use_podman_cached": settings["use_podman_cached"],
             "podman_build_storage_opts": settings["podman_build_storage_opts"],
@@ -127,6 +145,8 @@ def _load_settings(context: RunContext) -> dict[str, Any]:
         "dataset_name": os.environ.get("SWE_DATASET_NAME", DEFAULT_DATASET),
         "split": os.environ.get("SWE_SPLIT", DEFAULT_SPLIT),
         "run_id": os.environ.get("SWE_RUN_ID"),
+        "evaluator": os.environ.get("SWE_EVALUATOR", "official").lower(),
+        "fast_bin": os.environ.get("SWE_BENCH_FAST_BIN", "swe-bench-fast"),
         "max_workers": _default_max_workers(),
         "timeout": int(os.environ.get("SWE_TIMEOUT", "1800")),
         "cache_level": os.environ.get("SWE_CACHE_LEVEL", "env"),
@@ -134,7 +154,7 @@ def _load_settings(context: RunContext) -> dict[str, Any]:
         "namespace": _optional_str(os.environ.get("SWE_NAMESPACE", "none")),
         "arch": os.environ.get("SWE_ARCH", "x86_64"),
         "relax_conda_builds": os.environ.get("SWE_RELAX_CONDA_BUILDS", "auto"),
-        "relax_conda_package_pins": os.environ.get("SWE_RELAX_CONDA_PACKAGE_PINS", "setuptools"),
+        "relax_conda_package_pins": os.environ.get("SWE_RELAX_CONDA_PACKAGE_PINS", "setuptools pip python"),
         "instance_ids": instance_ids,
         "force_rebuild": _env_bool("SWE_FORCE_REBUILD", False),
         "rewrite_reports": _env_bool("SWE_REWRITE_REPORTS", False),
@@ -196,9 +216,8 @@ def _generate_predictions(
 ) -> str:
     from lm_eval.api.instance import Instance
     from lm_eval.api.registry import get_model
-    from swebench.harness.utils import load_swebench_dataset
 
-    dataset = load_swebench_dataset(
+    dataset = _load_swebench_dataset(
         settings["dataset_name"],
         settings["split"],
         settings["instance_ids"],
@@ -322,6 +341,164 @@ def _extract_patch(generation: str) -> str:
     return text
 
 
+def _run_fast_harness(
+    *,
+    dataset_name: str,
+    split: str,
+    predictions_path: str,
+    run_id: str,
+    max_workers: int,
+    timeout: int,
+    instance_ids: list[str] | None,
+    work_dir: Path,
+) -> Path:
+    if predictions_path == "gold":
+        raise ValueError("SWE_EVALUATOR=fast requires a predictions JSONL file; SWE_PREDICTIONS_PATH=gold is only supported by the official harness.")
+
+    fast_bin = os.environ.get("SWE_BENCH_FAST_BIN", "swe-bench-fast")
+    if shutil.which(fast_bin) is None and not Path(fast_bin).exists():
+        raise FileNotFoundError(
+            f"SWE_EVALUATOR=fast requires swe-bench-fast on PATH or SWE_BENCH_FAST_BIN, got: {fast_bin}"
+        )
+
+    configured_dataset_path = os.environ.get("SWE_BENCH_FAST_DATASET_PATH")
+    if not configured_dataset_path:
+        dataset_path = work_dir / "dataset.jsonl"
+        _write_fast_dataset(dataset_name, split, instance_ids, dataset_path)
+    else:
+        dataset_path = Path(configured_dataset_path).expanduser().resolve()
+
+    config_path = work_dir / "swe-bench-fast.toml"
+    _write_fast_config(config_path, max_workers, timeout)
+
+    report_path = work_dir / f"swe-bench-fast.{run_id}.json"
+    log_path = work_dir / f"swe-bench-fast.{run_id}.log"
+    command = [
+        fast_bin,
+        "run",
+        "--dataset",
+        str(dataset_path),
+        "--predictions",
+        predictions_path,
+        "--workers",
+        str(max_workers),
+        "--timeout",
+        str(timeout),
+        "--run-id",
+        run_id,
+        "--format",
+        "json",
+        "--output",
+        str(report_path),
+    ]
+    print("Running swe-bench-fast: " + " ".join(command))
+    completed = subprocess.run(
+        command,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    log_path.write_text(completed.stdout)
+    print(completed.stdout)
+    if completed.returncode != 0:
+        raise RuntimeError(f"swe-bench-fast failed with exit code {completed.returncode}; see {log_path}")
+    return report_path
+
+
+def _write_fast_dataset(
+    dataset_name: str,
+    split: str,
+    instance_ids: list[str] | None,
+    dataset_path: Path,
+) -> None:
+    dataset = _load_swebench_dataset(dataset_name, split, instance_ids)
+    with dataset_path.open("w") as handle:
+        for instance in dataset:
+            handle.write(json.dumps(dict(instance), sort_keys=True) + "\n")
+
+
+def _load_swebench_dataset(
+    name: str,
+    split: str,
+    instance_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    from datasets import load_dataset, load_from_disk
+
+    if name.lower() in {"swe-bench", "swebench", "swe_bench"}:
+        name = "SWE-bench/SWE-bench"
+    elif name.lower() in {
+        "swe-bench-lite",
+        "swebench-lite",
+        "swe_bench_lite",
+        "swe-bench_lite",
+        "lite",
+    }:
+        name = "SWE-bench/SWE-bench_Lite"
+
+    if name.endswith(".json"):
+        raw_dataset = json.loads(Path(name).read_text())
+        if isinstance(raw_dataset, dict):
+            raw_dataset = list(raw_dataset.values())
+    elif name.endswith(".jsonl"):
+        raw_dataset = [json.loads(line) for line in Path(name).read_text().splitlines() if line.strip()]
+    elif name.endswith(".parquet"):
+        raw_dataset = load_dataset("parquet", data_files=name, split="train")
+    else:
+        parquet_path = Path(name) / f"{split}.parquet"
+        disk_path = Path(name) / split
+        if parquet_path.exists():
+            raw_dataset = load_dataset("parquet", data_files=str(parquet_path), split="train")
+        elif (disk_path / "dataset_info.json").exists():
+            raw_dataset = load_from_disk(disk_path)
+        else:
+            raw_dataset = load_dataset(name, split=split)
+
+    dataset = [dict(instance) for instance in raw_dataset]
+    if not instance_ids:
+        return dataset
+
+    selected_ids = set(instance_ids)
+    dataset_ids = {instance["instance_id"] for instance in dataset}
+    missing = selected_ids - dataset_ids
+    if missing:
+        raise ValueError(
+            "Some SWE-bench instance IDs were not found in the dataset: "
+            + " ".join(sorted(missing))
+        )
+    return [instance for instance in dataset if instance["instance_id"] in selected_ids]
+
+
+def _write_fast_config(config_path: Path, max_workers: int, timeout: int) -> None:
+    arch = os.environ.get("SWE_BENCH_FAST_ARCH") or os.environ.get("SWE_ARCH", "x86_64")
+    if arch == "arm64":
+        arch = "aarch64"
+    config = {
+        "name": "swe-bench-fast",
+        "workers": int(os.environ.get("SWE_BENCH_FAST_WORKERS", str(max_workers))),
+        "timeout": int(os.environ.get("SWE_BENCH_FAST_TIMEOUT", str(timeout))),
+        "arch": arch,
+        "checkpoint_dir": os.environ.get("SWE_BENCH_FAST_CHECKPOINT_DIR", ".checkpoints"),
+        "arm64_registry": os.environ.get("SWE_BENCH_FAST_ARM64_REGISTRY", "docker.io/greynewell/swe-bench-fast"),
+        "x86_registry": os.environ.get("SWE_BENCH_FAST_X86_REGISTRY", "ghcr.io/epoch-research"),
+        "x86_prefix": os.environ.get("SWE_BENCH_FAST_X86_PREFIX", "swe-bench.eval"),
+        "mem_limit": os.environ.get("SWE_BENCH_FAST_MEM_LIMIT", "4g"),
+        "tmpfs": _env_bool("SWE_BENCH_FAST_TMPFS", False),
+        "runtime": os.environ.get("SWE_BENCH_FAST_RUNTIME", ""),
+        "build_workers": int(os.environ.get("SWE_BENCH_FAST_BUILD_WORKERS", "4")),
+    }
+    lines = []
+    for key, value in config.items():
+        if isinstance(value, bool):
+            rendered = "true" if value else "false"
+        elif isinstance(value, int):
+            rendered = str(value)
+        else:
+            rendered = json.dumps(value)
+        lines.append(f"{key} = {rendered}")
+    config_path.write_text("\n".join(lines) + "\n")
+
+
 def _run_official_harness(
     *,
     dataset_name: str,
@@ -379,6 +556,58 @@ def _load_predictions(predictions_path: str) -> dict[str, dict[str, Any]]:
     return {row["instance_id"]: row for row in rows}
 
 
+def _load_fast_report(
+    report_path: Path,
+    predictions: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    payload = json.loads(report_path.read_text())
+    reports = payload.get("reports", [])
+    by_id = {row.get("instance_id"): row for row in reports if row.get("instance_id")}
+    submitted_ids = sorted(predictions)
+    empty_patch_ids = {
+        instance_id
+        for instance_id, prediction in predictions.items()
+        if not (prediction.get("model_patch") or "").strip()
+    }
+    error_ids = {
+        instance_id
+        for instance_id, row in by_id.items()
+        if row.get("error")
+    }
+    resolved_ids = {
+        instance_id
+        for instance_id, row in by_id.items()
+        if row.get("resolved") == "RESOLVED_FULL" and not row.get("error")
+    }
+    completed_ids = {
+        instance_id
+        for instance_id, row in by_id.items()
+        if not row.get("error") and instance_id not in empty_patch_ids
+    }
+    unresolved_ids = set(submitted_ids) - resolved_ids - error_ids - empty_patch_ids
+    return {
+        "submitted_instances": len(submitted_ids),
+        "completed_instances": len(completed_ids),
+        "resolved_instances": len(resolved_ids),
+        "unresolved_instances": len(unresolved_ids),
+        "empty_patch_instances": len(empty_patch_ids),
+        "error_instances": len(error_ids),
+        "submitted_ids": submitted_ids,
+        "completed_ids": sorted(completed_ids),
+        "resolved_ids": sorted(resolved_ids),
+        "unresolved_ids": sorted(unresolved_ids),
+        "empty_patch_ids": sorted(empty_patch_ids),
+        "error_ids": sorted(error_ids),
+        "fast_report_path": str(report_path),
+        "fast_summary": payload.get("summary", {}),
+        "fast_errors": {
+            instance_id: row.get("error", "")
+            for instance_id, row in by_id.items()
+            if row.get("error")
+        },
+    }
+
+
 def _print_prediction_summary(
     predictions_path: str,
     predictions: dict[str, dict[str, Any]],
@@ -431,7 +660,11 @@ def _print_report_error_summary(
         return
 
     print("SWE-bench error samples:")
+    fast_errors = report.get("fast_errors", {})
     for instance_id in errors[:5]:
+        if instance_id in fast_errors:
+            print(f"  {instance_id}: {fast_errors[instance_id][:240]}")
+            continue
         prediction = predictions.get(instance_id, {})
         model_name = prediction.get("model_name_or_path", "None").replace("/", "__")
         log_file = work_dir / "logs" / "run_evaluation" / run_id / model_name / instance_id / "run_instance.log"

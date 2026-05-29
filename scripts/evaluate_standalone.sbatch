@@ -49,6 +49,7 @@ PODMAN_SERVICE_PORT=${PODMAN_SERVICE_PORT:-}
 PODMAN_SERVICE_HOST=${PODMAN_SERVICE_HOST:-}
 PODMAN_SERVICE_USE_EXTERNAL=${PODMAN_SERVICE_USE_EXTERNAL:-false}
 PODMAN_SERVICE_STORAGE_OPTS=${PODMAN_SERVICE_STORAGE_OPTS:-ignore_chown_errors=true}
+SWE_BENCH_FAST_AUTO_BUILD=${SWE_BENCH_FAST_AUTO_BUILD:-true}
 export SWE_USE_PODMAN_BUILD=${SWE_USE_PODMAN_BUILD:-true}
 export SWE_PODMAN_BUILD_STORAGE_OPTS=${SWE_PODMAN_BUILD_STORAGE_OPTS:-ignore_chown_errors=true}
 detect_swe_arch() {
@@ -60,7 +61,7 @@ detect_swe_arch() {
 }
 export SWE_ARCH=${SWE_ARCH:-$(detect_swe_arch)}
 export SWE_RELAX_CONDA_BUILDS=${SWE_RELAX_CONDA_BUILDS:-auto}
-export SWE_RELAX_CONDA_PACKAGE_PINS=${SWE_RELAX_CONDA_PACKAGE_PINS:-setuptools}
+export SWE_RELAX_CONDA_PACKAGE_PINS=${SWE_RELAX_CONDA_PACKAGE_PINS:-setuptools pip python}
 LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 BS=${BS:-auto:20}
 BOS=${BOS:-false}
@@ -89,6 +90,96 @@ if [[ -z "${TOKENIZER:-}" ]]; then
     TOKENIZER=$MODEL
 fi
 
+IS_SWEBENCH=false
+if [[ ",$STANDALONE_TASKS," == *",swebench_verified,"* ]]; then
+    IS_SWEBENCH=true
+fi
+
+find_swe_bench_fast_source_dir() {
+    local candidate
+    for candidate in \
+        "${SWE_BENCH_FAST_SOURCE_DIR:-}" \
+        "swe-bench-fast-main" \
+        "swe-bench-fast" \
+        "external/swe-bench-fast"; do
+        if [[ -n "$candidate" && -f "$candidate/go.mod" && -f "$candidate/cmd/swe-bench-fast/main.go" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+absolute_path() {
+    if [[ "$1" == /* ]]; then
+        echo "$1"
+    else
+        echo "$PWD/$1"
+    fi
+}
+
+find_swe_bench_fast_bin() {
+    local source_dir candidate
+    for candidate in \
+        "${SWE_BENCH_FAST_BIN:-}" \
+        "swe-bench-fast-main/dist/swe-bench-fast" \
+        "swe-bench-fast-main/bin/swe-bench-fast" \
+        "swe-bench-fast/dist/swe-bench-fast" \
+        "swe-bench-fast/bin/swe-bench-fast" \
+        "external/swe-bench-fast/dist/swe-bench-fast" \
+        "external/swe-bench-fast/bin/swe-bench-fast"; do
+        if [[ -n "$candidate" && -x "$candidate" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    if source_dir=$(find_swe_bench_fast_source_dir); then
+        echo "$source_dir/dist/swe-bench-fast"
+        return 0
+    fi
+    if command -v swe-bench-fast >/dev/null 2>&1; then
+        command -v swe-bench-fast
+        return 0
+    fi
+    return 1
+}
+
+configure_swe_bench_fast_defaults() {
+    local source_dir fast_bin
+    if fast_bin=$(find_swe_bench_fast_bin); then
+        export SWE_BENCH_FAST_BIN="$(absolute_path "${SWE_BENCH_FAST_BIN:-$fast_bin}")"
+    fi
+
+    if [[ -z "${SWE_EVALUATOR:-}" ]]; then
+        if [[ -n "${SWE_BENCH_FAST_BIN:-}" || -n "${SWE_BENCH_FAST_SOURCE_DIR:-}" ]] || find_swe_bench_fast_source_dir >/dev/null 2>&1; then
+            export SWE_EVALUATOR=fast
+        else
+            export SWE_EVALUATOR=official
+        fi
+    fi
+
+    if [[ "$SWE_EVALUATOR" == "fast" && ! -x "${SWE_BENCH_FAST_BIN:-}" ]]; then
+        if [[ "$SWE_BENCH_FAST_AUTO_BUILD" != "true" ]]; then
+            echo "ERROR: SWE_EVALUATOR=fast but SWE_BENCH_FAST_BIN is not executable: ${SWE_BENCH_FAST_BIN:-<unset>}" >&2
+            exit 1
+        fi
+        source_dir=$(find_swe_bench_fast_source_dir) || {
+            echo "ERROR: SWE_EVALUATOR=fast requires swe-bench-fast source or binary." >&2
+            echo "Set SWE_BENCH_FAST_BIN, or place the checkout at swe-bench-fast-main, swe-bench-fast, or external/swe-bench-fast." >&2
+            exit 1
+        }
+        echo "Building swe-bench-fast from $source_dir"
+        make -C "$source_dir" build
+        export SWE_BENCH_FAST_BIN="$(absolute_path "$source_dir")/dist/swe-bench-fast"
+    fi
+}
+
+if [[ "$IS_SWEBENCH" == "true" ]]; then
+    configure_swe_bench_fast_defaults
+else
+    export SWE_EVALUATOR=${SWE_EVALUATOR:-official}
+fi
+
 COMMON_MODEL_ARGS="dtype=bfloat16"
 if [[ $BOS = true ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
@@ -110,11 +201,6 @@ fi
 
 export LM_EVAL_MODEL_ARGS=${LM_EVAL_MODEL_ARGS:-$COMMON_MODEL_ARGS}
 export MAX_BATCH_SIZE=${MAX_BATCH_SIZE:-32}
-
-IS_SWEBENCH=false
-if [[ ",$STANDALONE_TASKS," == *",swebench_verified,"* ]]; then
-    IS_SWEBENCH=true
-fi
 
 LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/ymetz/lm-evaluation-harness.git"
 if [[ -n "${LM_EVAL_HARNESS_BRANCH:-}" ]]; then
@@ -139,10 +225,6 @@ pip install --no-cache-dir --upgrade \
     ghapi \
     GitPython \
     rich"
-
-if [[ -d "swe-bench-reference" ]]; then
-    INSTALL_CMD="$INSTALL_CMD && pip install --no-cache-dir --upgrade --no-deps -e swe-bench-reference"
-fi
 
 if [ -f "$TABLE_METRICS" ]; then
     echo "Reading table metrics from file: $TABLE_METRICS"
@@ -361,6 +443,7 @@ echo "  LM_EVAL_MODEL_ARGS=$LM_EVAL_MODEL_ARGS"
 echo "  APPLY_CHAT_TEMPLATE=$APPLY_CHAT_TEMPLATE"
 echo "  MAX_NEW_TOKENS=$MAX_NEW_TOKENS"
 if [[ "$IS_SWEBENCH" == "true" ]]; then
+    echo "  SWE_EVALUATOR=$SWE_EVALUATOR"
     echo "  SWE_MAX_WORKERS=$SWE_MAX_WORKERS"
     echo "  SWE_CACHE_LEVEL=${SWE_CACHE_LEVEL:-env}"
     echo "  SWE_TIMEOUT=${SWE_TIMEOUT:-1800}"
@@ -388,11 +471,17 @@ if [[ "$IS_SWEBENCH" == "true" ]]; then
         $GEN_RUN_CMD_STR
     "
 
-    echo "SWE-bench phase 2/2: running official harness on host with Podman/Docker"
+    echo "SWE-bench phase 2/2: running $SWE_EVALUATOR evaluator on host with Podman/Docker"
     start_podman_docker_api
-    start_local_registry
+    if [[ "$SWE_EVALUATOR" != "fast" ]]; then
+        start_local_registry
+    fi
     install_host_python_deps
-    export PYTHONPATH="$PWD:$PWD/swe-bench-reference${HOST_EXTRA_PYTHONPATH:+:$HOST_EXTRA_PYTHONPATH}:${PYTHONPATH:-}"
+    if [[ "$SWE_EVALUATOR" == "official" ]]; then
+        export PYTHONPATH="$PWD:$PWD/swe-bench-reference${HOST_EXTRA_PYTHONPATH:+:$HOST_EXTRA_PYTHONPATH}:${PYTHONPATH:-}"
+    else
+        export PYTHONPATH="$PWD${HOST_EXTRA_PYTHONPATH:+:$HOST_EXTRA_PYTHONPATH}:${PYTHONPATH:-}"
+    fi
     "$HOST_PYTHON" -c 'import docker, os; print("docker module", getattr(docker, "__file__", None), getattr(docker, "__path__", None)); assert hasattr(docker, "from_env"), "Imported docker module is not the Docker SDK"; client = docker.from_env(); print("Docker API reachable", client.version().get("ApiVersion"), "via", os.environ.get("DOCKER_HOST"))'
     "$HOST_PYTHON" -m scripts.standalone.run "${RUN_ARGS[@]}" --phase evaluate
 else
