@@ -66,6 +66,49 @@ def compute_mgsm_avg(summary):
     return sum(vals) / len(vals) if vals else None
 
 
+def compute_degeneration_avg(summary):
+    """Average all metrics across benchmarks whose key contains '/degeneration'."""
+    vals = []
+    for k, v in summary.items():
+        if "stderr" in k:
+            continue
+        if "/degeneration" in k.lower():
+            nv = normalize_score(v)
+            if nv is not None:
+                vals.append(nv)
+    return sum(vals) / len(vals) if vals else None
+
+
+def compute_mmlu_pro_detail(summary):
+    """Extract MMLU-Pro overall accuracy and per-subject breakdown from a run summary.
+
+    Summary keys are flattened as '<task>/exact_match,<filter>'. The group task
+    'mmlu_pro' is the overall accuracy; 'mmlu_pro_<subject>' are the per-subject scores
+    (underscores in the subject become spaces, e.g. computer_science -> 'computer science').
+    Returns None if no MMLU-Pro keys are present.
+    """
+    accuracy = None
+    subjects = {}
+    for k, v in summary.items():
+        if "stderr" in k:
+            continue
+        kl = k.lower()
+        if "mmlu_pro" not in kl or "exact_match" not in kl:
+            continue
+        task = k.split("/", 1)[0]
+        try:
+            val = float(v)
+        except (ValueError, TypeError):
+            continue
+        if task == "mmlu_pro":
+            accuracy = val
+        elif task.startswith("mmlu_pro_"):
+            subjects[task[len("mmlu_pro_"):].replace("_", " ")] = val
+    if accuracy is None and not subjects:
+        return None
+    return {"accuracy": accuracy, "subjects": subjects}
+
+
 def get_metric(summary, metric):
     if "mgsm" in metric.lower() and "mgsm_en" not in metric.lower():
         return compute_mgsm_avg(summary)
@@ -680,6 +723,52 @@ details[open] .arrow {{ transform: rotate(90deg); }}
     print(f"Saved HTML table to {output_path}")
 
 
+def build_json(groups, models, scores, output_path, info_rows=None, summaries=None):
+    """Write combined metrics to JSON: grouped by task, with per-group and overall averages.
+
+    Score values are the normalized fractions (0-1) used internally by the table; the
+    group/overall averages exclude missing (null) entries, matching the HTML rendering.
+    When summaries are provided, an 'mmlu_pro_detail' section with overall accuracy and
+    per-subject scores is added for each model that has MMLU-Pro results.
+    """
+    out_groups = []
+    all_vals = {m: [] for m in models}
+
+    for group_name, metric_list in groups:
+        metrics_out = []
+        group_vals = {m: [] for m in models}
+        for metric_key, display_name in metric_list:
+            row = {}
+            for m in models:
+                v = scores.get(m, {}).get(metric_key)
+                row[m] = v
+                if v is not None:
+                    group_vals[m].append(v)
+                    all_vals[m].append(v)
+            metrics_out.append({"key": metric_key, "display": display_name, "scores": row})
+        group_avg = {m: (sum(group_vals[m]) / len(group_vals[m]) if group_vals[m] else None) for m in models}
+        out_groups.append({"name": group_name, "average": group_avg, "metrics": metrics_out})
+
+    overall = {m: (sum(all_vals[m]) / len(all_vals[m]) if all_vals[m] else None) for m in models}
+
+    result = {"models": models, "groups": out_groups, "overall_average": overall}
+    if info_rows:
+        result["info_rows"] = {label: {m: row_vals.get(m) for m in models} for label, row_vals in info_rows}
+
+    if summaries is not None:
+        mmlu_detail = {}
+        for m in models:
+            detail = compute_mmlu_pro_detail(summaries.get(m, {}))
+            if detail is not None:
+                mmlu_detail[m] = detail
+        if mmlu_detail:
+            result["mmlu_pro_detail"] = mmlu_detail
+
+    with open(output_path, "w") as f:
+        json.dump(result, f, indent=2)
+    print(f"Saved JSON metrics to {output_path}")
+
+
 BASELINE_PROJECT = "apertus/apertus-1.5-post-training-v0.0"
 
 PINNED_PREFIX = [
@@ -743,14 +832,18 @@ def main():
     parser.add_argument("--entity", default="apertus")
     parser.add_argument("--project", default="apertus-1.5-post-training-v0.0")
     parser.add_argument("--output", default="eval_table.html", help="Output HTML file path")
+    parser.add_argument("--json-output", default=None,
+                        help="Also write combined metrics (grouped by task, with group + overall averages) to this JSON path. Only includes models passed via --models/--models-file, no baselines.")
     parser.add_argument("--rename", nargs="*", default=[],
                         help="Rename models for display: 'long-run-name=Short Name'")
     parser.add_argument("--instruct-baseline", action="store_true",
                         help="Include Apertus-1.5-Instruct column after Apertus-1.5-SFT")
     parser.add_argument("--show-word-count", action="store_true",
                         help="Show alpaca_eval avg_word_count as an info row")
-    parser.add_argument("--show-orbench", action="store_true",
-                        help="Show orbench refusal and degeneration rates as info rows")
+    parser.add_argument("--more-details", action="store_true",
+                        help="Show averaged degeneration (across all benchmarks) as an info row")
+    parser.add_argument("--overrefusal", action="store_true",
+                        help="Show orbench overrefusal rate as an info row")
     parser.add_argument("--no-baselines", action="store_true",
                         help="Skip all baseline models; only use models from --models / --models-file")
     parser.add_argument("--no-split", action="store_true",
@@ -762,6 +855,8 @@ def main():
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--sft-baseline", default=None,
                         help="Override the Apertus 1.5 8B SFT baseline run name")
+    parser.add_argument("--no-sft-baseline", action="store_true",
+                        help="Exclude the Apertus 1.5 8B SFT baseline column")
     args = parser.parse_args()
 
     all_models = list(args.models)
@@ -785,14 +880,19 @@ def main():
     scores = {}
     summaries = {}
     display_names = []
+    requested_display_names = []
     fetched_runs = set()
     apertus_baselines = set()
 
     if args.sft_baseline:
         PINNED_PREFIX[2] = (args.sft_baseline, "Apertus 1.5 8B SFT")
 
+    prefix_baselines = PINNED_PREFIX
+    if args.no_sft_baseline:
+        prefix_baselines = [b for b in PINNED_PREFIX if b[1] != "Apertus 1.5 8B SFT"]
+
     if not args.no_baselines:
-        for run_name, display in PINNED_PREFIX:
+        for run_name, display in prefix_baselines:
             if fetch_model(api, BASELINE_PROJECT, run_name, display, groups, scores, args.debug, summaries):
                 display_names.append(display)
                 fetched_runs.add(run_name)
@@ -811,6 +911,7 @@ def main():
         display = rename_map.get(model_name, model_name)
         if fetch_model(api, project_path, model_name, display, groups, scores, args.debug, summaries):
             display_names.append(display)
+            requested_display_names.append(display)
 
     for run_name, display in PINNED_SUFFIX:
         if fetch_model(api, BASELINE_PROJECT, run_name, display, groups, scores, args.debug, summaries):
@@ -822,22 +923,40 @@ def main():
 
     info_rows = []
     if args.show_word_count:
+        wc_metrics = [
+            "alpaca_eval/avg_word_count",
+            "arena_hard_v2/avg_word_count",
+            "arena_hard_v01/avg_word_count",
+        ]
         row_vals = {}
         for display in display_names:
             summary = summaries.get(display, {})
-            val = get_metric(summary, "alpaca_eval/avg_word_count")
-            row_vals[display] = float(val) if val is not None else None
-        info_rows.append(("Alpaca Eval Avg Word Count", row_vals))
-    if args.show_orbench:
-        for metric_key, label in [("orbench/refusal", "ORBench Refusal"), ("orbench/degeneration", "ORBench Degeneration")]:
-            row_vals = {}
-            for display in display_names:
-                summary = summaries.get(display, {})
-                val = get_metric(summary, metric_key)
-                row_vals[display] = float(val) if val is not None else None
-            info_rows.append((label, row_vals))
+            vals = []
+            for mk in wc_metrics:
+                v = get_metric(summary, mk)
+                if v is not None:
+                    vals.append(float(v))
+            row_vals[display] = sum(vals) / len(vals) if vals else None
+        info_rows.append(("Mean Avg Word Count", row_vals))
+    if args.more_details:
+        deg_vals = {}
+        for display in display_names:
+            summary = summaries.get(display, {})
+            avg = compute_degeneration_avg(summary)
+            deg_vals[display] = avg * 100 if avg is not None else None
+        info_rows.append(("Degeneration", deg_vals))
+    if args.overrefusal:
+        ref_vals = {}
+        for display in display_names:
+            summary = summaries.get(display, {})
+            val = get_metric(summary, "orbench/refusal")
+            ref_vals[display] = normalize_score(val) * 100 if val is not None else None
+        info_rows.append(("Overrefusal", ref_vals))
     if not info_rows:
         info_rows = None
+
+    if args.json_output:
+        build_json(groups, requested_display_names, scores, args.json_output, info_rows=info_rows, summaries=summaries)
 
     build_html(groups, display_names, scores, args.output, info_rows=info_rows,
                olmo_default_hidden=args.no_baselines, apertus_baselines=apertus_baselines,

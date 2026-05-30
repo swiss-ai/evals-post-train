@@ -3,6 +3,7 @@ Shared utilities for W&B alignment evaluation scripts.
 Contains common functions for collecting, processing, and uploading evaluation results.
 """
 
+import hashlib
 import json
 import os
 import random
@@ -200,8 +201,18 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
         if eval_metric in log_data:
             main_log_data[eval_metric] = log_data[eval_metric]
     
-    run_id_suffix = "-007"
-    wandb_id = (model_eval.model_name + run_id_suffix)[:110]
+    run_id_suffix = "-008"
+    full_id = model_eval.model_name + run_id_suffix
+    if len(full_id) <= 110:
+        wandb_id = full_id
+    else:
+        # Names longer than the cap may share an identical 110-char prefix
+        # (e.g. differing only by a later suffix), which would collide and,
+        # with resume="allow", overwrite each other's run. Append a
+        # deterministic hash of the full name so the id stays stable per model
+        # (resume still works) but is unique across distinct models.
+        name_hash = hashlib.sha1(model_eval.model_name.encode()).hexdigest()[:8]
+        wandb_id = full_id[:110 - len(name_hash) - 1] + "-" + name_hash
     with wandb.init(
         id=wandb_id,
         resume="allow",

@@ -15,6 +15,7 @@ BASE_DIR=""
 CONFIG_FILE="./configs/apertus/tasks_posttrain_final.txt"
 TABLE_METRICS="./configs/apertus/tasks_posttrain_final_main_table.txt"
 FORCE_TASKS=""
+TOKENIZER=""
 
 # --- Argument Parsing ---
 while [[ $# -gt 0 ]]; do
@@ -35,6 +36,8 @@ while [[ $# -gt 0 ]]; do
         --group_size=*) GROUP_SIZE="${1#*=}"; shift 1 ;;
         --force_tasks) FORCE_TASKS="$2"; shift 2 ;;
         --force_tasks=*) FORCE_TASKS="${1#*=}"; shift 1 ;;
+        --tokenizer) TOKENIZER="$2"; shift 2 ;;
+        --tokenizer=*) TOKENIZER="${1#*=}"; shift 1 ;;
         --debug) DEBUG=1; shift 1 ;;
         *)
             echo "Error: Unknown argument '$1'"
@@ -78,6 +81,10 @@ for model_path in "${MODEL_DIRS[@]}"; do
 
     if [[ -n "$FORCE_TASKS" ]]; then
         CMD+=("--force_tasks" "$FORCE_TASKS")
+    fi
+
+    if [[ -n "$TOKENIZER" ]]; then
+        CMD+=("--tokenizer" "$TOKENIZER")
     fi
 
     if [[ $DEBUG -eq 1 ]]; then CMD+=("--debug"); fi

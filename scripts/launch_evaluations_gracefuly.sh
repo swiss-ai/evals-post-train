@@ -31,6 +31,7 @@ GROUP_SIZE=1
 TASK_FILE=""
 MODEL=""
 FORCE_TASKS=""
+TOKENIZER=""
 
 # --- Argument Parsing ---
 while [[ $# -gt 0 ]]; do
@@ -47,6 +48,7 @@ while [[ $# -gt 0 ]]; do
         --debug) DEBUG=1; shift 1 ;;
         --merge_only) MERGE_ONLY=1; shift 1 ;;
         --force_tasks) FORCE_TASKS="$2"; shift 2 ;;
+        --tokenizer) TOKENIZER="$2"; shift 2 ;;
         *) echo "Error: Unknown argument '$1'"; exit 1 ;;
     esac
 done
@@ -212,6 +214,7 @@ num_groups=${#TASK_GROUPS[@]}
 echo -e "\nLaunching $num_missing missing tasks in $num_groups groups (group_size=$GROUP_SIZE):"
 for group in "${TASK_GROUPS[@]}"; do
     launch_cmd=("bash" "scripts/launch_evaluations.sh" "single" "--task" "$group" "--model" "$MODEL" "--chat-template")
+    if [[ -n "$TOKENIZER" ]]; then launch_cmd+=("--tokenizer" "$TOKENIZER"); fi
 
     if [[ $DEBUG -eq 1 ]]; then
         echo "[DEBUG] Would launch: WANDB_MODE=disabled SBATCH_ACCOUNT=$ACCOUNT SBATCH_RESERVATION=$RESERVATION ${launch_cmd[*]}"
@@ -254,6 +257,10 @@ if [[ ${#JOB_IDS[@]} -gt 0 ]]; then
 
     if [[ -n "$FORCE_TASKS" ]]; then
         WRAP_CMD="$WRAP_CMD --force_tasks \"$FORCE_TASKS\""
+    fi
+
+    if [[ -n "$TOKENIZER" ]]; then
+        WRAP_CMD="$WRAP_CMD --tokenizer \"$TOKENIZER\""
     fi
 
     WRAP_CMD="$WRAP_CMD --merge_only"
