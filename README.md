@@ -300,7 +300,7 @@ Useful SWE-bench environment variables:
 | `SWE_BENCH_FAST_ALLOW_X86_EMULATION` | `false` | On ARM hosts, allow `swe-bench-fast` to run x86-only fallback images. Keep `false` on CSCS ARM nodes without amd64 emulation so unsupported IDs are skipped explicitly |
 | `SWE_BENCH_FAST_ARM64_DATASET` | auto | Optional path to `swe-bench-arm64.jsonl`, used to identify ARM-supported instances and skip x86-only cases |
 | `SWE_INSTANCE_IDS` | unset | Space- or comma-separated subset for smoke runs |
-| `SWE_MAX_WORKERS` | `75% of SLURM_CPUS_PER_TASK, else 4` | Harness worker count for image builds and test containers |
+| `SWE_MAX_WORKERS` | `ceil(SLURM_CPUS_PER_TASK / 4)` | Harness worker count for image builds and test containers |
 | `SWE_TIMEOUT` | `1800` | Per-instance timeout in seconds |
 | `SWE_CACHE_LEVEL` | `env` | Official harness cache level |
 | `SWE_NAMESPACE` | `none` | Image namespace. `none` builds images locally; set `swebench` only when remote prebuilt image pulls are desired and authenticated/mirrored |
@@ -310,6 +310,10 @@ Useful SWE-bench environment variables:
 | `SWE_USE_PODMAN_BUILD` | `true` | Build SWE-bench images with host `podman build` instead of the Docker API build endpoint |
 | `SWE_PODMAN_BUILD_STORAGE_OPTS` | `ignore_chown_errors=true` | Storage options passed to `podman build`; useful on rootless CSCS nodes without broad subuid/subgid mappings |
 | `PODMAN_SERVICE_STORAGE_OPTS` | `ignore_chown_errors=true` | Storage options used when starting the per-job Podman Docker-compatible API service |
+| `PODMAN_STORAGE_ROOT` | `$RUN_ROOT/podman_storage` | Disk-backed Podman image store for SWE-bench evaluation containers. Keep this off `/dev/shm`; hundreds of image pulls can otherwise count as job memory and trigger OOM kills |
+| `PODMAN_RUNROOT` | `${TMPDIR:-/tmp}/podman_runroot_$SLURM_JOBID` | Per-job Podman runtime state directory |
+| `PODMAN_TMPDIR` | `${TMPDIR:-/tmp}/podman_tmp_$SLURM_JOBID` | Per-job Podman temporary directory |
+| `PODMAN_STORAGE_DRIVER` | unset | Optional Podman storage driver override; leave unset unless the selected filesystem rejects the default overlay store |
 | `SWE_USE_PODMAN_CACHED` | set by local registry mode | Tell the local `swe-bench-reference` harness to use `podman-cached` for image builds |
 | `LM_EVAL_BACKEND` | `vllm` | lm-eval backend used for patch generation |
 | `LM_EVAL_MODEL_ARGS` | launcher-built | lm-eval model args used for patch generation |
