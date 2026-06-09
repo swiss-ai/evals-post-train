@@ -49,4 +49,7 @@ bbq
 toxigen
 wmdp
 orbench
+harmbench
+polyglotoxicitypromptsllama
+realtoxicitypromptsllama
 # Tool Use
