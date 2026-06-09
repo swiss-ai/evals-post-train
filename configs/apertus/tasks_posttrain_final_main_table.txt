@@ -48,4 +48,8 @@ switzerland_qa_0shot/exact_match
 bbq/acc
 toxigen/acc
 wmdp/acc
+orbench/refusal
+harmbench/score
+realtoxicitypromptsllama/score
+polyglotoxicitypromptsllama/score
 # Tool Use
