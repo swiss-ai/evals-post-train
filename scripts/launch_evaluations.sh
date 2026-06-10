@@ -91,7 +91,7 @@ HARNESS_LIMIT=""
 MEGATRON_ITER=""
 SINGLE_TASK=""
 HARNESS_BRANCH=""
-JUDGE_MODE="auto"       # auto, none, or a preset name
+JUDGE_MODE="none"       # auto, none, or a preset name
 JUDGE_EXTRA_ARGS=""
 KEEP_JUDGE="false"
 
@@ -123,7 +123,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Validate mode ---
-VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "non-gated" "single")
+VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "posttrain" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "non-gated" "single" "custom")
 if [[ ! " ${VALID_MODES[*]} " =~ " ${EVAL_MODE} " ]]; then
     echo "Error: Invalid mode '$EVAL_MODE'"
     echo "Valid modes: ${VALID_MODES[*]}"
@@ -186,6 +186,10 @@ case "$EVAL_MODE" in
         export TABLE_METRICS=./configs/apertus/tasks_pretrain_main_table.txt
         export WANDB_PROJECT="apertus-1.5-pre-training-v0.0"
         ;;
+    "posttrain")
+        export TASKS=./configs/apertus/tasks_posttrain_final.txt
+        export TABLE_METRICS=./configs/apertus/tasks_posttrain_final_main_table.txt
+        ;;
     "olmo-easy")
         export TASKS=./configs/olmo/olmo3_easy.txt
         export TABLE_METRICS=./configs/olmo/olmo3_easy_main_table.txt
@@ -228,6 +232,8 @@ case "$EVAL_MODE" in
         export TASKS="$SINGLE_TASK"
         export TABLE_METRICS="$SINGLE_TASK"
         export WANDB_PROJECT="${WANDB_PROJECT}-single"
+        ;;
+    "custom")
         ;;
 esac
 
@@ -291,11 +297,12 @@ echo "  Splits: $NUM_SPLITS"
 [[ -n "$HARNESS_LIMIT" ]] && export HARNESS_LIMIT="$HARNESS_LIMIT"
 [[ -n "$HARNESS_BRANCH" ]] && export LM_EVAL_HARNESS_BRANCH="$HARNESS_BRANCH"
 
-# --- Judge model launch ---
+# --- Judge model launch - if none is set, rely on already hosted judge or manual launch ---
 JUDGE_JOB_IDS=""
 JUDGE_TASKS_PATTERN="alpaca_eval|multijail|aya_redteaming|arena_hard_v01|arena_hard_v2"
 
 if [[ "$JUDGE_MODE" != "none" ]]; then
+
     NEEDS_JUDGE=false
     JUDGE_LAUNCH_ARGS=""
 
@@ -338,6 +345,16 @@ if [[ "$JUDGE_MODE" != "none" ]]; then
         fi
         echo "--------------------------"
         echo ""
+    fi
+fi
+
+# warn if tasks are detected but judge is explicitly disabled (mode=none)
+if [[ "$JUDGE_MODE" == "none" ]]; then
+    if [[ -f "$TASKS" ]]; then
+        if grep -qE "$JUDGE_TASKS_PATTERN" "$TASKS"; then
+            echo "WARNING: Detected judge-dependent tasks but judge model launching is disabled (--judge none)"
+            echo "Make sure a judge model is available via the CSCS serving platform or launch it manually"
+        fi
     fi
 fi
 

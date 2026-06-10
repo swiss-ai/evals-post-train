@@ -1,0 +1,4 @@
+amc23/acc
+minerva_math500/acc
+aime24/acc
+aime25/acc

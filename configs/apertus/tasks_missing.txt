@@ -1,0 +1,17 @@
+commonsense_qa #
+mmlu_pro #
+piqa #
+squadv2 #
+minerva_math #
+lambada #
+lambada_multilingual #
+xcopa #
+xnli #
+bbq # long
+blend_sample
+cultural_bench #
+switzerland_qa_0shot # 
+harmbench #
+hallulens # hasn't finished, 1.5 hours in
+wmdp #
+hellaswag_multilingual # hasn't finished, 1.5 hours in

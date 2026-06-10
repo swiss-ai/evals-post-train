@@ -26,9 +26,9 @@ MODEL=$1
 NAME=$2
 
 # These must be passed as env vars from the launcher
-LOGS_ROOT=${LOGS_ROOT:-/capstor/store/cscs/swissai/infra01/eval-logs}
+LOGS_ROOT=${LOGS_ROOT:-/iopsstor/scratch/cscs/dmelikidze/eval_logs_start}
 WANDB_ENTITY=${WANDB_ENTITY:-apertus}
-WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
+WANDB_PROJECT=${WANDB_PROJECT:-apertus-1.5-post-training-v0.0}
 TABLE_METRICS=${TABLE_METRICS:-""}
 NUM_SPLITS=${NUM_SPLITS:-1}
 
