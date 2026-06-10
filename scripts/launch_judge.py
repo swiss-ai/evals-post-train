@@ -32,9 +32,14 @@ import urllib.request
 from importlib.resources import files
 from pathlib import Path
 
-from swiss_ai_model_launch.launchers.launch_args import LaunchArgs
+from swiss_ai_model_launch.launchers.launch_args import LaunchArgs as BaseLaunchArgs
 from swiss_ai_model_launch.launchers.launcher import JobStatus
 from swiss_ai_model_launch.launchers.slurm_launcher import SlurmLauncher
+
+# overwrite LaunchArgs to include nodes and worker_port
+class LaunchArgs(BaseLaunchArgs):
+    nodes: int = 1
+    worker_port: int = 8080
 
 # ── Task-to-judge mapping ────────────────────────────────────────────
 
@@ -272,7 +277,13 @@ def main() -> None:
         asyncio.run(cancel_job(args.cancel_job_id))
         return
 
-    api_key = os.environ.get("CSCS_SERVING_API", "")
+    # in sbatch, we can run export CSCS_SERVING_API="${CSCS_SERVING_API:-$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)} - also try to read from file
+
+    api_key = os.environ.get("CSCS_SERVING_API")
+    if not api_key:
+        key_path = Path(__file__).parent.joinpath("cscs_serving_api_key.txt")
+        if key_path.is_file():
+            api_key = key_path.read_text().strip()
     if not api_key and not args.dry_run:
         _log("ERROR: CSCS_SERVING_API environment variable not set.")
         sys.exit(1)
