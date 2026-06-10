@@ -46,9 +46,9 @@
 #   --splits K           - Split tasks across K parallel nodes per model
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
-#   --judge <preset|auto|none> - Judge model control:
-#                          auto (default): detect judge-dependent tasks and launch needed judges
-#                          none: disable judge auto-launch
+#   --judge <none|auto|preset> - Judge model control:
+#                          none (default): disable judge auto-launch
+#                          auto: detect judge-dependent tasks and launch needed judges
 #                          <preset>: launch a specific preset (qwen3.5-27b, llama-3.3-70b)
 #   --judge-args <str>   - Extra arguments forwarded to scripts/launch_judge.py
 #   --keep-judge         - Do not auto-cancel judge model after evaluation finishes

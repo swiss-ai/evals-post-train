@@ -201,7 +201,7 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
         if eval_metric in log_data:
             main_log_data[eval_metric] = log_data[eval_metric]
     
-    run_id_suffix = "-008"
+    run_id_suffix = "-001"
     full_id = model_eval.model_name + run_id_suffix
     if len(full_id) <= 110:
         wandb_id = full_id

@@ -93,8 +93,5 @@ for model_path in "${MODEL_DIRS[@]}"; do
         echo "Error: Failed to process $model_name."
         exit 1 
     fi
-    #if [[ $model_name == "/iopsstor/scratch/cscs/dmelikidze/aper_mods2/baseline-Olmo-3-7B-SFT2" ]]; then
     echo "Reached debug model, exiting after first iteration."
-    # exit 0
-    #fi
 done

@@ -186,6 +186,10 @@ def simplify_metric_name(metric):
 
 
 def main():
+
+    # get username from environment variable 
+    username = os.getenv("USER")
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-model-path", required=True, nargs="+",
                         help="One or more directories containing model subdirectories")
@@ -195,7 +199,7 @@ def main():
     parser.add_argument("--project", default="apertus-1.5-post-training-v0.0")
     parser.add_argument("--metrics-file", default=["./configs/apertus/tasks_posttrain_main_table.txt"],
                         nargs="+", help="One or more metrics files (all are merged)")
-    parser.add_argument("--output", default="/iopsstor/scratch/cscs/dmelikidze/evals-post-train/eval_output",
+    parser.add_argument("--output", default=f"/iopsstor/scratch/cscs/{username}/eval_tables",
                         help="Output directory (created if it doesn't exist)")
     parser.add_argument("--title", default="Eval Table",
                         help="Title text for the PNG table")
