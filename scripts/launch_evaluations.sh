@@ -46,6 +46,12 @@
 #   --splits K           - Split tasks across K parallel nodes per model
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
+#   --judge <none|auto|preset> - Judge model control:
+#                          none (default): disable judge auto-launch
+#                          auto: detect judge-dependent tasks and launch needed judges
+#                          <preset>: launch a specific preset (qwen3.5-27b, llama-3.3-70b)
+#   --judge-args <str>   - Extra arguments forwarded to scripts/launch_judge.py
+#   --keep-judge         - Do not auto-cancel judge model after evaluation finishes
 #
 # Examples:
 #   # Single HF model, auto-detect everything
@@ -85,6 +91,9 @@ HARNESS_LIMIT=""
 MEGATRON_ITER=""
 SINGLE_TASK=""
 HARNESS_BRANCH=""
+JUDGE_MODE="none"       # auto, none, or a preset name
+JUDGE_EXTRA_ARGS=""
+KEEP_JUDGE="false"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -102,6 +111,9 @@ while [[ $# -gt 0 ]]; do
         --megatron-iter) MEGATRON_ITER="$2";            shift 2 ;;
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --harness-branch) HARNESS_BRANCH="$2";        shift 2 ;;
+        --judge)         JUDGE_MODE="$2";              shift 2 ;;
+        --judge-args)    JUDGE_EXTRA_ARGS="$2";        shift 2 ;;
+        --keep-judge)    KEEP_JUDGE="true";            shift ;;
         *)
             echo "Error: Unknown option '$1'"
             echo "Run with no arguments for usage."
@@ -111,7 +123,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Validate mode ---
-VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "non-gated" "single")
+VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "posttrain" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "non-gated" "single" "custom")
 if [[ ! " ${VALID_MODES[*]} " =~ " ${EVAL_MODE} " ]]; then
     echo "Error: Invalid mode '$EVAL_MODE'"
     echo "Valid modes: ${VALID_MODES[*]}"
@@ -148,7 +160,7 @@ fi
 
 # --- Environment defaults ---
 export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
-export WANDB_PROJECT=${WANDB_PROJECT:-apertus-1.5-post-training-v0.0}
+export WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
 export NUM_SPLITS
 export SBATCH_SCRIPT=${SBATCH_SCRIPT:-scripts/evaluate.sbatch}
 # Global checkpoint iteration override for Megatron checkpoints.
@@ -173,6 +185,10 @@ case "$EVAL_MODE" in
         export TASKS=./configs/apertus/tasks_pretrain.txt
         export TABLE_METRICS=./configs/apertus/tasks_pretrain_main_table.txt
         export WANDB_PROJECT="apertus-1.5-pre-training-v0.0"
+        ;;
+    "posttrain")
+        export TASKS=./configs/apertus/tasks_posttrain_final.txt
+        export TABLE_METRICS=./configs/apertus/tasks_posttrain_final_main_table.txt
         ;;
     "olmo-easy")
         export TASKS=./configs/olmo/olmo3_easy.txt
@@ -216,6 +232,8 @@ case "$EVAL_MODE" in
         export TASKS="$SINGLE_TASK"
         export TABLE_METRICS="$SINGLE_TASK"
         export WANDB_PROJECT="${WANDB_PROJECT}-single"
+        ;;
+    "custom")
         ;;
 esac
 
@@ -278,6 +296,67 @@ echo "  Splits: $NUM_SPLITS"
 # --- Harness limit override ---
 [[ -n "$HARNESS_LIMIT" ]] && export HARNESS_LIMIT="$HARNESS_LIMIT"
 [[ -n "$HARNESS_BRANCH" ]] && export LM_EVAL_HARNESS_BRANCH="$HARNESS_BRANCH"
+
+# --- Judge model launch - if none is set, rely on already hosted judge or manual launch ---
+JUDGE_JOB_IDS=""
+JUDGE_TASKS_PATTERN="alpaca_eval|multijail|aya_redteaming|arena_hard_v01|arena_hard_v2"
+
+if [[ "$JUDGE_MODE" != "none" ]]; then
+
+    NEEDS_JUDGE=false
+    JUDGE_LAUNCH_ARGS=""
+
+    if [[ "$JUDGE_MODE" == "auto" ]]; then
+        # Auto-detect: scan task list for judge-dependent tasks
+        if [[ -f "$TASKS" ]]; then
+            grep -qE "$JUDGE_TASKS_PATTERN" "$TASKS" && NEEDS_JUDGE=true
+        elif echo "$TASKS" | grep -qE "$JUDGE_TASKS_PATTERN"; then
+            NEEDS_JUDGE=true
+        fi
+        if [[ "$NEEDS_JUDGE" == "true" ]]; then
+            JUDGE_LAUNCH_ARGS="--detect-from-tasks $TASKS"
+        fi
+    else
+        # Explicit preset
+        NEEDS_JUDGE=true
+        JUDGE_LAUNCH_ARGS="--preset $JUDGE_MODE"
+    fi
+
+    if [[ "$NEEDS_JUDGE" == "true" ]]; then
+        echo ""
+        echo "--- Judge Model Launch ---"
+        # Capture machine-readable output (JUDGE_JOB_ID=...) from stdout,
+        # while letting human-readable logs flow to stderr (visible to user).
+        JUDGE_STDOUT=$(python3 scripts/launch_judge.py $JUDGE_LAUNCH_ARGS $JUDGE_EXTRA_ARGS)
+        JUDGE_EXIT=$?
+
+        if [[ $JUDGE_EXIT -ne 0 ]]; then
+            echo "ERROR: Judge model launch failed (exit code $JUDGE_EXIT)"
+            exit 1
+        fi
+
+        JUDGE_JOB_IDS=$(echo "$JUDGE_STDOUT" | grep "^JUDGE_JOB_ID=" | cut -d= -f2 | tr '\n' ' ')
+        JUDGE_MODELS=$(echo "$JUDGE_STDOUT" | grep "^JUDGE_MODEL_NAME=" | cut -d= -f2 | tr '\n' ', ')
+
+        if [[ -n "$JUDGE_JOB_IDS" ]]; then
+            echo "  Judge jobs: $JUDGE_JOB_IDS"
+            echo "  Judge models: $JUDGE_MODELS"
+            export JUDGE_JOB_IDS
+        fi
+        echo "--------------------------"
+        echo ""
+    fi
+fi
+
+# warn if tasks are detected but judge is explicitly disabled (mode=none)
+if [[ "$JUDGE_MODE" == "none" ]]; then
+    if [[ -f "$TASKS" ]]; then
+        if grep -qE "$JUDGE_TASKS_PATTERN" "$TASKS"; then
+            echo "WARNING: Detected judge-dependent tasks but judge model launching is disabled (--judge none)"
+            echo "Make sure a judge model is available via the CSCS serving platform or launch it manually"
+        fi
+    fi
+fi
 
 # --- Dispatch based on model selection mode ---
 
@@ -362,4 +441,20 @@ else
         echo "----------------------------------------"
         bash "$script"
     done
+fi
+
+# --- Judge cleanup job ---
+# After all eval jobs are submitted, schedule a cleanup job that cancels judge
+# SLURM jobs once all evaluations finish.
+if [[ -n "$JUDGE_JOB_IDS" && "$KEEP_JUDGE" != "true" && ${#EVAL_JOB_IDS[@]} -gt 0 ]]; then
+    DEP_STRING=$(IFS=':'; echo "${EVAL_JOB_IDS[*]}")
+    SCANCEL_CMD="scancel $JUDGE_JOB_IDS"
+    CLEANUP_JOB=$(sbatch --parsable \
+        --account=infra01 \
+        --partition=normal \
+        --job-name "judge-cleanup" \
+        --dependency="afterany:${DEP_STRING}" \
+        --time=00:05:00 \
+        --wrap="$SCANCEL_CMD")
+    echo "Judge cleanup job $CLEANUP_JOB will cancel judge(s) [$JUDGE_JOB_IDS] after evals finish"
 fi

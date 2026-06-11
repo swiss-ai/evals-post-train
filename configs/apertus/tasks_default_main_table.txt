@@ -9,7 +9,7 @@ arc_challenge_chat/exact_match
 commonsense_qa/acc
 global_mmlu_gen_0shot/exact_match
 hellaswag/acc_norm
-mmlu_flan_cot_zeroshotexact_match,ordered-extract
+mmlu_flan_cot_zeroshot/exact_match,ordered-extract
 mmlu_pro/exact_match
 piqa/acc_norm
 squadv2/f1

@@ -3,11 +3,28 @@ Shared utilities for W&B alignment evaluation scripts.
 Contains common functions for collecting, processing, and uploading evaluation results.
 """
 
+import hashlib
 import json
+import os
 import random
 import wandb
+import wandb.sdk.lib.server
 from pathlib import Path
 from typing import List, Tuple
+
+_orig_query_with_timeout = wandb.sdk.lib.server.Server.query_with_timeout
+
+def _patched_query_with_timeout(self):
+    try:
+        _orig_query_with_timeout(self)
+    except TypeError:
+        if hasattr(self, "_viewer") and self._viewer:
+            flags = self._viewer.get("flags")
+            self._flags = json.loads(flags) if isinstance(flags, str) else {}
+        else:
+            self._flags = {}
+
+wandb.sdk.lib.server.Server.query_with_timeout = _patched_query_with_timeout
 from collections import defaultdict
 
 from .data_structures import Sample, Metric, Task, ModelEvaluation
@@ -175,8 +192,6 @@ def upload_multi_model_results(entity: str, project: str, model_evaluations: Lis
 
 def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: ModelEvaluation, main_metrics: List[str], eval_duration: int):
     """Upload ModelEvaluation data to W&B with structured samples."""
-    wandb.login()
-    
     # Get flattened metrics for W&B logging
     log_data = model_eval.get_flattened_metrics()
     
@@ -187,9 +202,19 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
             main_log_data[eval_metric] = log_data[eval_metric]
     
     run_id_suffix = "-001"
-    
+    full_id = model_eval.model_name + run_id_suffix
+    if len(full_id) <= 110:
+        wandb_id = full_id
+    else:
+        # Names longer than the cap may share an identical 110-char prefix
+        # (e.g. differing only by a later suffix), which would collide and,
+        # with resume="allow", overwrite each other's run. Append a
+        # deterministic hash of the full name so the id stays stable per model
+        # (resume still works) but is unique across distinct models.
+        name_hash = hashlib.sha1(model_eval.model_name.encode()).hexdigest()[:8]
+        wandb_id = full_id[:110 - len(name_hash) - 1] + "-" + name_hash
     with wandb.init(
-        id=model_eval.model_name + run_id_suffix,
+        id=wandb_id,
         resume="allow",
         entity=entity,
         project=project,
@@ -199,7 +224,7 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
         run.log({"main_results": create_wandb_table(model_eval.model_name, main_log_data)})
         run.log(log_data)
         run.log({"eval_duration": eval_duration})
-        
+
         # Upload samples as a table directly from the structured data
         for task in model_eval.tasks:
             if not task.samples:
@@ -207,8 +232,11 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
                 continue
 
             samples_table = upload_structured_samples_as_table(task)
+            # Cap key length so artifact name "run-{id}-{key}" stays under 128
+            samples_key = f"samples/{model_eval.model_name}/{task.task_name}"
+            samples_key = samples_key[:128 - len("run-") - len(wandb_id) - 1]
             try:
-                run.log({f"samples/{model_eval.model_name}/{task.task_name}": samples_table})
+                run.log({samples_key: samples_table})
             except Exception as e:
                 print(f"  - Failed to log samples for task {task.task_name}: {e}")
 

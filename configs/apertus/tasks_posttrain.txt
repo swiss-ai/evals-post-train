@@ -1,0 +1,40 @@
+agieval
+arc_challenge_chat
+mmlu_flan_cot_zeroshot
+truthfulqa_mc2
+hellaswag
+gsm8k_cot
+gsm8k_platinum_cot_zeroshot
+hendrycks_math
+mgsm_en_cot
+mathqa
+gpqa_main_cot_zeroshot
+humaneval_instruct
+mbpp_instruct
+acp_bench
+bbh
+drop
+ifeval
+multi-if
+# harmbench
+toxigen
+alpaca_eval
+# Multilingual 
+arc_multilingual
+global_mmlu_gen_0shot
+# hellaswag_multilingual # very long time taken
+include_base_44_gen_0shot
+# include_base_new_45_gen_0shot # gated dataset
+mlogiqa_gen
+truthfulqa_multilingual_mc2
+# arena_hard_v01
+
+#OOD:
+# nq_open
+# triviaqa
+# coqa
+# hallulens
+# pubmedqa
+# meqsum
+# meddialog_qsumm
+# aime
