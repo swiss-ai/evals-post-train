@@ -50,3 +50,6 @@ toxigen
 wmdp
 orbench
 # Tool Use
+bfcl_v3
+# Charter Alignment
+swiss_ai_charter_alignment
