@@ -35,6 +35,7 @@ from pathlib import Path
 from swiss_ai_model_launch.launchers.launch_args import LaunchArgs as BaseLaunchArgs
 from swiss_ai_model_launch.launchers.launcher import JobStatus
 from swiss_ai_model_launch.launchers.slurm_launcher import SlurmLauncher
+from swiss_ai_model_launch.launchers.topology import Topology
 
 # overwrite LaunchArgs to include nodes and worker_port
 class LaunchArgs(BaseLaunchArgs):
@@ -59,13 +60,11 @@ JUDGE_PRESETS = {
     "qwen3.5-27b": {
         "served_model_name": "Qwen/Qwen3.5-27B",
         "framework": "vllm",
-        "nodes": 1,
         "time": "04:00:00",
         "partition": "normal",
-        "worker_port": 8080,
         "framework_args": (
             "--model Qwen/Qwen3.5-27B "
-            "--host 0.0.0.0 --port 8080 "
+            "--host 0.0.0.0 "
             "--served-model-name Qwen/Qwen3.5-27B "
             "--tensor-parallel-size 4 --max-model-len 26000 "
         ),
@@ -73,12 +72,10 @@ JUDGE_PRESETS = {
     "llama-3.3-70b": {
         "served_model_name": "meta-llama/Llama-3.3-70B-Instruct",
         "framework": "vllm",
-        "nodes": 1,
         "time": "04:00:00",
-        "worker_port": 8080,
         "framework_args": (
             "--model meta-llama/Llama-3.3-70B-Instruct "
-            "--host 0.0.0.0 --port 8080 "
+            "--host 0.0.0.0 "
             "--served-model-name meta-llama/Llama-3.3-70B-Instruct "
             "--tensor-parallel-size 4 --max-model-len 35000"
         ),
@@ -129,6 +126,11 @@ def _build_launch_args(preset_name: str, overrides: dict) -> LaunchArgs:
     partition = preset.pop("partition", "normal")
     environment = preset.pop("environment", None) or _get_vllm_environment()
 
+    topology = Topology(
+        replicas=preset.get("replicas", 1),
+        nodes_per_replica=preset.get("nodes_per_replica", 1),
+    )
+
     return LaunchArgs(
         job_name=f"judge-{preset_name}-{username}",
         served_model_name=preset["served_model_name"],
@@ -138,8 +140,7 @@ def _build_launch_args(preset_name: str, overrides: dict) -> LaunchArgs:
         framework=preset["framework"],
         framework_args=preset["framework_args"],
         time=preset.get("time", "06:00:00"),
-        nodes=preset.get("nodes", 1),
-        worker_port=preset.get("worker_port", 8080),
+        topology=topology,
     )
 
 
@@ -179,7 +180,7 @@ async def launch_judge(args: LaunchArgs, api_key: str, health_timeout: int,
 
     _log(f"Submitting judge job: {args.job_name}")
     _log(f"  Model: {args.served_model_name}")
-    _log(f"  Nodes: {args.nodes}, Time: {args.time}")
+    _log(f"  Nodes: {args.total_nodes}, Time: {args.time}")
 
     job_id, served_name = await launcher.launch_with_args(args)
     _log(f"Job submitted: {job_id}")
@@ -254,7 +255,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--served-model-name", help="Override served model name.")
     parser.add_argument("--framework", help="Override serving framework.")
     parser.add_argument("--framework-args", help="Override framework arguments.")
-    parser.add_argument("--nodes", type=int, help="Override number of SLURM nodes.")
+    parser.add_argument("--replicas", type=int, help="Override number of serving replicas.")
+    parser.add_argument("--nodes-per-replica", type=int, help="Override nodes per replica.")
     parser.add_argument("--time", help="Override SLURM time limit (HH:MM:SS).")
     parser.add_argument("--environment", help="Override environment TOML path.")
     parser.add_argument("--account", help="SLURM account (default: user's group).")
@@ -304,7 +306,8 @@ def main() -> None:
         "served_model_name": args.served_model_name,
         "framework": args.framework,
         "framework_args": args.framework_args,
-        "nodes": args.nodes,
+        "replicas": args.replicas,
+        "nodes_per_replica": args.nodes_per_replica,
         "time": args.time,
         "environment": args.environment,
         "account": args.account,
@@ -320,12 +323,13 @@ def main() -> None:
             _log(f"  served_model_name: {launch_args.served_model_name}")
             _log(f"  framework:        {launch_args.framework}")
             _log(f"  framework_args:   {launch_args.framework_args}")
-            _log(f"  nodes:            {launch_args.nodes}")
+            _log(f"  replicas:         {launch_args.topology.replicas}")
+            _log(f"  nodes_per_replica: {launch_args.topology.nodes_per_replica}")
+            _log(f"  total_nodes:      {launch_args.total_nodes}")
             _log(f"  time:             {launch_args.time}")
             _log(f"  environment:      {launch_args.environment}")
             _log(f"  account:          {launch_args.account}")
             _log(f"  partition:        {launch_args.partition}")
-            _log(f"  worker_port:      {launch_args.worker_port}")
             continue
 
         try:
