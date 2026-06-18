@@ -10,7 +10,7 @@
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --exclusive
 #SBATCH --partition=normal
-#SBATCH --time=03:59:00
+#SBATCH --time=11:59:00
 #SBATCH --exclude=nid006784
 #SBATCH --exclude=nid007014
 #SBATCH --exclude=nid007127
@@ -289,7 +289,15 @@ if echo "$TASKS" | grep -q "ruler"; then
     fi
 fi
 
-LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/swiss-ai/lm-evaluation-harness.git"
+# Select the lm-evaluation-harness fork per benchmark. bfcl_v3 and
+# swiss_ai_charter_alignment need the ymetz fork; everything else uses swiss-ai.
+# NOTE: assumes one benchmark per job (GROUP_SIZE=1). If a group mixes a
+# ymetz-only task with others, only one harness can be installed per job.
+if echo "$TASKS" | grep -qE "bfcl_v3|swiss_ai_charter_alignment"; then
+    LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/ymetz/lm-evaluation-harness.git"
+else
+    LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/swiss-ai/lm-evaluation-harness.git"
+fi
 if [[ -n "$LM_EVAL_HARNESS_BRANCH" ]]; then
     LM_EVAL_HARNESS_PIP_SPEC="${LM_EVAL_HARNESS_PIP_SPEC}@${LM_EVAL_HARNESS_BRANCH}"
 fi
