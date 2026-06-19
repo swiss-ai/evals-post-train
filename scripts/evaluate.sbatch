@@ -247,9 +247,11 @@ fi
 #,tokenizer_mode=slow"
 
 # if enable_thinking is set, add think_end_token (defaults to <|inner_suffix|>)
+# The token is quoted so its shell-special chars (< > |) survive re-parsing by the
+# inner `bash -lc` that runs $CMD, e.g. it resolves to ,think_end_token="</think>".
 if [[ $ENABLE_THINKING == "true" ]]; then
     echo "Thinking enabled, using think_end_token=$THINK_END_TOKEN"
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,think_end_token=$THINK_END_TOKEN"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,think_end_token=\"$THINK_END_TOKEN\""
 fi
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
