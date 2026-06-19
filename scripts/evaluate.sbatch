@@ -36,6 +36,7 @@ usage() {
 	echo " MAX_LENGTH: The maximum length of the input sequence to the model. By default, it is unset."
 	echo " MAX_NEW_TOKENS: The maximum number of new tokens to generate. By default, it is unset."
     echo " ENABLE_THINKING: Enable 'chain-of-thought' reasoning for thinking models."
+    echo " THINK_END_TOKEN: Token that marks the end of the thinking block (only used when ENABLE_THINKING=true). Default: <|inner_suffix|> (our internal checkpoints). Pass the shorthand 'think' for </think>, or any custom literal string."
 	echo " BOS: Set this to 'true' if you wish to prepend the BOS token when evaluating models."
 	echo " LOGS_ROOT: Where are your evaluation wandb&harness logs going to."
 	echo " TASKS: Tasks to run with lm eval harness."
@@ -102,9 +103,18 @@ warn_if_empty CSCS_SERVING_API \
 
 # optional eval arguments
 MAX_LENGTH=${MAX_LENGTH:-4096}
-MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
+# Leave unset by default so each task's own `max_gen_toks` (from its YAML) is used.
+# Set MAX_NEW_TOKENS explicitly only to force a global override across all tasks.
+MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-""}
 NUM_FEWSHOT=${NUM_FEWSHOT:-""}
 ENABLE_THINKING=${ENABLE_THINKING:-""}
+# Token marking the end of the thinking block (only used when ENABLE_THINKING=true).
+# Defaults to our internal checkpoints' '<|inner_suffix|>'. The shorthand 'think' is a
+# quick reference for '</think>'; any other value is used verbatim as a custom token.
+THINK_END_TOKEN=${THINK_END_TOKEN:-"<|inner_suffix|>"}
+if [[ "$THINK_END_TOKEN" == "think" ]]; then
+    THINK_END_TOKEN="</think>"
+fi
 
 # Task splitting support: set NUM_SPLITS and SPLIT_INDEX to distribute tasks across jobs
 NUM_SPLITS=${NUM_SPLITS:-1}
@@ -236,9 +246,10 @@ else
 fi
 #,tokenizer_mode=slow"
 
-# if enable_thinking is set, add think_end_token, defaults to </think>
+# if enable_thinking is set, add think_end_token (defaults to <|inner_suffix|>)
 if [[ $ENABLE_THINKING == "true" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,think_end_token=</think>"
+    echo "Thinking enabled, using think_end_token=$THINK_END_TOKEN"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,think_end_token=$THINK_END_TOKEN"
 fi
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
@@ -253,8 +264,13 @@ COMMON_EVAL_ARGS=(
 	--write_out
 	--confirm_run_unsafe_code
     # --cache_requests true - causes problems for long model names due to file name length limits
-    --gen_kwargs max_gen_toks=$MAX_NEW_TOKENS
 )
+
+# Only force max_gen_toks via the CLI when MAX_NEW_TOKENS is explicitly set; otherwise
+# each task's own max_gen_toks from its YAML takes precedence (CLI --gen_kwargs overrides YAML).
+if [[ -n "${MAX_NEW_TOKENS}" ]]; then
+    COMMON_EVAL_ARGS+=(--gen_kwargs max_gen_toks=$MAX_NEW_TOKENS)
+fi
 
 if [[ -n "${HARNESS_LIMIT}" ]]; then
     COMMON_EVAL_ARGS+=(--limit $HARNESS_LIMIT)
