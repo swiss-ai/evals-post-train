@@ -35,6 +35,7 @@ usage() {
 	echo " SIZE: The (approximate) size of the model in billions of parameters. Used to set model parallelism (needs to be set in larger models)."
 	echo " MAX_LENGTH: The maximum length of the input sequence to the model. By default, it is unset."
 	echo " MAX_NEW_TOKENS: The maximum number of new tokens to generate. By default, it is unset."
+    echo " ENABLE_THINKING: Enable 'chain-of-thought' reasoning for thinking models."
 	echo " BOS: Set this to 'true' if you wish to prepend the BOS token when evaluating models."
 	echo " LOGS_ROOT: Where are your evaluation wandb&harness logs going to."
 	echo " TASKS: Tasks to run with lm eval harness."
@@ -103,6 +104,7 @@ warn_if_empty CSCS_SERVING_API \
 MAX_LENGTH=${MAX_LENGTH:-4096}
 MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
 NUM_FEWSHOT=${NUM_FEWSHOT:-""}
+ENABLE_THINKING=${ENABLE_THINKING:-""}
 
 # Task splitting support: set NUM_SPLITS and SPLIT_INDEX to distribute tasks across jobs
 NUM_SPLITS=${NUM_SPLITS:-1}
@@ -217,9 +219,9 @@ VLLM_MEMORY_FRACTION=0.75
 # export VLLM_DISABLE_CUSTOM_ALL_REDUCE=1
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=False"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=$ENABLE_THINKING"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,load=$MODEL,tokenizer_type=HuggingFaceTokenizer,tokenizer_model=$TOKENIZER$MAYBE_REVISION,devices=4"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,load=$MODEL,tokenizer_type=HuggingFaceTokenizer,tokenizer_model=$TOKENIZER$MAYBE_REVISION,devices=4,enable_thinking=$ENABLE_THINKING"
     if [[ "$CKPT_ITER" =~ ^[0-9]+$ ]]; then
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,ckpt_step=$CKPT_ITER"
     elif [[ "$CKPT_ITER" == "latest" ]]; then
@@ -228,11 +230,16 @@ elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
         die "CKPT_ITER must be an integer or 'latest' when LM_EVAL_BACKEND=megatron_lm (got '$CKPT_ITER')."
     fi
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,enable_thinking=$ENABLE_THINKING"
 else
     die "Unsupported LM_EVAL_BACKEND: $LM_EVAL_BACKEND"
 fi
 #,tokenizer_mode=slow"
+
+# if enable_thinking is set, add think_end_token, defaults to </think>
+if [[ $ENABLE_THINKING == "true" ]]; then
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,think_end_token=</think>"
+fi
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
 
