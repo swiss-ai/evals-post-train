@@ -238,7 +238,7 @@ fi
 
 # if enable_thinking is set, add think_end_token, defaults to </think>
 if [[ $ENABLE_THINKING == "true" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,think_end_token=</think>"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,think_end_token=\"</think>\""
 fi
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
