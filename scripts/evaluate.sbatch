@@ -9,8 +9,9 @@
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --exclusive
+#SBATCH --reservation=SD-69241-apertus-1-5-0
 #SBATCH --partition=normal
-#SBATCH --time=03:59:00
+#SBATCH --time=11:59:00
 #SBATCH --exclude=nid006784
 #SBATCH --exclude=nid007014
 #SBATCH --exclude=nid007127
@@ -289,7 +290,7 @@ if echo "$TASKS" | grep -q "ruler"; then
     fi
 fi
 
-LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/swiss-ai/lm-evaluation-harness.git"
+LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/ymetz/lm-evaluation-harness.git"
 if [[ -n "$LM_EVAL_HARNESS_BRANCH" ]]; then
     LM_EVAL_HARNESS_PIP_SPEC="${LM_EVAL_HARNESS_PIP_SPEC}@${LM_EVAL_HARNESS_BRANCH}"
 fi

@@ -37,7 +37,6 @@ drop
 lambada
 lambada_multilingual
 mlogiqa_gen
-xcopa
 xnli
 # Instruction Following
 alpaca_eval

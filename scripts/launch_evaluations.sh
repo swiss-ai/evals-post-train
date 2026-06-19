@@ -160,7 +160,7 @@ fi
 
 # --- Environment defaults ---
 export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
-export WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
+export WANDB_PROJECT=${WANDB_PROJECT:-apertus-1.5-post-training-v0.0}
 export NUM_SPLITS
 export SBATCH_SCRIPT=${SBATCH_SCRIPT:-scripts/evaluate.sbatch}
 # Global checkpoint iteration override for Megatron checkpoints.
