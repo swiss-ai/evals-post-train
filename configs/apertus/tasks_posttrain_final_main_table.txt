@@ -21,8 +21,8 @@ minerva_math/exact_match
 mathqa/acc
 gsm8k_platinum_cot_zeroshot/exact_match
 minerva_math500/exact_match
-aime24/exact_match
-aime25/exact_match
+aime24/exact_match,mean@8
+aime25/exact_match,mean@8
 # Coding
 humaneval_instruct/pass@10
 mbpp_instruct/pass_at_1

@@ -1,4 +1,4 @@
 amc23/acc
 minerva_math500/acc
-aime24/acc
-aime25/acc
+aime24/exact_match,mean@8
+aime25/exact_match,mean@8

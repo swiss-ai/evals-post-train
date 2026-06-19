@@ -6,5 +6,5 @@ pubmedqa/acc
 meqsum/rouge1
 meddialog_qsumm/rouge1
 gpqa_main_cot_zeroshot/exact_match,ordered-extract
-aime/exact_match
+aime/exact_match,mean@8
 acp_bench/exact_match
