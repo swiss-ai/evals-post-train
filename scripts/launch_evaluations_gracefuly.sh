@@ -32,6 +32,7 @@ TASK_FILE=""
 MODEL=""
 FORCE_TASKS=""
 TOKENIZER=""
+ENABLE_THINKING=0
 
 # --- Argument Parsing ---
 while [[ $# -gt 0 ]]; do
@@ -49,6 +50,7 @@ while [[ $# -gt 0 ]]; do
         --merge_only) MERGE_ONLY=1; shift 1 ;;
         --force_tasks) FORCE_TASKS="$2"; shift 2 ;;
         --tokenizer) TOKENIZER="$2"; shift 2 ;;
+        --enable_thinking) ENABLE_THINKING=1; shift 1 ;;
         *) echo "Error: Unknown argument '$1'"; exit 1 ;;
     esac
 done
@@ -59,9 +61,17 @@ if [[ -z "$TASK_FILE" || -z "$MODEL" ]]; then
 fi
 
 MODEL_BASENAME=$(basename "${MODEL%/}")
-MAIN_HARNESS_DIR="$EVAL_PREFIX/$MODEL_BASENAME/harness"
+# When thinking is enabled, route logs/results to a separate "<model>-think"
+# directory and W&B run so they don't collide with (or get skipped because of)
+# previously-saved non-thinking eval results. Used as the directory component
+# for the completion-scan, the eval launch (--name), and aggregation.
+RUN_BASENAME="$MODEL_BASENAME"
+if [[ $ENABLE_THINKING -eq 1 ]]; then
+    RUN_BASENAME="${MODEL_BASENAME}-think"
+fi
+MAIN_HARNESS_DIR="$EVAL_PREFIX/$RUN_BASENAME/harness"
 SINGLE_EVAL_PREFIX="${EVAL_PREFIX/$WANDB_PROJECT/${WANDB_PROJECT}-single}"
-SINGLE_HARNESS_DIR="$SINGLE_EVAL_PREFIX/$MODEL_BASENAME/harness"
+SINGLE_HARNESS_DIR="$SINGLE_EVAL_PREFIX/$RUN_BASENAME/harness"
 
 declare -a ORDERED_TASKS
 while IFS= read -r line || [[ -n "$line" ]]; do
@@ -139,7 +149,7 @@ submit_aggregator() {
     # Pass positional arguments to aggregate_splits.sbatch
     local agg_cmd=("sbatch" "--account" "$ACCOUNT")
     if [[ -n "$RESERVATION" ]]; then agg_cmd+=("--reservation" "$RESERVATION"); fi
-    agg_cmd+=("scripts/aggregate_splits.sbatch" "$MODEL" "$MODEL_BASENAME")
+    agg_cmd+=("scripts/aggregate_splits.sbatch" "$MODEL" "$RUN_BASENAME")
     
     if [[ $DEBUG -eq 1 ]]; then
         echo -e "\n[DEBUG] Would submit aggregator: ${agg_cmd[*]}"
@@ -180,7 +190,7 @@ for task in "${ORDERED_TASKS[@]}"; do
     fi
 done
 
-echo -e "\nModel: $MODEL_BASENAME"
+echo -e "\nModel: $RUN_BASENAME"
 echo "Total expected tasks: ${#ORDERED_TASKS[@]}"
 echo "Successfully completed tasks: ${#COMPLETED_MAP[@]}"
 echo "Missing tasks: ${#MISSING_TASKS[@]}"
@@ -215,6 +225,7 @@ echo -e "\nLaunching $num_missing missing tasks in $num_groups groups (group_siz
 for group in "${TASK_GROUPS[@]}"; do
     launch_cmd=("bash" "scripts/launch_evaluations.sh" "single" "--task" "$group" "--model" "$MODEL" "--chat-template")
     if [[ -n "$TOKENIZER" ]]; then launch_cmd+=("--tokenizer" "$TOKENIZER"); fi
+    if [[ $ENABLE_THINKING -eq 1 ]]; then launch_cmd+=("--enable-thinking" "--name" "$RUN_BASENAME"); fi
 
     if [[ $DEBUG -eq 1 ]]; then
         echo "[DEBUG] Would launch: WANDB_MODE=disabled SBATCH_ACCOUNT=$ACCOUNT SBATCH_RESERVATION=$RESERVATION ${launch_cmd[*]}"
@@ -261,6 +272,10 @@ if [[ ${#JOB_IDS[@]} -gt 0 ]]; then
 
     if [[ -n "$TOKENIZER" ]]; then
         WRAP_CMD="$WRAP_CMD --tokenizer \"$TOKENIZER\""
+    fi
+
+    if [[ $ENABLE_THINKING -eq 1 ]]; then
+        WRAP_CMD="$WRAP_CMD --enable_thinking"
     fi
 
     WRAP_CMD="$WRAP_CMD --merge_only"

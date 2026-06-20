@@ -76,6 +76,13 @@ APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-true}
 HARNESS_LIMIT=${HARNESS_LIMIT:-""}
 LM_EVAL_HARNESS_BRANCH=${LM_EVAL_HARNESS_BRANCH:-""}
 
+# Thinking/deliberation toggle (vLLM backend only). Forwarded to the chat
+# template via the enable_thinking model arg. Default off to preserve prior behavior.
+case "${ENABLE_THINKING:-}" in
+	true|True|1|yes|on) ENABLE_THINKING=True ;;
+	*) ENABLE_THINKING=False ;;
+esac
+
 export HF_TOKEN="${HF_TOKEN:-$(tr -d '\r\n' < ./scripts/hf_token.txt)}"
 export WANDB_API_KEY="${WANDB_API_KEY:-$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)}"
 export CSCS_SERVING_API="${CSCS_SERVING_API:-$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)}"
@@ -100,7 +107,14 @@ warn_if_empty CSCS_SERVING_API \
 
 # optional eval arguments
 MAX_LENGTH=${MAX_LENGTH:-4096}
-MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
+# Thinking traces need more generation budget; raise the default only when thinking
+# is on (env override still wins). 4096 covers most tasks; consider 8192 for the
+# hardest reasoning/competition-math benchmarks (aime, hendrycks_math, gpqa).
+if [[ $ENABLE_THINKING == True ]]; then
+	MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-4096}
+else
+	MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
+fi
 NUM_FEWSHOT=${NUM_FEWSHOT:-""}
 
 # Task splitting support: set NUM_SPLITS and SPLIT_INDEX to distribute tasks across jobs
@@ -153,7 +167,7 @@ GPUS_PER_NODE=4
 
 # Print configuration.
 echo "Configuration set:"
-printf "MODEL=$MODEL\nNAME=$NAME\nTOKENIZER=$TOKENIZER\nBS=$BS\nREVISION=$REVISION\nSIZE=$SIZE\nHARNESS_LIMIT=$HARNESS_LIMIT\nLM_EVAL_HARNESS_BRANCH=$LM_EVAL_HARNESS_BRANCH\nBOS=$BOS\nTASKS=$TASKS\nMAX_LENGTH=$MAX_LENGTH\nWANDB_ENTITY=$WANDB_ENTITY\nWANDB_PROJECT=$WANDB_PROJECT\nLM_EVAL_BACKEND=$LM_EVAL_BACKEND\nLHF_HOME=$HF_HOME\n\n"
+printf "MODEL=$MODEL\nNAME=$NAME\nTOKENIZER=$TOKENIZER\nBS=$BS\nREVISION=$REVISION\nSIZE=$SIZE\nHARNESS_LIMIT=$HARNESS_LIMIT\nLM_EVAL_HARNESS_BRANCH=$LM_EVAL_HARNESS_BRANCH\nBOS=$BOS\nTASKS=$TASKS\nMAX_LENGTH=$MAX_LENGTH\nWANDB_ENTITY=$WANDB_ENTITY\nWANDB_PROJECT=$WANDB_PROJECT\nLM_EVAL_BACKEND=$LM_EVAL_BACKEND\nENABLE_THINKING=$ENABLE_THINKING\nLHF_HOME=$HF_HOME\n\n"
 
 # Generic envs.
 export MASTER_ADDR=$(hostname)
@@ -216,7 +230,14 @@ VLLM_MEMORY_FRACTION=0.75
 # export VLLM_DISABLE_CUSTOM_ALL_REDUCE=1
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=False"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=$ENABLE_THINKING"
+    if [[ $ENABLE_THINKING == True ]]; then
+        # Strip the deliberation span before scoring: the chat template closes
+        # thinking with <|inner_suffix|>, and the harness keeps only the text
+        # after this token (postprocess_generated_text). skip_special_tokens
+        # defaults to False in this fork, so the delimiter survives decoding.
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,think_end_token=<|inner_suffix|>"
+    fi
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,load=$MODEL,tokenizer_type=HuggingFaceTokenizer,tokenizer_model=$TOKENIZER$MAYBE_REVISION,devices=4"
     if [[ "$CKPT_ITER" =~ ^[0-9]+$ ]]; then
@@ -245,7 +266,9 @@ COMMON_EVAL_ARGS=(
 	--write_out
 	--confirm_run_unsafe_code
     # --cache_requests true - causes problems for long model names due to file name length limits
-    --gen_kwargs max_gen_toks=$MAX_NEW_TOKENS
+    # max_gen_toks is resolved at run time (see COMPUTE_MAX_GEN_TOKS below): a floor
+    # of MAX_NEW_TOKENS that never lowers a task's own larger YAML value.
+    --gen_kwargs max_gen_toks=\$EFFECTIVE_MAX_GEN_TOKS
 )
 
 if [[ -n "${HARNESS_LIMIT}" ]]; then
@@ -330,7 +353,10 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
 fi
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    CMD="lm_eval --model $LM_EVAL_BACKEND --model_args=$COMMON_MODEL_ARGS ${COMMON_EVAL_ARGS[@]}"
+    # Single-quote model_args: think_end_token=<|inner_suffix|> contains shell
+    # metacharacters (< | >) and $CMD is re-evaluated via `bash -lc`. With no
+    # special chars (thinking off) the quotes are a no-op.
+    CMD="lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
     CMD="accelerate launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args=$COMMON_MODEL_ARGS ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
@@ -357,6 +383,17 @@ export SPACY_DATA=$SPACY_DATA
 export XDG_CACHE_HOME=$XDG_CACHE_HOME
 mkdir -p $HF_DATASETS_CACHE $NLTK_DATA $TRITON_CACHE_DIR $TIKTOKEN_CACHE_DIR $PYTHONUSERBASE $MPLCONFIGDIR $SPACY_DATA
 "
+
+# Resolve the effective generation budget inside the container, after the harness
+# is installed (so its task YAMLs are available): a floor of MAX_NEW_TOKENS that is
+# never lowered below a task's own larger YAML max_gen_toks (e.g. AIME's 32768).
+# Fail-safe: the helper falls back to MAX_NEW_TOKENS on any error. Prepended to
+# $CMD so $EFFECTIVE_MAX_GEN_TOKS is set before lm_eval runs, in every backend block.
+COMPUTE_MAX_GEN_TOKS="
+EFFECTIVE_MAX_GEN_TOKS=\$(cd $PWD && python -m scripts.get_max_gen_toks --tasks '$TASKS' --floor $MAX_NEW_TOKENS 2>/dev/null || echo $MAX_NEW_TOKENS)
+echo \"Effective max_gen_toks: \$EFFECTIVE_MAX_GEN_TOKS (floor $MAX_NEW_TOKENS)\"
+"
+CMD="$COMPUTE_MAX_GEN_TOKS$CMD"
 
 if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
   srun -n 1 --mpi=pmix -ul --environment=./containers/env_vllm.toml bash -lc "
