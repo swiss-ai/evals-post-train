@@ -13,7 +13,6 @@
 #   apertus-previous - Apertus previous benchmark suite (from 1.0)
 #   eval-debug       - Small set of loglikelihood and generative benchmarks to test eval script
 #   single           - Run a single task (requires --task <task_name>)
-#   non-gated        - Subset of default with non swiss-ai gated datasets (todo: full access)
 
 #
 # Olmo3:
@@ -131,7 +130,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Validate mode ---
-VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "posttrain" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "non-gated" "single" "custom")
+VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "posttrain" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "single" "custom")
 if [[ ! " ${VALID_MODES[*]} " =~ " ${EVAL_MODE} " ]]; then
     echo "Error: Invalid mode '$EVAL_MODE'"
     echo "Valid modes: ${VALID_MODES[*]}"
@@ -230,10 +229,6 @@ case "$EVAL_MODE" in
         ;;
     "eval-debug")
         export TASKS=./configs/apertus/eval_debug.txt
-        export TABLE_METRICS=./configs/olmo/eval_debug_main_table.txt
-        ;;
-    "non-gated")
-        export TASKS=./configs/apertus/tasks_non_gated.txt
         export TABLE_METRICS=./configs/olmo/eval_debug_main_table.txt
         ;;
     "single")

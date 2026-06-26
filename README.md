@@ -30,21 +30,33 @@ bash scripts/launch_evaluations.sh single --task multijail --model meta-llama/Ll
 
 ### Benchmark Suites
 
+The launcher selects a benchmark suite from its first positional argument (`<mode>`). Apertus suites are defined in `configs/apertus/`, OLMo3 suites in `configs/olmo/`.
+
+**Apertus suites** (`configs/apertus/`)
+
+| Mode | Task list | Tasks | Description |
+|------|-----------|-------|-------------|
+| `default` | `tasks_default.txt` | 48 | Full Apertus 1.5 post-training suite: knowledge, math, code, reasoning, multilingual, instruction following, bias, cultural knowledge, safety |
+| `posttrain` | `tasks_posttrain_final.txt` | 45 | Post-training suite incl. chat/arena (alpaca_eval, arena_hard_v01/v2), AIME, MATH-500, o(r)bench |
+| `multi-lingual` | `tasks_multilingual.txt` | 12 | Multilingual-only subset (global_mmlu, mgsm, hellaswag_multilingual, include, cultural_bench, multi-if, aya_redteaming, ...) |
+| `apertus-previous` | `tasks_english.txt` | 19 | Previous (Apertus 1.0) English benchmark suite |
+| `pretrain` | `tasks_pretrain.txt` | 30 | Pretraining suite (base-model loglikelihood/MC variants, few-shot MMLU); logs to W&B project `apertus-1.5-pre-training-v0.0` |
+| `eval-debug` | `eval_debug.txt` | 8 | Small mix of loglikelihood + generative tasks to smoke-test the eval pipeline |
+| `custom` | (none) | — | No suite configured; export `TASKS` and `TABLE_METRICS` yourself before launching |
+| `single` | `--task` | 1 | One task, user-specified through `--task` (comma-separated tasks allowed) |
+
+**OLMo3 suites** (`configs/olmo/`)
+
 | Mode | Tasks | Description |
 |------|-------|-------------|
-| `default` | 40 tasks | Full Apertus benchmark suite with basic evaluation |
-| `multi-lingual` | 10 tasks | Apertus benchmark suite with multi-lingual evaluation |
-| `pretrain` | 35 tasks | Apertus pretraining benchmark suite |
-| `apertus-previous` | 14 tasks | Apertus benchmark suite with multi-lingual evaluation |
 | `olmo-easy` | 21 tasks | Base Easy Suite: perplexity/BPB-style evaluation (mmlu, hellaswag, arc, etc.) |
 | `olmo-main` | 23 tasks | Base Main Suite: generation + MC (gsm8k_cot, humaneval, drop, etc.) |
 | `olmo-heldout` | 2 tasks | Held-out Suite: mmlu_pro, bbh |
 | `olmo-safety` | 4 tasks | Safety Suite: harmbench, toxigen, wmdp, bbq |
 | `olmo-longcontext` | 1 task | Long-Context: RULER (8192 tokens) |
 | `olmo-complete` | 30 tasks | Union of all above (excludes long-context), deduplicated |
-| `single` | 1 task | One task, user-specified through `--task` |
 
-Each mode has a corresponding task list (`configs/olmo3_<mode>.txt`) and metric config (`configs/olmo3_<mode>_main_table.txt`). Results are logged to separate W&B projects per mode (e.g., `swissai-evals-olmo3-easy`).
+Each mode maps to a task list and a metric config (`*_main_table.txt`) in the same directory. OLMo3 modes log to a per-mode W&B project (the base `WANDB_PROJECT` with a `-olmo-<suite>` suffix, e.g. `swissai-evals-test-olmo-easy`); the `single` mode appends `-single`.
 
 ### Model Selection Modes
 
@@ -65,17 +77,27 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 bash scripts/launch_evaluations.sh <mode>
 ```
 
-### Options
+### Options / Key Hyperparameters
 
 | Flag | Description |
 |------|-------------|
 | `--name <name>` | Override the auto-derived evaluation run name |
-| `--chat-template` | Force enable chat template |
+| `--task <task>` | Task name(s) for `single` mode (single task or comma-separated list) |
+| `--chat-template` | Force enable chat template (auto-detected for Instruct/Chat/SFT/DPO/-it/-aligned models) |
 | `--no-chat-template` | Force disable chat template |
 | `--tokenizer <path>` | Custom tokenizer (default: same as model) |
 | `--num-fewshot N` | Override num_fewshot globally. Tasks with explicit `num_fewshot: 0` in their YAML are never overridden. OLMo3 paper uses 5-shot for most MC tasks. |
-| `--backend <hf\|vllm>` | Inference backend (default: from sbatch script) |
-| `--splits K` | Split task list across K parallel SLURM nodes per model |
+| `--backend <hf\|vllm\|megatron_lm>` | Inference backend (default: from sbatch script). `vllm` recommended. |
+| `--splits K` | Split task list across K parallel SLURM nodes per model (auto-clamped to the task count) |
+| `--limit N` | Limit number of samples per task (forwarded as `--limit` to lm-eval-harness; default: no limit). Useful for quick sanity checks. |
+| `--megatron-iter <iter>` | For Megatron-LM checkpoints, the iteration to evaluate (e.g. `8926`); defaults to `latest`. Exported as `CKPT_ITERATION`. |
+| `--harness-branch B` | Install lm-evaluation-harness from a specific branch/ref (default: repo default branch) |
+| `--judge <none\|auto\|preset>` | Judge-model control for LLM-as-a-judge tasks (alpaca_eval, arena_hard_v01/v2, multijail, aya_redteaming). `none` (default) disables auto-launch; `auto` scans the task list and launches needed judges; a preset name (e.g. `qwen3.5-27b`, `llama-3.3-70b`) launches that judge. |
+| `--judge-args <str>` | Extra arguments forwarded to `scripts/launch_judge.py` |
+| `--keep-judge` | Do not auto-cancel the judge model after evaluation finishes (otherwise a cleanup job cancels it via `afterany` dependency) |
+
+> [!TIP]
+> Inference hyperparameters such as batch size (`BS`), `MAX_LENGTH`, `MAX_NEW_TOKENS`, and `SIZE` (model size in billions, for parallelism) are not exposed as launcher flags — set them as environment variables consumed by `evaluate.sbatch` (see [SBATCH Scripts](#sbatch-scripts)).
 
 
 ### Examples
@@ -96,6 +118,48 @@ bash scripts/launch_evaluations.sh olmo-safety \
 #### Deprecated option:
 
 | `--bos` | Prepend BOS token (deprecated: previously for Apertus models, now automatically infered from chat temlate) |
+
+---
+
+## Graceful / Resumable Launcher
+
+`scripts/launch_evaluations_gracefuly.sh` is a **resumable, idempotent wrapper** around `launch_evaluations.sh`. Instead of launching a whole suite as one job, it inspects which tasks already have results on disk and only (re)launches the *missing* ones, then automatically aggregates everything once complete. This makes it the recommended entry point for large post-training suites where individual tasks may fail or time out and you don't want to re-run the entire suite.
+
+```bash
+bash scripts/launch_evaluations_gracefuly.sh \
+  --task_file configs/apertus/tasks_posttrain_final.txt \
+  --model /capstor/store/.../apertus-1.5-checkpoint \
+  --table_metrics configs/apertus/tasks_posttrain_final_main_table.txt \
+  --wandb_entity apertus --wandb_project apertus-1.5-post-training-v0.0 \
+  --group_size 1
+```
+
+### How it works
+
+1. **Scan**: reads `--task_file`, then scans the model's harness output directories (`<eval_prefix>/<model>/harness/eval_*/results_*.json`, plus the `-single` project variant) and marks each task that already has a result.
+2. **Diff**: computes the set of *missing* tasks (expected − completed).
+3. **Launch missing only**: groups missing tasks into batches of `--group_size` and submits each group via `launch_evaluations.sh single --task <group> --chat-template` (with `WANDB_MODE=disabled` for the per-task runs).
+4. **Aggregate**: submits a follow-up job (`--dependency=afterok:<all_task_jobs>`) that re-runs this same script in `--merge_only` mode, which rebuilds the split markers and submits `aggregate_splits.sbatch` to merge all results and upload the final run to W&B.
+5. If no tasks are missing on the first pass, it skips straight to marker rebuild + aggregation.
+
+### Differences vs. `launch_evaluations.sh`
+
+| Aspect | `launch_evaluations.sh` | `launch_evaluations_gracefuly.sh` |
+|--------|-------------------------|-----------------------------------|
+| Purpose | One-shot launch of a full suite (or split across nodes) | Resume/complete a partially-finished suite; only launches missing tasks |
+| Suite selection | Positional `<mode>` (named suite) | Explicit `--task_file <path>` (any task list) |
+| Model arg | `--model` / `--script` / default array | `--model` only |
+| Granularity | One job per model (optionally `--splits K`) | One job per **task group** (`--group_size`, default 1 = per-task) |
+| Idempotency | Re-runs everything every time | Skips tasks that already have results on disk |
+| Aggregation | Triggered by `--splits` flow | Always; chained automatically via `afterok` + `--merge_only` |
+| W&B during task runs | Uploads per job | `WANDB_MODE=disabled` per task; only the final aggregator uploads |
+| SLURM placement | Defaults from sbatch script | `--account` / `--reservation` flags (cache dirs redirected to `$SCRATCH/.cache`) |
+| Extra controls | judge / splits / backend / fewshot flags | `--force_tasks <substr,...>` to force re-eval, `--merge_only`, `--debug` (dry run) |
+
+Key flags: `--task_file` and `--model` (required), `--table_metrics`, `--eval_prefix`, `--account`, `--reservation`, `--wandb_entity`, `--wandb_project`, `--group_size`, `--tokenizer`, `--force_tasks <comma-separated substrings>` (drop matching tasks from the completed set to re-run them), `--merge_only` (skip launching, just rebuild markers + aggregate), and `--debug` (dry run — prints what would be submitted without submitting).
+
+> [!NOTE]
+> Under the hood the graceful launcher delegates each task to `launch_evaluations.sh` in `single` mode and always applies the chat template, so it is intended primarily for post-training (instruct) checkpoints.
 
 ---
 
@@ -123,6 +187,8 @@ evals/
 │   ├── olmo/                        # OLMo3 benchmark suites (easy, main, heldout, safety, longcontext, complete)
 ├── scripts/
 │   ├── launch_evaluations.sh  # Main launcher (recommended entry point)
+│   ├── launch_evaluations_gracefuly.sh # Resumable launcher (only runs missing tasks, auto-aggregates)
+│   ├── launch_judge.py        # Launches judge models for LLM-as-a-judge tasks
 │   ├── evaluate.sbatch        # SLURM job script for HF/vLLM model evaluation
 │   ├── aggregate_splits.sbatch   # Aggregation job for split evaluations
 │   └── alignment/                   # Python package for W&B upload and data handling
