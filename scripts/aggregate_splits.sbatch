@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=a-infra01-1
+#SBATCH --account=infra01
 #SBATCH --cpus-per-task=16
 #SBATCH --job-name=eval-aggregate
 #SBATCH --mem=64000
@@ -78,7 +78,7 @@ srun -ul --mpi=pmix --environment=./containers/env.toml bash -c " \
     pip install --no-cache-dir --upgrade \"git+https://github.com/swiss-ai/lm-evaluation-harness.git\" && \
     pip install --no-cache-dir --upgrade --no-deps \
         \"huggingface-hub>=1.3.0,<2.0\" \
-        \"transformers==5.1.0\" && \
+        \"transformers>=5.4.0\" && \
     $MERGE_CMD
 "
 
