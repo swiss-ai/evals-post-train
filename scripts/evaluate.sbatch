@@ -76,6 +76,7 @@ WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
 LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-true}
+CHAT_TEMPLATE_PATH=${CHAT_TEMPLATE_PATH:-""}
 HARNESS_LIMIT=${HARNESS_LIMIT:-""}
 LM_EVAL_HARNESS_BRANCH=${LM_EVAL_HARNESS_BRANCH:-""}
 
@@ -230,6 +231,8 @@ VLLM_MEMORY_FRACTION=0.75
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=$ENABLE_THINKING"
+elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=$ENABLE_THINKING"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,load=$MODEL,tokenizer_type=HuggingFaceTokenizer,tokenizer_model=$TOKENIZER$MAYBE_REVISION,devices=4,enable_thinking=$ENABLE_THINKING"
     if [[ "$CKPT_ITER" =~ ^[0-9]+$ ]]; then
@@ -248,10 +251,16 @@ fi
 
 # if enable_thinking is set, add think_end_token (defaults to <|inner_suffix|>)
 # The token is quoted so its shell-special chars (< > |) survive re-parsing by the
-# inner `bash -lc` that runs $CMD, e.g. it resolves to ,think_end_token="</think>".
+# inner `bash -lc` that runs $CMD, e.g. it resolves to ,think_end_token="<tool_call>".
 if [[ $ENABLE_THINKING == "true" ]]; then
     echo "Thinking enabled, using think_end_token=$THINK_END_TOKEN"
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,think_end_token=\"$THINK_END_TOKEN\""
+fi
+
+# apply custom chat template from path if specified
+if [[ -n "$CHAT_TEMPLATE_PATH" ]]; then
+    echo "Applying custom chat template from path: $CHAT_TEMPLATE_PATH"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,chat_template_path=$CHAT_TEMPLATE_PATH"
 fi
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
@@ -268,11 +277,15 @@ COMMON_EVAL_ARGS=(
     # --cache_requests true - causes problems for long model names due to file name length limits
 )
 
+GEN_KWARGS=(skip_special_tokens=false)
+
 # Only force max_gen_toks via the CLI when MAX_NEW_TOKENS is explicitly set; otherwise
-# each task's own max_gen_toks from its YAML takes precedence (CLI --gen_kwargs overrides YAML).
+# each task's own max_gen_toks from its YAML takes precedence.
 if [[ -n "${MAX_NEW_TOKENS}" ]]; then
-    COMMON_EVAL_ARGS+=(--gen_kwargs max_gen_toks=$MAX_NEW_TOKENS)
+    GEN_KWARGS+=(max_gen_toks="$MAX_NEW_TOKENS")
 fi
+
+COMMON_EVAL_ARGS+=(--gen_kwargs "$(IFS=,; echo "${GEN_KWARGS[*]}")")
 
 if [[ -n "${HARNESS_LIMIT}" ]]; then
     COMMON_EVAL_ARGS+=(--limit $HARNESS_LIMIT)
