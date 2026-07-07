@@ -49,9 +49,6 @@ bbq
 toxigen
 wmdp
 orbench
-harmbench
-polyglotoxicitypromptsllama
-realtoxicitypromptsllama
 # Tool Use
 bfcl_v3
 # Charter Alignment
