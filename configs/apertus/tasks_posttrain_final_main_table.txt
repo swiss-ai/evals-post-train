@@ -50,8 +50,8 @@ toxigen/acc
 wmdp/acc
 orbench/refusal
 harmbench/score
-realtoxicitypromptsllama/score
-polyglotoxicitypromptsllama/score
+polyglotoxicitypromptsllama_small/score
+realtoxicitypromptsllama_small/score
 # Tool Use
 bfcl_v3/acc
 # Charter Alignment 
