@@ -16,6 +16,7 @@ CONFIG_FILE="./configs/apertus/tasks_posttrain_final.txt"
 TABLE_METRICS="./configs/apertus/tasks_posttrain_final_main_table.txt"
 FORCE_TASKS=""
 TOKENIZER=""
+ENABLE_THINKING=0
 
 # --- Argument Parsing ---
 while [[ $# -gt 0 ]]; do
@@ -38,6 +39,7 @@ while [[ $# -gt 0 ]]; do
         --force_tasks=*) FORCE_TASKS="${1#*=}"; shift 1 ;;
         --tokenizer) TOKENIZER="$2"; shift 2 ;;
         --tokenizer=*) TOKENIZER="${1#*=}"; shift 1 ;;
+        --enable_thinking) ENABLE_THINKING=1; shift 1 ;;
         --debug) DEBUG=1; shift 1 ;;
         *)
             echo "Error: Unknown argument '$1'"
@@ -85,6 +87,10 @@ for model_path in "${MODEL_DIRS[@]}"; do
 
     if [[ -n "$TOKENIZER" ]]; then
         CMD+=("--tokenizer" "$TOKENIZER")
+    fi
+
+    if [[ $ENABLE_THINKING -eq 1 ]]; then
+        CMD+=("--enable_thinking")
     fi
 
     if [[ $DEBUG -eq 1 ]]; then CMD+=("--debug"); fi

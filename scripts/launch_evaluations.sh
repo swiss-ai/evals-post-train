@@ -46,6 +46,7 @@
 #   --splits K           - Split tasks across K parallel nodes per model
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
+#   --enable-thinking    - Enable model thinking/deliberation (vLLM backend; sets enable_thinking=True in the chat template)
 #
 # Examples:
 #   # Single HF model, auto-detect everything
@@ -85,6 +86,7 @@ HARNESS_LIMIT=""
 MEGATRON_ITER=""
 SINGLE_TASK=""
 HARNESS_BRANCH=""
+ENABLE_THINKING_FLAG=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -102,6 +104,7 @@ while [[ $# -gt 0 ]]; do
         --megatron-iter) MEGATRON_ITER="$2";            shift 2 ;;
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --harness-branch) HARNESS_BRANCH="$2";        shift 2 ;;
+        --enable-thinking|--enable_thinking) ENABLE_THINKING_FLAG="true"; shift ;;
         *)
             echo "Error: Unknown option '$1'"
             echo "Run with no arguments for usage."
@@ -280,6 +283,9 @@ echo "  Splits: $NUM_SPLITS"
 # --- Harness limit override ---
 [[ -n "$HARNESS_LIMIT" ]] && export HARNESS_LIMIT="$HARNESS_LIMIT"
 [[ -n "$HARNESS_BRANCH" ]] && export LM_EVAL_HARNESS_BRANCH="$HARNESS_BRANCH"
+
+# --- Thinking toggle (forwarded to evaluate.sbatch via sbatch --export=ALL) ---
+[[ -n "$ENABLE_THINKING_FLAG" ]] && export ENABLE_THINKING="$ENABLE_THINKING_FLAG"
 
 # --- Dispatch based on model selection mode ---
 
