@@ -37,7 +37,7 @@ The launcher selects a benchmark suite from its first positional argument (`<mod
 | Mode | Task list | Tasks | Description |
 |------|-----------|-------|-------------|
 | `default` | `tasks_default.txt` | 48 | Full Apertus 1.5 post-training suite: knowledge, math, code, reasoning, multilingual, instruction following, bias, cultural knowledge, safety |
-| `posttrain` | `tasks_posttrain_final.txt` | 45 | Post-training suite incl. chat/arena (alpaca_eval, arena_hard_v01/v2), AIME, MATH-500, o(r)bench |
+| `posttrain` | `tasks_posttrain_final.txt` | 48 | Post-training suite incl. chat/arena (alpaca_eval, arena_hard_v01/v2), AIME, MATH-500, o(r)bench, system-prompt adherence (RealGuardrails: S-IFEval, TensorTrust, S-RuLES) |
 | `multi-lingual` | `tasks_multilingual.txt` | 12 | Multilingual-only subset (global_mmlu, mgsm, hellaswag_multilingual, include, cultural_bench, multi-if, aya_redteaming, ...) |
 | `apertus-previous` | `tasks_english.txt` | 19 | Previous (Apertus 1.0) English benchmark suite |
 | `pretrain` | `tasks_pretrain.txt` | 30 | Pretraining suite (base-model loglikelihood/MC variants, few-shot MMLU); logs to W&B project `apertus-1.5-pre-training-v0.0` |

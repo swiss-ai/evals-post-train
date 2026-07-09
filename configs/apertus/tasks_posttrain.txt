@@ -28,6 +28,13 @@ include_base_44_gen_0shot
 mlogiqa_gen
 truthfulqa_multilingual_mc2
 # arena_hard_v01
+# System Prompt
+# RealGuardrails / SystemCheck: adherence to instructions placed in the system message.
+# NOTE: run the s_rules umbrella task but report the nested realguardrails_s_rules_br group
+# (see tasks_posttrain_main_table.txt). Requires the chat template to be applied.
+realguardrails_s_ifeval
+realguardrails_tensortrust
+realguardrails_s_rules
 
 #OOD:
 # nq_open

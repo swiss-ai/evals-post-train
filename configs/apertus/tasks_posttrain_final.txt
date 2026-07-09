@@ -52,4 +52,11 @@ orbench
 harmbench
 polyglotoxicitypromptsllama
 realtoxicitypromptsllama
+# System Prompt
+# RealGuardrails / SystemCheck: adherence to instructions placed in the system message.
+# NOTE: run the s_rules umbrella task but report the nested realguardrails_s_rules_br group
+# (see the /prompt_level_strict_acc and /passed keys in the *_main_table.txt).
+realguardrails_s_ifeval
+realguardrails_tensortrust
+realguardrails_s_rules
 # Tool Use
