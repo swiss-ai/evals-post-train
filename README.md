@@ -95,6 +95,13 @@ bash scripts/launch_evaluations.sh <mode>
 | `--judge <none\|auto\|preset>` | Judge-model control for LLM-as-a-judge tasks (alpaca_eval, arena_hard_v01/v2, multijail, aya_redteaming). `none` (default) disables auto-launch; `auto` scans the task list and launches needed judges; a preset name (e.g. `qwen3.5-27b`, `llama-3.3-70b`) launches that judge. |
 | `--judge-args <str>` | Extra arguments forwarded to `scripts/launch_judge.py` |
 | `--keep-judge` | Do not auto-cancel the judge model after evaluation finishes (otherwise a cleanup job cancels it via `afterany` dependency) |
+| `--thinking` | Umbrella flag for reasoning models: make the model think **and** record the thinking metrics. See [Thinking / Reasoning Metrics](#thinking--reasoning-metrics). |
+| `--enable-thinking` / `--no-enable-thinking` | Chat-template argument deciding whether the model reasons. `--enable-thinking` **on its own records nothing** — a reasoning close token must also be known. |
+| `--think-end-token <str>` | Force the reasoning close token, e.g. `'</think>'`. A known close token arms the trace strip **and** the thinking metrics. |
+| `--think-start-token <str>` | Force the reasoning open token, e.g. `'<think>'`. Needed for `thinking_format_has_open`. |
+| `--autodetect-think-tokens` | Read the reasoning open/close tokens from the model's chat template. |
+| `--track-thinking-metrics <true\|false>` / `--no-track-thinking-metrics` | Force the thinking metrics on or off (default: on iff a close token is known). |
+| `--log-length-metrics` | Aggregate `response_length_*` / `thinking_length_*` into results and W&B. `thinking_format_*` is aggregated regardless. |
 
 > [!TIP]
 > Inference hyperparameters such as batch size (`BS`), `MAX_LENGTH`, `MAX_NEW_TOKENS`, and `SIZE` (model size in billions, for parallelism) are not exposed as launcher flags — set them as environment variables consumed by `evaluate.sbatch` (see [SBATCH Scripts](#sbatch-scripts)).
@@ -121,6 +128,135 @@ bash scripts/launch_evaluations.sh olmo-safety \
 
 ---
 
+## Thinking / Reasoning Metrics
+
+For reasoning models, the harness strips the reasoning trace before scoring the answer, and records
+how long that trace was and whether it was well-formed. Enable all of it with one flag:
+
+```bash
+bash scripts/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B --thinking
+```
+
+> [!WARNING]
+> **`--enable-thinking` on its own records nothing.** It is purely a chat-template argument that
+> decides whether the model reasons. The trace strip and every thinking metric are armed by a known
+> reasoning **close token** — supplied with `--think-end-token '</think>'` or discovered with
+> `--autodetect-think-tokens`. `--thinking` wires both up for you; the launcher refuses to submit a
+> job that would silently record nothing.
+
+### The four independent switches
+
+| Question | Flag | Default |
+|---|---|---|
+| Does the model reason? | `--enable-thinking` | vLLM: off (this repo pins `enable_thinking=False`); hf: the chat template's own default |
+| Are the reasoning tokens discovered? | `--autodetect-think-tokens` | off — the template is never scanned |
+| Does the trace get stripped before scoring? | *(implicit)* whenever a **close** token is known | off |
+| Are the thinking metrics recorded? | `--track-thinking-metrics` | on iff a close token is known |
+
+`--thinking` sets the first, second and fourth, adds `--log-length-metrics`, and forces the chat
+template on (the reasoning tokens live in it). Any granular flag you pass overrides the umbrella.
+
+### Emitted metrics
+
+Recorded per task, and uploaded to W&B as `<task>/<metric>` alongside a `_stderr` companion:
+
+| Metric | Kind | Gated by |
+|---|---|---|
+| `thinking_format_has_open` | rate `[0,1]` | tracking on **and** an open token is known |
+| `thinking_format_has_close` | rate `[0,1]` | tracking on |
+| `thinking_format_correct` | rate `[0,1]` | tracking on |
+| `response_length_{words,chars,tokens}` | raw count | `--log-length-metrics` |
+| `thinking_length_{words,chars,tokens}` | raw count | `--log-length-metrics` |
+
+> [!NOTE]
+> These exist **only for generative tasks** (`generate_until` / `multi_turn_generate`).
+> Multiple-choice and loglikelihood tasks — `mmlu`, `hellaswag`, `arc_challenge` — emit nothing,
+> and are dropped automatically from the thinking table.
+
+Two caveats worth internalising:
+
+- **The two length families use different denominators.** `response_length_*` averages over *all*
+  responses; `thinking_length_*` averages over *well-formed* responses only (those with
+  `thinking_format_correct == 1`). So an aggregate `thinking_length` is **not** bounded by the
+  aggregate `response_length` — it can exceed it when the well-formed responses are the long ones.
+- **Prefer `_chars` when comparing across backends.** `_tokens` provenance differs per backend
+  (vLLM counts the stop-string and EOS tokens; a re-encoded thinking span can land 1–2 tokens over).
+
+### Backend support
+
+| Backend | Support | `enable_thinking` |
+|---|---|---|
+| `vllm` (recommended) | full | forwarded always; this repo defaults it to `False` |
+| `hf` | full | forwarded **only when explicitly set**; otherwise the template's default applies |
+| `megatron_lm` | **unsupported** | requesting thinking metrics is a hard error |
+
+### Examples
+
+```bash
+# Reasoning model, everything on, quick smoke test
+bash scripts/launch_evaluations.sh single --task gsm8k_cot \
+  --model Qwen/Qwen3-8B --thinking --limit 20
+
+# Explicit tokens rather than template auto-detection
+bash scripts/launch_evaluations.sh posttrain --model my/reasoner --backend vllm \
+  --enable-thinking --think-start-token '<think>' --think-end-token '</think>' \
+  --log-length-metrics
+
+# Measure format well-formedness only, no length aggregation
+bash scripts/launch_evaluations.sh olmo-main --model my/reasoner --autodetect-think-tokens
+
+# Response length of a NON-reasoning model: no close token needed, since response_length_*
+# is recorded for every generative response whether the model thinks or not
+bash scripts/launch_evaluations.sh posttrain --model meta-llama/Llama-3.1-8B-Instruct --log-length-metrics
+```
+
+The graceful launcher accepts and forwards all of these to its per-task `single` runs:
+
+```bash
+bash scripts/launch_evaluations_gracefuly.sh --task_file configs/apertus/tasks_posttrain_final.txt \
+  --model /capstor/.../my-reasoner --thinking
+```
+
+### Building a thinking-only table
+
+`make_html_table.py --thinking` renders one group per metric family and one row per task. It reuses
+the suite's **existing task list** as the metric source — there is no separate config file to keep
+in sync:
+
+```bash
+python make_html_table.py --thinking \
+  --metrics-file configs/apertus/tasks_posttrain_final.txt \
+  --entity apertus --project apertus-1.5-post-training-v0.0 \
+  --models my-reasoner-run another-run \
+  --output thinking_table.html
+```
+
+```
+Category / Benchmark          Reasoner-A   Reasoner-B
+▼ Thinking Format Correct (%)       97.4         99.1
+    gsm8k_cot                       98.2         99.5
+    aime24                          96.6         98.7
+▼ Thinking Length (tokens)           413          918
+    gsm8k_cot                        287          602
+    aime24                           538         1235
+▼ Response Length (tokens)           499         1021
+```
+
+Behaviour specific to `--thinking`:
+
+- Lengths render **raw** and never receive a "best" badge — a shorter trace is not automatically a
+  better one. Only the format-correctness rates are scored and highlighted.
+- There is **no Overall Average**: averaging a `[0,1]` rate with a ~600-token count is meaningless.
+  Each group still shows a macro-mean over its tasks.
+- Tasks with no thinking metrics, and models that never ran with thinking enabled, are dropped.
+- `--length-unit {tokens,words,chars}` swaps the unit (default `tokens`);
+  `--thinking-format-detail` adds the `has_open` / `has_close` groups.
+- Metric keys are resolved by **exact match** (`get_metric(..., fuzzy=False)`), since they are
+  synthesized rather than hand-written. The main table's substring fallback would happily let
+  `gsm8k/...` be answered by `gsm8k_cot/...`.
+
+---
+
 ## Graceful / Resumable Launcher
 
 `scripts/launch_evaluations_gracefuly.sh` is a **resumable, idempotent wrapper** around `launch_evaluations.sh`. Instead of launching a whole suite as one job, it inspects which tasks already have results on disk and only (re)launches the *missing* ones, then automatically aggregates everything once complete. This makes it the recommended entry point for large post-training suites where individual tasks may fail or time out and you don't want to re-run the entire suite.
@@ -141,6 +277,10 @@ bash scripts/launch_evaluations_gracefuly.sh \
 3. **Launch missing only**: groups missing tasks into batches of `--group_size` and submits each group via `launch_evaluations.sh single --task <group> --chat-template` (with `WANDB_MODE=disabled` for the per-task runs).
 4. **Aggregate**: submits a follow-up job (`--dependency=afterok:<all_task_jobs>`) that re-runs this same script in `--merge_only` mode, which rebuilds the split markers and submits `aggregate_splits.sbatch` to merge all results and upload the final run to W&B.
 5. If no tasks are missing on the first pass, it skips straight to marker rebuild + aggregation.
+
+All [thinking flags](#thinking--reasoning-metrics) (`--thinking`, `--think-end-token`, …) are accepted
+and forwarded verbatim to the per-task `single` runs in step 3. They are deliberately *not* forwarded to
+the step-4 aggregator, which runs `--merge_only` and loads no model.
 
 ### Differences vs. `launch_evaluations.sh`
 
@@ -297,6 +437,12 @@ Results are automatically uploaded to W&B after evaluation completes (or after a
 - **Flat metrics**: all task metrics logged as `task_name/metric_name`
 - **`eval_duration`**: wall-clock time for the evaluation
 
+Because *every* flat metric is uploaded — not just the `*_main_table.txt` subset — the
+[thinking metrics](#thinking--reasoning-metrics) reach W&B as `task_name/thinking_format_correct`
+without any uploader configuration. The length families (`task_name/thinking_length_tokens`,
+`task_name/response_length_tokens`, …) arrive the same way, but only once the eval was launched
+with `--log-length-metrics`, which is what makes the harness aggregate them in the first place.
+
 ### Sample Upload (Stratified)
 
 Per task, **10 example prompts** are uploaded as W&B tables at `samples/{model_name}/{task_name}`:
@@ -384,8 +530,18 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `LOGS_ROOT` | `/capstor/.../eval-logs` | Root directory for evaluation logs |
 | `WANDB_ENTITY` | `apertus` | W&B entity |
 | `WANDB_PROJECT` | `swissai-evals-test` | W&B project |
+| `ENABLE_THINKING` | `false` | Chat-template argument: whether the model reasons. Emitted for `hf` **only when set explicitly**. |
+| `AUTODETECT_THINK_TOKENS` | `false` | Read the reasoning open/close tokens from the chat template |
+| `THINK_START_TOKEN` | (unset) | Force the reasoning open token, e.g. `<think>` |
+| `THINK_END_TOKEN` | (unset) | Force the reasoning close token, e.g. `</think>`. Arms the strip and the metrics. |
+| `TRACK_THINKING_METRICS` | (unset → derive) | `true`/`false` to force the thinking metrics on/off |
+| `LOG_LENGTH_METRICS` | `false` | Add `--log_length_metrics` (aggregates `response_length_*` / `thinking_length_*`) |
 
 The script auto-detects RULER long-context tasks and adjusts `MAX_LENGTH` and `max_model_len` accordingly.
+
+Requesting any thinking metric with `LM_EVAL_BACKEND=megatron_lm` aborts the job: the harness has no
+reasoning-token support for that backend, so it would otherwise record nothing silently. See
+[Thinking / Reasoning Metrics](#thinking--reasoning-metrics).
 
 ---
 

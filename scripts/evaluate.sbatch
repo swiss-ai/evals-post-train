@@ -43,6 +43,13 @@ usage() {
     echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from swiss-ai/lm-evaluation-harness (default: repository default branch)."
+    echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
+    echo "  ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: false)."
+    echo "  AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
+    echo "  THINK_END_TOKEN: Force the reasoning close token, e.g. '</think>'. A known close token arms the strip AND the metrics."
+    echo "  THINK_START_TOKEN: Force the reasoning open token, e.g. '<think>'. Needed for thinking_format_has_open."
+    echo "  TRACK_THINKING_METRICS: 'true'/'false' to force the thinking metrics on/off (default: on iff a close token is known)."
+    echo "  LOG_LENGTH_METRICS: 'true' to aggregate response_length_*/thinking_length_* (thinking_format_* is always aggregated)."
 	echo "For more information see the README: https://github.com/swiss-ai/evals?tab=readme-ov-file."
 }
 die() {
@@ -103,6 +110,55 @@ MAX_LENGTH=${MAX_LENGTH:-4096}
 MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
 NUM_FEWSHOT=${NUM_FEWSHOT:-""}
 
+# --- Thinking / reasoning metrics ---
+# Whether ENABLE_THINKING was provided has to be captured before defaulting: the hf backend
+# forwards enable_thinking to the chat template only when it is set explicitly, and emitting it
+# unconditionally would change the rendered prompt of every existing hf run. ':+' rather than
+# '+' so an exported-but-empty ENABLE_THINKING= counts as unset, not as an explicit "false".
+if [[ -n "${ENABLE_THINKING:+x}" ]]; then ENABLE_THINKING_EXPLICIT=1; else ENABLE_THINKING_EXPLICIT=0; fi
+ENABLE_THINKING=${ENABLE_THINKING:-false}
+AUTODETECT_THINK_TOKENS=${AUTODETECT_THINK_TOKENS:-false}
+THINK_END_TOKEN=${THINK_END_TOKEN:-""}
+THINK_START_TOKEN=${THINK_START_TOKEN:-""}
+TRACK_THINKING_METRICS=${TRACK_THINKING_METRICS:-""}   # "" | true | false
+LOG_LENGTH_METRICS=${LOG_LENGTH_METRICS:-false}
+
+# Booleans are validated, not coerced: silently reading 'ture' or 'true ' as false would run a
+# whole GPU job with reasoning off and record nothing. Normalize by assignment -- `X=$(_norm_bool
+# ...)` aborts under set -e when _norm_bool dies, whereas `[[ "$(_norm_bool ...)" == True ]]`
+# would swallow the failure and evaluate to false.
+_norm_bool() {  # _norm_bool <var-name> <value> -> echoes True/False, dies on anything else
+	local name="$1" val="$2"
+	val="${val#"${val%%[![:space:]]*}"}"   # strip leading whitespace
+	val="${val%"${val##*[![:space:]]}"}"   # strip trailing whitespace
+	case "$val" in
+		true|True|TRUE|1|yes)   echo "True" ;;
+		false|False|FALSE|0|no) echo "False" ;;
+		*) die "$name must be true or false (got '$2')." ;;
+	esac
+}
+ENABLE_THINKING=$(_norm_bool ENABLE_THINKING "$ENABLE_THINKING")
+AUTODETECT_THINK_TOKENS=$(_norm_bool AUTODETECT_THINK_TOKENS "$AUTODETECT_THINK_TOKENS")
+LOG_LENGTH_METRICS=$(_norm_bool LOG_LENGTH_METRICS "$LOG_LENGTH_METRICS")
+[[ -z "$TRACK_THINKING_METRICS" ]] || TRACK_THINKING_METRICS=$(_norm_bool TRACK_THINKING_METRICS "$TRACK_THINKING_METRICS")
+
+# lm_eval splits --model_args on commas (utils.simple_parse_args_string), so a comma inside a
+# reasoning token would silently inject an extra key and could override a real one.
+_reject_comma() {
+	[[ "$2" != *,* ]] || die "$1 must not contain a comma (got '$2'): it would inject an extra model_args key."
+}
+_reject_comma THINK_END_TOKEN "$THINK_END_TOKEN"
+_reject_comma THINK_START_TOKEN "$THINK_START_TOKEN"
+
+# Reasoning args shared by the hf and vllm backends. Only non-defaults are emitted: omitting
+# autodetect_think_tokens keeps the harness default (false), and omitting track_thinking_metrics
+# keeps its "track iff a close token is known" behaviour.
+THINK_ARGS=""
+[[ -n "$THINK_END_TOKEN" ]] && THINK_ARGS="${THINK_ARGS},think_end_token=${THINK_END_TOKEN}"
+[[ -n "$THINK_START_TOKEN" ]] && THINK_ARGS="${THINK_ARGS},think_start_token=${THINK_START_TOKEN}"
+[[ "$AUTODETECT_THINK_TOKENS" == "True" ]] && THINK_ARGS="${THINK_ARGS},autodetect_think_tokens=True"
+[[ -n "$TRACK_THINKING_METRICS" ]] && THINK_ARGS="${THINK_ARGS},track_thinking_metrics=${TRACK_THINKING_METRICS}"
+
 # Task splitting support: set NUM_SPLITS and SPLIT_INDEX to distribute tasks across jobs
 NUM_SPLITS=${NUM_SPLITS:-1}
 SPLIT_INDEX=${SPLIT_INDEX:-0}
@@ -153,7 +209,16 @@ GPUS_PER_NODE=4
 
 # Print configuration.
 echo "Configuration set:"
-printf "MODEL=$MODEL\nNAME=$NAME\nTOKENIZER=$TOKENIZER\nBS=$BS\nREVISION=$REVISION\nSIZE=$SIZE\nHARNESS_LIMIT=$HARNESS_LIMIT\nLM_EVAL_HARNESS_BRANCH=$LM_EVAL_HARNESS_BRANCH\nBOS=$BOS\nTASKS=$TASKS\nMAX_LENGTH=$MAX_LENGTH\nWANDB_ENTITY=$WANDB_ENTITY\nWANDB_PROJECT=$WANDB_PROJECT\nLM_EVAL_BACKEND=$LM_EVAL_BACKEND\nLHF_HOME=$HF_HOME\n\n"
+# Values go in printf's ARGUMENTS, never in its format string: a '%' in a path or a reasoning
+# token would otherwise be read as a conversion and abort the job under set -e.
+printf '%s\n' "MODEL=$MODEL" "NAME=$NAME" "TOKENIZER=$TOKENIZER" "BS=$BS" "REVISION=$REVISION" \
+	"SIZE=$SIZE" "HARNESS_LIMIT=$HARNESS_LIMIT" "LM_EVAL_HARNESS_BRANCH=$LM_EVAL_HARNESS_BRANCH" \
+	"BOS=$BOS" "TASKS=$TASKS" "MAX_LENGTH=$MAX_LENGTH" "WANDB_ENTITY=$WANDB_ENTITY" \
+	"WANDB_PROJECT=$WANDB_PROJECT" "LM_EVAL_BACKEND=$LM_EVAL_BACKEND" "HF_HOME=$HF_HOME" ""
+printf '%s\n' "ENABLE_THINKING=$ENABLE_THINKING (explicit=$ENABLE_THINKING_EXPLICIT)" \
+	"AUTODETECT_THINK_TOKENS=$AUTODETECT_THINK_TOKENS" "THINK_START_TOKEN=$THINK_START_TOKEN" \
+	"THINK_END_TOKEN=$THINK_END_TOKEN" "TRACK_THINKING_METRICS=$TRACK_THINKING_METRICS" \
+	"LOG_LENGTH_METRICS=$LOG_LENGTH_METRICS" ""
 
 # Generic envs.
 export MASTER_ADDR=$(hostname)
@@ -215,8 +280,16 @@ VLLM_MEMORY_FRACTION=0.75
 # export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export VLLM_DISABLE_CUSTOM_ALL_REDUCE=1
 
+# The harness only implements the reasoning producers for the hf/vllm/sglang backends.
+# Fail loudly rather than run a megatron job that silently records nothing.
+if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
+    if [[ -n "$THINK_ARGS" ]] || (( ENABLE_THINKING_EXPLICIT )) || [[ "$LOG_LENGTH_METRICS" == "True" ]]; then
+        die "Thinking/reasoning metrics are unsupported with LM_EVAL_BACKEND=megatron_lm."
+    fi
+fi
+
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=False"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS}"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,load=$MODEL,tokenizer_type=HuggingFaceTokenizer,tokenizer_model=$TOKENIZER$MAYBE_REVISION,devices=4"
     if [[ "$CKPT_ITER" =~ ^[0-9]+$ ]]; then
@@ -228,6 +301,10 @@ elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     fi
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION"
+    # hf forwards enable_thinking to the chat template only when it is set; leaving it unset
+    # lets the template's own default apply, which is what every existing hf run relies on.
+    (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS${THINK_ARGS}"
 else
     die "Unsupported LM_EVAL_BACKEND: $LM_EVAL_BACKEND"
 fi
@@ -259,6 +336,12 @@ fi
 if [[ $APPLY_CHAT_TEMPLATE = true ]]; then
 	COMMON_EVAL_ARGS+=(--apply_chat_template)
 	COMMON_EVAL_ARGS+=(--fewshot_as_multiturn)
+fi
+
+# Aggregates response_length_*/thinking_length_* into results.json and W&B.
+# thinking_format_* is aggregated by the harness whenever tracking is on, flag or not.
+if [[ "$LOG_LENGTH_METRICS" == "True" ]]; then
+	COMMON_EVAL_ARGS+=(--log_length_metrics)
 fi
 
 # Detect long context length only when 'ruler' is among tasks.
@@ -321,12 +404,20 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
   INSTALL_CMD="$INSTALL_CMD && pip install megatron-core --no-deps && export MEGATRON_PATH=$(pwd)/Megatron-LM"
 fi
 
+# $CMD is re-parsed by the inner `bash -lc` below, so --model_args must be single-quoted: a
+# reasoning token such as think_end_token=</think> would otherwise be read as redirections, and
+# a `$(...)` in a checkpoint path would be executed. Single quotes cannot nest, so a literal
+# quote in the value would escape them and run arbitrary commands -- refuse it outright.
+if [[ "$COMMON_MODEL_ARGS" == *\'* ]]; then
+    die "Model args must not contain a single quote: $COMMON_MODEL_ARGS"
+fi
+
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    CMD="lm_eval --model $LM_EVAL_BACKEND --model_args=$COMMON_MODEL_ARGS ${COMMON_EVAL_ARGS[@]}"
+    CMD="lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
-    CMD="accelerate launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args=$COMMON_MODEL_ARGS ${COMMON_EVAL_ARGS[@]}"
+    CMD="accelerate launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
-    CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args=$COMMON_MODEL_ARGS ${COMMON_EVAL_ARGS[@]}"
+    CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 fi
 
 echo "Installation command: $INSTALL_CMD"

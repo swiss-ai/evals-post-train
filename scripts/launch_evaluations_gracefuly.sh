@@ -32,6 +32,10 @@ TASK_FILE=""
 MODEL=""
 FORCE_TASKS=""
 TOKENIZER=""
+# Thinking flags are collected verbatim and forwarded to the inner `launch_evaluations.sh single`
+# runs, which is where the model is actually loaded. They are never forwarded to the aggregator
+# re-invocation, which runs --merge_only and loads no model.
+declare -a THINKING_ARGS=()
 
 # --- Argument Parsing ---
 while [[ $# -gt 0 ]]; do
@@ -49,6 +53,15 @@ while [[ $# -gt 0 ]]; do
         --merge_only) MERGE_ONLY=1; shift 1 ;;
         --force_tasks) FORCE_TASKS="$2"; shift 2 ;;
         --tokenizer) TOKENIZER="$2"; shift 2 ;;
+        --thinking)                  THINKING_ARGS+=("$1"); shift 1 ;;
+        --enable-thinking)           THINKING_ARGS+=("$1"); shift 1 ;;
+        --no-enable-thinking)        THINKING_ARGS+=("$1"); shift 1 ;;
+        --autodetect-think-tokens)   THINKING_ARGS+=("$1"); shift 1 ;;
+        --no-track-thinking-metrics) THINKING_ARGS+=("$1"); shift 1 ;;
+        --log-length-metrics)        THINKING_ARGS+=("$1"); shift 1 ;;
+        --think-end-token)           THINKING_ARGS+=("$1" "$2"); shift 2 ;;
+        --think-start-token)         THINKING_ARGS+=("$1" "$2"); shift 2 ;;
+        --track-thinking-metrics)    THINKING_ARGS+=("$1" "$2"); shift 2 ;;
         *) echo "Error: Unknown argument '$1'"; exit 1 ;;
     esac
 done
@@ -214,6 +227,7 @@ num_groups=${#TASK_GROUPS[@]}
 echo -e "\nLaunching $num_missing missing tasks in $num_groups groups (group_size=$GROUP_SIZE):"
 for group in "${TASK_GROUPS[@]}"; do
     launch_cmd=("bash" "scripts/launch_evaluations.sh" "single" "--task" "$group" "--model" "$MODEL" "--chat-template")
+    if [[ ${#THINKING_ARGS[@]} -gt 0 ]]; then launch_cmd+=("${THINKING_ARGS[@]}"); fi
     if [[ -n "$TOKENIZER" ]]; then launch_cmd+=("--tokenizer" "$TOKENIZER"); fi
 
     if [[ $DEBUG -eq 1 ]]; then
