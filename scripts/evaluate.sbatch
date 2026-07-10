@@ -107,6 +107,9 @@ warn_if_empty CSCS_SERVING_API \
 
 # optional eval arguments
 MAX_LENGTH=${MAX_LENGTH:-4096}
+# Same explicitness capture as ENABLE_THINKING below — thinking raises the default to
+# 8192 (once ENABLE_THINKING is normalized), but an explicit caller value must win.
+if [[ -n "${MAX_NEW_TOKENS:+x}" ]]; then MAX_NEW_TOKENS_EXPLICIT=1; else MAX_NEW_TOKENS_EXPLICIT=0; fi
 MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
 NUM_FEWSHOT=${NUM_FEWSHOT:-""}
 
@@ -141,6 +144,13 @@ ENABLE_THINKING=$(_norm_bool ENABLE_THINKING "$ENABLE_THINKING")
 AUTODETECT_THINK_TOKENS=$(_norm_bool AUTODETECT_THINK_TOKENS "$AUTODETECT_THINK_TOKENS")
 LOG_LENGTH_METRICS=$(_norm_bool LOG_LENGTH_METRICS "$LOG_LENGTH_METRICS")
 [[ -z "$TRACK_THINKING_METRICS" ]] || TRACK_THINKING_METRICS=$(_norm_bool TRACK_THINKING_METRICS "$TRACK_THINKING_METRICS")
+
+# Reasoning generates the trace before the answer, so the default generation budget is too
+# small for thinking runs; raise it unless the caller set MAX_NEW_TOKENS explicitly.
+if [[ "$ENABLE_THINKING" == "True" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then
+    MAX_NEW_TOKENS=8192
+    echo "ENABLE_THINKING=True: raising default MAX_NEW_TOKENS to $MAX_NEW_TOKENS"
+fi
 
 # lm_eval splits --model_args on commas (utils.simple_parse_args_string), so a comma inside a
 # reasoning token would silently inject an extra key and could override a real one.
@@ -312,6 +322,31 @@ fi
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
 
+# Generation kwargs (CLI). lm-eval dict-UPDATEs each task's YAML generation_kwargs
+# with these (CLI keys win per-key; keys only in the YAML are kept). max_gen_toks is
+# the EFFECTIVE_MAX_GEN_TOKS floor (see COMPUTE_MAX_GEN_TOKS below). For thinking,
+# also force sampling: reasoning degrades under greedy, and do_sample=true is required
+# because normalize_gen_kwargs forces temperature=0 whenever a task's do_sample is
+# False (most generation tasks) — temperature/top_p would be silently ignored without it.
+GEN_KWARGS="max_gen_toks=\$EFFECTIVE_MAX_GEN_TOKS"
+if [[ "$ENABLE_THINKING" == "True" ]]; then
+    THINK_TEMPERATURE=${THINK_TEMPERATURE:-0.6}
+    THINK_TOP_P=${THINK_TOP_P:-0.95}
+    GEN_KWARGS="${GEN_KWARGS},do_sample=true,temperature=${THINK_TEMPERATURE},top_p=${THINK_TOP_P}"
+    # Only non-defaults are emitted: THINK_REPETITION_PENALTY is a knob for degenerate
+    # looping (e.g. 1.05); unset it leaves vLLM's own default (1.0, a no-op) in place.
+    if [[ -n "${THINK_REPETITION_PENALTY:-}" ]]; then
+        GEN_KWARGS="${GEN_KWARGS},repetition_penalty=${THINK_REPETITION_PENALTY}"
+    fi
+    echo "Thinking sampling: do_sample=true temperature=$THINK_TEMPERATURE top_p=$THINK_TOP_P repetition_penalty=${THINK_REPETITION_PENALTY:-<unset>} (max_gen_toks via floor)"
+elif [[ -n "${NOTHINK_TEMPERATURE:-}" ]]; then
+    # Optional NO-THINK sampling (additive; inert unless NOTHINK_TEMPERATURE is set). Lets a caller
+    # run no-think evals with sampling for a greedy-vs-sampling comparison in non-thinking mode.
+    NOTHINK_TOP_P=${NOTHINK_TOP_P:-0.95}
+    GEN_KWARGS="${GEN_KWARGS},do_sample=true,temperature=${NOTHINK_TEMPERATURE},top_p=${NOTHINK_TOP_P}"
+    echo "No-think sampling: do_sample=true temperature=$NOTHINK_TEMPERATURE top_p=$NOTHINK_TOP_P"
+fi
+
 COMMON_EVAL_ARGS=(
 	--trust_remote_code
 	--batch_size $BS
@@ -322,7 +357,7 @@ COMMON_EVAL_ARGS=(
 	--write_out
 	--confirm_run_unsafe_code
     # --cache_requests true - causes problems for long model names due to file name length limits
-    --gen_kwargs max_gen_toks=$MAX_NEW_TOKENS
+    --gen_kwargs "$GEN_KWARGS"
 )
 
 if [[ -n "${HARNESS_LIMIT}" ]]; then
@@ -419,6 +454,19 @@ elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 fi
+
+# Resolve the effective generation budget inside the container, after the harness
+# is installed (so its task YAMLs are available): a floor of MAX_NEW_TOKENS that is
+# never lowered below a task's own larger YAML max_gen_toks (e.g. AIME's 32768).
+# Fail-safe: the helper falls back to MAX_NEW_TOKENS on any error. Prepended to
+# $CMD so $EFFECTIVE_MAX_GEN_TOKS is set before lm_eval runs, in every backend block.
+COMPUTE_MAX_GEN_TOKS="
+EFFECTIVE_MAX_GEN_TOKS=\$(cd $PWD && python -m scripts.get_max_gen_toks --tasks '$TASKS' --floor $MAX_NEW_TOKENS 2>/dev/null || echo $MAX_NEW_TOKENS)
+# Guard against stray stdout (e.g. a library print at import time) corrupting the value.
+[[ \"\$EFFECTIVE_MAX_GEN_TOKS\" =~ ^[0-9]+\$ ]] || EFFECTIVE_MAX_GEN_TOKS=$MAX_NEW_TOKENS
+echo \"Effective max_gen_toks: \$EFFECTIVE_MAX_GEN_TOKS (floor $MAX_NEW_TOKENS)\"
+"
+CMD="$COMPUTE_MAX_GEN_TOKS$CMD"
 
 echo "Installation command: $INSTALL_CMD"
 echo "Final command: $CMD"

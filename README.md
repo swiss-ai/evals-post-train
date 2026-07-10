@@ -142,7 +142,9 @@ bash scripts/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B
 > decides whether the model reasons. The trace strip and every thinking metric are armed by a known
 > reasoning **close token** — supplied with `--think-end-token '</think>'` or discovered with
 > `--autodetect-think-tokens`. `--thinking` wires both up for you; the launcher refuses to submit a
-> job that would silently record nothing.
+> job that would silently record nothing. If the model's chat template declares no reasoning
+> tokens, autodetection fails loudly *inside the job* (after queueing, at model construction) —
+> for such models pass `--think-end-token` explicitly or skip `--thinking`.
 
 ### The four independent switches
 
@@ -155,6 +157,13 @@ bash scripts/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B
 
 `--thinking` sets the first, second and fourth, adds `--log-length-metrics`, and forces the chat
 template on (the reasoning tokens live in it). Any granular flag you pass overrides the umbrella.
+
+Thinking runs also change **generation**: sampling is forced (`do_sample=true`,
+`THINK_TEMPERATURE=0.6`, `THINK_TOP_P=0.95` — reasoning degrades under greedy), and the default
+generation budget rises to 8192 tokens, floored at each task's own YAML `max_gen_toks` (AIME keeps
+its 32768). Override via the `THINK_*` / `MAX_NEW_TOKENS` env vars (see
+[SBATCH Scripts](#sbatch-scripts)); `NOTHINK_TEMPERATURE` enables the same sampling for no-think
+ablations.
 
 ### Emitted metrics
 
@@ -217,6 +226,10 @@ bash scripts/launch_evaluations_gracefuly.sh --task_file configs/apertus/tasks_p
   --model /capstor/.../my-reasoner --thinking
 ```
 
+Thinking runs get an isolated run name (`<model-basename>-think`, override with `--name`), so their
+results and W&B run never collide with the same model's non-thinking eval — see
+[Graceful / Resumable Launcher](#graceful--resumable-launcher).
+
 ### Building a thinking-only table
 
 `make_html_table.py --thinking` renders one group per metric family and one row per task. It reuses
@@ -272,7 +285,7 @@ bash scripts/launch_evaluations_gracefuly.sh \
 
 ### How it works
 
-1. **Scan**: reads `--task_file`, then scans the model's harness output directories (`<eval_prefix>/<model>/harness/eval_*/results_*.json`, plus the `-single` project variant) and marks each task that already has a result.
+1. **Scan**: reads `--task_file`, then scans the run's harness output directories (`<eval_prefix>/<run-name>/harness/eval_*/results_*.json`, plus the `-single` project variant) and marks each task that already has a result. The run name defaults to the model basename; thinking runs get a `-think` suffix and `--name` overrides it outright, so a reasoning run never collides with the same model's non-thinking results.
 2. **Diff**: computes the set of *missing* tasks (expected − completed).
 3. **Launch missing only**: groups missing tasks into batches of `--group_size` and submits each group via `launch_evaluations.sh single --task <group> --chat-template` (with `WANDB_MODE=disabled` for the per-task runs).
 4. **Aggregate**: submits a follow-up job (`--dependency=afterok:<all_task_jobs>`) that re-runs this same script in `--merge_only` mode, which rebuilds the split markers and submits `aggregate_splits.sbatch` to merge all results and upload the final run to W&B.
@@ -296,7 +309,7 @@ the step-4 aggregator, which runs `--merge_only` and loads no model.
 | SLURM placement | Defaults from sbatch script | `--account` / `--reservation` flags (cache dirs redirected to `$SCRATCH/.cache`) |
 | Extra controls | judge / splits / backend / fewshot flags | `--force_tasks <substr,...>` to force re-eval, `--merge_only`, `--debug` (dry run) |
 
-Key flags: `--task_file` and `--model` (required), `--table_metrics`, `--eval_prefix`, `--account`, `--reservation`, `--wandb_entity`, `--wandb_project`, `--group_size`, `--tokenizer`, `--force_tasks <comma-separated substrings>` (drop matching tasks from the completed set to re-run them), `--merge_only` (skip launching, just rebuild markers + aggregate), and `--debug` (dry run — prints what would be submitted without submitting).
+Key flags: `--task_file` and `--model` (required), `--table_metrics`, `--eval_prefix`, `--account`, `--reservation`, `--wandb_entity`, `--wandb_project`, `--group_size`, `--tokenizer`, `--name <run-name>` (override the run name — dirs + W&B run; defaults to the model basename, with a `-think` suffix for thinking runs), `--force_tasks <comma-separated substrings>` (drop matching tasks from the completed set to re-run them), `--merge_only` (skip launching, just rebuild markers + aggregate), and `--debug` (dry run — prints what would be submitted without submitting).
 
 > [!NOTE]
 > Under the hood the graceful launcher delegates each task to `launch_evaluations.sh` in `single` mode and always applies the chat template, so it is intended primarily for post-training (instruct) checkpoints.
@@ -523,7 +536,10 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `BS` | `auto:20` | Batch size |
 | `SIZE` | `1` | Model size in billions (for model parallelism) |
 | `MAX_LENGTH` | `4096` | Maximum input sequence length |
-| `MAX_NEW_TOKENS` | `512` | Maximum generated tokens |
+| `MAX_NEW_TOKENS` | `2048` (`8192` with thinking) | Generation-budget *floor*: raised to the largest per-task YAML `max_gen_toks` (e.g. AIME's 32768), never lowered. Thinking raises the default; an explicit value always wins. |
+| `THINK_TEMPERATURE` / `THINK_TOP_P` | `0.6` / `0.95` | Sampling for thinking runs (`do_sample=true` is forced — reasoning degrades under greedy) |
+| `THINK_REPETITION_PENALTY` | (unset) | Optional knob against degenerate looping in thinking runs (e.g. `1.05`) |
+| `NOTHINK_TEMPERATURE` / `NOTHINK_TOP_P` | (unset) / `0.95` | Optional sampling for NO-think runs (greedy-vs-sampling ablations); inert unless `NOTHINK_TEMPERATURE` is set |
 | `LIMIT` | (unset) | Limit number of samples per task |
 | `NUM_FEWSHOT` | (unset) | Global few-shot override |
 | `NUM_SPLITS` / `SPLIT_INDEX` | `1` / `0` | Task splitting (set automatically by launcher) |

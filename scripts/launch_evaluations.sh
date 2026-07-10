@@ -104,7 +104,10 @@ CUSTOM_TOKENIZER=""
 BOS_FLAG=""
 BACKEND_FLAG=""
 FEWSHOT_FLAG=""
-HARNESS_LIMIT=""
+# Keep an ambient HARNESS_LIMIT: the graceful launcher has no --limit flag, so callers
+# (e.g. run_dummy_lite_think_test.sh) export it; blanking an exported var here would
+# silently ship the cleared value into the sbatch job. --limit still overrides.
+HARNESS_LIMIT="${HARNESS_LIMIT:-}"
 MEGATRON_ITER=""
 SINGLE_TASK=""
 HARNESS_BRANCH=""
