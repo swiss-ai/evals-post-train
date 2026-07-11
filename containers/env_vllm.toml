@@ -1,4 +1,4 @@
-image = "/capstor/store/cscs/swissai/infra01/container-images/eval-vllm-26-02-17.sqsh"
+image = "/capstor/store/cscs/swissai/infra01/container-images/vllm_container_0221.sqsh"
 
 mounts = [
     "/users/${USER}",

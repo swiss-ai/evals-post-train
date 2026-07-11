@@ -300,7 +300,7 @@ pip install --no-cache-dir --upgrade \
     \"transformers==5.1.0\" \
     \"accelerate>=1.1.0\" \
     \"antlr4-python3-runtime==4.11\" \
-    datasketch \
+    \"datasketch<2.0\" \
     segtok \
     \"tokenizers==0.22.2\" \
     mistral-common \
