@@ -49,6 +49,9 @@ TASK_TO_JUDGE = {
     "aya_redteaming": "llama-3.3-70b",
     "arena_hard_v01": "qwen3.5-27b",
     "arena_hard_v2": "qwen3.5-27b",
+    "harmbench": "cais-llama-harmbench",
+    "hallulens": "qwen3.5-27b",
+    "realtoxicitypromptsllama": "llama-guard",
 }
 
 # ── Judge presets ─────────────────────────────────────────────────────
@@ -60,12 +63,12 @@ JUDGE_PRESETS = {
         "served_model_name": "Qwen/Qwen3.5-27B",
         "framework": "vllm",
         "nodes": 1,
+        "account": "infra01",
         "time": "04:00:00",
         "partition": "normal",
-        "worker_port": 8080,
         "framework_args": (
             "--model Qwen/Qwen3.5-27B "
-            "--host 0.0.0.0 --port 8080 "
+            "--host 0.0.0.0 "
             "--served-model-name Qwen/Qwen3.5-27B "
             "--tensor-parallel-size 4 --max-model-len 26000 "
         ),
@@ -75,11 +78,39 @@ JUDGE_PRESETS = {
         "framework": "vllm",
         "nodes": 1,
         "time": "04:00:00",
-        "worker_port": 8080,
+        "account": "infra01",
         "framework_args": (
-            "--model meta-llama/Llama-3.3-70B-Instruct "
-            "--host 0.0.0.0 --port 8080 "
+            "--model meta-llama/Llama-3.3-70B-Instruct"
+            "--host 0.0.0.0 "
             "--served-model-name meta-llama/Llama-3.3-70B-Instruct "
+            "--tensor-parallel-size 4 --max-model-len 35000"
+        ),
+    },
+    "cais-llama-harmbench": {
+        "served_model_name": "cais/HarmBench-Llama-2-13b-cls ",
+        "framework": "vllm",
+        "nodes": 1,
+        "time": "04:00:00",
+        "account": "infra01",
+        "partition": "normal",
+        "framework_args": (
+            "--model /capstor/store/cscs/swissai/infra01/hf_models/models/cais/HarmBench-Llama-2-13b-cls "
+            "--host 0.0.0.0 "
+            "--served-model-name cais/HarmBench-Llama-2-13b-cls "
+            "--tensor-parallel-size 4 --max-model-len 35000"
+        ),
+    },
+    "llama-guard": {
+        "served_model_name": "cais/Llama-Guard-13b",
+        "framework": "vllm",
+        "nodes": 1,
+        "time": "04:00:00",
+        "account": "infra01",
+        "partition": "normal",
+        "framework_args": (
+            "--model /capstor/store/cscs/swissai/infra01/hf_models/models/meta-llama/Llama-Guard-4-12B "
+            "--host 0.0.0.0 "
+            "--served-model-name cais/Llama-Guard-13b "
             "--tensor-parallel-size 4 --max-model-len 35000"
         ),
     },

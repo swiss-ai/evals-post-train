@@ -41,7 +41,7 @@
 #   --num-fewshot N      - Override num_fewshot for all tasks (default: use task YAML defaults)
 #                          Note: tasks with num_fewshot=0 in YAML are never overridden.
 #                          OLMo3 uses 5-shot for most MC tasks; pass --num-fewshot 5 to match.
-#   --backend <backend>  - lm-eval backend: hf, vllm, megatron_lm (default: from sbatch script)
+#   --backend <backend>  - lm-eval backend: hf, vllm, sglang, megatron_lm (default: from sbatch script)
 #   --splits K           - Split tasks across K parallel nodes per model
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)

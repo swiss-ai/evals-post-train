@@ -39,7 +39,7 @@ usage() {
 	echo " TASKS: Tasks to run with lm eval harness."
 	echo " WANDB_ENTITY: WandB entity name for uploading results (default: apertus)."
 	echo " WANDB_PROJECT: WandB project name for uploading results (default: swissai-evals)."
-	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: hf). - options are: hf, vllm, megatron_lm"
+	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: hf). - options are: hf, vllm, sglang, megatron_lm"
     echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from swiss-ai/lm-evaluation-harness (default: repository default branch)."
@@ -216,7 +216,9 @@ VLLM_MEMORY_FRACTION=0.75
 # export VLLM_DISABLE_CUSTOM_ALL_REDUCE=1
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=False"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION"
+elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,dp_size=$DP,tp_size=$MP,mem_fraction_static=$VLLM_MEMORY_FRACTION"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,load=$MODEL,tokenizer_type=HuggingFaceTokenizer,tokenizer_model=$TOKENIZER$MAYBE_REVISION,devices=4"
     if [[ "$CKPT_ITER" =~ ^[0-9]+$ ]]; then
@@ -226,6 +228,8 @@ elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     else
         die "CKPT_ITER must be an integer or 'latest' when LM_EVAL_BACKEND=megatron_lm (got '$CKPT_ITER')."
     fi
+elif [[ $LM_EVAL_BACKEND == "swissai-api" ]]; then
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,model=local-completions,base_url=https://api.swissai.svc.cscs.ch/v1,num_concurrent=1,max_retries=3,tokenized_requests=False,batch_size=16"
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION"
 else
@@ -323,6 +327,10 @@ fi
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
     CMD="lm_eval --model $LM_EVAL_BACKEND --model_args=$COMMON_MODEL_ARGS ${COMMON_EVAL_ARGS[@]}"
+elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
+    CMD="lm_eval --model $LM_EVAL_BACKEND --model_args=$COMMON_MODEL_ARGS ${COMMON_EVAL_ARGS[@]}"
+elif [[ $LM_EVAL_BACKEND == "swissai-api" ]]; then
+    CMD="lm_eval --model local-completions --model_args=$COMMON_MODEL_ARGS ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
     CMD="accelerate launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args=$COMMON_MODEL_ARGS ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
@@ -373,6 +381,17 @@ elif [[ $LM_EVAL_BACKEND == "vllm" ]]; then
     $INSTALL_CMD
     # Make torch CUDA libs discoverable for vllm._C import
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
+    $CMD
+    "
+elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
+  # vLLM needs to run with a single process that manages all GPUs, so we run the install and eval in the same command to avoid issues with environment persistence across srun calls
+  srun -n 1 --mpi=pmix -ul --environment=./containers/env_sglang.toml bash -lc "
+    set -euo pipefail
+    unset SSL_CERT_FILE
+    export HF_DATASETS_TRUST_REMOTE_CODE=1
+    $CACHE_EXPORTS
+
+    $INSTALL_CMD
     $CMD
     "
 else
