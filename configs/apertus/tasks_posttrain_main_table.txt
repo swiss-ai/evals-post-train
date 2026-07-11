@@ -28,3 +28,7 @@ include_base_44_gen_0shot/exact_match
 mlogiqa_gen/exact_match
 truthfulqa_multilingual_mc2/acc
 # arena_hard_v01/arena_hard_score
+# System Prompt
+realguardrails_s_ifeval/prompt_level_strict_acc
+realguardrails_tensortrust/passed
+realguardrails_s_rules_br/passed

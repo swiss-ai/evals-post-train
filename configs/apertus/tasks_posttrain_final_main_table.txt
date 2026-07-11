@@ -48,4 +48,8 @@ switzerland_qa_0shot/exact_match
 bbq/acc
 toxigen/acc
 wmdp/acc
+# System Prompt
+realguardrails_s_ifeval/prompt_level_strict_acc
+realguardrails_tensortrust/passed
+realguardrails_s_rules_br/passed
 # Tool Use
