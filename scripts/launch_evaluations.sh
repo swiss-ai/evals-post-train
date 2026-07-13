@@ -52,6 +52,24 @@
 #   --judge-args <str>   - Extra arguments forwarded to scripts/launch_judge.py
 #   --keep-judge         - Do not auto-cancel judge model after evaluation finishes
 #
+# Thinking / reasoning metrics (hf and vllm backends only):
+#   --thinking           - Umbrella flag: make the model reason AND record the thinking metrics.
+#                          Implies --enable-thinking, --autodetect-think-tokens (unless
+#                          --think-end-token is given), --track-thinking-metrics true,
+#                          --log-length-metrics, and forces the chat template on.
+#   --enable-thinking    - Chat-template argument: let the model reason. On its own this records
+#   --no-enable-thinking   NOTHING - a reasoning close token must also be known.
+#   --think-end-token <s>  - Force the reasoning close token, e.g. '</think>'. Arms the trace
+#                            strip and the thinking metrics.
+#   --think-start-token <s> - Force the reasoning open token, e.g. '<think>'. Needed for
+#                             thinking_format_has_open; without it thinking_format_correct
+#                             degrades to == thinking_format_has_close.
+#   --autodetect-think-tokens - Read the open/close tokens from the model's chat template.
+#   --track-thinking-metrics <true|false>  - Force the thinking metrics on/off.
+#   --no-track-thinking-metrics              Default: on iff a close token is known.
+#   --log-length-metrics - Aggregate response_length_* / thinking_length_* into results and W&B.
+#                          thinking_format_* is aggregated regardless.
+#
 # Examples:
 #   # Single HF model, auto-detect everything
 #   bash launch_evaluations.sh complete --model meta-llama/Llama-3.1-8B-Instruct
@@ -86,13 +104,22 @@ CUSTOM_TOKENIZER=""
 BOS_FLAG=""
 BACKEND_FLAG=""
 FEWSHOT_FLAG=""
-HARNESS_LIMIT=""
+# Keep an ambient HARNESS_LIMIT (the graceful launcher has no --limit flag, so callers export
+# it); blanking it here would ship the cleared value into the job. --limit still overrides.
+HARNESS_LIMIT="${HARNESS_LIMIT:-}"
 MEGATRON_ITER=""
 SINGLE_TASK=""
 HARNESS_BRANCH=""
 JUDGE_MODE="none"       # auto, none, or a preset name
 JUDGE_EXTRA_ARGS=""
 KEEP_JUDGE="false"
+THINKING_UMBRELLA=""
+ENABLE_THINKING_OVERRIDE=""   # "", "true", "false"
+THINK_END_TOKEN=""
+THINK_START_TOKEN=""
+AUTODETECT_THINK_TOKENS=""
+TRACK_THINKING_METRICS=""     # "", "true", "false"
+LOG_LENGTH_METRICS=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -113,6 +140,15 @@ while [[ $# -gt 0 ]]; do
         --judge)         JUDGE_MODE="$2";              shift 2 ;;
         --judge-args)    JUDGE_EXTRA_ARGS="$2";        shift 2 ;;
         --keep-judge)    KEEP_JUDGE="true";            shift ;;
+        --thinking)                  THINKING_UMBRELLA="true";          shift ;;
+        --enable-thinking)           ENABLE_THINKING_OVERRIDE="true";   shift ;;
+        --no-enable-thinking)        ENABLE_THINKING_OVERRIDE="false";  shift ;;
+        --think-end-token)           THINK_END_TOKEN="$2";              shift 2 ;;
+        --think-start-token)         THINK_START_TOKEN="$2";            shift 2 ;;
+        --autodetect-think-tokens)   AUTODETECT_THINK_TOKENS="true";    shift ;;
+        --track-thinking-metrics)    TRACK_THINKING_METRICS="$2";       shift 2 ;;
+        --no-track-thinking-metrics) TRACK_THINKING_METRICS="false";    shift ;;
+        --log-length-metrics)        LOG_LENGTH_METRICS="true";         shift ;;
         *)
             echo "Error: Unknown option '$1'"
             echo "Run with no arguments for usage."
@@ -156,6 +192,91 @@ if [[ -n "$MODEL_PATH" && -n "$SCRIPT_PATH" ]]; then
     echo "Error: --model and --script are mutually exclusive"
     exit 1
 fi
+
+# --- Resolve thinking / reasoning configuration ---
+# Must run before dispatch so the forced chat template reaches all model-selection modes.
+if [[ -n "$TRACK_THINKING_METRICS" && "$TRACK_THINKING_METRICS" != "true" && "$TRACK_THINKING_METRICS" != "false" ]]; then
+    echo "Error: --track-thinking-metrics expects 'true' or 'false' (got '$TRACK_THINKING_METRICS')"
+    exit 1
+fi
+# lm_eval splits --model_args on commas, so a comma in a token would inject an extra key.
+for _tok_var in THINK_END_TOKEN THINK_START_TOKEN; do
+    if [[ "${!_tok_var}" == *,* ]]; then
+        echo "Error: ${_tok_var} must not contain a comma (got '${!_tok_var}')"
+        exit 1
+    fi
+done
+
+if [[ "$THINKING_UMBRELLA" == "true" ]]; then
+    [[ -z "$ENABLE_THINKING_OVERRIDE" ]] && ENABLE_THINKING_OVERRIDE="true"
+    [[ -z "$TRACK_THINKING_METRICS"   ]] && TRACK_THINKING_METRICS="true"
+    [[ -z "$LOG_LENGTH_METRICS"       ]] && LOG_LENGTH_METRICS="true"
+    # A close token must come from somewhere; prefer the user's if they named one.
+    [[ -z "$THINK_END_TOKEN" && -z "$AUTODETECT_THINK_TOKENS" ]] && AUTODETECT_THINK_TOKENS="true"
+fi
+
+# Two distinct questions (conflating them rejected every "off" switch):
+#   THINKING_TOUCHED       - any thinking/length flag was passed; drives the megatron guard.
+#   THINKING_METRICS_ASKED - the user asked to RECORD metrics; needs a close token + chat template.
+# --log-length-metrics alone is neither: response_length_* is recorded for any generative response.
+THINKING_TOUCHED="false"
+if [[ "$THINKING_UMBRELLA" == "true" || -n "$ENABLE_THINKING_OVERRIDE" \
+      || -n "$THINK_END_TOKEN" || -n "$THINK_START_TOKEN" \
+      || "$AUTODETECT_THINK_TOKENS" == "true" \
+      || -n "$TRACK_THINKING_METRICS" || "$LOG_LENGTH_METRICS" == "true" ]]; then
+    THINKING_TOUCHED="true"
+fi
+
+THINKING_METRICS_ASKED="false"
+if [[ "$THINKING_UMBRELLA" == "true" || "$ENABLE_THINKING_OVERRIDE" == "true" \
+      || "$TRACK_THINKING_METRICS" == "true" \
+      || -n "$THINK_END_TOKEN" || -n "$THINK_START_TOKEN" \
+      || "$AUTODETECT_THINK_TOKENS" == "true" ]]; then
+    THINKING_METRICS_ASKED="true"
+fi
+
+# Length/reasoning producers exist only for hf/vllm/sglang. Resolve the backend as
+# evaluate.sbatch will, so an ambient LM_EVAL_BACKEND fails here, not after scheduling.
+EFFECTIVE_BACKEND="${BACKEND_FLAG:-${LM_EVAL_BACKEND:-}}"
+if [[ "$THINKING_TOUCHED" == "true" && "$EFFECTIVE_BACKEND" == "megatron_lm" ]]; then
+    echo "Error: thinking and length metrics are not supported with the megatron_lm backend"
+    exit 1
+fi
+
+if [[ "$THINKING_METRICS_ASKED" == "true" ]]; then
+    # The reasoning tokens live in the chat template, so it has to be rendered.
+    if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" ]]; then
+        echo "Error: thinking metrics require the chat template; drop --no-chat-template"
+        exit 1
+    fi
+    CHAT_TEMPLATE_OVERRIDE="true"
+
+    # Without a close token nothing is stripped or recorded -- the run silently produces nothing.
+    if [[ -z "$THINK_END_TOKEN" && "$AUTODETECT_THINK_TOKENS" != "true" ]]; then
+        echo "Error: thinking metrics requested but no reasoning close token is known."
+        echo "       Pass --think-end-token '</think>', --autodetect-think-tokens, or use --thinking."
+        exit 1
+    fi
+
+    if [[ -z "$THINK_START_TOKEN" && "$AUTODETECT_THINK_TOKENS" != "true" ]]; then
+        echo "WARNING: no reasoning open token (--think-start-token). thinking_format_has_open"
+        echo "         will not be recorded and thinking_format_correct degrades to == has_close."
+    fi
+fi
+
+if [[ "$TRACK_THINKING_METRICS" == "false" && "$LOG_LENGTH_METRICS" == "true" ]]; then
+    echo "WARNING: --track-thinking-metrics false drops thinking_length_*;"
+    echo "         --log-length-metrics will only aggregate response_length_*."
+fi
+
+# Export only what was set: unset ENABLE_THINKING keeps the hf template default; unset
+# TRACK_THINKING_METRICS lets the harness derive it.
+[[ -n "$ENABLE_THINKING_OVERRIDE"       ]] && export ENABLE_THINKING="$ENABLE_THINKING_OVERRIDE"
+[[ -n "$THINK_END_TOKEN"                ]] && export THINK_END_TOKEN
+[[ -n "$THINK_START_TOKEN"              ]] && export THINK_START_TOKEN
+[[ "$AUTODETECT_THINK_TOKENS" == "true" ]] && export AUTODETECT_THINK_TOKENS="true"
+[[ -n "$TRACK_THINKING_METRICS"         ]] && export TRACK_THINKING_METRICS
+[[ "$LOG_LENGTH_METRICS" == "true"      ]] && export LOG_LENGTH_METRICS="true"
 
 # --- Environment defaults ---
 export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
@@ -284,6 +405,10 @@ echo "Apertus Evaluation Launcher"
 echo "  Mode:   $EVAL_MODE"
 [[ "$EVAL_MODE" == "single" ]] && echo "  Task:   $SINGLE_TASK"
 echo "  Splits: $NUM_SPLITS"
+if [[ "$THINKING_TOUCHED" == "true" ]]; then
+    echo "  Thinking: enable=${ENABLE_THINKING_OVERRIDE:-<unset>} autodetect=${AUTODETECT_THINK_TOKENS:-false} track=${TRACK_THINKING_METRICS:-<derive>} lengths=${LOG_LENGTH_METRICS:-false}"
+    [[ -n "$THINK_START_TOKEN" || -n "$THINK_END_TOKEN" ]] && echo "  Think tokens: start='${THINK_START_TOKEN:-<none>}' end='${THINK_END_TOKEN:-<none>}'"
+fi
 
 # --- Few-shot override ---
 [[ -n "$FEWSHOT_FLAG" ]] && export NUM_FEWSHOT="$FEWSHOT_FLAG"

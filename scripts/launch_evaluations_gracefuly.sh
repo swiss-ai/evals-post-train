@@ -32,6 +32,11 @@ TASK_FILE=""
 MODEL=""
 FORCE_TASKS=""
 TOKENIZER=""
+RUN_NAME=""
+# Thinking flags are forwarded verbatim to the inner `launch_evaluations.sh single` runs (which
+# load the model), never to the --merge_only aggregator re-invocation (which loads none).
+declare -a THINKING_ARGS=()
+WANTS_THINK=0   # see run-name isolation below
 
 # --- Argument Parsing ---
 while [[ $# -gt 0 ]]; do
@@ -49,6 +54,15 @@ while [[ $# -gt 0 ]]; do
         --merge_only) MERGE_ONLY=1; shift 1 ;;
         --force_tasks) FORCE_TASKS="$2"; shift 2 ;;
         --tokenizer) TOKENIZER="$2"; shift 2 ;;
+        --name) RUN_NAME="$2"; shift 2 ;;
+        --thinking|--enable-thinking) THINKING_ARGS+=("$1"); WANTS_THINK=1; shift 1 ;;
+        --no-enable-thinking)        THINKING_ARGS+=("$1"); shift 1 ;;
+        --autodetect-think-tokens)   THINKING_ARGS+=("$1"); shift 1 ;;
+        --no-track-thinking-metrics) THINKING_ARGS+=("$1"); shift 1 ;;
+        --log-length-metrics)        THINKING_ARGS+=("$1"); shift 1 ;;
+        --think-end-token)           THINKING_ARGS+=("$1" "$2"); shift 2 ;;
+        --think-start-token)         THINKING_ARGS+=("$1" "$2"); shift 2 ;;
+        --track-thinking-metrics)    THINKING_ARGS+=("$1" "$2"); shift 2 ;;
         *) echo "Error: Unknown argument '$1'"; exit 1 ;;
     esac
 done
@@ -59,9 +73,20 @@ if [[ -z "$TASK_FILE" || -z "$MODEL" ]]; then
 fi
 
 MODEL_BASENAME=$(basename "${MODEL%/}")
-MAIN_HARNESS_DIR="$EVAL_PREFIX/$MODEL_BASENAME/harness"
+
+# Run-name isolation: a reasoning run must not collide with the same model's non-thinking eval,
+# in the COMPLETED_MAP scan or the W&B run. Suffix "-think" when the run actually reasons
+# (--thinking / --enable-thinking); --name overrides the whole run name.
+RUN_BASENAME="$MODEL_BASENAME"
+(( WANTS_THINK )) && RUN_BASENAME="${MODEL_BASENAME}-think"
+[[ -n "$RUN_NAME" ]] && RUN_BASENAME="$RUN_NAME"
+# Non-default run names are threaded to the per-task jobs and the aggregator; default names
+# keep the launcher's auto-derived name.
+if [[ "$RUN_BASENAME" != "$MODEL_BASENAME" ]]; then NAME_ISOLATED=1; else NAME_ISOLATED=0; fi
+
+MAIN_HARNESS_DIR="$EVAL_PREFIX/$RUN_BASENAME/harness"
 SINGLE_EVAL_PREFIX="${EVAL_PREFIX/$WANDB_PROJECT/${WANDB_PROJECT}-single}"
-SINGLE_HARNESS_DIR="$SINGLE_EVAL_PREFIX/$MODEL_BASENAME/harness"
+SINGLE_HARNESS_DIR="$SINGLE_EVAL_PREFIX/$RUN_BASENAME/harness"
 
 declare -a ORDERED_TASKS
 while IFS= read -r line || [[ -n "$line" ]]; do
@@ -139,7 +164,7 @@ submit_aggregator() {
     # Pass positional arguments to aggregate_splits.sbatch
     local agg_cmd=("sbatch" "--account" "$ACCOUNT")
     if [[ -n "$RESERVATION" ]]; then agg_cmd+=("--reservation" "$RESERVATION"); fi
-    agg_cmd+=("scripts/aggregate_splits.sbatch" "$MODEL" "$MODEL_BASENAME")
+    agg_cmd+=("scripts/aggregate_splits.sbatch" "$MODEL" "$RUN_BASENAME")
     
     if [[ $DEBUG -eq 1 ]]; then
         echo -e "\n[DEBUG] Would submit aggregator: ${agg_cmd[*]}"
@@ -166,7 +191,7 @@ if [[ -n "$FORCE_TASKS" ]]; then
 fi
 
 if [[ $MERGE_ONLY -eq 1 ]]; then
-    echo "--- Running Post-Eval Cleanup for $MODEL_BASENAME ---"
+    echo "--- Running Post-Eval Cleanup for $RUN_BASENAME ---"
     rebuild_split_markers
     submit_aggregator
     exit 0
@@ -180,7 +205,7 @@ for task in "${ORDERED_TASKS[@]}"; do
     fi
 done
 
-echo -e "\nModel: $MODEL_BASENAME"
+echo -e "\nModel: $MODEL_BASENAME (run name: $RUN_BASENAME)"
 echo "Total expected tasks: ${#ORDERED_TASKS[@]}"
 echo "Successfully completed tasks: ${#COMPLETED_MAP[@]}"
 echo "Missing tasks: ${#MISSING_TASKS[@]}"
@@ -214,6 +239,8 @@ num_groups=${#TASK_GROUPS[@]}
 echo -e "\nLaunching $num_missing missing tasks in $num_groups groups (group_size=$GROUP_SIZE):"
 for group in "${TASK_GROUPS[@]}"; do
     launch_cmd=("bash" "scripts/launch_evaluations.sh" "single" "--task" "$group" "--model" "$MODEL" "--chat-template")
+    if [[ ${#THINKING_ARGS[@]} -gt 0 ]]; then launch_cmd+=("${THINKING_ARGS[@]}"); fi
+    (( NAME_ISOLATED )) && launch_cmd+=("--name" "$RUN_BASENAME")
     if [[ -n "$TOKENIZER" ]]; then launch_cmd+=("--tokenizer" "$TOKENIZER"); fi
 
     if [[ $DEBUG -eq 1 ]]; then
@@ -262,6 +289,10 @@ if [[ ${#JOB_IDS[@]} -gt 0 ]]; then
     if [[ -n "$TOKENIZER" ]]; then
         WRAP_CMD="$WRAP_CMD --tokenizer \"$TOKENIZER\""
     fi
+
+    # The aggregator loads no model, so thinking flags aren't forwarded -- but it must still
+    # scan/aggregate under the isolated run name.
+    (( NAME_ISOLATED )) && WRAP_CMD="$WRAP_CMD --name \"$RUN_BASENAME\""
 
     WRAP_CMD="$WRAP_CMD --merge_only"
     
