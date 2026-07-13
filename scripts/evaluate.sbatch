@@ -107,17 +107,14 @@ warn_if_empty CSCS_SERVING_API \
 
 # optional eval arguments
 MAX_LENGTH=${MAX_LENGTH:-4096}
-# Same explicitness capture as ENABLE_THINKING below — thinking raises the default to
-# 8192 (once ENABLE_THINKING is normalized), but an explicit caller value must win.
+# Capture explicitness before defaulting: thinking raises the default, but a caller value wins.
 if [[ -n "${MAX_NEW_TOKENS:+x}" ]]; then MAX_NEW_TOKENS_EXPLICIT=1; else MAX_NEW_TOKENS_EXPLICIT=0; fi
 MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
 NUM_FEWSHOT=${NUM_FEWSHOT:-""}
 
 # --- Thinking / reasoning metrics ---
-# Whether ENABLE_THINKING was provided has to be captured before defaulting: the hf backend
-# forwards enable_thinking to the chat template only when it is set explicitly, and emitting it
-# unconditionally would change the rendered prompt of every existing hf run. ':+' rather than
-# '+' so an exported-but-empty ENABLE_THINKING= counts as unset, not as an explicit "false".
+# Capture explicitness before defaulting: hf forwards enable_thinking only when set (unset lets
+# the template default apply). ':+' treats an exported-but-empty value as unset.
 if [[ -n "${ENABLE_THINKING:+x}" ]]; then ENABLE_THINKING_EXPLICIT=1; else ENABLE_THINKING_EXPLICIT=0; fi
 ENABLE_THINKING=${ENABLE_THINKING:-false}
 AUTODETECT_THINK_TOKENS=${AUTODETECT_THINK_TOKENS:-false}
@@ -126,11 +123,9 @@ THINK_START_TOKEN=${THINK_START_TOKEN:-""}
 TRACK_THINKING_METRICS=${TRACK_THINKING_METRICS:-""}   # "" | true | false
 LOG_LENGTH_METRICS=${LOG_LENGTH_METRICS:-false}
 
-# Booleans are validated, not coerced: silently reading 'ture' or 'true ' as false would run a
-# whole GPU job with reasoning off and record nothing. Normalize by assignment -- `X=$(_norm_bool
-# ...)` aborts under set -e when _norm_bool dies, whereas `[[ "$(_norm_bool ...)" == True ]]`
-# would swallow the failure and evaluate to false.
-_norm_bool() {  # _norm_bool <var-name> <value> -> echoes True/False, dies on anything else
+# Validate booleans (don't coerce): a typo'd 'ture' read as false would waste a GPU job.
+# Assign directly so a bad value aborts under set -e.
+_norm_bool() {  # <name> <value> -> echoes True/False, dies otherwise
 	local name="$1" val="$2"
 	val="${val#"${val%%[![:space:]]*}"}"   # strip leading whitespace
 	val="${val%"${val##*[![:space:]]}"}"   # strip trailing whitespace
@@ -145,24 +140,21 @@ AUTODETECT_THINK_TOKENS=$(_norm_bool AUTODETECT_THINK_TOKENS "$AUTODETECT_THINK_
 LOG_LENGTH_METRICS=$(_norm_bool LOG_LENGTH_METRICS "$LOG_LENGTH_METRICS")
 [[ -z "$TRACK_THINKING_METRICS" ]] || TRACK_THINKING_METRICS=$(_norm_bool TRACK_THINKING_METRICS "$TRACK_THINKING_METRICS")
 
-# Reasoning generates the trace before the answer, so the default generation budget is too
-# small for thinking runs; raise it unless the caller set MAX_NEW_TOKENS explicitly.
+# Thinking emits a trace before the answer; raise the budget unless the caller set it.
 if [[ "$ENABLE_THINKING" == "True" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then
     MAX_NEW_TOKENS=8192
     echo "ENABLE_THINKING=True: raising default MAX_NEW_TOKENS to $MAX_NEW_TOKENS"
 fi
 
-# lm_eval splits --model_args on commas (utils.simple_parse_args_string), so a comma inside a
-# reasoning token would silently inject an extra key and could override a real one.
+# lm_eval splits --model_args on commas, so a comma in a token would inject an extra key.
 _reject_comma() {
 	[[ "$2" != *,* ]] || die "$1 must not contain a comma (got '$2'): it would inject an extra model_args key."
 }
 _reject_comma THINK_END_TOKEN "$THINK_END_TOKEN"
 _reject_comma THINK_START_TOKEN "$THINK_START_TOKEN"
 
-# Reasoning args shared by the hf and vllm backends. Only non-defaults are emitted: omitting
-# autodetect_think_tokens keeps the harness default (false), and omitting track_thinking_metrics
-# keeps its "track iff a close token is known" behaviour.
+# Reasoning model_args shared by hf and vllm. Only non-defaults are emitted (an unset flag
+# keeps the harness default).
 THINK_ARGS=""
 [[ -n "$THINK_END_TOKEN" ]] && THINK_ARGS="${THINK_ARGS},think_end_token=${THINK_END_TOKEN}"
 [[ -n "$THINK_START_TOKEN" ]] && THINK_ARGS="${THINK_ARGS},think_start_token=${THINK_START_TOKEN}"
@@ -219,8 +211,7 @@ GPUS_PER_NODE=4
 
 # Print configuration.
 echo "Configuration set:"
-# Values go in printf's ARGUMENTS, never in its format string: a '%' in a path or a reasoning
-# token would otherwise be read as a conversion and abort the job under set -e.
+# Values go in printf's arguments, not the format string: a '%' would be read as a conversion.
 printf '%s\n' "MODEL=$MODEL" "NAME=$NAME" "TOKENIZER=$TOKENIZER" "BS=$BS" "REVISION=$REVISION" \
 	"SIZE=$SIZE" "HARNESS_LIMIT=$HARNESS_LIMIT" "LM_EVAL_HARNESS_BRANCH=$LM_EVAL_HARNESS_BRANCH" \
 	"BOS=$BOS" "TASKS=$TASKS" "MAX_LENGTH=$MAX_LENGTH" "WANDB_ENTITY=$WANDB_ENTITY" \
@@ -290,8 +281,7 @@ VLLM_MEMORY_FRACTION=0.75
 # export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export VLLM_DISABLE_CUSTOM_ALL_REDUCE=1
 
-# The harness only implements the reasoning producers for the hf/vllm/sglang backends.
-# Fail loudly rather than run a megatron job that silently records nothing.
+# The harness only implements the reasoning producers for hf/vllm/sglang; fail loudly on megatron.
 if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     if [[ -n "$THINK_ARGS" ]] || (( ENABLE_THINKING_EXPLICIT )) || [[ "$LOG_LENGTH_METRICS" == "True" ]]; then
         die "Thinking/reasoning metrics are unsupported with LM_EVAL_BACKEND=megatron_lm."
@@ -311,8 +301,7 @@ elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     fi
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION"
-    # hf forwards enable_thinking to the chat template only when it is set; leaving it unset
-    # lets the template's own default apply, which is what every existing hf run relies on.
+    # Forward enable_thinking only when explicitly set; unset lets the template default apply.
     (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS${THINK_ARGS}"
 else
@@ -322,26 +311,21 @@ fi
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
 
-# Generation kwargs (CLI). lm-eval dict-UPDATEs each task's YAML generation_kwargs
-# with these (CLI keys win per-key; keys only in the YAML are kept). max_gen_toks is
-# the EFFECTIVE_MAX_GEN_TOKS floor (see COMPUTE_MAX_GEN_TOKS below). For thinking,
-# also force sampling: reasoning degrades under greedy, and do_sample=true is required
-# because normalize_gen_kwargs forces temperature=0 whenever a task's do_sample is
-# False (most generation tasks) — temperature/top_p would be silently ignored without it.
+# Generation kwargs (CLI): lm-eval dict-updates each task's YAML generation_kwargs with these.
+# max_gen_toks is the EFFECTIVE_MAX_GEN_TOKS floor (see below). Thinking also forces sampling
+# (do_sample=true is needed or normalize_gen_kwargs pins temperature=0 for do_sample=False tasks).
 GEN_KWARGS="max_gen_toks=\$EFFECTIVE_MAX_GEN_TOKS"
 if [[ "$ENABLE_THINKING" == "True" ]]; then
     THINK_TEMPERATURE=${THINK_TEMPERATURE:-0.6}
     THINK_TOP_P=${THINK_TOP_P:-0.95}
     GEN_KWARGS="${GEN_KWARGS},do_sample=true,temperature=${THINK_TEMPERATURE},top_p=${THINK_TOP_P}"
-    # Only non-defaults are emitted: THINK_REPETITION_PENALTY is a knob for degenerate
-    # looping (e.g. 1.05); unset it leaves vLLM's own default (1.0, a no-op) in place.
+    # Optional knob for degenerate looping (e.g. 1.05); unset leaves vLLM's default (1.0).
     if [[ -n "${THINK_REPETITION_PENALTY:-}" ]]; then
         GEN_KWARGS="${GEN_KWARGS},repetition_penalty=${THINK_REPETITION_PENALTY}"
     fi
     echo "Thinking sampling: do_sample=true temperature=$THINK_TEMPERATURE top_p=$THINK_TOP_P repetition_penalty=${THINK_REPETITION_PENALTY:-<unset>} (max_gen_toks via floor)"
 elif [[ -n "${NOTHINK_TEMPERATURE:-}" ]]; then
-    # Optional NO-THINK sampling (additive; inert unless NOTHINK_TEMPERATURE is set). Lets a caller
-    # run no-think evals with sampling for a greedy-vs-sampling comparison in non-thinking mode.
+    # Optional no-think sampling (inert unless NOTHINK_TEMPERATURE is set): greedy-vs-sampling ablation.
     NOTHINK_TOP_P=${NOTHINK_TOP_P:-0.95}
     GEN_KWARGS="${GEN_KWARGS},do_sample=true,temperature=${NOTHINK_TEMPERATURE},top_p=${NOTHINK_TOP_P}"
     echo "No-think sampling: do_sample=true temperature=$NOTHINK_TEMPERATURE top_p=$NOTHINK_TOP_P"
@@ -373,8 +357,8 @@ if [[ $APPLY_CHAT_TEMPLATE = true ]]; then
 	COMMON_EVAL_ARGS+=(--fewshot_as_multiturn)
 fi
 
-# Aggregates response_length_*/thinking_length_* into results.json and W&B.
-# thinking_format_* is aggregated by the harness whenever tracking is on, flag or not.
+# Aggregates response_length_*/thinking_length_* into results.json and W&B (thinking_format_*
+# is aggregated whenever tracking is on, flag or not).
 if [[ "$LOG_LENGTH_METRICS" == "True" ]]; then
 	COMMON_EVAL_ARGS+=(--log_length_metrics)
 fi
@@ -439,10 +423,9 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
   INSTALL_CMD="$INSTALL_CMD && pip install megatron-core --no-deps && export MEGATRON_PATH=$(pwd)/Megatron-LM"
 fi
 
-# $CMD is re-parsed by the inner `bash -lc` below, so --model_args must be single-quoted: a
-# reasoning token such as think_end_token=</think> would otherwise be read as redirections, and
-# a `$(...)` in a checkpoint path would be executed. Single quotes cannot nest, so a literal
-# quote in the value would escape them and run arbitrary commands -- refuse it outright.
+# $CMD is re-parsed by the inner `bash -lc`, so --model_args is single-quoted (a token like
+# think_end_token=</think> would otherwise redirect, and $(...) in a path would execute).
+# A single quote in the value can't be nested safely, so refuse it.
 if [[ "$COMMON_MODEL_ARGS" == *\'* ]]; then
     die "Model args must not contain a single quote: $COMMON_MODEL_ARGS"
 fi
@@ -455,14 +438,12 @@ elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 fi
 
-# Resolve the effective generation budget inside the container, after the harness
-# is installed (so its task YAMLs are available): a floor of MAX_NEW_TOKENS that is
-# never lowered below a task's own larger YAML max_gen_toks (e.g. AIME's 32768).
-# Fail-safe: the helper falls back to MAX_NEW_TOKENS on any error. Prepended to
-# $CMD so $EFFECTIVE_MAX_GEN_TOKS is set before lm_eval runs, in every backend block.
+# Resolve the generation budget in-container, after the harness install (task YAMLs present):
+# a MAX_NEW_TOKENS floor, never lowered below a task's own larger max_gen_toks (AIME's 32768).
+# Fail-safe: falls back to MAX_NEW_TOKENS on any error. Prepended so it runs before lm_eval.
 COMPUTE_MAX_GEN_TOKS="
 EFFECTIVE_MAX_GEN_TOKS=\$(cd $PWD && python -m scripts.get_max_gen_toks --tasks '$TASKS' --floor $MAX_NEW_TOKENS 2>/dev/null || echo $MAX_NEW_TOKENS)
-# Guard against stray stdout (e.g. a library print at import time) corrupting the value.
+# Guard against stray stdout corrupting the value.
 [[ \"\$EFFECTIVE_MAX_GEN_TOKS\" =~ ^[0-9]+\$ ]] || EFFECTIVE_MAX_GEN_TOKS=$MAX_NEW_TOKENS
 echo \"Effective max_gen_toks: \$EFFECTIVE_MAX_GEN_TOKS (floor $MAX_NEW_TOKENS)\"
 "

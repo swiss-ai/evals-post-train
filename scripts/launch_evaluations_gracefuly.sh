@@ -33,9 +33,8 @@ MODEL=""
 FORCE_TASKS=""
 TOKENIZER=""
 RUN_NAME=""
-# Thinking flags are collected verbatim and forwarded to the inner `launch_evaluations.sh single`
-# runs, which is where the model is actually loaded. They are never forwarded to the aggregator
-# re-invocation, which runs --merge_only and loads no model.
+# Thinking flags are forwarded verbatim to the inner `launch_evaluations.sh single` runs (which
+# load the model), never to the --merge_only aggregator re-invocation (which loads none).
 declare -a THINKING_ARGS=()
 WANTS_THINK=0   # see run-name isolation below
 
@@ -75,17 +74,14 @@ fi
 
 MODEL_BASENAME=$(basename "${MODEL%/}")
 
-# Run-name isolation: a reasoning run must not collide with a previously-saved
-# non-thinking eval of the same model — neither in the COMPLETED_MAP scan (a done
-# no-think task would wrongly mark the thinking variant complete) nor in the W&B run.
-# Default: suffix "-think" when the run actually reasons (--thinking / --enable-thinking;
-# metrics-only flags like --think-end-token don't change the generations' identity).
-# --name overrides the whole run name explicitly.
+# Run-name isolation: a reasoning run must not collide with the same model's non-thinking eval,
+# in the COMPLETED_MAP scan or the W&B run. Suffix "-think" when the run actually reasons
+# (--thinking / --enable-thinking); --name overrides the whole run name.
 RUN_BASENAME="$MODEL_BASENAME"
 (( WANTS_THINK )) && RUN_BASENAME="${MODEL_BASENAME}-think"
 [[ -n "$RUN_NAME" ]] && RUN_BASENAME="$RUN_NAME"
-# Non-default run names must be threaded to the per-task jobs and the aggregator
-# re-invocation; default-named runs keep the launcher's auto-derived name, as before.
+# Non-default run names are threaded to the per-task jobs and the aggregator; default names
+# keep the launcher's auto-derived name.
 if [[ "$RUN_BASENAME" != "$MODEL_BASENAME" ]]; then NAME_ISOLATED=1; else NAME_ISOLATED=0; fi
 
 MAIN_HARNESS_DIR="$EVAL_PREFIX/$RUN_BASENAME/harness"
@@ -294,8 +290,8 @@ if [[ ${#JOB_IDS[@]} -gt 0 ]]; then
         WRAP_CMD="$WRAP_CMD --tokenizer \"$TOKENIZER\""
     fi
 
-    # The aggregator re-invocation loads no model, so the thinking flags themselves are
-    # not forwarded — but it must still scan/aggregate under the isolated run name.
+    # The aggregator loads no model, so thinking flags aren't forwarded -- but it must still
+    # scan/aggregate under the isolated run name.
     (( NAME_ISOLATED )) && WRAP_CMD="$WRAP_CMD --name \"$RUN_BASENAME\""
 
     WRAP_CMD="$WRAP_CMD --merge_only"

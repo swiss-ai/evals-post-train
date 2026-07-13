@@ -45,13 +45,7 @@ def compute_mgsm_avg(summary):
 
 
 def is_mgsm_aggregate(task, metric_name):
-    """True when a request means "the MGSM average across languages".
-
-    MGSM is many per-language subtasks, so a request for its accuracy is answered by
-    averaging them. Keying this on the task name alone would answer *every* mgsm request
-    that way -- including a per-language score or a thinking length -- so the requested
-    metric has to match what compute_mgsm_avg() actually averages.
-    """
+    """True when a request means the MGSM average across per-language subtasks."""
     if metric_name != "exact_match":
         return False
     task = task.lower()

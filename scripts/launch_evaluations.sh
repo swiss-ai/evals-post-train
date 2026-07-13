@@ -104,9 +104,8 @@ CUSTOM_TOKENIZER=""
 BOS_FLAG=""
 BACKEND_FLAG=""
 FEWSHOT_FLAG=""
-# Keep an ambient HARNESS_LIMIT: the graceful launcher has no --limit flag, so callers
-# (e.g. run_dummy_lite_think_test.sh) export it; blanking an exported var here would
-# silently ship the cleared value into the sbatch job. --limit still overrides.
+# Keep an ambient HARNESS_LIMIT (the graceful launcher has no --limit flag, so callers export
+# it); blanking it here would ship the cleared value into the job. --limit still overrides.
 HARNESS_LIMIT="${HARNESS_LIMIT:-}"
 MEGATRON_ITER=""
 SINGLE_TASK=""
@@ -195,8 +194,7 @@ if [[ -n "$MODEL_PATH" && -n "$SCRIPT_PATH" ]]; then
 fi
 
 # --- Resolve thinking / reasoning configuration ---
-# Must run before the dispatch section so the forced chat template reaches all three
-# model-selection modes.
+# Must run before dispatch so the forced chat template reaches all model-selection modes.
 if [[ -n "$TRACK_THINKING_METRICS" && "$TRACK_THINKING_METRICS" != "true" && "$TRACK_THINKING_METRICS" != "false" ]]; then
     echo "Error: --track-thinking-metrics expects 'true' or 'false' (got '$TRACK_THINKING_METRICS')"
     exit 1
@@ -217,14 +215,10 @@ if [[ "$THINKING_UMBRELLA" == "true" ]]; then
     [[ -z "$THINK_END_TOKEN" && -z "$AUTODETECT_THINK_TOKENS" ]] && AUTODETECT_THINK_TOKENS="true"
 fi
 
-# Two different questions, and conflating them wrongly rejected every "off" switch.
-#   THINKING_TOUCHED       - any thinking or length flag was passed at all. Drives the megatron
-#                            guard, since that backend has no length producers whatsoever.
-#   THINKING_METRICS_ASKED - the user positively asked to RECORD thinking metrics. Only this
-#                            needs a reasoning close token and the chat template.
-# `--log-length-metrics` alone is neither: response_length_* is recorded for every generative
-# response, thinking or not, so measuring a non-reasoning model must stay possible. Likewise
-# `--no-enable-thinking` / `--track-thinking-metrics false` are requests to record *less*.
+# Two distinct questions (conflating them rejected every "off" switch):
+#   THINKING_TOUCHED       - any thinking/length flag was passed; drives the megatron guard.
+#   THINKING_METRICS_ASKED - the user asked to RECORD metrics; needs a close token + chat template.
+# --log-length-metrics alone is neither: response_length_* is recorded for any generative response.
 THINKING_TOUCHED="false"
 if [[ "$THINKING_UMBRELLA" == "true" || -n "$ENABLE_THINKING_OVERRIDE" \
       || -n "$THINK_END_TOKEN" || -n "$THINK_START_TOKEN" \
@@ -241,9 +235,8 @@ if [[ "$THINKING_UMBRELLA" == "true" || "$ENABLE_THINKING_OVERRIDE" == "true" \
     THINKING_METRICS_ASKED="true"
 fi
 
-# The harness only implements the length/reasoning producers for hf/vllm/sglang. Resolve the
-# backend the way evaluate.sbatch will, so an ambient LM_EVAL_BACKEND fails here rather than
-# after the job has been scheduled.
+# Length/reasoning producers exist only for hf/vllm/sglang. Resolve the backend as
+# evaluate.sbatch will, so an ambient LM_EVAL_BACKEND fails here, not after scheduling.
 EFFECTIVE_BACKEND="${BACKEND_FLAG:-${LM_EVAL_BACKEND:-}}"
 if [[ "$THINKING_TOUCHED" == "true" && "$EFFECTIVE_BACKEND" == "megatron_lm" ]]; then
     echo "Error: thinking and length metrics are not supported with the megatron_lm backend"
@@ -258,8 +251,7 @@ if [[ "$THINKING_METRICS_ASKED" == "true" ]]; then
     fi
     CHAT_TEMPLATE_OVERRIDE="true"
 
-    # Without a close token nothing is stripped and no thinking metric is recorded --
-    # the run would look fine and silently produce nothing. Refuse it.
+    # Without a close token nothing is stripped or recorded -- the run silently produces nothing.
     if [[ -z "$THINK_END_TOKEN" && "$AUTODETECT_THINK_TOKENS" != "true" ]]; then
         echo "Error: thinking metrics requested but no reasoning close token is known."
         echo "       Pass --think-end-token '</think>', --autodetect-think-tokens, or use --thinking."
@@ -277,8 +269,8 @@ if [[ "$TRACK_THINKING_METRICS" == "false" && "$LOG_LENGTH_METRICS" == "true" ]]
     echo "         --log-length-metrics will only aggregate response_length_*."
 fi
 
-# Export only what was actually set: an unset ENABLE_THINKING lets the hf chat template keep
-# its own default, and an unset TRACK_THINKING_METRICS lets the harness derive it.
+# Export only what was set: unset ENABLE_THINKING keeps the hf template default; unset
+# TRACK_THINKING_METRICS lets the harness derive it.
 [[ -n "$ENABLE_THINKING_OVERRIDE"       ]] && export ENABLE_THINKING="$ENABLE_THINKING_OVERRIDE"
 [[ -n "$THINK_END_TOKEN"                ]] && export THINK_END_TOKEN
 [[ -n "$THINK_START_TOKEN"              ]] && export THINK_START_TOKEN

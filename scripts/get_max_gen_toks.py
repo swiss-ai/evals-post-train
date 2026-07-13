@@ -1,20 +1,12 @@
 #!/usr/bin/env python3
 """Resolve the effective ``max_gen_toks`` for one or more lm-eval tasks.
 
-Used by ``evaluate.sbatch`` to apply a *floor* (never a clobber) to the
-generation budget: the launcher passes ``--floor <MAX_NEW_TOKENS>`` and this
-script returns ``max(floor, <largest max_gen_toks declared by the task YAMLs>)``.
-That way tasks that deliberately ask for more (e.g. AIME's 32768) keep their
-value, while tasks with no/smaller setting still get the sane floor.
+Applies a *floor* to the generation budget: returns ``max(floor, largest max_gen_toks
+declared by the task YAMLs)``, so tasks that ask for more (AIME's 32768) keep it.
+Fail-safe: any error falls back to the floor. Prints a single integer to stdout.
 
-Fail-safe by design: any error or undetected value falls back to the floor, so
-the worst case is identical to passing ``max_gen_toks=<floor>`` unconditionally.
-Prints a single integer to stdout.
-
-NOTE: relies on TaskManager *private* helpers (``_get_config`` / ``_name_is_task``
-/ ``_get_tasklist``). If a harness upgrade renames them, this degrades silently
-to the floor (check the "Effective max_gen_toks" echo in the job log) — revisit
-on harness upgrades.
+Relies on TaskManager private helpers (``_get_config`` / ``_name_is_task`` /
+``_get_tasklist``); a rename degrades silently to the floor -- revisit on harness upgrades.
 """
 
 import argparse

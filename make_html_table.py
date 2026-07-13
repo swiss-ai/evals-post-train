@@ -57,9 +57,8 @@ def parse_metrics_file(path):
 
 
 # --- Thinking / reasoning metrics ---
-# The harness records these for every generate_until task; the uploader strips the ",none"
-# filter suffix, so a W&B summary key is exactly "<task>/<metric>". Rates live in [0, 1] and
-# render as percentages; counts are raw word/char/token counts and must never be rescaled.
+# W&B summary keys are exactly "<task>/<metric>". Rates live in [0,1] and render as percentages;
+# counts are raw word/char/token lengths and must never be rescaled.
 THINKING_COUNT_SUFFIXES = frozenset({
     "response_length_words", "response_length_chars", "response_length_tokens",
     "thinking_length_words", "thinking_length_chars", "thinking_length_tokens",
@@ -85,11 +84,10 @@ def thinking_specs(length_unit="tokens", format_detail=False):
 
 
 def thinking_tasks_from_file(path):
-    """Task names from a suite file: either a `tasks_*.txt` list or a `*_main_table.txt`.
+    """Task names from a suite file (`tasks_*.txt` list or `*_main_table.txt`).
 
-    Not parse_metrics_file(): that returns nothing for a file with no `#` header, and several
-    main tables have none. Inline comments are stripped, matching how the graceful launcher
-    reads the same task lists (`line="${line%%#*}"`); some suites really do use them.
+    Not parse_metrics_file(): that returns nothing for a file with no `#` header. Inline
+    comments are stripped, matching the graceful launcher.
     """
     seen, tasks = set(), []
     with open(path) as f:
@@ -105,10 +103,10 @@ def thinking_tasks_from_file(path):
 
 
 def build_thinking_groups(tasks, specs, label_with_group=False):
-    """One group per metric family, one row per task -- the transpose of a main table.
+    """One group per metric family, one row per task (the transpose of a main table).
 
-    `label_with_group` folds the family into the row label, for flat rendering where the
-    group headers (which carry the unit) are not drawn.
+    `label_with_group` folds the family into the row label for flat rendering, where the
+    unit-carrying group headers aren't drawn.
     """
     return [
         (label, [(f"{task}/{suffix}", f"{task} - {label}" if label_with_group else task) for task in tasks])
@@ -171,12 +169,7 @@ def compute_mmlu_pro_detail(summary):
 
 
 def is_mgsm_aggregate(task, metric_name):
-    """True when a request means "the MGSM average across languages".
-
-    MGSM is many per-language subtasks, so a request for its accuracy is answered by
-    averaging them. Keying this on the task name alone would answer *every* mgsm request
-    that way -- including a thinking length -- so the requested metric has to match what
-    compute_mgsm_avg() actually averages.
+    """True when a request means the MGSM average across per-language subtasks.
     """
     if metric_name != "exact_match":
         return False
@@ -187,9 +180,8 @@ def is_mgsm_aggregate(task, metric_name):
 def get_metric(summary, metric, fuzzy=True):
     """Resolve a `task/metric[,filter]` key against a W&B run summary.
 
-    Main-table keys are hand-written and usually omit the harness's filter suffix, so by
-    default we fall back to a substring scan. Pass fuzzy=False for keys we synthesized
-    ourselves (they must match exactly, and guessing would silently cross-match siblings).
+    Hand-written main-table keys often omit the filter suffix, so fuzzy=True falls back to a
+    substring scan. Pass fuzzy=False for synthesized keys, which must match exactly.
     """
     parts = metric.split("/", 1)
     task = parts[0]
@@ -243,17 +235,12 @@ def normalize_score(val):
 
 
 def _prepare_group_data(groups, models, scores, metric_filter, thinking=False):
-    """Build group_data and overall_avgs for a subset of metrics selected by metric_filter.
+    """Build group_data and overall_avgs for the metrics selected by metric_filter.
 
-    Each group_data entry is (group_name, benchmarks, group_avgs, kind). Group averages are an
-    unweighted macro-mean over the tasks that resolved; for a count group that is the mean of
-    each task's mean length. Counts never enter overall_avgs -- averaging a length with a rate
-    is meaningless.
-
-    `kind` is only derived in thinking mode, where the groups are metric families we
-    synthesized and every value in a group therefore shares a unit. A hand-written main table
-    can mix units inside one group, and its values have already been through normalize_score,
-    so classifying them by key suffix there would render the whole group wrong.
+    Each group_data entry is (group_name, benchmarks, group_avgs, kind). Averages are an
+    unweighted macro-mean over resolved tasks; counts never enter overall_avgs (averaging a
+    length with a rate is meaningless). `kind` is only derived in thinking mode, where each
+    group is a synthesized family sharing one unit -- a main table can mix units per group.
     """
     group_data = []
     all_model_scores = {m: [] for m in models}
@@ -267,8 +254,7 @@ def _prepare_group_data(groups, models, scores, metric_filter, thinking=False):
         benchmarks = []
         for metric_key, display_name in filtered:
             row = {model: scores.get(model, {}).get(metric_key) for model in models}
-            # Tasks that emit no thinking metrics (loglikelihood / multiple-choice) resolve to
-            # None for every model; drop them rather than render a row of dashes.
+            # Drop tasks that emit no thinking metrics (loglikelihood / MC) rather than show dashes.
             if thinking and all(v is None for v in row.values()):
                 continue
             for model, val in row.items():
@@ -297,9 +283,8 @@ def _na_cell(col, indent):
 
 
 def _value_cell(val, col, kind, indent):
-    """One data cell. A count carries no data-val, which keeps it out of updateBest()'s
-    `.score-row [data-val]` sweep: raw lengths are never rescaled and never win a "best"
-    badge, because a shorter trace is not automatically a better one."""
+    """One data cell. A count carries no data-val, keeping it out of updateBest()'s sweep:
+    raw lengths are never rescaled and never win a "best" badge."""
     if val is None:
         return _na_cell(col, indent)
     if kind == "count":
@@ -314,8 +299,7 @@ def _row_classes(base, kind):
 
 def _render_table(html, table_id, models, group_data, overall_avgs, n_models, info_rows=None, flat=False):
     """Render one table-box with the given group_data."""
-    # An overall average is only meaningful when every group shares a unit. A table carrying a
-    # count group (raw token lengths) alongside a rate group has nothing to average.
+    # An overall average needs every group to share a unit; a count group alongside rates has none.
     show_overall = all(kind == "rate" for _, _, _, kind in group_data)
     html.append(f'<div class="table-box" id="{table_id}">\n')
     html.append(f'  <div class="grid-row header-row">\n    <div class="cell">{"Benchmark" if flat else "Category / Benchmark"}</div>\n')
@@ -378,10 +362,8 @@ def build_html(groups, models, scores, output_path, info_rows=None, olmo_default
     """Generate a self-contained HTML file with collapsible skill groups and train/test toggle."""
 
     def _count(group_data):
-        # In thinking mode every task appears once per metric family, so summing the group
-        # row-counts would report 3x the number of benchmarks actually evaluated. Count the
-        # distinct tasks that resolved instead -- from the metric keys, since the display
-        # label carries the family name under --flat.
+        # In thinking mode a task appears once per metric family, so summing row-counts would
+        # over-report; count distinct resolved tasks from the metric keys instead.
         if thinking:
             return len({
                 key.split("/")[0]
@@ -849,10 +831,9 @@ details[open] .arrow {{ transform: rotate(90deg); }}
 def build_json(groups, models, scores, output_path, info_rows=None, summaries=None, thinking=False):
     """Write combined metrics to JSON: grouped by task, with per-group and overall averages.
 
-    Score values are the normalized fractions (0-1) used internally by the table -- except for
-    "count"-kind groups (thinking/response lengths), which are stored raw. The group/overall
-    averages exclude missing (null) entries, matching the HTML rendering. In thinking mode the
-    overall average is omitted, since it would mix rates with token counts.
+    Score values are the normalized fractions (0-1) used internally by the table -- except
+    "count"-kind groups (lengths), stored raw. Averages exclude null entries. In thinking mode
+    the overall average is omitted (it would mix rates with token counts).
     When summaries are provided, an 'mmlu_pro_detail' section with overall accuracy and
     per-subject scores is added for each model that has MMLU-Pro results.
     """
@@ -879,8 +860,8 @@ def build_json(groups, models, scores, output_path, info_rows=None, summaries=No
         group_avg = {m: (sum(group_vals[m]) / len(group_vals[m]) if group_vals[m] else None) for m in models}
         group_out = {"name": group_name, "average": group_avg, "metrics": metrics_out}
         if thinking:
-            # Only thinking groups carry a unit worth naming; adding it elsewhere would change
-            # the schema of every existing --json-output.
+            # Only thinking groups carry a named unit; adding "kind" elsewhere would change the
+            # existing --json-output schema.
             group_out["kind"] = kind
         out_groups.append(group_out)
 
@@ -950,8 +931,6 @@ def fetch_model(api, project_path, run_name, display_name, groups, scores, debug
     for _, metric_list in groups:
         for metric_key, _ in metric_list:
             if thinking:
-                # Keys are synthesized, so demand an exact hit. Counts stay raw:
-                # normalize_score() would turn 612.4 tokens into 6.124.
                 raw = get_metric(summary, metric_key, fuzzy=False)
                 raw = None if raw is None else float(raw)
                 val = raw if metric_kind(metric_key) == "count" else normalize_score(raw)
@@ -1028,8 +1007,8 @@ def main():
 
     if args.thinking:
         tasks = thinking_tasks_from_file(args.metrics_file)
-        # Under --flat the group headers are not drawn, and they carry the unit, so the
-        # family has to move into the row label or a rate and a token count look alike.
+        # Under --flat the unit-carrying group headers aren't drawn, so fold the family into
+        # the row label or a rate and a token count look alike.
         groups = build_thinking_groups(
             tasks, thinking_specs(args.length_unit, args.thinking_format_detail),
             label_with_group=args.flat,
@@ -1055,9 +1034,8 @@ def main():
     if args.no_sft_baseline:
         prefix_baselines = [b for b in PINNED_PREFIX if b[1] != "Apertus 1.5 8B SFT"]
 
-    # The pinned baselines were evaluated without thinking, so every one of their thinking
-    # columns would be empty. The all-None column drop below would remove them anyway; not
-    # fetching them just saves the W&B round-trips. Compare against a thinking run via --models.
+    # Pinned baselines ran without thinking, so their columns would be all-None (and dropped
+    # below anyway); skipping the fetch just saves W&B round-trips.
     if not args.no_baselines and not args.thinking:
         for run_name, display in prefix_baselines:
             if fetch_model(api, BASELINE_PROJECT, run_name, display, groups, scores, args.debug, summaries):
@@ -1086,8 +1064,7 @@ def main():
                 display_names.append(display)
 
     if args.thinking:
-        # A model with no thinking metrics at all (thinking never enabled for its run) would
-        # otherwise contribute a column of dashes.
+        # Drop a model with no thinking metrics (thinking never enabled) instead of a dash column.
         keep = [d for d in display_names if any(v is not None for v in scores.get(d, {}).values())]
         for dropped in [d for d in display_names if d not in keep]:
             print(f"Warning: '{dropped}' has no thinking metrics; dropping its column")
