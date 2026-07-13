@@ -50,8 +50,8 @@ toxigen
 wmdp
 orbench
 harmbench
-polyglotoxicitypromptsllama
-realtoxicitypromptsllama
+polyglotoxicitypromptsllama_small
+realtoxicitypromptsllama_small
 # System Prompt
 # RealGuardrails / SystemCheck: adherence to instructions placed in the system message.
 # NOTE: run the s_rules umbrella task but report the nested realguardrails_s_rules_br group
