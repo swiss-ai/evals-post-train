@@ -33,6 +33,7 @@ MODEL=""
 FORCE_TASKS=""
 TOKENIZER=""
 RUN_NAME=""
+HARNESS_BRANCH=""
 # Thinking flags are forwarded verbatim to the inner `launch_evaluations.sh single` runs (which
 # load the model), never to the --merge_only aggregator re-invocation (which loads none).
 declare -a THINKING_ARGS=()
@@ -55,6 +56,7 @@ while [[ $# -gt 0 ]]; do
         --force_tasks) FORCE_TASKS="$2"; shift 2 ;;
         --tokenizer) TOKENIZER="$2"; shift 2 ;;
         --name) RUN_NAME="$2"; shift 2 ;;
+        --harness-branch) HARNESS_BRANCH="$2"; shift 2 ;;
         --thinking|--enable-thinking) THINKING_ARGS+=("$1"); WANTS_THINK=1; shift 1 ;;
         --no-enable-thinking)        THINKING_ARGS+=("$1"); shift 1 ;;
         --autodetect-think-tokens)   THINKING_ARGS+=("$1"); shift 1 ;;
@@ -242,6 +244,7 @@ for group in "${TASK_GROUPS[@]}"; do
     if [[ ${#THINKING_ARGS[@]} -gt 0 ]]; then launch_cmd+=("${THINKING_ARGS[@]}"); fi
     (( NAME_ISOLATED )) && launch_cmd+=("--name" "$RUN_BASENAME")
     if [[ -n "$TOKENIZER" ]]; then launch_cmd+=("--tokenizer" "$TOKENIZER"); fi
+    if [[ -n "$HARNESS_BRANCH" ]]; then launch_cmd+=("--harness-branch" "$HARNESS_BRANCH"); fi
 
     if [[ $DEBUG -eq 1 ]]; then
         echo "[DEBUG] Would launch: WANDB_MODE=disabled SBATCH_ACCOUNT=$ACCOUNT SBATCH_RESERVATION=$RESERVATION ${launch_cmd[*]}"

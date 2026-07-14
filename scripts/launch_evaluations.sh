@@ -215,6 +215,11 @@ if [[ "$THINKING_UMBRELLA" == "true" ]]; then
     [[ -z "$THINK_END_TOKEN" && -z "$AUTODETECT_THINK_TOKENS" ]] && AUTODETECT_THINK_TOKENS="true"
 fi
 
+WANTS_THINKING_RUN="false"
+if [[ "$THINKING_UMBRELLA" == "true" || "$ENABLE_THINKING_OVERRIDE" == "true" ]]; then
+    WANTS_THINKING_RUN="true"
+fi
+
 # Two distinct questions (conflating them rejected every "off" switch):
 #   THINKING_TOUCHED       - any thinking/length flag was passed; drives the megatron guard.
 #   THINKING_METRICS_ASKED - the user asked to RECORD metrics; needs a close token + chat template.
@@ -484,6 +489,7 @@ if [[ -n "$MODEL_PATH" ]]; then
     # ===== MODE 1: Single model =====
     if [[ -z "$MODEL_NAME" ]]; then
         MODEL_NAME=$(auto_derive_name "$MODEL_PATH")
+        [[ "$WANTS_THINKING_RUN" == "true" ]] && MODEL_NAME="${MODEL_NAME}-think"
     fi
 
     if [[ -z "$CHAT_TEMPLATE_OVERRIDE" ]]; then
@@ -524,6 +530,7 @@ elif [[ -n "$SCRIPT_PATH" ]]; then
     [[ -n "$CUSTOM_TOKENIZER" ]] && export TOKENIZER="$CUSTOM_TOKENIZER"
     [[ -n "$BOS_FLAG" ]] && export BOS="$BOS_FLAG"
     [[ -n "$BACKEND_FLAG" ]] && export LM_EVAL_BACKEND="$BACKEND_FLAG"
+    [[ "$WANTS_THINKING_RUN" == "true" ]] && export EVAL_NAME_SUFFIX="${EVAL_NAME_SUFFIX:-}-think"
 
     echo "  Script: $SCRIPT_PATH"
     [[ -n "$HARNESS_BRANCH" ]] && echo "  Harness branch: $HARNESS_BRANCH"
@@ -538,6 +545,7 @@ else
     [[ -n "$CUSTOM_TOKENIZER" ]] && export TOKENIZER="$CUSTOM_TOKENIZER"
     [[ -n "$BOS_FLAG" ]] && export BOS="$BOS_FLAG"
     [[ -n "$BACKEND_FLAG" ]] && export LM_EVAL_BACKEND="$BACKEND_FLAG"
+    [[ "$WANTS_THINKING_RUN" == "true" ]] && export EVAL_NAME_SUFFIX="${EVAL_NAME_SUFFIX:-}-think"
 
     # Edit this array to select which model-list scripts to run
     EVALUATION_SCRIPTS=(

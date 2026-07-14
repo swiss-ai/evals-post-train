@@ -376,6 +376,14 @@ bash scripts/launch_evaluations_gracefuly.sh --task_file configs/apertus/tasks_p
   --model /capstor/.../my-reasoner --thinking
 ```
 
+For a directory of checkpoints, `launcher_graceful.sh` forwards the same thinking flags and
+`--harness-branch` to every model:
+
+```bash
+bash launcher_graceful.sh --base_dir /capstor/.../checkpoints \
+  --thinking --harness-branch feat/log-response-thinking-length
+```
+
 Thinking runs get an isolated run name (`<model-basename>-think`, override with `--name`), so their
 results and W&B run never collide with the same model's non-thinking eval — see
 [Graceful / Resumable Launcher](#graceful--resumable-launcher).

@@ -16,6 +16,8 @@ CONFIG_FILE="./configs/apertus/tasks_posttrain_final.txt"
 TABLE_METRICS="./configs/apertus/tasks_posttrain_final_main_table.txt"
 FORCE_TASKS=""
 TOKENIZER=""
+HARNESS_BRANCH=""
+declare -a THINKING_ARGS=()
 
 # --- Argument Parsing ---
 while [[ $# -gt 0 ]]; do
@@ -38,6 +40,12 @@ while [[ $# -gt 0 ]]; do
         --force_tasks=*) FORCE_TASKS="${1#*=}"; shift 1 ;;
         --tokenizer) TOKENIZER="$2"; shift 2 ;;
         --tokenizer=*) TOKENIZER="${1#*=}"; shift 1 ;;
+        --harness-branch) HARNESS_BRANCH="$2"; shift 2 ;;
+        --harness-branch=*) HARNESS_BRANCH="${1#*=}"; shift 1 ;;
+        --thinking|--enable-thinking|--no-enable-thinking|--autodetect-think-tokens|--no-track-thinking-metrics|--log-length-metrics)
+            THINKING_ARGS+=("$1"); shift 1 ;;
+        --think-end-token|--think-start-token|--track-thinking-metrics)
+            THINKING_ARGS+=("$1" "$2"); shift 2 ;;
         --debug) DEBUG=1; shift 1 ;;
         *)
             echo "Error: Unknown argument '$1'"
@@ -85,6 +93,14 @@ for model_path in "${MODEL_DIRS[@]}"; do
 
     if [[ -n "$TOKENIZER" ]]; then
         CMD+=("--tokenizer" "$TOKENIZER")
+    fi
+
+    if [[ -n "$HARNESS_BRANCH" ]]; then
+        CMD+=("--harness-branch" "$HARNESS_BRANCH")
+    fi
+
+    if [[ ${#THINKING_ARGS[@]} -gt 0 ]]; then
+        CMD+=("${THINKING_ARGS[@]}")
     fi
 
     if [[ $DEBUG -eq 1 ]]; then CMD+=("--debug"); fi
