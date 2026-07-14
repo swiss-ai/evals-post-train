@@ -2,13 +2,34 @@
 
 Evaluation infrastructure for benchmarking Large Language Models on SLURM clusters (CSCS Alps). Built on top of [lm-evaluation-harness](https://github.com/swiss-ai/lm-evaluation-harness) with W&B integration for results tracking.
 
+**Contents**
+
+1. [Quick Start](#quick-start)
+2. [The Launch Script](#the-launch-script)
+3. [Graceful / Resumable Launcher](#graceful--resumable-launcher)
+4. [Task Configuration](#task-configuration)
+5. [Parallel Task Splitting](#parallel-task-splitting)
+6. [Thinking / Reasoning Metrics](#thinking--reasoning-metrics)
+7. [W&B Integration](#wb-integration)
+8. [Reporting: Building Result Tables](#reporting-building-result-tables)
+9. [SBATCH Scripts](#sbatch-scripts)
+10. [Multi-Model Scripts](#multi-model-scripts)
+11. [Container Setup](#container-setup)
+12. [Notes](#notes)
+13. [Extending the Pipeline](#extending-the-pipeline)
+14. [Repository Structure](#repository-structure)
+
+---
+
 ## Quick Start
+
+This pipeline **launches evaluations** on the cluster (see [The Launch Script](#the-launch-script)) and turns their W&B results into **tables** (see [Reporting: Building Result Tables](#reporting-building-result-tables)). For reasoning models, the `--thinking` option additionally makes the model reason and records the reasoning metrics — see [Thinking / Reasoning Metrics](#thinking--reasoning-metrics).
 
 ```bash
 # Evaluate a single model on the benchmark suite (with custom name)
 bash scripts/launch_evaluations.sh default --model meta-llama/Llama-3.1-8B-Instruct --name Llama-Baseline
 
-# Same, but split tasks across 4 parallel nodes for faster evaluation, name automatically infered
+# Same, but split tasks across 4 parallel nodes for faster evaluation, name automatically inferred
 bash scripts/launch_evaluations.sh default --model meta-llama/Llama-3.1-8B-Instruct --splits 4
 
 # Launch Megatron checkpoint without conversion (TODO: Verify), Megatron-iter defaults to: latest
@@ -22,7 +43,14 @@ bash scripts/launch_evaluations.sh olmo-easy --model Qwen/Qwen2.5-7B --num-fewsh
 
 # Evaluate a small model on a single task, useful for testing newly implemented tasks
 bash scripts/launch_evaluations.sh single --task multijail --model meta-llama/Llama-3.2-3B --backend vllm
+
+# Thinking / reasoning eval: run the suite and auto-aggregate results to a "<model>-think" W&B run
+bash scripts/launch_evaluations_gracefuly.sh --task_file configs/apertus/tasks_posttrain_final.txt --model Qwen/Qwen3-8B --thinking
+# ...then build the thinking-only table from that run (details: "Building a thinking-only table")
+python make_html_table.py --thinking --metrics-file configs/apertus/tasks_posttrain_final.txt --entity apertus --project <project> --models Qwen3-8B-think --output thinking_table.html
 ```
+
+---
 
 ## The Launch Script
 
@@ -95,6 +123,13 @@ bash scripts/launch_evaluations.sh <mode>
 | `--judge <none\|auto\|preset>` | Judge-model control for LLM-as-a-judge tasks (alpaca_eval, arena_hard_v01/v2, multijail, aya_redteaming). `none` (default) disables auto-launch; `auto` scans the task list and launches needed judges; a preset name (e.g. `qwen3.5-27b`, `llama-3.3-70b`) launches that judge. |
 | `--judge-args <str>` | Extra arguments forwarded to `scripts/launch_judge.py` |
 | `--keep-judge` | Do not auto-cancel the judge model after evaluation finishes (otherwise a cleanup job cancels it via `afterany` dependency) |
+| `--thinking` | Umbrella flag for reasoning models: make the model think **and** record the thinking metrics. See [Thinking / Reasoning Metrics](#thinking--reasoning-metrics). |
+| `--enable-thinking` / `--no-enable-thinking` | Chat-template argument deciding whether the model reasons. `--enable-thinking` **on its own records nothing** — a reasoning close token must also be known. |
+| `--think-end-token <str>` | Force the reasoning close token, e.g. `'</think>'`. A known close token arms the trace strip **and** the thinking metrics. |
+| `--think-start-token <str>` | Force the reasoning open token, e.g. `'<think>'`. Needed for `thinking_format_has_open`. |
+| `--autodetect-think-tokens` | Read the reasoning open/close tokens from the model's chat template. |
+| `--track-thinking-metrics <true\|false>` / `--no-track-thinking-metrics` | Force the thinking metrics on or off (default: on iff a close token is known). |
+| `--log-length-metrics` | Aggregate `response_length_*` / `thinking_length_*` into results and W&B. `thinking_format_*` is aggregated regardless. |
 
 > [!TIP]
 > Inference hyperparameters such as batch size (`BS`), `MAX_LENGTH`, `MAX_NEW_TOKENS`, and `SIZE` (model size in billions, for parallelism) are not exposed as launcher flags — set them as environment variables consumed by `evaluate.sbatch` (see [SBATCH Scripts](#sbatch-scripts)).
@@ -136,106 +171,34 @@ bash scripts/launch_evaluations_gracefuly.sh \
 
 ### How it works
 
-1. **Scan**: reads `--task_file`, then scans the model's harness output directories (`<eval_prefix>/<model>/harness/eval_*/results_*.json`, plus the `-single` project variant) and marks each task that already has a result.
+1. **Scan**: reads `--task_file`, then scans the run's harness output directories (`<eval_prefix>/<run-name>/harness/eval_*/results_*.json`, plus the `-single` project variant) and marks each task that already has a result. The run name defaults to the model basename; thinking runs get a `-think` suffix and `--name` overrides it outright, so a reasoning run never collides with the same model's non-thinking results.
 2. **Diff**: computes the set of *missing* tasks (expected − completed).
 3. **Launch missing only**: groups missing tasks into batches of `--group_size` and submits each group via `launch_evaluations.sh single --task <group> --chat-template` (with `WANDB_MODE=disabled` for the per-task runs).
 4. **Aggregate**: submits a follow-up job (`--dependency=afterok:<all_task_jobs>`) that re-runs this same script in `--merge_only` mode, which rebuilds the split markers and submits `aggregate_splits.sbatch` to merge all results and upload the final run to W&B.
 5. If no tasks are missing on the first pass, it skips straight to marker rebuild + aggregation.
 
+All [thinking flags](#thinking--reasoning-metrics) (`--thinking`, `--think-end-token`, …) are accepted
+and forwarded verbatim to the per-task `single` runs in step 3. They are deliberately *not* forwarded to
+the step-4 aggregator, which runs `--merge_only` and loads no model.
+
 ### Differences vs. `launch_evaluations.sh`
 
-| Aspect | `launch_evaluations.sh` | `launch_evaluations_gracefuly.sh` |
-|--------|-------------------------|-----------------------------------|
-| Purpose | One-shot launch of a full suite (or split across nodes) | Resume/complete a partially-finished suite; only launches missing tasks |
-| Suite selection | Positional `<mode>` (named suite) | Explicit `--task_file <path>` (any task list) |
-| Model arg | `--model` / `--script` / default array | `--model` only |
-| Granularity | One job per model (optionally `--splits K`) | One job per **task group** (`--group_size`, default 1 = per-task) |
-| Idempotency | Re-runs everything every time | Skips tasks that already have results on disk |
-| Aggregation | Triggered by `--splits` flow | Always; chained automatically via `afterok` + `--merge_only` |
-| W&B during task runs | Uploads per job | `WANDB_MODE=disabled` per task; only the final aggregator uploads |
-| SLURM placement | Defaults from sbatch script | `--account` / `--reservation` flags (cache dirs redirected to `$SCRATCH/.cache`) |
-| Extra controls | judge / splits / backend / fewshot flags | `--force_tasks <substr,...>` to force re-eval, `--merge_only`, `--debug` (dry run) |
+| Aspect               | `launch_evaluations.sh`                                 | `launch_evaluations_gracefuly.sh`                                                  |
+|----------------------|---------------------------------------------------------|------------------------------------------------------------------------------------|
+| Purpose              | One-shot launch of a full suite (or split across nodes) | Resume/complete a partially-finished suite; only launches missing tasks            |
+| Suite selection      | Positional `<mode>` (named suite)                       | Explicit `--task_file <path>` (any task list)                                      |
+| Model arg            | `--model` / `--script` / default array                  | `--model` only                                                                     |
+| Granularity          | One job per model (optionally `--splits K`)             | One job per **task group** (`--group_size`, default 1 = per-task)                  |
+| Idempotency          | Re-runs everything every time                           | Skips tasks that already have results on disk                                      |
+| Aggregation          | Triggered by `--splits` flow                            | Always; chained automatically via `afterok` + `--merge_only`                       |
+| W&B during task runs | Uploads per job                                         | `WANDB_MODE=disabled` per task; only the final aggregator uploads                  |
+| SLURM placement      | Defaults from sbatch script                             | `--account` / `--reservation` flags (cache dirs redirected to `$SCRATCH/.cache`)   |
+| Extra controls       | judge / splits / backend / fewshot flags                | `--force_tasks <substr,...>` to force re-eval, `--merge_only`, `--debug` (dry run) |
 
-Key flags: `--task_file` and `--model` (required), `--table_metrics`, `--eval_prefix`, `--account`, `--reservation`, `--wandb_entity`, `--wandb_project`, `--group_size`, `--tokenizer`, `--force_tasks <comma-separated substrings>` (drop matching tasks from the completed set to re-run them), `--merge_only` (skip launching, just rebuild markers + aggregate), and `--debug` (dry run — prints what would be submitted without submitting).
+Key flags: `--task_file` and `--model` (required), `--table_metrics`, `--eval_prefix`, `--account`, `--reservation`, `--wandb_entity`, `--wandb_project`, `--group_size`, `--tokenizer`, `--name <run-name>` (override the run name — dirs + W&B run; defaults to the model basename, with a `-think` suffix for thinking runs), `--force_tasks <comma-separated substrings>` (drop matching tasks from the completed set to re-run them), `--merge_only` (skip launching, just rebuild markers + aggregate), and `--debug` (dry run — prints what would be submitted without submitting).
 
 > [!NOTE]
 > Under the hood the graceful launcher delegates each task to `launch_evaluations.sh` in `single` mode and always applies the chat template, so it is intended primarily for post-training (instruct) checkpoints.
-
----
-
-## Notes
-
-> [!NOTE]
-> **vLLM vs HF inference**: Generation task results (gsm8k, squadv2) may differ slightly between backends (for instruction-tuned models).. Only compare results across models using the same backend. We recommend to perform all evaluations with the `vllm` backend (default) to ensure reproducability.
-- **Megatron-LM** If you want to run Megatron-LM models natively, you need clone the [Nvdia Megatron-LM repository](https://github.com/NVIDIA/Megatron-LM) to the evals-post-train directory (or change the location with the launch script):
-- **Time limits**: The default 12h SLURM limit works for most evaluations. For large suites on large models, use `--splits` to parallelize.
-- **WANDB_API_KEY**: Must be available either as an environment variable or in `scripts/wandb_api_key.txt`.
-- **HF_TOKEN**: Must be available either as an environment variable or in  `scripts/hf_token.txt`.
-- **CSCS_SERVING_API**: Must be available either as an environment variable or in `scripts/cscs_serving_api_key.txt` to run LLM-as-a-judge evals (e.g. AlpacaEval). Key can be optained [here](https://serving.swissai.cscs.ch).
-
----
-
-## Repository Structure
-
-```
-evals/
-├── configs/                         # Task lists and model registry
-│   ├── _*.txt                       # actual task lists
-│   ├── _*_main_table.txt            # Corresponding metric specs for W&B summary tables
-│   ├── models.md                    # Model registry with paths and special flags
-│   ├── apertus/                     # Apertus task lists (english, multilingual, etc.)
-│   ├── olmo/                        # OLMo3 benchmark suites (easy, main, heldout, safety, longcontext, complete)
-├── scripts/
-│   ├── launch_evaluations.sh  # Main launcher (recommended entry point)
-│   ├── launch_evaluations_gracefuly.sh # Resumable launcher (only runs missing tasks, auto-aggregates)
-│   ├── launch_judge.py        # Launches judge models for LLM-as-a-judge tasks
-│   ├── evaluate.sbatch        # SLURM job script for HF/vLLM model evaluation
-│   ├── aggregate_splits.sbatch   # Aggregation job for split evaluations
-│   └── alignment/                   # Python package for W&B upload and data handling
-│       ├── wandb_alignment_utils.py # Core upload logic with stratified sample selection
-│       ├── update_wandb_alignment.py       # Per-model W&B upload script
-│       ├── update_wandb_all_models.py      # Batch upload for all models
-│       ├── merge_split_results.py          # Merges results from split evaluation jobs
-│       └── data_structures.py              # Sample, Metric, Task, ModelEvaluation classes
-├── runners/              # Multi-model evaluation scripts
-│   ├── hf_base_runner.sh            # Generic runner (handles split-aware job submission)
-│   ├── hf_eval_multiple_other_models.sh
-│   ├── hf_eval_multiple_other_base_models.sh
-│   ├── hf_eval_multiple_apertus_models.sh
-│   └── hf_eval_multiple_apertus_base_models.sh
-├── containers/                      # Container specs (Docker, env.toml for enroot/pyxis)
-│   ├── Dockerfile                   # CUDA 9.0+PTX, vLLM, FlashAttention-3
-│   ├── env.toml                     # Standard container config
-└── └── env_vllm.toml                # VLLM-based container config
-```
-
----
-
-## Parallel Task Splitting
-
-For evaluations that would exceed the 12h SLURM time limit (or just to get results faster), the `--splits K` option distributes tasks across K parallel SLURM nodes.
-
-### How It Works
-
-1. The launcher submits K `sbatch` jobs, each with `NUM_SPLITS=K` and `SPLIT_INDEX=0..K-1`
-2. Each job reads the task list, splits it into K chunks, and runs only its chunk
-3. Each split job writes a marker file to `$HARNESS_DIR/split_markers/split_<i>.txt`
-4. An aggregation job (`aggregate_splits.sbatch`) is submitted with `--dependency=afterok:<all_split_job_ids>` -- it only runs once all splits succeed
-5. The aggregation job calls `merge_split_results.py` to combine `results_*.json` files and copy sample JSONL files, then uploads merged results to W&B
-
-```
-sbatch split-0  ─┐
-sbatch split-1  ─┤
-sbatch split-2  ─┤──> afterok ──> sbatch aggregate ──> W&B upload
-sbatch split-3  ─┘
-```
-
-No manual dependency management is needed -- the launcher handles everything via `sbatch --parsable` and `--dependency`.
-
-### Race Condition Safety
-
-- Split jobs do **not** upload to W&B individually. Only the single aggregation job does the upload, avoiding concurrent `wandb.init(resume="allow")` conflicts.
-- Output directories are unique per job ID (`eval_<timestamp>_$SLURM_JOBID`), so file writes never collide.
 
 ---
 
@@ -287,6 +250,175 @@ Available task names can be found in `lm_eval_reference/tasks/` or by running `l
 
 ---
 
+## Parallel Task Splitting
+
+For evaluations that would exceed the 12h SLURM time limit (or just to get results faster), the `--splits K` option distributes tasks across K parallel SLURM nodes.
+
+### How It Works
+
+1. The launcher submits K `sbatch` jobs, each with `NUM_SPLITS=K` and `SPLIT_INDEX=0..K-1`
+2. Each job reads the task list, splits it into K chunks, and runs only its chunk
+3. Each split job writes a marker file to `$HARNESS_DIR/split_markers/split_<i>.txt`
+4. An aggregation job (`aggregate_splits.sbatch`) is submitted with `--dependency=afterok:<all_split_job_ids>` -- it only runs once all splits succeed
+5. The aggregation job calls `merge_split_results.py` to combine `results_*.json` files and copy sample JSONL files, then uploads merged results to W&B
+
+```
+sbatch split-0  ─┐
+sbatch split-1  ─┤
+sbatch split-2  ─┤──> afterok ──> sbatch aggregate ──> W&B upload
+sbatch split-3  ─┘
+```
+
+No manual dependency management is needed -- the launcher handles everything via `sbatch --parsable` and `--dependency`.
+
+### Race Condition Safety
+
+- Split jobs do **not** upload to W&B individually. Only the single aggregation job does the upload, avoiding concurrent `wandb.init(resume="allow")` conflicts.
+- Output directories are unique per job ID (`eval_<timestamp>_$SLURM_JOBID`), so file writes never collide.
+
+---
+
+## Thinking / Reasoning Metrics
+
+For reasoning models, the harness strips the reasoning trace before scoring the answer, and records
+how long that trace was and whether it was well-formed. Enable all of it with one flag:
+
+```bash
+bash scripts/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B --thinking
+```
+
+> [!WARNING]
+> **`--enable-thinking` on its own records nothing.** It is purely a chat-template argument that
+> decides whether the model reasons. The trace strip and every thinking metric are armed by a known
+> reasoning **close token** — supplied with `--think-end-token '</think>'` or discovered with
+> `--autodetect-think-tokens`. `--thinking` wires both up for you; the launcher refuses to submit a
+> job that would silently record nothing. If the model's chat template declares no reasoning
+> tokens, autodetection fails loudly *inside the job* (after queueing, at model construction) —
+> for such models pass `--think-end-token` explicitly or skip `--thinking`.
+
+### The four independent switches
+
+| Question                                    | Flag                                             | Default                                                                                 |
+|---------------------------------------------|--------------------------------------------------|-----------------------------------------------------------------------------------------|
+| Does the model reason?                      | `--enable-thinking`                              | vLLM: off (this repo pins `enable_thinking=False`); hf: the chat template's own default |
+| Are the reasoning tokens discovered?        | `--autodetect-think-tokens`                      | off — the template is never scanned                                                     |
+| Does the trace get stripped before scoring? | *(implicit)* whenever a **close** token is known | off                                                                                     |
+| Are the thinking metrics recorded?          | `--track-thinking-metrics`                       | on iff a close token is known                                                           |
+
+`--thinking` sets the first, second and fourth, adds `--log-length-metrics`, and forces the chat
+template on (the reasoning tokens live in it). Any granular flag you pass overrides the umbrella.
+
+Thinking runs also change **generation**: sampling is forced (`do_sample=true`,
+`THINK_TEMPERATURE=0.6`, `THINK_TOP_P=0.95` — reasoning degrades under greedy), and the default
+generation budget rises to 8192 tokens, floored at each task's own YAML `max_gen_toks` (AIME keeps
+its 32768). Override via the `THINK_*` / `MAX_NEW_TOKENS` env vars (see
+[SBATCH Scripts](#sbatch-scripts)); `NOTHINK_TEMPERATURE` enables the same sampling for no-think
+ablations.
+
+### Emitted metrics
+
+Recorded per task, and uploaded to W&B as `<task>/<metric>` alongside a `_stderr` companion:
+
+| Metric                                 | Kind         | Gated by                                   |
+|----------------------------------------|--------------|--------------------------------------------|
+| `thinking_format_has_open`             | rate `[0,1]` | tracking on **and** an open token is known |
+| `thinking_format_has_close`            | rate `[0,1]` | tracking on                                |
+| `thinking_format_correct`              | rate `[0,1]` | tracking on                                |
+| `response_length_{words,chars,tokens}` | raw count    | `--log-length-metrics`                     |
+| `thinking_length_{words,chars,tokens}` | raw count    | `--log-length-metrics`                     |
+
+> [!NOTE]
+> These exist **only for generative tasks** (`generate_until` / `multi_turn_generate`).
+> Multiple-choice and loglikelihood tasks — `mmlu`, `hellaswag`, `arc_challenge` — emit nothing,
+> and are dropped automatically from the thinking table.
+
+Two caveats worth internalising:
+
+- **The two length families use different denominators.** `response_length_*` averages over *all*
+  responses; `thinking_length_*` averages over *well-formed* responses only (those with
+  `thinking_format_correct == 1`). So an aggregate `thinking_length` is **not** bounded by the
+  aggregate `response_length` — it can exceed it when the well-formed responses are the long ones.
+- **Prefer `_chars` when comparing across backends.** `_tokens` provenance differs per backend
+  (vLLM counts the stop-string and EOS tokens; a re-encoded thinking span can land 1–2 tokens over).
+
+### Backend support
+
+| Backend              | Support         | `enable_thinking`                                                                |
+|----------------------|-----------------|----------------------------------------------------------------------------------|
+| `vllm` (recommended) | full            | forwarded always; this repo defaults it to `False`                               |
+| `hf`                 | full            | forwarded **only when explicitly set**; otherwise the template's default applies |
+| `megatron_lm`        | **unsupported** | requesting thinking metrics is a hard error                                      |
+
+### Examples
+
+```bash
+# Reasoning model, everything on, quick smoke test
+bash scripts/launch_evaluations.sh single --task gsm8k_cot \
+  --model Qwen/Qwen3-8B --thinking --limit 20
+
+# Explicit tokens rather than template auto-detection
+bash scripts/launch_evaluations.sh posttrain --model my/reasoner --backend vllm \
+  --enable-thinking --think-start-token '<think>' --think-end-token '</think>' \
+  --log-length-metrics
+
+# Measure format well-formedness only, no length aggregation
+bash scripts/launch_evaluations.sh olmo-main --model my/reasoner --autodetect-think-tokens
+
+# Response length of a NON-reasoning model: no close token needed, since response_length_*
+# is recorded for every generative response whether the model thinks or not
+bash scripts/launch_evaluations.sh posttrain --model meta-llama/Llama-3.1-8B-Instruct --log-length-metrics
+```
+
+The graceful launcher accepts and forwards all of these to its per-task `single` runs:
+
+```bash
+bash scripts/launch_evaluations_gracefuly.sh --task_file configs/apertus/tasks_posttrain_final.txt \
+  --model /capstor/.../my-reasoner --thinking
+```
+
+Thinking runs get an isolated run name (`<model-basename>-think`, override with `--name`), so their
+results and W&B run never collide with the same model's non-thinking eval — see
+[Graceful / Resumable Launcher](#graceful--resumable-launcher).
+
+### Building a thinking-only table
+
+`make_html_table.py --thinking` creates a separate, thinking-only table: one group per metric family, one row per task. It reuses
+the suite's **existing task list** as the metric source.
+
+```bash
+python make_html_table.py --thinking \
+  --metrics-file configs/apertus/tasks_posttrain_final.txt \
+  --entity apertus --project apertus-1.5-post-training-v0.0 \
+  --models my-reasoner-run another-run \
+  --output thinking_table.html
+```
+
+```
+Category / Benchmark          Reasoner-A   Reasoner-B
+▼ Thinking Format Correct (%)       97.4         99.1
+    gsm8k_cot                       98.2         99.5
+    aime24                          96.6         98.7
+▼ Thinking Length (tokens)           413          918
+    gsm8k_cot                        287          602
+    aime24                           538         1235
+▼ Response Length (tokens)           499         1021
+```
+
+Behaviour specific to `--thinking`:
+
+- Lengths render **raw** and never receive a "best" badge — a shorter trace is not automatically a
+  better one. Only the format-correctness rates are scored and highlighted.
+- There is **no Overall Average**: averaging a `[0,1]` rate with a ~600-token count is meaningless.
+  Each group still shows a macro-mean over its tasks.
+- Tasks with no thinking metrics, and models that never ran with thinking enabled, are dropped.
+- `--length-unit {tokens,words,chars}` swaps the unit (default `tokens`);
+  `--thinking-format-detail` adds the `has_open` / `has_close` groups.
+- Metric keys are resolved by **exact match** (`get_metric(..., fuzzy=False)`), since they are
+  synthesized rather than hand-written. The main table's substring fallback would happily let
+  `gsm8k/...` be answered by `gsm8k_cot/...`.
+
+---
+
 ## W&B Integration
 
 ### Metrics Upload
@@ -296,6 +428,12 @@ Results are automatically uploaded to W&B after evaluation completes (or after a
 - **`main_results`** table: summary metrics specified in the `*_main_table.txt` config
 - **Flat metrics**: all task metrics logged as `task_name/metric_name`
 - **`eval_duration`**: wall-clock time for the evaluation
+
+Because *every* flat metric is uploaded — not just the `*_main_table.txt` subset — the
+[thinking metrics](#thinking--reasoning-metrics) reach W&B as `task_name/thinking_format_correct`
+without any uploader configuration. The length families (`task_name/thinking_length_tokens`,
+`task_name/response_length_tokens`, …) arrive the same way, but only once the eval was launched
+with `--log-length-metrics`, which is what makes the harness aggregate them in the first place.
 
 ### Sample Upload (Stratified)
 
@@ -354,6 +492,67 @@ python -m scripts.alignment.update_wandb_all_models \
 
 ---
 
+## Reporting: Building Result Tables
+
+Both table scripts must be run manually. They read every score from **W&B run summaries** (not from disk); the metrics file
+selects *which* `task/metric` keys to pull and how to group them.
+
+### `make_html_table.py` — interactive HTML results table
+
+A self-contained, collapsible HTML table: one column per model, benchmarks grouped by the `#`
+headers in the metrics file.
+
+```bash
+python make_html_table.py \
+  --metrics-file configs/apertus/tasks_posttrain_final_main_table.txt \
+  --entity apertus --project apertus-1.5-post-training-v0.0 \
+  --models my-run-a my-run-b \
+  --output eval_table.html
+```
+
+- **`--metrics-file`** (required): a `*_main_table.txt` — each `#` line is a category group, each
+  other line a `task/metric[,filter]` W&B summary key.
+- **Models**: the pinned Apertus baselines are included automatically; add yours with `--models`
+  and/or `--models-file` (one run name per line). `--no-baselines` drops the pins.
+- **Layout**: `--no-split` (single table, no train/test), `--flat` (plain rows, no group headers),
+  `--title`, `--rename 'run-name=Display Name'`.
+- **Baseline controls**: `--sft-baseline <run>`, `--no-sft-baseline`, `--instruct-baseline`.
+- **Extra info rows**: `--show-word-count` (AlpacaEval avg word count), `--more-details` (averaged
+  degeneration), `--overrefusal` (ORBench over-refusal rate).
+- **`--json-output <path>`**: also dump the combined metrics (grouped, with group + overall
+  averages) as JSON — only the `--models`, no baselines.
+- **`--thinking`**: switches to the thinking-only table — see
+  [Building a thinking-only table](#building-a-thinking-only-table).
+- `--debug` prints the fetched W&B summary keys per run (useful when a cell is blank).
+
+### `make_table.py` — hyperparameter-sweep table (PNG + CSV)
+
+Targets sweep comparisons rather than a leaderboard: it enumerates the run sub-directories
+under `--base-model-path`, parses each name for `beta` / batch-size / `lr` / length-norm, fetches
+its W&B summary, and renders **delta improvements over a baseline** (`Avg_Imp`; or absolute scores
+with `--absolute`). Writes `eval_table.png` **and** `eval_table.csv` into the `--output` directory.
+
+```bash
+python make_table.py \
+  --base-model-path /path/to/sweep_runs \
+  --entity apertus --project apertus-1.5-post-training-v0.0 \
+  --metrics-file configs/apertus/tasks_posttrain_main_table.txt \
+  --output ./eval_tables
+```
+
+- **`--base-model-path`** (required, one or more dirs): each contains the run sub-directories to
+  look up in W&B by name.
+- **Baselines**: the base run defaults to `baseline-apertus-1-sft` (override `--baseline`); a DPO
+  baseline row is shown unless `--no-dpo-baseline`. Add `--extra-baseline` / `--extra-run` (with
+  matching `-name` flags) for extra rows.
+- **Benchmark selection**: `--include` / `--exclude` (substring match), `--metrics-file` (one or
+  more, merged).
+- **Rows**: `--top-n` (best N by `Avg_Imp`), `--complete-only` (drop rows with any N/A),
+  `--model-order`, `--raw-names` (don't parse lr/beta/ebs), `--rename`, `--label`, `--filter`.
+- **Columns**: `--absolute` (raw scores instead of deltas), `--wordcount` (append avg word count).
+
+---
+
 ## SBATCH Scripts
 
 ### `scripts/evaluate.sbatch`
@@ -377,15 +576,28 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `BS` | `auto:20` | Batch size |
 | `SIZE` | `1` | Model size in billions (for model parallelism) |
 | `MAX_LENGTH` | `4096` | Maximum input sequence length |
-| `MAX_NEW_TOKENS` | `512` | Maximum generated tokens |
+| `MAX_NEW_TOKENS` | `2048` (`8192` with thinking) | Generation-budget *floor*: raised to the largest per-task YAML `max_gen_toks` (e.g. AIME's 32768), never lowered. Thinking raises the default; an explicit value always wins. |
+| `THINK_TEMPERATURE` / `THINK_TOP_P` | `0.6` / `0.95` | Sampling for thinking runs (`do_sample=true` is forced — reasoning degrades under greedy) |
+| `THINK_REPETITION_PENALTY` | (unset) | Optional knob against degenerate looping in thinking runs (e.g. `1.05`) |
+| `NOTHINK_TEMPERATURE` / `NOTHINK_TOP_P` | (unset) / `0.95` | Optional sampling for NO-think runs (greedy-vs-sampling ablations); inert unless `NOTHINK_TEMPERATURE` is set |
 | `LIMIT` | (unset) | Limit number of samples per task |
 | `NUM_FEWSHOT` | (unset) | Global few-shot override |
 | `NUM_SPLITS` / `SPLIT_INDEX` | `1` / `0` | Task splitting (set automatically by launcher) |
 | `LOGS_ROOT` | `/capstor/.../eval-logs` | Root directory for evaluation logs |
 | `WANDB_ENTITY` | `apertus` | W&B entity |
 | `WANDB_PROJECT` | `swissai-evals-test` | W&B project |
+| `ENABLE_THINKING` | `false` | Chat-template argument: whether the model reasons. Emitted for `hf` **only when set explicitly**. |
+| `AUTODETECT_THINK_TOKENS` | `false` | Read the reasoning open/close tokens from the chat template |
+| `THINK_START_TOKEN` | (unset) | Force the reasoning open token, e.g. `<think>` |
+| `THINK_END_TOKEN` | (unset) | Force the reasoning close token, e.g. `</think>`. Arms the strip and the metrics. |
+| `TRACK_THINKING_METRICS` | (unset → derive) | `true`/`false` to force the thinking metrics on/off |
+| `LOG_LENGTH_METRICS` | `false` | Add `--log_length_metrics` (aggregates `response_length_*` / `thinking_length_*`) |
 
 The script auto-detects RULER long-context tasks and adjusts `MAX_LENGTH` and `max_model_len` accordingly.
+
+Requesting any thinking metric with `LM_EVAL_BACKEND=megatron_lm` aborts the job: the harness has no
+reasoning-token support for that backend, so it would otherwise record nothing silently. See
+[Thinking / Reasoning Metrics](#thinking--reasoning-metrics).
 
 ---
 
@@ -420,14 +632,26 @@ See `configs/models.md` for the full list of available models with their HF path
 
 ## Container Setup
 
-The pipeline runs inside containers managed by enroot/pyxis on SLURM. Three container configurations are provided:
+The pipeline runs inside containers managed by enroot/pyxis on SLURM. The available container configurations:
 
 | Config | Base Image | Use Case |
 |--------|-----------|----------|
 | `env.toml` | Based on CSCS container image | Standard HF evals |
-| `env_vllm.toml` | Based on custom VLLM 0.16 image, build from source on top of CSCS container image | Standard HF evals |
+| `env_vllm.toml` | CSCS base image + vLLM 0.16 built from source | vLLM evals |
 
 Dependencies (lm-eval-harness, vLLM, etc.) are installed at runtime inside the container via `pip install`. This ensures the latest versions but adds ~2-3 minutes of startup overhead per job.
+
+---
+
+## Notes
+
+> [!NOTE]
+> **vLLM vs HF inference**: Generation task results (gsm8k, squadv2) may differ slightly between backends (for instruction-tuned models). Only compare results across models using the same backend. We recommend performing all evaluations with the `vllm` backend (default) to ensure reproducibility.
+- **Megatron-LM**: To run Megatron-LM models natively, clone the [NVIDIA Megatron-LM repository](https://github.com/NVIDIA/Megatron-LM) into the evals-post-train directory (or change the location via the launch script).
+- **Time limits**: The default 12h SLURM limit works for most evaluations. For large suites on large models, use `--splits` to parallelize.
+- **WANDB_API_KEY**: Must be available either as an environment variable or in `scripts/wandb_api_key.txt`.
+- **HF_TOKEN**: Must be available either as an environment variable or in  `scripts/hf_token.txt`.
+- **CSCS_SERVING_API**: Must be available either as an environment variable or in `scripts/cscs_serving_api_key.txt` to run LLM-as-a-judge evals (e.g. AlpacaEval). Key can be optained [here](https://serving.swissai.cscs.ch).
 
 ---
 
@@ -437,7 +661,7 @@ Dependencies (lm-eval-harness, vLLM, etc.) are installed at runtime inside the c
 
 The sbatch scripts support `hf`, `vllm`, and `megatron_lm` backends. To add a new one:
 
-1. Add a new `elif` block in `evaluate.sbatch` at the `LM_EVAL_BACKEND` dispatch section (~line 181)
+1. Add a new `elif` block in `evaluate.sbatch` at the `LM_EVAL_BACKEND` dispatch section
 2. Set appropriate `COMMON_MODEL_ARGS` for the new backend
 3. Add any required pip install commands to `INSTALL_CMD`
 
@@ -485,3 +709,40 @@ swissai_eval (100%)
 
 Rule of thumb for fitting within the 12h limit: ensure `2.5 * percentage * model_size_B < 100`.
 
+---
+
+## Repository Structure
+
+```
+evals/
+├── configs/                         # Task lists and model registry
+│   ├── _*.txt                       # actual task lists
+│   ├── _*_main_table.txt            # Corresponding metric specs for W&B summary tables
+│   ├── models.md                    # Model registry with paths and special flags
+│   ├── apertus/                     # Apertus task lists (english, multilingual, etc.)
+│   ├── olmo/                        # OLMo3 benchmark suites (easy, main, heldout, safety, longcontext, complete)
+├── scripts/
+│   ├── launch_evaluations.sh  # Main launcher (recommended entry point)
+│   ├── launch_evaluations_gracefuly.sh # Resumable launcher (only runs missing tasks, auto-aggregates)
+│   ├── launch_judge.py        # Launches judge models for LLM-as-a-judge tasks
+│   ├── evaluate.sbatch        # SLURM job script for HF/vLLM model evaluation
+│   ├── aggregate_splits.sbatch   # Aggregation job for split evaluations
+│   └── alignment/                   # Python package for W&B upload and data handling
+│       ├── wandb_alignment_utils.py # Core upload logic with stratified sample selection
+│       ├── update_wandb_alignment.py       # Per-model W&B upload script
+│       ├── update_wandb_all_models.py      # Batch upload for all models
+│       ├── merge_split_results.py          # Merges results from split evaluation jobs
+│       └── data_structures.py              # Sample, Metric, Task, ModelEvaluation classes
+├── make_html_table.py                # Reporting: interactive HTML results table (reads W&B)
+├── make_table.py                     # Reporting: hyperparameter-sweep table, PNG + CSV (reads W&B)
+├── runners/              # Multi-model evaluation scripts
+│   ├── hf_base_runner.sh            # Generic runner (handles split-aware job submission)
+│   ├── hf_eval_multiple_other_models.sh
+│   ├── hf_eval_multiple_other_base_models.sh
+│   ├── hf_eval_multiple_apertus_models.sh
+│   └── hf_eval_multiple_apertus_base_models.sh
+├── containers/                      # Container specs (Docker, env.toml for enroot/pyxis)
+│   ├── Dockerfile                   # CUDA 9.0+PTX, vLLM, FlashAttention-3
+│   ├── env.toml                     # Standard container config
+└── └── env_vllm.toml                # VLLM-based container config
+```

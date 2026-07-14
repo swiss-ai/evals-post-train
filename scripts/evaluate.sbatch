@@ -43,6 +43,13 @@ usage() {
     echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from swiss-ai/lm-evaluation-harness (default: repository default branch)."
+    echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
+    echo "  ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: false)."
+    echo "  AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
+    echo "  THINK_END_TOKEN: Force the reasoning close token, e.g. '</think>'. A known close token arms the strip AND the metrics."
+    echo "  THINK_START_TOKEN: Force the reasoning open token, e.g. '<think>'. Needed for thinking_format_has_open."
+    echo "  TRACK_THINKING_METRICS: 'true'/'false' to force the thinking metrics on/off (default: on iff a close token is known)."
+    echo "  LOG_LENGTH_METRICS: 'true' to aggregate response_length_*/thinking_length_* (thinking_format_* is always aggregated)."
 	echo "For more information see the README: https://github.com/swiss-ai/evals?tab=readme-ov-file."
 }
 die() {
@@ -100,8 +107,59 @@ warn_if_empty CSCS_SERVING_API \
 
 # optional eval arguments
 MAX_LENGTH=${MAX_LENGTH:-4096}
+# Capture explicitness before defaulting: thinking raises the default, but a caller value wins.
+if [[ -n "${MAX_NEW_TOKENS:+x}" ]]; then MAX_NEW_TOKENS_EXPLICIT=1; else MAX_NEW_TOKENS_EXPLICIT=0; fi
 MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
 NUM_FEWSHOT=${NUM_FEWSHOT:-""}
+
+# --- Thinking / reasoning metrics ---
+# Capture explicitness before defaulting: hf forwards enable_thinking only when set (unset lets
+# the template default apply). ':+' treats an exported-but-empty value as unset.
+if [[ -n "${ENABLE_THINKING:+x}" ]]; then ENABLE_THINKING_EXPLICIT=1; else ENABLE_THINKING_EXPLICIT=0; fi
+ENABLE_THINKING=${ENABLE_THINKING:-false}
+AUTODETECT_THINK_TOKENS=${AUTODETECT_THINK_TOKENS:-false}
+THINK_END_TOKEN=${THINK_END_TOKEN:-""}
+THINK_START_TOKEN=${THINK_START_TOKEN:-""}
+TRACK_THINKING_METRICS=${TRACK_THINKING_METRICS:-""}   # "" | true | false
+LOG_LENGTH_METRICS=${LOG_LENGTH_METRICS:-false}
+
+# Validate booleans (don't coerce): a typo'd 'ture' read as false would waste a GPU job.
+# Assign directly so a bad value aborts under set -e.
+_norm_bool() {  # <name> <value> -> echoes True/False, dies otherwise
+	local name="$1" val="$2"
+	val="${val#"${val%%[![:space:]]*}"}"   # strip leading whitespace
+	val="${val%"${val##*[![:space:]]}"}"   # strip trailing whitespace
+	case "$val" in
+		true|True|TRUE|1|yes)   echo "True" ;;
+		false|False|FALSE|0|no) echo "False" ;;
+		*) die "$name must be true or false (got '$2')." ;;
+	esac
+}
+ENABLE_THINKING=$(_norm_bool ENABLE_THINKING "$ENABLE_THINKING")
+AUTODETECT_THINK_TOKENS=$(_norm_bool AUTODETECT_THINK_TOKENS "$AUTODETECT_THINK_TOKENS")
+LOG_LENGTH_METRICS=$(_norm_bool LOG_LENGTH_METRICS "$LOG_LENGTH_METRICS")
+[[ -z "$TRACK_THINKING_METRICS" ]] || TRACK_THINKING_METRICS=$(_norm_bool TRACK_THINKING_METRICS "$TRACK_THINKING_METRICS")
+
+# Thinking emits a trace before the answer; raise the budget unless the caller set it.
+if [[ "$ENABLE_THINKING" == "True" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then
+    MAX_NEW_TOKENS=8192
+    echo "ENABLE_THINKING=True: raising default MAX_NEW_TOKENS to $MAX_NEW_TOKENS"
+fi
+
+# lm_eval splits --model_args on commas, so a comma in a token would inject an extra key.
+_reject_comma() {
+	[[ "$2" != *,* ]] || die "$1 must not contain a comma (got '$2'): it would inject an extra model_args key."
+}
+_reject_comma THINK_END_TOKEN "$THINK_END_TOKEN"
+_reject_comma THINK_START_TOKEN "$THINK_START_TOKEN"
+
+# Reasoning model_args shared by hf and vllm. Only non-defaults are emitted (an unset flag
+# keeps the harness default).
+THINK_ARGS=""
+[[ -n "$THINK_END_TOKEN" ]] && THINK_ARGS="${THINK_ARGS},think_end_token=${THINK_END_TOKEN}"
+[[ -n "$THINK_START_TOKEN" ]] && THINK_ARGS="${THINK_ARGS},think_start_token=${THINK_START_TOKEN}"
+[[ "$AUTODETECT_THINK_TOKENS" == "True" ]] && THINK_ARGS="${THINK_ARGS},autodetect_think_tokens=True"
+[[ -n "$TRACK_THINKING_METRICS" ]] && THINK_ARGS="${THINK_ARGS},track_thinking_metrics=${TRACK_THINKING_METRICS}"
 
 # Task splitting support: set NUM_SPLITS and SPLIT_INDEX to distribute tasks across jobs
 NUM_SPLITS=${NUM_SPLITS:-1}
@@ -153,7 +211,15 @@ GPUS_PER_NODE=4
 
 # Print configuration.
 echo "Configuration set:"
-printf "MODEL=$MODEL\nNAME=$NAME\nTOKENIZER=$TOKENIZER\nBS=$BS\nREVISION=$REVISION\nSIZE=$SIZE\nHARNESS_LIMIT=$HARNESS_LIMIT\nLM_EVAL_HARNESS_BRANCH=$LM_EVAL_HARNESS_BRANCH\nBOS=$BOS\nTASKS=$TASKS\nMAX_LENGTH=$MAX_LENGTH\nWANDB_ENTITY=$WANDB_ENTITY\nWANDB_PROJECT=$WANDB_PROJECT\nLM_EVAL_BACKEND=$LM_EVAL_BACKEND\nLHF_HOME=$HF_HOME\n\n"
+# Values go in printf's arguments, not the format string: a '%' would be read as a conversion.
+printf '%s\n' "MODEL=$MODEL" "NAME=$NAME" "TOKENIZER=$TOKENIZER" "BS=$BS" "REVISION=$REVISION" \
+	"SIZE=$SIZE" "HARNESS_LIMIT=$HARNESS_LIMIT" "LM_EVAL_HARNESS_BRANCH=$LM_EVAL_HARNESS_BRANCH" \
+	"BOS=$BOS" "TASKS=$TASKS" "MAX_LENGTH=$MAX_LENGTH" "WANDB_ENTITY=$WANDB_ENTITY" \
+	"WANDB_PROJECT=$WANDB_PROJECT" "LM_EVAL_BACKEND=$LM_EVAL_BACKEND" "HF_HOME=$HF_HOME" ""
+printf '%s\n' "ENABLE_THINKING=$ENABLE_THINKING (explicit=$ENABLE_THINKING_EXPLICIT)" \
+	"AUTODETECT_THINK_TOKENS=$AUTODETECT_THINK_TOKENS" "THINK_START_TOKEN=$THINK_START_TOKEN" \
+	"THINK_END_TOKEN=$THINK_END_TOKEN" "TRACK_THINKING_METRICS=$TRACK_THINKING_METRICS" \
+	"LOG_LENGTH_METRICS=$LOG_LENGTH_METRICS" ""
 
 # Generic envs.
 export MASTER_ADDR=$(hostname)
@@ -215,8 +281,15 @@ VLLM_MEMORY_FRACTION=0.75
 # export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export VLLM_DISABLE_CUSTOM_ALL_REDUCE=1
 
+# The harness only implements the reasoning producers for hf/vllm/sglang; fail loudly on megatron.
+if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
+    if [[ -n "$THINK_ARGS" ]] || (( ENABLE_THINKING_EXPLICIT )) || [[ "$LOG_LENGTH_METRICS" == "True" ]]; then
+        die "Thinking/reasoning metrics are unsupported with LM_EVAL_BACKEND=megatron_lm."
+    fi
+fi
+
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS}"
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer_path=$TOKENIZER$MAYBE_REVISION,dp_size=$DP,tp_size=$MP,mem_fraction_static=$VLLM_MEMORY_FRACTION,dtype=auto"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
@@ -232,12 +305,35 @@ elif [[ $LM_EVAL_BACKEND == "swissai-api" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,model=local-completions,base_url=https://api.swissai.svc.cscs.ch/v1,num_concurrent=1,max_retries=3,tokenized_requests=False,batch_size=16"
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION"
+    # Forward enable_thinking only when explicitly set; unset lets the template default apply.
+    (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS${THINK_ARGS}"
 else
     die "Unsupported LM_EVAL_BACKEND: $LM_EVAL_BACKEND"
 fi
 #,tokenizer_mode=slow"
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
+
+# Generation kwargs (CLI): lm-eval dict-updates each task's YAML generation_kwargs with these.
+# max_gen_toks is the EFFECTIVE_MAX_GEN_TOKS floor (see below). Thinking also forces sampling
+# (do_sample=true is needed or normalize_gen_kwargs pins temperature=0 for do_sample=False tasks).
+GEN_KWARGS="max_gen_toks=\$EFFECTIVE_MAX_GEN_TOKS"
+if [[ "$ENABLE_THINKING" == "True" ]]; then
+    THINK_TEMPERATURE=${THINK_TEMPERATURE:-0.6}
+    THINK_TOP_P=${THINK_TOP_P:-0.95}
+    GEN_KWARGS="${GEN_KWARGS},do_sample=true,temperature=${THINK_TEMPERATURE},top_p=${THINK_TOP_P}"
+    # Optional knob for degenerate looping (e.g. 1.05); unset leaves vLLM's default (1.0).
+    if [[ -n "${THINK_REPETITION_PENALTY:-}" ]]; then
+        GEN_KWARGS="${GEN_KWARGS},repetition_penalty=${THINK_REPETITION_PENALTY}"
+    fi
+    echo "Thinking sampling: do_sample=true temperature=$THINK_TEMPERATURE top_p=$THINK_TOP_P repetition_penalty=${THINK_REPETITION_PENALTY:-<unset>} (max_gen_toks via floor)"
+elif [[ -n "${NOTHINK_TEMPERATURE:-}" ]]; then
+    # Optional no-think sampling (inert unless NOTHINK_TEMPERATURE is set): greedy-vs-sampling ablation.
+    NOTHINK_TOP_P=${NOTHINK_TOP_P:-0.95}
+    GEN_KWARGS="${GEN_KWARGS},do_sample=true,temperature=${NOTHINK_TEMPERATURE},top_p=${NOTHINK_TOP_P}"
+    echo "No-think sampling: do_sample=true temperature=$NOTHINK_TEMPERATURE top_p=$NOTHINK_TOP_P"
+fi
 
 COMMON_EVAL_ARGS=(
 	--trust_remote_code
@@ -249,7 +345,7 @@ COMMON_EVAL_ARGS=(
 	--write_out
 	--confirm_run_unsafe_code
     # --cache_requests true - causes problems for long model names due to file name length limits
-    --gen_kwargs max_gen_toks=$MAX_NEW_TOKENS
+    --gen_kwargs "$GEN_KWARGS"
 )
 
 if [[ -n "${HARNESS_LIMIT}" ]]; then
@@ -263,6 +359,12 @@ fi
 if [[ $APPLY_CHAT_TEMPLATE = true ]]; then
 	COMMON_EVAL_ARGS+=(--apply_chat_template)
 	COMMON_EVAL_ARGS+=(--fewshot_as_multiturn)
+fi
+
+# Aggregates response_length_*/thinking_length_* into results.json and W&B (thinking_format_*
+# is aggregated whenever tracking is on, flag or not).
+if [[ "$LOG_LENGTH_METRICS" == "True" ]]; then
+	COMMON_EVAL_ARGS+=(--log_length_metrics)
 fi
 
 # Detect long context length only when 'ruler' is among tasks.
@@ -325,17 +427,35 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
   INSTALL_CMD="$INSTALL_CMD && pip install megatron-core --no-deps && export MEGATRON_PATH=$(pwd)/Megatron-LM"
 fi
 
+# $CMD is re-parsed by the inner `bash -lc`, so --model_args is single-quoted (a token like
+# think_end_token=</think> would otherwise redirect, and $(...) in a path would execute).
+# A single quote in the value can't be nested safely, so refuse it.
+if [[ "$COMMON_MODEL_ARGS" == *\'* ]]; then
+    die "Model args must not contain a single quote: $COMMON_MODEL_ARGS"
+fi
+
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    CMD="lm_eval --model $LM_EVAL_BACKEND --model_args=$COMMON_MODEL_ARGS ${COMMON_EVAL_ARGS[@]}"
+    CMD="lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     CMD="lm_eval --model $LM_EVAL_BACKEND --model_args=$COMMON_MODEL_ARGS ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "swissai-api" ]]; then
     CMD="lm_eval --model local-completions --model_args=$COMMON_MODEL_ARGS ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
-    CMD="accelerate launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args=$COMMON_MODEL_ARGS ${COMMON_EVAL_ARGS[@]}"
+    CMD="accelerate launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
-    CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args=$COMMON_MODEL_ARGS ${COMMON_EVAL_ARGS[@]}"
+    CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 fi
+
+# Resolve the generation budget in-container, after the harness install (task YAMLs present):
+# a MAX_NEW_TOKENS floor, never lowered below a task's own larger max_gen_toks (AIME's 32768).
+# Fail-safe: falls back to MAX_NEW_TOKENS on any error. Prepended so it runs before lm_eval.
+COMPUTE_MAX_GEN_TOKS="
+EFFECTIVE_MAX_GEN_TOKS=\$(cd $PWD && python -m scripts.get_max_gen_toks --tasks '$TASKS' --floor $MAX_NEW_TOKENS 2>/dev/null || echo $MAX_NEW_TOKENS)
+# Guard against stray stdout corrupting the value.
+[[ \"\$EFFECTIVE_MAX_GEN_TOKS\" =~ ^[0-9]+\$ ]] || EFFECTIVE_MAX_GEN_TOKS=$MAX_NEW_TOKENS
+echo \"Effective max_gen_toks: \$EFFECTIVE_MAX_GEN_TOKS (floor $MAX_NEW_TOKENS)\"
+"
+CMD="$COMPUTE_MAX_GEN_TOKS$CMD"
 
 echo "Installation command: $INSTALL_CMD"
 echo "Final command: $CMD"
