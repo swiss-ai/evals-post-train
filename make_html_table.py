@@ -790,6 +790,13 @@ PINNED_SUFFIX = [
 
 ALWAYS_PINNED = {run for run, _ in PINNED_PREFIX + PINNED_SUFFIX}
 
+# 70B Apertus baselines passed via --models. Mapped to display names (not toggled by
+# the Apertus button, which only controls the 8B baselines).
+APERTUS_70B_BASELINES = {
+    "Apertus-70B-Instruct-2509": "Apertus-1.0-70B-Instruct",
+    "Apertus-70B-Instruct-2509-SFT": "Apertus-1.0-70B-SFT",
+}
+
 
 def fetch_model(api, project_path, run_name, display_name, groups, scores, debug=False, summaries=None):
     try:
@@ -908,7 +915,7 @@ def main():
     for model_name in all_models:
         if model_name in fetched_runs or model_name in ALWAYS_PINNED:
             continue
-        display = rename_map.get(model_name, model_name)
+        display = rename_map.get(model_name, APERTUS_70B_BASELINES.get(model_name, model_name))
         if fetch_model(api, project_path, model_name, display, groups, scores, args.debug, summaries):
             display_names.append(display)
             requested_display_names.append(display)
