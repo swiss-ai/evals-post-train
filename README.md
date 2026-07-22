@@ -38,6 +38,14 @@ bash scripts/launch_evaluations.sh olmo-easy --model /capstor/store/../apertus-.
 # Launch with vllm backend - recommended!
 bash scripts/launch_evaluations.sh olmo-easy --model /capstor/store/../apertus-.../checkpoints/ --backend vllm
 
+# Launch with the SGLang backend
+bash scripts/launch_evaluations.sh olmo-easy --model /capstor/store/../apertus-.../checkpoints/ --backend sglang
+
+# Evaluate against an already-running OpenAI-compatible endpoint (vLLM serve, CSCS serving, ...)
+# instead of loading the model in the job
+bash scripts/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B \
+  --backend openai --api-base-url http://nid001234:8000
+
 # Evaluate a base model with 5-shot and easy eval set (matching OLMo3 technical report settings)
 bash scripts/launch_evaluations.sh olmo-easy --model Qwen/Qwen2.5-7B --num-fewshot 5
 
@@ -115,7 +123,9 @@ bash scripts/launch_evaluations.sh <mode>
 | `--no-chat-template` | Force disable chat template |
 | `--tokenizer <path>` | Custom tokenizer (default: same as model) |
 | `--num-fewshot N` | Override num_fewshot globally. Tasks with explicit `num_fewshot: 0` in their YAML are never overridden. OLMo3 paper uses 5-shot for most MC tasks. |
-| `--backend <hf\|vllm\|megatron_lm>` | Inference backend (default: from sbatch script). `vllm` recommended. |
+| `--backend <hf\|vllm\|sglang\|megatron_lm\|openai>` | Inference backend (default: from sbatch script). `vllm` recommended for in-job inference; `openai` evaluates against an already-running OpenAI-compatible endpoint instead of loading the model. |
+| `--api-base-url <url>` | Endpoint for the `openai` backend (required with it). Accepts a bare host (`http://host:8000`), a `/v1` root, or a full `/v1/(chat/)completions` URL. |
+| `--api-model-name <name>` | `model` field sent in API requests (default: the `--model` value) |
 | `--splits K` | Split task list across K parallel SLURM nodes per model (auto-clamped to the task count) |
 | `--limit N` | Limit number of samples per task (forwarded as `--limit` to lm-eval-harness; default: no limit). Useful for quick sanity checks. |
 | `--megatron-iter <iter>` | For Megatron-LM checkpoints, the iteration to evaluate (e.g. `8926`); defaults to `latest`. Exported as `CKPT_ITERATION`. |
@@ -347,7 +357,9 @@ Two caveats worth internalising:
 |----------------------|-----------------|----------------------------------------------------------------------------------|
 | `vllm` (recommended) | full            | forwarded always; this repo defaults it to `False`                               |
 | `hf`                 | full            | forwarded **only when explicitly set**; otherwise the template's default applies |
+| `sglang`             | available       | uses the SGLang backend and its dedicated container                              |
 | `megatron_lm`        | **unsupported** | requesting thinking metrics is a hard error                                      |
+| `openai`             | **unsupported** | requesting thinking metrics is a hard error                                      |
 
 ### Examples
 
@@ -569,7 +581,12 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 |----------|---------|-------------|
 | `TASKS` | `configs/apertus/tasks_constrained.txt` | Task list file or comma-separated task names |
 | `TABLE_METRICS` | `configs/apertus/tasks_constrained_main_table.txt` | Metrics for W&B summary table |
-| `LM_EVAL_BACKEND` | `hf` | Backend: `hf` (accelerate), `vllm`, `megatron_lm` |
+| `LM_EVAL_BACKEND` | `hf` | Backend: `hf` (accelerate), `vllm`, `sglang`, `megatron_lm`, `openai` (OpenAI-compatible API) |
+| `API_BASE_URL` | (unset) | `openai` backend only, **required**: the OpenAI-compatible endpoint. Bare host / `/v1` root / full endpoint URL all accepted. |
+| `API_MODEL_NAME` | same as model | `openai` backend only: the `model` field sent in requests, when the server registers the model under a different id |
+| `API_NUM_CONCURRENT` | `8` | `openai` backend only: concurrent requests (batch size is pinned to 1; this is the throughput knob) |
+| `API_MAX_RETRIES` | `3` | `openai` backend only: retries per failed request |
+| `OPENAI_API_KEY` | `CSCS_SERVING_API` | `openai` backend only: bearer token sent to the endpoint |
 | `APPLY_CHAT_TEMPLATE` | `false` | Apply chat template for instruct models |
 | `TOKENIZER` | same as model | Custom tokenizer path |
 | `BOS` | `false` | Prepend BOS token |
@@ -638,6 +655,7 @@ The pipeline runs inside containers managed by enroot/pyxis on SLURM. The availa
 |--------|-----------|----------|
 | `env.toml` | Based on CSCS container image | Standard HF evals |
 | `env_vllm.toml` | CSCS base image + vLLM 0.16 built from source | vLLM evals |
+| `env_sglang.toml` | CSCS SGLang CUDA 13 image | SGLang evals |
 
 Dependencies (lm-eval-harness, vLLM, etc.) are installed at runtime inside the container via `pip install`. This ensures the latest versions but adds ~2-3 minutes of startup overhead per job.
 
@@ -647,6 +665,7 @@ Dependencies (lm-eval-harness, vLLM, etc.) are installed at runtime inside the c
 
 > [!NOTE]
 > **vLLM vs HF inference**: Generation task results (gsm8k, squadv2) may differ slightly between backends (for instruction-tuned models). Only compare results across models using the same backend. We recommend performing all evaluations with the `vllm` backend (default) to ensure reproducibility.
+- **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. With the chat template on it uses lm-eval's `local-chat-completions` (`/v1/chat/completions`) — **generative tasks only**; loglikelihood/multiple-choice tasks (mmlu, hellaswag, ...) cannot be scored through a chat endpoint. With the chat template off it uses `local-completions` (`/v1/completions`), which also handles loglikelihood tasks *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Note the job still requests the resources declared in `evaluate.sbatch` even though no GPU is used.
 - **Megatron-LM**: To run Megatron-LM models natively, clone the [NVIDIA Megatron-LM repository](https://github.com/NVIDIA/Megatron-LM) into the evals-post-train directory (or change the location via the launch script).
 - **Time limits**: The default 12h SLURM limit works for most evaluations. For large suites on large models, use `--splits` to parallelize.
 - **WANDB_API_KEY**: Must be available either as an environment variable or in `scripts/wandb_api_key.txt`.
@@ -659,7 +678,7 @@ Dependencies (lm-eval-harness, vLLM, etc.) are installed at runtime inside the c
 
 ### Adding a New Inference Backend
 
-The sbatch scripts support `hf`, `vllm`, and `megatron_lm` backends. To add a new one:
+The sbatch scripts support `hf`, `vllm`, `sglang`, `megatron_lm`, and `openai` backends. To add a new one:
 
 1. Add a new `elif` block in `evaluate.sbatch` at the `LM_EVAL_BACKEND` dispatch section
 2. Set appropriate `COMMON_MODEL_ARGS` for the new backend
