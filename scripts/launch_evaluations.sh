@@ -41,10 +41,15 @@
 #   --num-fewshot N      - Override num_fewshot for all tasks (default: use task YAML defaults)
 #                          Note: tasks with num_fewshot=0 in YAML are never overridden.
 #                          OLMo3 uses 5-shot for most MC tasks; pass --num-fewshot 5 to match.
-#   --backend <backend>  - lm-eval backend: hf, vllm, megatron_lm (default: from sbatch script)
+#   --backend <backend>  - lm-eval backend: hf, vllm, megatron_lm, openai (default: from sbatch script)
+#   --api-base-url <url> - OpenAI-compatible endpoint for the 'openai' backend (required with it,
+#                          unless API_BASE_URL is exported). Bare host, /v1 root, or full endpoint URL.
+#   --api-model-name <n> - 'model' field sent in API requests (default: the --model value)
 #   --splits K           - Split tasks across K parallel nodes per model
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
+#   --reservation <name> - Submit jobs under a SLURM reservation (exported as SBATCH_RESERVATION;
+#                          ambient SBATCH_RESERVATION is respected when the flag is absent)
 #   --judge <none|auto|preset> - Judge model control:
 #                          none (default): disable judge auto-launch
 #                          auto: detect judge-dependent tasks and launch needed judges
@@ -103,6 +108,8 @@ CHAT_TEMPLATE_OVERRIDE=""  # "", "true", "false"
 CUSTOM_TOKENIZER=""
 BOS_FLAG=""
 BACKEND_FLAG=""
+API_BASE_URL_FLAG=""
+API_MODEL_NAME_FLAG=""
 FEWSHOT_FLAG=""
 # Keep an ambient HARNESS_LIMIT (the graceful launcher has no --limit flag, so callers export
 # it); blanking it here would ship the cleared value into the job. --limit still overrides.
@@ -110,6 +117,7 @@ HARNESS_LIMIT="${HARNESS_LIMIT:-}"
 MEGATRON_ITER=""
 SINGLE_TASK=""
 HARNESS_BRANCH=""
+RESERVATION_FLAG=""
 JUDGE_MODE="none"       # auto, none, or a preset name
 JUDGE_EXTRA_ARGS=""
 KEEP_JUDGE="false"
@@ -134,9 +142,12 @@ while [[ $# -gt 0 ]]; do
         --tokenizer)    CUSTOM_TOKENIZER="$2";        shift 2 ;;
         --bos)          BOS_FLAG="true";              shift ;;
         --backend)      BACKEND_FLAG="$2";            shift 2 ;;
+        --api-base-url) API_BASE_URL_FLAG="$2";       shift 2 ;;
+        --api-model-name) API_MODEL_NAME_FLAG="$2";   shift 2 ;;
         --megatron-iter) MEGATRON_ITER="$2";            shift 2 ;;
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --harness-branch) HARNESS_BRANCH="$2";        shift 2 ;;
+        --reservation)   RESERVATION_FLAG="$2";        shift 2 ;;
         --judge)         JUDGE_MODE="$2";              shift 2 ;;
         --judge-args)    JUDGE_EXTRA_ARGS="$2";        shift 2 ;;
         --keep-judge)    KEEP_JUDGE="true";            shift ;;
@@ -238,10 +249,22 @@ fi
 # Length/reasoning producers exist only for hf/vllm/sglang. Resolve the backend as
 # evaluate.sbatch will, so an ambient LM_EVAL_BACKEND fails here, not after scheduling.
 EFFECTIVE_BACKEND="${BACKEND_FLAG:-${LM_EVAL_BACKEND:-}}"
-if [[ "$THINKING_TOUCHED" == "true" && "$EFFECTIVE_BACKEND" == "megatron_lm" ]]; then
-    echo "Error: thinking and length metrics are not supported with the megatron_lm backend"
+if [[ "$THINKING_TOUCHED" == "true" && ( "$EFFECTIVE_BACKEND" == "megatron_lm" || "$EFFECTIVE_BACKEND" == "openai" ) ]]; then
+    echo "Error: thinking and length metrics are not supported with the $EFFECTIVE_BACKEND backend"
     exit 1
 fi
+
+# The openai backend needs an endpoint; fail here, not after scheduling.
+if [[ "$EFFECTIVE_BACKEND" == "openai" && -z "${API_BASE_URL_FLAG:-${API_BASE_URL:-}}" ]]; then
+    echo "Error: --backend openai requires --api-base-url <url> (or an exported API_BASE_URL)"
+    exit 1
+fi
+if [[ -n "$API_BASE_URL_FLAG" || -n "$API_MODEL_NAME_FLAG" ]] && [[ "$EFFECTIVE_BACKEND" != "openai" ]]; then
+    echo "Error: --api-base-url/--api-model-name only apply with --backend openai"
+    exit 1
+fi
+[[ -n "$API_BASE_URL_FLAG"   ]] && export API_BASE_URL="$API_BASE_URL_FLAG"
+[[ -n "$API_MODEL_NAME_FLAG" ]] && export API_MODEL_NAME="$API_MODEL_NAME_FLAG"
 
 if [[ "$THINKING_METRICS_ASKED" == "true" ]]; then
     # The reasoning tokens live in the chat template, so it has to be rendered.
@@ -279,6 +302,8 @@ fi
 [[ "$LOG_LENGTH_METRICS" == "true"      ]] && export LOG_LENGTH_METRICS="true"
 
 # --- Environment defaults ---
+# sbatch reads SBATCH_RESERVATION natively (CLI > env > script directives).
+[[ -n "$RESERVATION_FLAG" ]] && export SBATCH_RESERVATION="$RESERVATION_FLAG"
 export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 export WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
 export NUM_SPLITS
@@ -408,6 +433,9 @@ echo "  Splits: $NUM_SPLITS"
 if [[ "$THINKING_TOUCHED" == "true" ]]; then
     echo "  Thinking: enable=${ENABLE_THINKING_OVERRIDE:-<unset>} autodetect=${AUTODETECT_THINK_TOKENS:-false} track=${TRACK_THINKING_METRICS:-<derive>} lengths=${LOG_LENGTH_METRICS:-false}"
     [[ -n "$THINK_START_TOKEN" || -n "$THINK_END_TOKEN" ]] && echo "  Think tokens: start='${THINK_START_TOKEN:-<none>}' end='${THINK_END_TOKEN:-<none>}'"
+fi
+if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
+    echo "  API:    ${API_BASE_URL} (model=${API_MODEL_NAME:-<from --model>})"
 fi
 
 # --- Few-shot override ---
