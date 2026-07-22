@@ -39,8 +39,14 @@ usage() {
 	echo " TASKS: Tasks to run with lm eval harness."
 	echo " WANDB_ENTITY: WandB entity name for uploading results (default: apertus)."
 	echo " WANDB_PROJECT: WandB project name for uploading results (default: swissai-evals)."
-	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: hf). - options are: hf, vllm, megatron_lm"
+	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: hf). - options are: hf, vllm, megatron_lm, openai"
     echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
+    echo " OpenAI-compatible API backend (LM_EVAL_BACKEND=openai; no model is loaded in the job):"
+    echo "  API_BASE_URL: Endpoint to evaluate against. Required. Accepts a bare host (http://host:8000), a /v1 root, or a full /v1/(chat/)completions URL."
+    echo "  API_MODEL_NAME: 'model' field sent in requests (default: the <model> positional argument)."
+    echo "  API_NUM_CONCURRENT: Concurrent requests (default: 8)."
+    echo "  API_MAX_RETRIES: Retries per request (default: 3)."
+    echo "  OPENAI_API_KEY: Bearer token for the endpoint (default: CSCS_SERVING_API)."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from swiss-ai/lm-evaluation-harness (default: repository default branch)."
     echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
@@ -83,9 +89,17 @@ APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-true}
 HARNESS_LIMIT=${HARNESS_LIMIT:-""}
 LM_EVAL_HARNESS_BRANCH=${LM_EVAL_HARNESS_BRANCH:-""}
 
+# OpenAI-compatible API backend (LM_EVAL_BACKEND=openai).
+API_BASE_URL=${API_BASE_URL:-""}
+API_MODEL_NAME=${API_MODEL_NAME:-""}
+API_NUM_CONCURRENT=${API_NUM_CONCURRENT:-8}
+API_MAX_RETRIES=${API_MAX_RETRIES:-3}
+
 export HF_TOKEN="${HF_TOKEN:-$(tr -d '\r\n' < ./scripts/hf_token.txt)}"
 export WANDB_API_KEY="${WANDB_API_KEY:-$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)}"
 export CSCS_SERVING_API="${CSCS_SERVING_API:-$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)}"
+# Bearer token the openai backend sends (lm-eval reads OPENAI_API_KEY); CSCS serving key by default.
+export OPENAI_API_KEY="${OPENAI_API_KEY:-${CSCS_SERVING_API:-}}"
 
 warn_if_empty() {
   local var="$1"
@@ -152,6 +166,8 @@ _reject_comma() {
 }
 _reject_comma THINK_END_TOKEN "$THINK_END_TOKEN"
 _reject_comma THINK_START_TOKEN "$THINK_START_TOKEN"
+_reject_comma API_BASE_URL "$API_BASE_URL"
+_reject_comma API_MODEL_NAME "$API_MODEL_NAME"
 
 # Reasoning model_args shared by hf and vllm. Only non-defaults are emitted (an unset flag
 # keeps the harness default).
@@ -281,10 +297,10 @@ VLLM_MEMORY_FRACTION=0.75
 # export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export VLLM_DISABLE_CUSTOM_ALL_REDUCE=1
 
-# The harness only implements the reasoning producers for hf/vllm/sglang; fail loudly on megatron.
-if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
+# The harness only implements the reasoning producers for hf/vllm/sglang; fail loudly otherwise.
+if [[ $LM_EVAL_BACKEND == "megatron_lm" || $LM_EVAL_BACKEND == "openai" ]]; then
     if [[ -n "$THINK_ARGS" ]] || (( ENABLE_THINKING_EXPLICIT )) || [[ "$LOG_LENGTH_METRICS" == "True" ]]; then
-        die "Thinking/reasoning metrics are unsupported with LM_EVAL_BACKEND=megatron_lm."
+        die "Thinking/reasoning metrics are unsupported with LM_EVAL_BACKEND=$LM_EVAL_BACKEND."
     fi
 fi
 
@@ -304,6 +320,39 @@ elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
     # Forward enable_thinking only when explicitly set; unset lets the template default apply.
     (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS${THINK_ARGS}"
+elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
+    [[ -n "$API_BASE_URL" ]] || die "API_BASE_URL must be set when LM_EVAL_BACKEND=openai (e.g. http://<host>:8000/v1)."
+    API_MODEL_NAME=${API_MODEL_NAME:-$MODEL}
+    # Chat template -> chat/completions; otherwise raw completions, which also serves the
+    # loglikelihood/MC tasks (the server must return prompt logprobs with echo, as vLLM does).
+    if [[ $APPLY_CHAT_TEMPLATE = true ]]; then
+        API_LM_EVAL_MODEL="local-chat-completions"
+        API_ENDPOINT_SUFFIX="chat/completions"
+    else
+        API_LM_EVAL_MODEL="local-completions"
+        API_ENDPOINT_SUFFIX="completions"
+    fi
+    # Accept a bare host, a /v1 root, or an already-full endpoint URL.
+    if [[ "$API_BASE_URL" != */chat/completions && "$API_BASE_URL" != */completions ]]; then
+        API_BASE_URL="${API_BASE_URL%/}"
+        [[ "$API_BASE_URL" == */v1 ]] || API_BASE_URL="$API_BASE_URL/v1"
+        API_BASE_URL="$API_BASE_URL/$API_ENDPOINT_SUFFIX"
+    fi
+    # Rebuilt from scratch: no model is loaded in-job, so dtype etc. do not apply.
+    COMMON_MODEL_ARGS="model=$API_MODEL_NAME,base_url=$API_BASE_URL,num_concurrent=$API_NUM_CONCURRENT,max_retries=$API_MAX_RETRIES,max_length=$MAX_LENGTH"
+    if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then
+        # Client-side tokenization: loglikelihood scoring needs token-aligned context/continuation.
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER"
+        [[ $BOS = true ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
+    else
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenized_requests=False"
+    fi
+    # API models take an integer batch size; throughput comes from num_concurrent instead.
+    if [[ "$BS" == auto* ]]; then
+        BS=1
+        echo "openai backend: batch size 'auto' unsupported, using BS=$BS (concurrency: API_NUM_CONCURRENT=$API_NUM_CONCURRENT)"
+    fi
+    echo "openai backend: $API_LM_EVAL_MODEL against $API_BASE_URL (model=$API_MODEL_NAME)"
 else
     die "Unsupported LM_EVAL_BACKEND: $LM_EVAL_BACKEND"
 fi
@@ -382,9 +431,16 @@ if echo "$TASKS" | grep -q "ruler"; then
 			COMMON_EVAL_ARGS+=( --metadata \'{\"max_seq_lengths\":[${CONTEXT_LEN}]}\' )
 
             MAX_MODEL_LEN_WITH_MARGIN=$(( CONTEXT_LEN + 600 ))
-            export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
-            COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$MAX_MODEL_LEN_WITH_MARGIN"
-            echo "Detected ruler context length: $CONTEXT_LEN (set MAX_LENGTH, max_model_len=$MAX_MODEL_LEN_WITH_MARGIN and lm-eval metadata)"
+            if [[ $LM_EVAL_BACKEND == "openai" ]]; then
+                # No in-job engine to configure; raise the client-side truncation length instead
+                # (duplicate max_length key: lm_eval keeps the last occurrence).
+                COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_length=$MAX_MODEL_LEN_WITH_MARGIN"
+                echo "Detected ruler context length: $CONTEXT_LEN (set MAX_LENGTH, max_length=$MAX_MODEL_LEN_WITH_MARGIN and lm-eval metadata)"
+            else
+                export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+                COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$MAX_MODEL_LEN_WITH_MARGIN"
+                echo "Detected ruler context length: $CONTEXT_LEN (set MAX_LENGTH, max_model_len=$MAX_MODEL_LEN_WITH_MARGIN and lm-eval metadata)"
+            fi
         else
             echo "Warning: Ruler detected but no numeric context length found; skipping metadata and max_model_len."
         fi
@@ -432,6 +488,8 @@ fi
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
     CMD="lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
+elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
+    CMD="lm_eval --model $API_LM_EVAL_MODEL --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
     CMD="accelerate launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
@@ -493,6 +551,18 @@ elif [[ $LM_EVAL_BACKEND == "vllm" ]]; then
     $INSTALL_CMD
     # Make torch CUDA libs discoverable for vllm._C import
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
+    $CMD
+    "
+elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
+  # No model is loaded in-job; the harness only makes HTTP calls against API_BASE_URL.
+  srun -n 1 --mpi=pmix -ul --environment=./containers/env.toml --export=ALL,HF_TOKEN,HF_HOME,WANDB_API_KEY,OPENAI_API_KEY bash -lc "
+    set -euo pipefail
+    unset SSL_CERT_FILE
+    export HF_DATASETS_TRUST_REMOTE_CODE=1
+    $CACHE_EXPORTS
+
+    $INSTALL_CMD
+
     $CMD
     "
 else
