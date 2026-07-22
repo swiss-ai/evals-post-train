@@ -11,6 +11,7 @@
 #   default          - Apertus multilingual suite
 #   multi-lingual    - Multi-lingual suite (taken from 1.0)
 #   apertus-previous - Apertus previous benchmark suite (from 1.0)
+#   best-of-k        - Multi-repeat/self-consistency suite
 #   eval-debug       - Small set of loglikelihood and generative benchmarks to test eval script
 #   single           - Run a single task (requires --task <task_name>)
 
@@ -169,7 +170,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Validate mode ---
-VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "posttrain" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "single" "custom")
+VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "posttrain" "best-of-k" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "single" "custom")
 if [[ ! " ${VALID_MODES[*]} " =~ " ${EVAL_MODE} " ]]; then
     echo "Error: Invalid mode '$EVAL_MODE'"
     echo "Valid modes: ${VALID_MODES[*]}"
@@ -334,6 +335,10 @@ case "$EVAL_MODE" in
     "posttrain")
         export TASKS=./configs/apertus/tasks_posttrain_final.txt
         export TABLE_METRICS=./configs/apertus/tasks_posttrain_final_main_table.txt
+        ;;
+    "best-of-k")
+        export TASKS=./configs/apertus/tasks_best_of_k.txt
+        export TABLE_METRICS=./configs/apertus/tasks_best_of_k_main_table.txt
         ;;
     "olmo-easy")
         export TASKS=./configs/olmo/olmo3_easy.txt
