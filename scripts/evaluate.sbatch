@@ -9,8 +9,8 @@
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --exclusive
-#SBATCH --partition=normal
-#SBATCH --time=03:59:00
+#SBATCH --partition=debug
+#SBATCH --time=00:59:00
 #SBATCH --exclude=nid006784
 #SBATCH --exclude=nid007014
 #SBATCH --exclude=nid007127
@@ -39,7 +39,7 @@ usage() {
 	echo " TASKS: Tasks to run with lm eval harness."
 	echo " WANDB_ENTITY: WandB entity name for uploading results (default: apertus)."
 	echo " WANDB_PROJECT: WandB project name for uploading results (default: swissai-evals)."
-	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: hf). - options are: hf, vllm, sglang, megatron_lm"
+	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: hf). - options are: hf, vllm, sglang, megatron_l, swissai-api"
     echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from swiss-ai/lm-evaluation-harness (default: repository default branch)."
@@ -289,7 +289,7 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
 fi
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS}"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,language_model_only=True,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS}"
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer_path=$TOKENIZER$MAYBE_REVISION,dp_size=$DP,tp_size=$MP,mem_fraction_static=$VLLM_MEMORY_FRACTION,dtype=auto"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
@@ -302,7 +302,7 @@ elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
         die "CKPT_ITER must be an integer or 'latest' when LM_EVAL_BACKEND=megatron_lm (got '$CKPT_ITER')."
     fi
 elif [[ $LM_EVAL_BACKEND == "swissai-api" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,model=local-completions,base_url=https://api.swissai.svc.cscs.ch/v1,num_concurrent=1,max_retries=3,tokenized_requests=False,batch_size=16"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,model=$MODEL,base_url=https://api.swissai.svc.cscs.ch/v1/chat/completions,num_concurrent=1,max_retries=3,tokenized_requests=False,tokenizer_backend=None"
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION"
     # Forward enable_thinking only when explicitly set; unset lets the template default apply.
@@ -337,7 +337,6 @@ fi
 
 COMMON_EVAL_ARGS=(
 	--trust_remote_code
-	--batch_size $BS
 	--tasks $TASKS
 	--output_path $HARNESS_EVAL_DIR
 	--max_batch_size 32
@@ -347,6 +346,11 @@ COMMON_EVAL_ARGS=(
     # --cache_requests true - causes problems for long model names due to file name length limits
     --gen_kwargs "$GEN_KWARGS"
 )
+
+# if not API backend, add batch size:
+if [[ $LM_EVAL_BACKEND != "swissai-api" ]]; then
+    COMMON_EVAL_ARGS+=(--batch_size $BS)
+fi
 
 if [[ -n "${HARNESS_LIMIT}" ]]; then
     COMMON_EVAL_ARGS+=(--limit $HARNESS_LIMIT)
@@ -410,6 +414,8 @@ pip install --no-cache-dir --upgrade \
     segtok \
     \"tokenizers>=0.22.0,<0.23.0\" \
     mistral-common \
+    \"humming-kernels[cu13]==0.1.2\" \
+    tenacity \
     sympy \
     spacy \
     math_verify \
@@ -504,7 +510,6 @@ elif [[ $LM_EVAL_BACKEND == "vllm" ]]; then
     $CMD
     "
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
-  # vLLM needs to run with a single process that manages all GPUs, so we run the install and eval in the same command to avoid issues with environment persistence across srun calls
   srun -n 1 --mpi=pmix -ul --environment=./containers/env_sglang.toml bash -lc "
     set -euo pipefail
     unset SSL_CERT_FILE
@@ -512,6 +517,18 @@ elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     $CACHE_EXPORTS
 
     $INSTALL_CMD
+    $CMD
+    "
+elif [[ $LM_EVAL_BACKEND == "swissai-api" ]]; then
+  # This backend is just a local wrapper for the SwissAI API, so we don't need to install anything excpect lm-eval and its api dependencies - pip install lm-eval-harness[api]
+  srun -n 1 --mpi=pmix -ul --environment=./containers/env_vllm.toml bash -lc "
+    set -euo pipefail
+    unset SSL_CERT_FILE
+    export HF_DATASETS_TRUST_REMOTE_CODE=1
+    export OPENAI_API_KEY=$CSCS_SERVING_API
+    $CACHE_EXPORTS
+
+    pip install --no-cache-dir --upgrade "lm_eval[api] @ $LM_EVAL_HARNESS_PIP_SPEC"
     $CMD
     "
 else
