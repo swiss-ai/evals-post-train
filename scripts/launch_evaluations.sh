@@ -48,6 +48,8 @@
 #   --splits K           - Split tasks across K parallel nodes per model
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
+#   --reservation <name> - Submit jobs under a SLURM reservation (exported as SBATCH_RESERVATION;
+#                          ambient SBATCH_RESERVATION is respected when the flag is absent)
 #   --judge <none|auto|preset> - Judge model control:
 #                          none (default): disable judge auto-launch
 #                          auto: detect judge-dependent tasks and launch needed judges
@@ -115,6 +117,7 @@ HARNESS_LIMIT="${HARNESS_LIMIT:-}"
 MEGATRON_ITER=""
 SINGLE_TASK=""
 HARNESS_BRANCH=""
+RESERVATION_FLAG=""
 JUDGE_MODE="none"       # auto, none, or a preset name
 JUDGE_EXTRA_ARGS=""
 KEEP_JUDGE="false"
@@ -144,6 +147,7 @@ while [[ $# -gt 0 ]]; do
         --megatron-iter) MEGATRON_ITER="$2";            shift 2 ;;
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --harness-branch) HARNESS_BRANCH="$2";        shift 2 ;;
+        --reservation)   RESERVATION_FLAG="$2";        shift 2 ;;
         --judge)         JUDGE_MODE="$2";              shift 2 ;;
         --judge-args)    JUDGE_EXTRA_ARGS="$2";        shift 2 ;;
         --keep-judge)    KEEP_JUDGE="true";            shift ;;
@@ -298,6 +302,8 @@ fi
 [[ "$LOG_LENGTH_METRICS" == "true"      ]] && export LOG_LENGTH_METRICS="true"
 
 # --- Environment defaults ---
+# sbatch reads SBATCH_RESERVATION natively (CLI > env > script directives).
+[[ -n "$RESERVATION_FLAG" ]] && export SBATCH_RESERVATION="$RESERVATION_FLAG"
 export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 export WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
 export NUM_SPLITS
