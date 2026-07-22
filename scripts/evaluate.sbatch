@@ -479,6 +479,11 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
   INSTALL_CMD="$INSTALL_CMD && pip install megatron-core --no-deps && export MEGATRON_PATH=$(pwd)/Megatron-LM"
 fi
 
+# lm-eval's API models (local-completions / local-chat-completions) need the [api] extras.
+if [[ $LM_EVAL_BACKEND == "openai" ]]; then
+  INSTALL_CMD="$INSTALL_CMD && pip install --no-cache-dir tenacity aiohttp"
+fi
+
 # $CMD is re-parsed by the inner `bash -lc`, so --model_args is single-quoted (a token like
 # think_end_token=</think> would otherwise redirect, and $(...) in a path would execute).
 # A single quote in the value can't be nested safely, so refuse it.
