@@ -43,6 +43,7 @@ usage() {
     echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
     echo " OpenAI-compatible API backend (LM_EVAL_BACKEND=openai; no model is loaded in the job):"
     echo "  API_BASE_URL: Endpoint to evaluate against. Required. Accepts a bare host (http://host:8000), a /v1 root, or a full /v1/(chat/)completions URL."
+    echo "  API_CHAT_ENDPOINT: 'true' to use /v1/chat/completions (server-side chat template; generative tasks ONLY). Default: /v1/completions, which serves mixed suites."
     echo "  API_MODEL_NAME: 'model' field sent in requests (default: the <model> positional argument)."
     echo "  API_NUM_CONCURRENT: Concurrent requests (default: 8)."
     echo "  API_MAX_RETRIES: Retries per request (default: 3)."
@@ -323,9 +324,14 @@ elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     [[ -n "$API_BASE_URL" ]] || die "API_BASE_URL must be set when LM_EVAL_BACKEND=openai (e.g. http://<host>:8000/v1)."
     API_MODEL_NAME=${API_MODEL_NAME:-$MODEL}
-    # Chat template -> chat/completions; otherwise raw completions, which also serves the
-    # loglikelihood/MC tasks (the server must return prompt logprobs with echo, as vLLM does).
-    if [[ $APPLY_CHAT_TEMPLATE = true ]]; then
+    # Always the completions endpoint: it serves BOTH generative and loglikelihood/MC
+    # requests, so mixed suites work (chat/completions raises NotImplementedError on
+    # loglikelihood). With the chat template on, the harness renders the model's template
+    # client-side via the HF tokenizer. For purely generative suites the server-side
+    # template path can be forced with API_CHAT_ENDPOINT=true.
+    API_CHAT_ENDPOINT=${API_CHAT_ENDPOINT:-false}
+    if [[ "$API_CHAT_ENDPOINT" == "true" ]]; then
+        [[ $APPLY_CHAT_TEMPLATE = true ]] || die "API_CHAT_ENDPOINT=true requires the chat template (chat/completions takes messages)."
         API_LM_EVAL_MODEL="local-chat-completions"
         API_ENDPOINT_SUFFIX="chat/completions"
     else
