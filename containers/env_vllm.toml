@@ -5,7 +5,6 @@ mounts = [
     "/capstor/scratch/cscs/${USER}",
     "/iopsstor/scratch/cscs/${USER}",
     "/capstor/store/cscs/swissai/infra01",
-    "/capstor/store/cscs/swissai/a06",
 ]
 
 writable = true
