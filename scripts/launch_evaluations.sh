@@ -45,6 +45,8 @@
 #   --backend <backend>  - lm-eval backend: hf, vllm, megatron_lm (default: from sbatch script)
 #   --splits K           - Split tasks across K parallel nodes per model
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
+#   --harness-repo R     - Install lm-evaluation-harness from GitHub owner/repo R
+#                          (default: swiss-ai/lm-evaluation-harness; e.g. VnznzT/lm-evaluation-harness)
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
 #   --enable-thinking    - Enable model thinking/deliberation (vLLM backend; sets enable_thinking=True in the chat template)
 #
@@ -86,6 +88,7 @@ HARNESS_LIMIT=""
 MEGATRON_ITER=""
 SINGLE_TASK=""
 HARNESS_BRANCH=""
+HARNESS_REPO=""
 ENABLE_THINKING_FLAG=""
 
 while [[ $# -gt 0 ]]; do
@@ -104,6 +107,7 @@ while [[ $# -gt 0 ]]; do
         --megatron-iter) MEGATRON_ITER="$2";            shift 2 ;;
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --harness-branch) HARNESS_BRANCH="$2";        shift 2 ;;
+        --harness-repo) HARNESS_REPO="$2";            shift 2 ;;
         --enable-thinking|--enable_thinking) ENABLE_THINKING_FLAG="true"; shift ;;
         *)
             echo "Error: Unknown option '$1'"
@@ -283,6 +287,7 @@ echo "  Splits: $NUM_SPLITS"
 # --- Harness limit override ---
 [[ -n "$HARNESS_LIMIT" ]] && export HARNESS_LIMIT="$HARNESS_LIMIT"
 [[ -n "$HARNESS_BRANCH" ]] && export LM_EVAL_HARNESS_BRANCH="$HARNESS_BRANCH"
+[[ -n "$HARNESS_REPO" ]] && export LM_EVAL_HARNESS_REPO="$HARNESS_REPO"
 
 # --- Thinking toggle (forwarded to evaluate.sbatch via sbatch --export=ALL) ---
 [[ -n "$ENABLE_THINKING_FLAG" ]] && export ENABLE_THINKING="$ENABLE_THINKING_FLAG"
@@ -312,6 +317,7 @@ if [[ -n "$MODEL_PATH" ]]; then
     [[ -n "$CUSTOM_TOKENIZER" ]] && echo "  Tok:    $CUSTOM_TOKENIZER"
     [[ -n "$BOS_FLAG" ]] && echo "  BOS:    $BOS_FLAG"
     [[ -n "$FEWSHOT_FLAG" ]] && echo "  Fewshot: $FEWSHOT_FLAG"
+    [[ -n "$HARNESS_REPO" ]] && echo "  Harness repo: $HARNESS_REPO"
     [[ -n "$HARNESS_BRANCH" ]] && echo "  Harness branch: $HARNESS_BRANCH"
     echo "  W&B:    $WANDB_ENTITY/$WANDB_PROJECT"
     echo "======================================"
@@ -335,6 +341,7 @@ elif [[ -n "$SCRIPT_PATH" ]]; then
     [[ -n "$BACKEND_FLAG" ]] && export LM_EVAL_BACKEND="$BACKEND_FLAG"
 
     echo "  Script: $SCRIPT_PATH"
+    [[ -n "$HARNESS_REPO" ]] && echo "  Harness repo: $HARNESS_REPO"
     [[ -n "$HARNESS_BRANCH" ]] && echo "  Harness branch: $HARNESS_BRANCH"
     echo "  W&B:    $WANDB_ENTITY/$WANDB_PROJECT"
     echo "======================================"
@@ -360,6 +367,7 @@ else
     for script in "${EVALUATION_SCRIPTS[@]}"; do
         echo "    - $script"
     done
+    [[ -n "$HARNESS_REPO" ]] && echo "  Harness repo: $HARNESS_REPO"
     [[ -n "$HARNESS_BRANCH" ]] && echo "  Harness branch: $HARNESS_BRANCH"
     echo "  W&B:    $WANDB_ENTITY/$WANDB_PROJECT"
     echo "======================================"

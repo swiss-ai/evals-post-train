@@ -42,7 +42,8 @@ usage() {
 	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: hf). - options are: hf, vllm, megatron_lm"
     echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
-    echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from swiss-ai/lm-evaluation-harness (default: repository default branch)."
+    echo " LM_EVAL_HARNESS_REPO: GitHub owner/repo of the lm-evaluation-harness fork to install (default: swiss-ai/lm-evaluation-harness)."
+    echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from \$LM_EVAL_HARNESS_REPO (default: repository default branch)."
 	echo "For more information see the README: https://github.com/swiss-ai/evals?tab=readme-ov-file."
 }
 die() {
@@ -74,6 +75,7 @@ WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
 LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-true}
 HARNESS_LIMIT=${HARNESS_LIMIT:-""}
+LM_EVAL_HARNESS_REPO=${LM_EVAL_HARNESS_REPO:-"swiss-ai/lm-evaluation-harness"}
 LM_EVAL_HARNESS_BRANCH=${LM_EVAL_HARNESS_BRANCH:-""}
 
 # Thinking/deliberation toggle (vLLM backend only). Forwarded to the chat
@@ -86,6 +88,11 @@ esac
 export HF_TOKEN="${HF_TOKEN:-$(tr -d '\r\n' < ./scripts/hf_token.txt)}"
 export WANDB_API_KEY="${WANDB_API_KEY:-$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)}"
 export CSCS_SERVING_API="${CSCS_SERVING_API:-$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)}"
+# Optional: the VnznzT harness fork judges alpaca_eval/arena_hard with OpenAI
+# gpt-4.1 and reads OPENAI_API_KEY (the swiss-ai fork uses CSCS_SERVING_API).
+if [[ -z "${OPENAI_API_KEY:-}" && -f ./scripts/openai_api_key.txt ]]; then
+    export OPENAI_API_KEY="$(tr -d '\r\n' < ./scripts/openai_api_key.txt)"
+fi
 
 warn_if_empty() {
   local var="$1"
@@ -313,13 +320,15 @@ if echo "$TASKS" | grep -q "ruler"; then
 fi
 
 # Select the lm-evaluation-harness fork per benchmark. bfcl_v3 and
-# swiss_ai_charter_alignment need the ymetz fork; everything else uses swiss-ai.
+# swiss_ai_charter_alignment need the ymetz fork; everything else uses
+# $LM_EVAL_HARNESS_REPO (swiss-ai by default, override e.g. with
+# LM_EVAL_HARNESS_REPO=VnznzT/lm-evaluation-harness).
 # NOTE: assumes one benchmark per job (GROUP_SIZE=1). If a group mixes a
 # ymetz-only task with others, only one harness can be installed per job.
 if echo "$TASKS" | grep -qE "bfcl_v3|swiss_ai_charter_alignment"; then
     LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/ymetz/lm-evaluation-harness.git"
 else
-    LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/swiss-ai/lm-evaluation-harness.git"
+    LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/${LM_EVAL_HARNESS_REPO}.git"
 fi
 if [[ -n "$LM_EVAL_HARNESS_BRANCH" ]]; then
     LM_EVAL_HARNESS_PIP_SPEC="${LM_EVAL_HARNESS_PIP_SPEC}@${LM_EVAL_HARNESS_BRANCH}"
@@ -416,7 +425,7 @@ elif [[ $LM_EVAL_BACKEND == "vllm" ]]; then
     $CACHE_EXPORTS
 
     $INSTALL_CMD
-    # Fix alpaca_eval endpoint URL
+    # Fix alpaca_eval endpoint URL (no-op on forks that already set it correctly)
     sed -i 's|https://api.swissai.cscs.ch/v1|https://api.swissai.svc.cscs.ch/v1|' /usr/local/lib/python3.12/dist-packages/lm_eval/tasks/alpaca_eval/metric.py
     # Make torch CUDA libs discoverable for vllm._C import
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}

@@ -33,11 +33,13 @@ MODEL=""
 FORCE_TASKS=""
 TOKENIZER=""
 ENABLE_THINKING=0
+HARNESS_REPO=""
 
 # --- Argument Parsing ---
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --task_file) TASK_FILE="$2"; shift 2 ;;
+        --harness_repo) HARNESS_REPO="$2"; shift 2 ;;
         --model) MODEL="$2"; shift 2 ;;
         --eval_prefix) EVAL_PREFIX="$2"; shift 2 ;;
         --account) ACCOUNT="$2"; shift 2 ;;
@@ -134,7 +136,8 @@ submit_aggregator() {
     export WANDB_ENTITY="$WANDB_ENTITY"
     export WANDB_PROJECT="$WANDB_PROJECT"
     export NUM_SPLITS="${#ORDERED_TASKS[@]}"
-    
+    if [[ -n "$HARNESS_REPO" ]]; then export LM_EVAL_HARNESS_REPO="$HARNESS_REPO"; fi
+
     # Export metrics file safely
     if [[ -n "$TABLE_METRICS" ]]; then
         export TABLE_METRICS=$(realpath "$TABLE_METRICS")
@@ -224,6 +227,7 @@ num_groups=${#TASK_GROUPS[@]}
 echo -e "\nLaunching $num_missing missing tasks in $num_groups groups (group_size=$GROUP_SIZE):"
 for group in "${TASK_GROUPS[@]}"; do
     launch_cmd=("bash" "scripts/launch_evaluations.sh" "single" "--task" "$group" "--model" "$MODEL" "--chat-template")
+    if [[ -n "$HARNESS_REPO" ]]; then launch_cmd+=("--harness-repo" "$HARNESS_REPO"); fi
     if [[ -n "$TOKENIZER" ]]; then launch_cmd+=("--tokenizer" "$TOKENIZER"); fi
     if [[ $ENABLE_THINKING -eq 1 ]]; then launch_cmd+=("--enable-thinking" "--name" "$RUN_BASENAME"); fi
 
@@ -276,6 +280,10 @@ if [[ ${#JOB_IDS[@]} -gt 0 ]]; then
 
     if [[ $ENABLE_THINKING -eq 1 ]]; then
         WRAP_CMD="$WRAP_CMD --enable_thinking"
+    fi
+
+    if [[ -n "$HARNESS_REPO" ]]; then
+        WRAP_CMD="$WRAP_CMD --harness_repo \"$HARNESS_REPO\""
     fi
 
     WRAP_CMD="$WRAP_CMD --merge_only"
