@@ -98,7 +98,6 @@ API_MAX_RETRIES=${API_MAX_RETRIES:-3}
 export HF_TOKEN="${HF_TOKEN:-$(tr -d '\r\n' < ./scripts/hf_token.txt)}"
 export WANDB_API_KEY="${WANDB_API_KEY:-$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)}"
 export CSCS_SERVING_API="${CSCS_SERVING_API:-$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)}"
-# Bearer token the openai backend sends (lm-eval reads OPENAI_API_KEY); CSCS serving key by default.
 export OPENAI_API_KEY="${OPENAI_API_KEY:-${CSCS_SERVING_API:-}}"
 
 warn_if_empty() {
