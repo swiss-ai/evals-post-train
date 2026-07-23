@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=a-infra01-1
+#SBATCH --account=infra01
 #SBATCH --cpus-per-task=16
 #SBATCH --job-name=eval-aggregate
 #SBATCH --mem=64000
