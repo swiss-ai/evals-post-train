@@ -498,6 +498,7 @@ The export manifest lists:
 
 - generated EEE records and HF previews
 - lm-eval tasks skipped because they have no reviewed mapping
+- `_self_consistency` task names resolved to a reviewed base-task mapping
 - missing run-level metadata such as generation temperature or maximum tokens
 - `publishing_performed: false`, confirming that the exporter only wrote local files
 
@@ -516,7 +517,15 @@ exact lm-eval task name to:
 - optionally, a registered Hugging Face benchmark dataset, task ID, and ordered
   metric candidates
 
-Do not use fuzzy matching for benchmark variants. For example,
+The repository's `_self_consistency` suffix is handled as a controlled task
+variant: the exporter removes only that exact suffix and requires the remaining
+base task to have a reviewed mapping. Its mapping can define
+`self_consistency_metric_candidates`; `{repeats}` is expanded from the lm-eval
+task config so, for example, `exact_match,mean@{repeats}` selects
+`exact_match,mean@32`. The original task name, repeat count, and
+`self_consistency` variant remain recorded in the exported metadata.
+
+Do not otherwise use fuzzy matching for benchmark variants. For example,
 `gpqa_main_cot_zeroshot` is not mapped to the datastore's `gpqa_diamond`
 collection, and `gsm8k_platinum` is not mapped to `gsm8k`. Add mappings only
 after confirming that the dataset and evaluation protocol are equivalent.

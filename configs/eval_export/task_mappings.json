@@ -70,6 +70,33 @@
         ]
       }
     },
+    "gsm8k_cot_zeroshot": {
+      "eee": {
+        "benchmark": "gsm8k",
+        "evaluation_name": "gsm8k",
+        "dataset_id": "openai/gsm8k",
+        "metric_candidates": [
+          "exact_match,strict-match",
+          "exact_match,none",
+          "exact_match"
+        ],
+        "self_consistency_metric_candidates": [
+          "exact_match,mean@{repeats}"
+        ]
+      },
+      "huggingface": {
+        "dataset_id": "openai/gsm8k",
+        "task_id": "gsm8k",
+        "metric_candidates": [
+          "exact_match,strict-match",
+          "exact_match,none",
+          "exact_match"
+        ],
+        "self_consistency_metric_candidates": [
+          "exact_match,mean@{repeats}"
+        ]
+      }
+    },
     "hellaswag": {
       "eee": {
         "benchmark": "hellaswag",
@@ -88,7 +115,10 @@
       "eee": {
         "benchmark": "openai_humaneval",
         "evaluation_name": "openai_humaneval",
-        "dataset_id": "openai/openai_humaneval"
+        "dataset_id": "openai/openai_humaneval",
+        "self_consistency_metric_candidates": [
+          "pass@1,all"
+        ]
       }
     },
     "ifeval": {
@@ -109,7 +139,10 @@
       "eee": {
         "benchmark": "mbpp",
         "evaluation_name": "mbpp",
-        "dataset_id": "google-research-datasets/mbpp"
+        "dataset_id": "google-research-datasets/mbpp",
+        "self_consistency_metric_candidates": [
+          "pass@1,all"
+        ]
       }
     },
     "mmlu_pro": {
