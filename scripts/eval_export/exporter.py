@@ -25,6 +25,7 @@ from typing import Any, Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MAPPING_FILE = REPO_ROOT / "configs/eval_export/task_mappings.json"
+SELF_CONSISTENCY_SUFFIX = "_self_consistency"
 
 SKIP_RESULT_KEYS = {"alias", "samples", "name", "sample_len", "sample_count"}
 KNOWN_METRICS: dict[str, dict[str, Any]] = {
@@ -109,6 +110,14 @@ class ExportError(RuntimeError):
     """An input or export invariant was violated."""
 
 
+def _format_items(items: Iterable[str], limit: int = 20) -> str:
+    values = sorted(set(items))
+    rendered = ", ".join(values[:limit])
+    if len(values) > limit:
+        rendered += f", ... ({len(values) - limit} more)"
+    return rendered or "(none)"
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     try:
         with path.open(encoding="utf-8") as handle:
@@ -154,6 +163,53 @@ def _load_mapping(path: Path) -> dict[str, Any]:
         if not eee.get("benchmark") or not eee.get("evaluation_name"):
             raise ExportError(f"Incomplete EEE mapping for {task_name}")
     return mapping
+
+
+def _resolve_task_mapping(
+    mapping: dict[str, Any], task_name: str
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Resolve exact tasks and the repository's self-consistency task variants."""
+    task_mapping = mapping["tasks"].get(task_name)
+    if task_mapping is not None:
+        return task_mapping, task_name
+    if task_name.endswith(SELF_CONSISTENCY_SUFFIX):
+        base_name = task_name.removesuffix(SELF_CONSISTENCY_SUFFIX)
+        task_mapping = mapping["tasks"].get(base_name)
+        if task_mapping is not None:
+            return task_mapping, base_name
+    return None, None
+
+
+def _metric_candidates(
+    raw: dict[str, Any],
+    task_name: str,
+    target_mapping: dict[str, Any],
+) -> list[str] | None:
+    """Return task-variant candidates, expanding the logged repeat count."""
+    candidate_key = (
+        "self_consistency_metric_candidates"
+        if task_name.endswith(SELF_CONSISTENCY_SUFFIX)
+        else "metric_candidates"
+    )
+    candidates = target_mapping.get(candidate_key)
+    if candidates is None and candidate_key != "metric_candidates":
+        candidates = target_mapping.get("metric_candidates")
+    if not candidates:
+        return None
+
+    repeats = _task_config(raw, task_name).get("repeats")
+    expanded: list[str] = []
+    for candidate in candidates:
+        if "{repeats}" not in candidate:
+            expanded.append(candidate)
+        elif isinstance(repeats, int) and repeats > 0:
+            expanded.append(candidate.replace("{repeats}", str(repeats)))
+        else:
+            # Preserve the unresolved template so metric matching fails with
+            # the task's available/configured metric diagnostic instead of
+            # silently exporting every numeric metric.
+            expanded.append(candidate)
+    return expanded
 
 
 def _parse_model_args(value: Any) -> dict[str, str]:
@@ -326,6 +382,11 @@ def _generation_config(
     num_fewshot = task_config.get("num_fewshot", raw.get("n-shot", {}).get(task_name))
     if num_fewshot is not None:
         details["num_fewshot"] = str(num_fewshot)
+    repeats = task_config.get("repeats")
+    if isinstance(repeats, int) and repeats > 0:
+        details["repeats"] = str(repeats)
+    if task_name.endswith(SELF_CONSISTENCY_SUFFIX):
+        details["evaluation_variant"] = "self_consistency"
     limit = raw.get("config", {}).get("limit")
     if limit is not None:
         details["limit"] = str(limit)
@@ -590,9 +651,12 @@ def _hf_metric(
 
 
 def _selected_metrics(
-    task_results: dict[str, Any], task_mapping: dict[str, Any]
+    raw: dict[str, Any],
+    task_name: str,
+    task_results: dict[str, Any],
+    task_mapping: dict[str, Any],
 ) -> list[tuple[str, float]]:
-    candidates = task_mapping["eee"].get("metric_candidates")
+    candidates = _metric_candidates(raw, task_name, task_mapping["eee"])
     if not candidates:
         return list(_numeric_metrics(task_results))
     selected = _hf_metric(task_results, candidates)
@@ -758,23 +822,83 @@ def export_results(
     retrieved = _epoch_string(retrieved_timestamp, time.time())
     warnings: list[str] = []
     skipped: list[str] = []
+    numeric_tasks: dict[str, list[str]] = {}
+    metric_mismatches: dict[str, tuple[list[str], list[str]]] = {}
+    resolved_task_aliases: dict[str, str] = {}
     grouped: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
 
     for task_name, task_results in raw["results"].items():
-        if not isinstance(task_results, dict) or not list(
-            _numeric_metrics(task_results)
-        ):
+        if not isinstance(task_results, dict):
             continue
-        task_mapping = mapping["tasks"].get(task_name)
+        available_metrics = [key for key, _ in _numeric_metrics(task_results)]
+        if not available_metrics:
+            continue
+        numeric_tasks[task_name] = available_metrics
+        task_mapping, mapped_task_name = _resolve_task_mapping(mapping, task_name)
         if not task_mapping:
             skipped.append(task_name)
             continue
+        if mapped_task_name != task_name:
+            resolved_task_aliases[task_name] = str(mapped_task_name)
+        candidates = _metric_candidates(raw, task_name, task_mapping["eee"])
+        if candidates and _hf_metric(task_results, candidates) is None:
+            metric_mismatches[task_name] = (
+                available_metrics,
+                list(candidates),
+            )
+            continue
         grouped[task_mapping["eee"]["benchmark"]].append((task_name, task_mapping))
 
-    if strict_mappings and skipped:
-        raise ExportError("Unmapped lm-eval tasks: " + ", ".join(sorted(skipped)))
+    if not numeric_tasks:
+        raise ExportError(
+            "The lm-eval results file contains no tasks with numeric scores.\n"
+            f"Results file: {results_file}\n"
+            "Check that the run completed successfully and that its `results` "
+            "object contains scored leaf or aggregate tasks."
+        )
+    if strict_mappings and (skipped or metric_mismatches):
+        details = []
+        if skipped:
+            details.append("Unmapped lm-eval tasks: " + _format_items(skipped))
+        if metric_mismatches:
+            details.append(
+                "Mapped tasks without a configured metric match: "
+                + _format_items(metric_mismatches)
+            )
+        raise ExportError("\n".join(details))
     if not grouped:
-        raise ExportError("No mapped numeric task results were found")
+        lines = [
+            "No exportable benchmark results were found.",
+            f"Results file: {results_file}",
+            f"Task mapping: {mapping_file}",
+            (
+                f"Detected {len(numeric_tasks)} task(s) with numeric results: "
+                f"{_format_items(numeric_tasks)}"
+            ),
+        ]
+        if skipped:
+            lines.append(
+                "None of these exact task names are mapped: " + _format_items(skipped)
+            )
+        for task_name, (available, candidates) in sorted(metric_mismatches.items()):
+            lines.append(
+                f"{task_name}: mapped, but available metrics "
+                f"[{_format_items(available)}] do not match configured "
+                f"candidates [{_format_items(candidates)}]"
+            )
+        lines.append(
+            "Add reviewed entries for these exact lm-eval task names to the "
+            "mapping file. Do not map variants such as AIME to an unrelated "
+            "EEE collection merely to make the export pass."
+        )
+        raise ExportError("\n".join(lines))
+
+    for task_name, (available, candidates) in sorted(metric_mismatches.items()):
+        warnings.append(
+            f"{task_name}: mapped, but available metrics "
+            f"[{_format_items(available)}] do not match configured candidates "
+            f"[{_format_items(candidates)}]"
+        )
 
     records_manifest: list[dict[str, Any]] = []
     for benchmark, task_entries in sorted(grouped.items()):
@@ -786,7 +910,9 @@ def export_results(
 
         for task_name, task_mapping in task_entries:
             task_results = raw["results"][task_name]
-            selected_metrics = _selected_metrics(task_results, task_mapping)
+            selected_metrics = _selected_metrics(
+                raw, task_name, task_results, task_mapping
+            )
             if not selected_metrics:
                 warnings.append(
                     f"{task_name}: none of the configured EEE metric "
@@ -831,9 +957,8 @@ def export_results(
 
             hf = task_mapping.get("huggingface")
             if hf:
-                selected = _hf_metric(
-                    dict(selected_metrics), hf.get("metric_candidates", [])
-                )
+                hf_candidates = _metric_candidates(raw, task_name, hf) or []
+                selected = _hf_metric(dict(selected_metrics), hf_candidates)
                 if selected is None:
                     warnings.append(
                         f"{task_name}: none of the configured Hugging Face "
@@ -991,6 +1116,7 @@ def export_results(
         "eee_schema_version": mapping["eee_schema_version"],
         "records": records_manifest,
         "skipped_unmapped_tasks": sorted(skipped),
+        "resolved_task_aliases": dict(sorted(resolved_task_aliases.items())),
         "warnings": sorted(set(warnings)),
         "publishing_performed": False,
     }
@@ -1178,6 +1304,17 @@ def main(argv: list[str] | None = None) -> None:
                 "unmapped task(s); "
                 f"{len(manifest['warnings'])} warning(s)."
             )
+            if manifest["skipped_unmapped_tasks"]:
+                print(
+                    "Unmapped tasks: "
+                    + _format_items(manifest["skipped_unmapped_tasks"])
+                )
+            if manifest["resolved_task_aliases"]:
+                print("Resolved self-consistency task aliases:")
+                for source, target in manifest["resolved_task_aliases"].items():
+                    print(f"  {source} -> {target}")
+            for warning in manifest["warnings"]:
+                print(f"Warning: {warning}")
             print("No files were published.")
         elif args.command == "validate":
             errors = validate_export(args.output_dir)
