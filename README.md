@@ -10,14 +10,15 @@ Evaluation infrastructure for benchmarking Large Language Models on SLURM cluste
 4. [Task Configuration](#task-configuration)
 5. [Parallel Task Splitting](#parallel-task-splitting)
 6. [Thinking / Reasoning Metrics](#thinking--reasoning-metrics)
-7. [W&B Integration](#wb-integration)
-8. [Reporting: Building Result Tables](#reporting-building-result-tables)
-9. [SBATCH Scripts](#sbatch-scripts)
-10. [Multi-Model Scripts](#multi-model-scripts)
-11. [Container Setup](#container-setup)
-12. [Notes](#notes)
-13. [Extending the Pipeline](#extending-the-pipeline)
-14. [Repository Structure](#repository-structure)
+7. [Every Eval Ever and Hugging Face exports](#every-eval-ever-and-hugging-face-exports)
+8. [W&B Integration](#wb-integration)
+9. [Reporting: Building Result Tables](#reporting-building-result-tables)
+10. [SBATCH Scripts](#sbatch-scripts)
+11. [Multi-Model Scripts](#multi-model-scripts)
+12. [Container Setup](#container-setup)
+13. [Notes](#notes)
+14. [Extending the Pipeline](#extending-the-pipeline)
+15. [Repository Structure](#repository-structure)
 
 ---
 
