@@ -432,6 +432,99 @@ Behaviour specific to `--thinking`:
 
 ---
 
+## Every Eval Ever and Hugging Face exports
+
+Completed lm-evaluation-harness runs can be converted into:
+
+- [Every Eval Ever (EEE)](https://huggingface.co/datasets/evaleval/EEE_datastore) schema `0.2.2` aggregate records
+- optional EEE instance-level JSONL records from lm-eval sample logs
+- reviewable Hugging Face `.eval_results/*.yaml` previews for registered Hub benchmarks
+
+The exporter is deliberately local-only: it does not upload files, open pull
+requests, or read an HF token.
+
+### Export a completed run
+
+Point the exporter at either a single `results_*.json` file or a directory that
+contains exactly one result file. For split runs, use the merged directory
+produced by `merge_split_results.py`.
+
+```bash
+python scripts/export_eval_results.py export \
+  /path/to/merged_eval/results_2026-07-27T12-00-00.json \
+  --output-dir eval-results/Apertus-release-2026-07 \
+  --model-id swiss-ai/Apertus-8B-Instruct-2607 \
+  --include-samples
+```
+
+`--model-id` is optional when the result log contains an `owner/model` ID, but
+it is required when the evaluation used a local checkpoint path.
+Evaluator provenance defaults to `first_party` for `swiss-ai/*` models and
+`third_party` for other owners; override it with `--evaluator-relationship`
+when a run was collaborative or has a different relationship.
+
+The output is organized for review and later submission:
+
+```text
+eval-results/Apertus-release-2026-07/
+├── manifest.json
+├── eee/data/
+│   └── <canonical-benchmark>/<developer>/<model>/
+│       ├── <uuid>.json
+│       └── <uuid>_samples.jsonl
+└── huggingface/.eval_results/
+    ├── gsm8k.yaml
+    └── mmlu-pro.yaml
+```
+
+The generated Hugging Face YAML links to the EEE record's expected immutable
+`flat/objects/<uuid-prefix>/<uuid>.json` location. Submit and merge the EEE
+records before copying those YAML previews into a model repository, otherwise
+the source links will not resolve yet.
+
+### Validate and review
+
+```bash
+# Check generated records, instance checksums, and expected files.
+python scripts/export_eval_results.py validate \
+  eval-results/Apertus-release-2026-07
+
+# Verify EEE collection names and Hugging Face benchmark task IDs remotely.
+python scripts/export_eval_results.py check-mappings
+```
+
+The export manifest lists:
+
+- generated EEE records and HF previews
+- lm-eval tasks skipped because they have no reviewed mapping
+- missing run-level metadata such as generation temperature or maximum tokens
+- `publishing_performed: false`, confirming that the exporter only wrote local files
+
+Use `--strict-mappings` when every numeric task in a run must be mapped. Without
+it, unmapped tasks are skipped and reported rather than guessed.
+
+### Task mappings
+
+Mappings live in `configs/eval_export/task_mappings.json`. Each entry maps an
+exact lm-eval task name to:
+
+- the canonical EEE datastore collection directory
+- the EEE `evaluation_name`
+- the source dataset ID
+- optional ordered EEE metric candidates and canonical metric-ID overrides
+- optionally, a registered Hugging Face benchmark dataset, task ID, and ordered
+  metric candidates
+
+Do not use fuzzy matching for benchmark variants. For example,
+`gpqa_main_cot_zeroshot` is not mapped to the datastore's `gpqa_diamond`
+collection, and `gsm8k_platinum` is not mapped to `gsm8k`. Add mappings only
+after confirming that the dataset and evaluation protocol are equivalent.
+
+The exporter preserves scores in their native lm-eval scale. It never
+automatically multiplies proportions by 100.
+
+---
+
 ## W&B Integration
 
 ### Metrics Upload
