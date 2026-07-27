@@ -17,6 +17,9 @@ Usage:
 
     # Dry run
     python3 scripts/launch_judge.py --preset qwen3.5-27b --dry-run
+
+    # Launch under a SLURM reservation
+    python3 scripts/launch_judge.py --preset qwen3.5-27b --reservation my-reservation
 """
 
 import argparse
@@ -198,8 +201,13 @@ def _detect_presets_from_tasks(tasks_file: str) -> set[str]:
     return presets
 
 
-async def launch_judge(args: LaunchArgs, api_key: str, health_timeout: int,
-                       health_interval: int) -> tuple[int, str]:
+async def launch_judge(
+    args: LaunchArgs,
+    api_key: str,
+    health_timeout: int,
+    health_interval: int,
+    reservation: str | None = None,
+) -> tuple[int, str]:
     """Launch a judge model and wait for it to become healthy."""
     username = getpass.getuser()
     account = args.account
@@ -209,11 +217,14 @@ async def launch_judge(args: LaunchArgs, api_key: str, health_timeout: int,
         username=username,
         account=account,
         partition=args.partition,
+        reservation=reservation,
     )
 
     _log(f"Submitting judge job: {args.job_name}")
     _log(f"  Model: {args.served_model_name}")
     _log(f"  Nodes: {args.total_nodes}, Time: {args.time}")
+    if reservation:
+        _log(f"  Reservation: {reservation}")
 
     job_id, served_name = await launcher.launch_with_args(args)
     _log(f"Job submitted: {job_id}")
@@ -358,6 +369,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--environment", help="Override environment TOML path.")
     parser.add_argument("--account", help="SLURM account (default: user's group).")
     parser.add_argument("--partition", help="SLURM partition (default: from preset, or 'normal').")
+    parser.add_argument("--reservation", help="Submit the judge job under this SLURM reservation.")
     parser.add_argument("--health-timeout", type=int, default=900,
                         help="Max seconds to wait for judge health (default: 900).")
     parser.add_argument("--health-interval", type=int, default=15,
@@ -424,6 +436,7 @@ def main() -> None:
             _log(f"  environment:      {launch_args.environment}")
             _log(f"  account:          {launch_args.account}")
             _log(f"  partition:        {launch_args.partition}")
+            _log(f"  reservation:      {args.reservation or '(none)'}")
             continue
 
         try:
@@ -431,6 +444,7 @@ def main() -> None:
                 launch_judge(
                     launch_args, api_key,
                     args.health_timeout, args.health_interval,
+                    reservation=args.reservation,
                 )
             )
         except (RuntimeError, TimeoutError) as e:

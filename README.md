@@ -132,7 +132,8 @@ bash scripts/launch_evaluations.sh <mode>
 | `--limit N` | Limit number of samples per task (forwarded as `--limit` to lm-eval-harness; default: no limit). Useful for quick sanity checks. |
 | `--megatron-iter <iter>` | For Megatron-LM checkpoints, the iteration to evaluate (e.g. `8926`); defaults to `latest`. Exported as `CKPT_ITERATION`. |
 | `--harness-branch B` | Install lm-evaluation-harness from a specific branch/ref (default: repo default branch) |
-| `--judge <none\|auto\|preset>` | Judge-model control for LLM-as-a-judge tasks (alpaca_eval, arena_hard_v01/v2, multijail, aya_redteaming). `none` (default) disables auto-launch; `auto` scans the task list and launches needed judges; a preset name (e.g. `qwen3.5-27b`, `llama-3.3-70b`) launches that judge. |
+| `--reservation <name>` | Submit evaluation jobs and any automatically launched judge under this SLURM reservation. |
+| `--judge <none\|auto\|preset>` | Judge-model control for LLM-as-a-judge tasks. `none` (default) disables auto-launch; `auto` scans the task list using the mapping in `scripts/launch_judge.py`; a preset name (e.g. `qwen3.5-27b`, `llama-3.3-70b`) launches that judge. |
 | `--judge-args <str>` | Extra arguments forwarded to `scripts/launch_judge.py` |
 | `--keep-judge` | Do not auto-cancel the judge model after evaluation finishes (otherwise a cleanup job cancels it via `afterany` dependency) |
 | `--thinking` | Umbrella flag for reasoning models: make the model think **and** record the thinking metrics. See [Thinking / Reasoning Metrics](#thinking--reasoning-metrics). |
@@ -145,6 +146,52 @@ bash scripts/launch_evaluations.sh <mode>
 
 > [!TIP]
 > Inference hyperparameters such as batch size (`BS`), `MAX_LENGTH`, `MAX_NEW_TOKENS`, and `SIZE` (model size in billions, for parallelism) are not exposed as launcher flags — set them as environment variables consumed by `evaluate.sbatch` (see [SBATCH Scripts](#sbatch-scripts)).
+
+### Judge Model Launching
+
+Some LLM-as-a-judge tasks require a separate model to be available through the CSCS serving API. Pass `--judge auto` to scan the selected task list and launch the required judge models before submitting the evaluations:
+
+```bash
+bash scripts/launch_evaluations.sh posttrain \
+  --model /capstor/store/.../checkpoint \
+  --judge auto
+```
+
+The task-to-judge mapping is defined by `TASK_TO_JUDGE` in `scripts/launch_judge.py`:
+
+| Tasks | Judge preset |
+|-------|--------------|
+| `alpaca_eval`, `multijail`, `aya_redteaming` | `llama-3.3-70b` |
+| `arena_hard_v01`, `arena_hard_v2`, `hallulens` | `qwen3.5-27b` |
+| `harmbench` | `cais-llama-harmbench` |
+| `realtoxicitypromptsllama` | `llama-guard` |
+
+Automatic judge launching runs on the login node, so the `python3` used to invoke the evaluation launcher must have the [Swiss AI Model Launch](https://github.com/swiss-ai/model-launch) (`swiss_ai_model_launch`) package installed. With the `model-launch/` checkout included in this repository:
+
+```bash
+python3 -m pip install -e ./model-launch
+python3 -c "import swiss_ai_model_launch"
+```
+
+`CSCS_SERVING_API` must also be exported or stored in `scripts/cscs_serving_api_key.txt` so the launcher can verify that the judge is healthy.
+
+An explicit preset can be launched through the evaluation launcher or directly:
+
+```bash
+# Evaluation launcher; --reservation is forwarded to the judge job
+bash scripts/launch_evaluations.sh single \
+  --task arena_hard_v2 \
+  --model /capstor/store/.../checkpoint \
+  --judge qwen3.5-27b \
+  --reservation my-reservation
+
+# Direct judge launch
+python3 scripts/launch_judge.py \
+  --preset qwen3.5-27b \
+  --reservation my-reservation
+```
+
+By default the evaluation launcher submits a cleanup job that cancels automatically launched judges after all evaluation jobs finish. Pass `--keep-judge` to leave them running. Additional judge-specific options, such as `--health-timeout 1800`, can be supplied through `--judge-args`.
 
 
 ### Examples

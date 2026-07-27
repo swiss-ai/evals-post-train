@@ -49,8 +49,9 @@
 #   --splits K           - Split tasks across K parallel nodes per model
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
-#   --reservation <name> - Submit jobs under a SLURM reservation (exported as SBATCH_RESERVATION;
-#                          ambient SBATCH_RESERVATION is respected when the flag is absent)
+#   --reservation <name> - Submit jobs under a SLURM reservation, including an auto-launched judge
+#                          (exported as SBATCH_RESERVATION; ambient SBATCH_RESERVATION is respected
+#                          for evaluation jobs when the flag is absent)
 #   --judge <none|auto|preset> - Judge model control:
 #                          none (default): disable judge auto-launch
 #                          auto: detect judge-dependent tasks and launch needed judges
@@ -453,7 +454,7 @@ fi
 
 # --- Judge model launch - if none is set, rely on already hosted judge or manual launch ---
 JUDGE_JOB_IDS=""
-JUDGE_TASKS_PATTERN="alpaca_eval|multijail|aya_redteaming|arena_hard_v01|arena_hard_v2"
+JUDGE_TASKS_PATTERN="alpaca_eval|multijail|aya_redteaming|arena_hard_v01|arena_hard_v2|harmbench|hallulens|realtoxicitypromptsllama"
 
 if [[ "$JUDGE_MODE" != "none" ]]; then
 
@@ -461,15 +462,10 @@ if [[ "$JUDGE_MODE" != "none" ]]; then
     JUDGE_LAUNCH_ARGS=""
 
     if [[ "$JUDGE_MODE" == "auto" ]]; then
-        # Auto-detect: scan task list for judge-dependent tasks
-        if [[ -f "$TASKS" ]]; then
-            grep -qE "$JUDGE_TASKS_PATTERN" "$TASKS" && NEEDS_JUDGE=true
-        elif echo "$TASKS" | grep -qE "$JUDGE_TASKS_PATTERN"; then
-            NEEDS_JUDGE=true
-        fi
-        if [[ "$NEEDS_JUDGE" == "true" ]]; then
-            JUDGE_LAUNCH_ARGS="--detect-from-tasks $TASKS"
-        fi
+        # Delegate detection to launch_judge.py so TASK_TO_JUDGE remains the
+        # single source of truth for automatic judge selection.
+        NEEDS_JUDGE=true
+        JUDGE_LAUNCH_ARGS="--detect-from-tasks $TASKS"
     else
         # Explicit preset
         NEEDS_JUDGE=true
@@ -479,6 +475,9 @@ if [[ "$JUDGE_MODE" != "none" ]]; then
     if [[ "$NEEDS_JUDGE" == "true" ]]; then
         echo ""
         echo "--- Judge Model Launch ---"
+        if [[ -n "$RESERVATION_FLAG" ]]; then
+            JUDGE_LAUNCH_ARGS="$JUDGE_LAUNCH_ARGS --reservation $RESERVATION_FLAG"
+        fi
         # Capture machine-readable output (JUDGE_JOB_ID=...) from stdout,
         # while letting human-readable logs flow to stderr (visible to user).
         JUDGE_STDOUT=$(python3 scripts/launch_judge.py $JUDGE_LAUNCH_ARGS $JUDGE_EXTRA_ARGS)
