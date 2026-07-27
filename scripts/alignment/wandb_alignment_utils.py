@@ -91,8 +91,8 @@ def _select_stratified_samples(
 def create_model_evaluation_from_results(
     model_name: str,
     eval_dir: Path,
-    n_positive: int = 3,
-    n_negative: int = 7,
+    n_positive: int = 2,
+    n_negative: int = 3,
 ) -> ModelEvaluation:
     """Create a ModelEvaluation directly from evaluation directory.
 

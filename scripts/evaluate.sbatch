@@ -9,8 +9,8 @@
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --exclusive
-#SBATCH --partition=debug
-#SBATCH --time=00:59:00
+#SBATCH --partition=normal
+#SBATCH --time=11:59:00
 #SBATCH --exclude=nid006784
 #SBATCH --exclude=nid007014
 #SBATCH --exclude=nid007127
@@ -305,7 +305,7 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" || $LM_EVAL_BACKEND == "openai" ]]; then
 fi
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,language_model_only=True,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS}"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,language_model_only=True,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS},max_model_len=65536"
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer_path=$TOKENIZER$MAYBE_REVISION,dp_size=$DP,tp_size=$MP,mem_fraction_static=$VLLM_MEMORY_FRACTION,dtype=auto"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
@@ -462,8 +462,8 @@ fi
 INSTALL_CMD="pip install --no-cache-dir --upgrade \"$LM_EVAL_HARNESS_PIP_SPEC\" && \
 pip install --no-cache-dir --upgrade \
     \"huggingface-hub>=1.3.0,<2.0\" \
-    \"transformers==5.14.1\" \
-    \"accelerate>=1.14.0\" \
+    \"transformers==5.12.1\" \
+    \"accelerate>=1.1.0\" \
     \"antlr4-python3-runtime==4.11\" \
     \"datasketch<2.0\" \
     segtok \
@@ -482,7 +482,7 @@ pip install --no-cache-dir --upgrade \
     hf-transfer \
     subset2evaluate \
     \"alpaca-eval>=0.6.2\" \
-    \"peft>=0.18.0\"  "
+    \"peft>=0.19.0\"  "
 
 if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
   INSTALL_CMD="$INSTALL_CMD && pip install megatron-core --no-deps && export MEGATRON_PATH=$(pwd)/Megatron-LM"

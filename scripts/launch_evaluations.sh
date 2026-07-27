@@ -339,6 +339,7 @@ case "$EVAL_MODE" in
     "best-of-k")
         export TASKS=./configs/apertus/tasks_best_of_k.txt
         export TABLE_METRICS=./configs/apertus/tasks_best_of_k_main_table.txt
+        export WANDB_PROJECT="${WANDB_PROJECT}-best-of-k"
         ;;
     "olmo-easy")
         export TASKS=./configs/olmo/olmo3_easy.txt
