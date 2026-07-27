@@ -32,14 +32,7 @@ import urllib.request
 from importlib.resources import files
 from pathlib import Path
 
-from swiss_ai_model_launch.launchers.launch_args import LaunchArgs as BaseLaunchArgs
-from swiss_ai_model_launch.launchers.launcher import JobStatus
-from swiss_ai_model_launch.launchers.slurm_launcher import SlurmLauncher
-
-# overwrite LaunchArgs to include nodes and worker_port
-class LaunchArgs(BaseLaunchArgs):
-    nodes: int = 1
-    worker_port: int = 8080
+from swiss_ai_model_launch import JobStatus, LaunchArgs, SlurmLauncher, Topology
 
 # ── Task-to-judge mapping ────────────────────────────────────────────
 
@@ -67,7 +60,7 @@ JUDGE_PRESETS = {
         "time": "04:00:00",
         "partition": "normal",
         "framework_args": (
-            "--model Qwen/Qwen3.5-27B "
+            f"--model {MODEL_REGISTRY / 'Qwen/Qwen3.5-27B'} "
             "--host 0.0.0.0 "
             "--served-model-name Qwen/Qwen3.5-27B "
             "--tensor-parallel-size 4 --max-model-len 26000 "
@@ -80,21 +73,21 @@ JUDGE_PRESETS = {
         "time": "04:00:00",
         "account": "infra01",
         "framework_args": (
-            "--model meta-llama/Llama-3.3-70B-Instruct"
+            f"--model {MODEL_REGISTRY / 'meta-llama/Llama-3.3-70B-Instruct'} "
             "--host 0.0.0.0 "
             "--served-model-name meta-llama/Llama-3.3-70B-Instruct "
             "--tensor-parallel-size 4 --max-model-len 35000"
         ),
     },
     "cais-llama-harmbench": {
-        "served_model_name": "cais/HarmBench-Llama-2-13b-cls ",
+        "served_model_name": "cais/HarmBench-Llama-2-13b-cls",
         "framework": "vllm",
         "nodes": 1,
         "time": "04:00:00",
         "account": "infra01",
         "partition": "normal",
         "framework_args": (
-            "--model /capstor/store/cscs/swissai/infra01/hf_models/models/cais/HarmBench-Llama-2-13b-cls "
+            f"--model {MODEL_REGISTRY / 'cais/HarmBench-Llama-2-13b-cls'} "
             "--host 0.0.0.0 "
             "--served-model-name cais/HarmBench-Llama-2-13b-cls "
             "--tensor-parallel-size 4 --max-model-len 35000"
@@ -108,7 +101,7 @@ JUDGE_PRESETS = {
         "account": "infra01",
         "partition": "normal",
         "framework_args": (
-            "--model /capstor/store/cscs/swissai/infra01/hf_models/models/meta-llama/Llama-Guard-4-12B "
+            f"--model {MODEL_REGISTRY / 'meta-llama/Llama-Guard-4-12B'} "
             "--host 0.0.0.0 "
             "--served-model-name cais/Llama-Guard-13b "
             "--tensor-parallel-size 4 --max-model-len 35000"
@@ -119,6 +112,13 @@ JUDGE_PRESETS = {
 # ── Health check ──────────────────────────────────────────────────────
 
 HEALTH_CHECK_URL = "https://api.swissai.svc.cscs.ch/v1/models"
+TERMINAL_JOB_STATUSES = {
+    JobStatus.COMPLETED,
+    JobStatus.CANCELLED,
+    JobStatus.FAILED,
+    JobStatus.TIMEOUT,
+}
+UNKNOWN_STATUS_GRACE_POLLS = 3
 
 
 def check_judge_health(model_name: str, api_key: str) -> bool:
@@ -133,7 +133,8 @@ def check_judge_health(model_name: str, api_key: str) -> bool:
             data = json.loads(resp.read().decode())
             model_ids = [m.get("id", "") for m in data.get("data", [])]
             return model_name in model_ids
-    except Exception:
+    except Exception as exc:
+        _log(f"  Health check failed: {type(exc).__name__}: {exc}")
         return False
 
 
@@ -165,12 +166,14 @@ def _build_launch_args(preset_name: str, overrides: dict) -> LaunchArgs:
         served_model_name=preset["served_model_name"],
         account=account,
         partition=partition,
+        topology=Topology(
+            replicas=1,
+            nodes_per_replica=preset.get("nodes", 1),
+        ),
         environment=environment,
         framework=preset["framework"],
         framework_args=preset["framework_args"],
         time=preset.get("time", "06:00:00"),
-        nodes=preset.get("nodes", 1),
-        worker_port=preset.get("worker_port", 8080),
     )
 
 
@@ -210,7 +213,7 @@ async def launch_judge(args: LaunchArgs, api_key: str, health_timeout: int,
 
     _log(f"Submitting judge job: {args.job_name}")
     _log(f"  Model: {args.served_model_name}")
-    _log(f"  Nodes: {args.nodes}, Time: {args.time}")
+    _log(f"  Nodes: {args.total_nodes}, Time: {args.time}")
 
     job_id, served_name = await launcher.launch_with_args(args)
     _log(f"Job submitted: {job_id}")
@@ -218,15 +221,36 @@ async def launch_judge(args: LaunchArgs, api_key: str, health_timeout: int,
     # Poll for health
     _log(f"Waiting for judge to become healthy (timeout: {health_timeout}s)...")
     start = time.time()
+    seen_active = False
+    consecutive_unknown = 0
     while time.time() - start < health_timeout:
         status = await launcher.get_job_status(job_id)
 
-        if status in (JobStatus.TIMEOUT, JobStatus.UNKNOWN):
-            # Check if it's truly terminal (UNKNOWN could be transient)
-            if status == JobStatus.TIMEOUT:
-                raise RuntimeError(
-                    f"Judge job {job_id} timed out (SLURM status: {status.value})"
-                )
+        if status in (JobStatus.PENDING, JobStatus.RUNNING):
+            seen_active = True
+            consecutive_unknown = 0
+        elif status == JobStatus.UNKNOWN:
+            # UNKNOWN is briefly possible before sacct sees a new job, but SML
+            # also uses it for SLURM states it cannot parse. Allow a short
+            # submission grace period, then surface the job logs.
+            consecutive_unknown += 1
+
+        terminal_status = status in TERMINAL_JOB_STATUSES
+        unknown_after_active = status == JobStatus.UNKNOWN and seen_active
+        unknown_after_grace = (
+            status == JobStatus.UNKNOWN
+            and consecutive_unknown >= UNKNOWN_STATUS_GRACE_POLLS
+        )
+        if terminal_status or unknown_after_active or unknown_after_grace:
+            logs = await _collect_job_logs(
+                launcher,
+                job_id,
+                replicas=args.topology.replicas,
+            )
+            raise RuntimeError(
+                f"Judge job {job_id} terminated before becoming healthy "
+                f"(SLURM status: {status.value}).{logs}"
+            )
 
         if status == JobStatus.RUNNING:
             if check_judge_health(served_name, api_key):
@@ -239,11 +263,55 @@ async def launch_judge(args: LaunchArgs, api_key: str, health_timeout: int,
         await asyncio.sleep(health_interval)
 
     # Timed out — cancel the orphaned job
+    logs = await _collect_job_logs(
+        launcher,
+        job_id,
+        replicas=args.topology.replicas,
+    )
     _log(f"Health check timed out after {health_timeout}s. Cancelling job {job_id}.")
     await launcher.cancel_job(job_id)
     raise TimeoutError(
-        f"Judge model '{served_name}' not healthy after {health_timeout}s"
+        f"Judge model '{served_name}' not healthy after {health_timeout}s.{logs}"
     )
+
+
+def _tail(text: str, lines: int = 80) -> str:
+    """Return a bounded log tail suitable for an error message."""
+    if not text:
+        return "(empty)"
+    return "\n".join(text.splitlines()[-lines:])
+
+
+async def _collect_job_logs(
+    launcher: SlurmLauncher,
+    job_id: int,
+    replicas: int,
+) -> str:
+    """Collect master and per-replica logs after an early job termination."""
+    sections = []
+    master_out, master_err = await launcher.get_job_logs(job_id)
+    sections.extend(
+        [
+            ("master log.out", master_out),
+            ("master log.err", master_err),
+        ]
+    )
+    for replica in range(replicas):
+        replica_out = await launcher.read_job_file(job_id, f"replica_{replica}.out")
+        replica_err = await launcher.read_job_file(job_id, f"replica_{replica}.err")
+        sections.extend(
+            [
+                (f"replica_{replica}.out", replica_out or ""),
+                (f"replica_{replica}.err", replica_err or ""),
+            ]
+        )
+
+    rendered = "".join(
+        f"\n\n--- {label} (tail) ---\n{_tail(content)}"
+        for label, content in sections
+        if content
+    )
+    return rendered or "\n\nNo SML job logs were available."
 
 
 async def cancel_job(job_id: int) -> None:
@@ -351,12 +419,11 @@ def main() -> None:
             _log(f"  served_model_name: {launch_args.served_model_name}")
             _log(f"  framework:        {launch_args.framework}")
             _log(f"  framework_args:   {launch_args.framework_args}")
-            _log(f"  nodes:            {launch_args.nodes}")
+            _log(f"  nodes:            {launch_args.total_nodes}")
             _log(f"  time:             {launch_args.time}")
             _log(f"  environment:      {launch_args.environment}")
             _log(f"  account:          {launch_args.account}")
             _log(f"  partition:        {launch_args.partition}")
-            _log(f"  worker_port:      {launch_args.worker_port}")
             continue
 
         try:

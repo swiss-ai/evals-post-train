@@ -1,20 +1,17 @@
-"""
-Alignment evaluation utilities for W&B integration.
-
-This package contains utilities for collecting, processing, and uploading
-evaluation results to Weights & Biases (W&B) for model alignment tasks.
-"""
-
-from .wandb_alignment_utils import (
-    create_wandb_table,
-    find_all_eval_dirs,
-    upload_multi_model_results,
-    create_model_evaluation_from_results
-)
+"""Alignment evaluation utilities for W&B integration."""
 
 __all__ = [
-    'create_wandb_table',
-    'find_all_eval_dirs',
-    'upload_multi_model_results',
-    'create_model_evaluation_from_results'
+    "create_model_evaluation_from_results",
+    "create_wandb_table",
+    "find_all_eval_dirs",
+    "upload_multi_model_results",
 ]
+
+
+def __getattr__(name: str):
+    """Load W&B-dependent helpers only when an upload helper is requested."""
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from . import wandb_alignment_utils
+
+    return getattr(wandb_alignment_utils, name)
