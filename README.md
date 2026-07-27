@@ -553,10 +553,14 @@ with `--log-length-metrics`, which is what makes the harness aggregate them in t
 
 ### Sample Upload (Stratified)
 
-Per task, **10 example prompts** are uploaded as W&B tables at `samples/{model_name}/{task_name}`:
+Per task, example prompts are uploaded as W&B tables below `samples/{task_name}`.
+The model name is not repeated in the table key because the table already belongs
+to that model's W&B run. Long run IDs and task names are shortened with stable
+hashes, leaving room for W&B's generated artifact suffix and avoiding its
+128-character artifact-name limit. The run keeps its full display name.
 
-- **3 positive samples** (correctly answered, metric = 1.0)
-- **7 negative samples** (incorrectly answered, metric = 0.0)
+- **2 positive samples** by default (correctly answered, metric = 1.0)
+- **3 negative samples** by default (incorrectly answered, metric = 0.0)
 
 Samples are classified using binary metrics (`acc`, `exact_match`, `em`, `pass@1`). Each sample includes an `is_correct` field (`true`/`false`/`null`) for downstream filtering. If a task has no binary metric (e.g., perplexity), 10 random samples are uploaded instead.
 
@@ -574,14 +578,17 @@ import wandb
 api = wandb.Api()
 run = api.run("entity/project/run_id")
 
-# Get a specific task's samples
-table = run.summary["samples/Llama-3.1-8B-Instruct/mmlu"]
+# Get a specific task's samples. This also works when its table key was shortened.
+task_name = "mmlu"
+table_key = run.summary["sample_table_keys"][task_name]
+table = run.summary[table_key]
 ```
 
 Each row in the table is a flattened sample dict containing:
 
 | Field | Description |
 |-------|-------------|
+| `task_name` | Full lm-eval task name, even if the W&B table key was shortened |
 | `doc/*` | Original question/document fields from the dataset |
 | `target` | Expected answer |
 | `arguments/*` | The prompt sent to the model |
@@ -807,8 +814,8 @@ The stratified sample selection in `scripts/alignment/wandb_alignment_utils.py` 
 model_eval = create_model_evaluation_from_results(
     model_name="my-model",
     eval_dir=Path("/path/to/eval_dir"),
-    n_positive=5,   # number of correct samples to upload (default: 3)
-    n_negative=15,  # number of incorrect samples to upload (default: 7)
+    n_positive=5,   # number of correct samples to upload (default: 2)
+    n_negative=15,  # number of incorrect samples to upload (default: 3)
 )
 ```
 
