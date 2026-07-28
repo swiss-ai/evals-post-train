@@ -515,7 +515,7 @@ The output is organized for review and later submission:
 
 ```text
 eval-results/Apertus-release-2026-07/
-├── manifest.json
+├── manifest.yaml
 ├── eee/data/
 │   └── <canonical-benchmark>/<developer>/<model>/
 │       ├── <uuid>.json
@@ -541,13 +541,20 @@ python scripts/export_eval_results.py validate \
 python scripts/export_eval_results.py check-mappings
 ```
 
-The export manifest lists:
+The export manifest (`manifest.yaml`, containing JSON-compatible YAML) lists:
 
 - generated EEE records and HF previews
 - lm-eval tasks skipped because they have no reviewed mapping
 - `_self_consistency` task names resolved to a reviewed base-task mapping
 - missing run-level metadata such as generation temperature or maximum tokens
 - `publishing_performed: false`, confirming that the exporter only wrote local files
+
+The YAML extension is intentional: the official EEE validator recursively
+treats every `.json` file as an aggregate `EvaluationLog`. Keeping exporter
+bookkeeping out of `.json` means the complete output directory can be passed
+directly to `every_eval_ever validate`. The local validator still accepts
+legacy exports containing `manifest.json`, and re-exporting migrates that file
+to `manifest.yaml`.
 
 Use `--strict-mappings` when every numeric task in a run must be mapped. Without
 it, unmapped tasks are skipped and reported rather than guessed.

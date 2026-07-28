@@ -26,6 +26,8 @@ from typing import Any, Iterable
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MAPPING_FILE = REPO_ROOT / "configs/eval_export/task_mappings.json"
 SELF_CONSISTENCY_SUFFIX = "_self_consistency"
+MANIFEST_FILENAME = "manifest.yaml"
+LEGACY_MANIFEST_FILENAME = "manifest.json"
 
 SKIP_RESULT_KEYS = {"alias", "samples", "name", "sample_len", "sample_count"}
 KNOWN_METRICS: dict[str, dict[str, Any]] = {
@@ -134,6 +136,29 @@ def _write_json(path: Path, value: Any) -> None:
     with path.open("w", encoding="utf-8") as handle:
         json.dump(value, handle, indent=2, ensure_ascii=False, sort_keys=False)
         handle.write("\n")
+
+
+def _write_manifest(output_dir: Path, manifest: dict[str, Any]) -> None:
+    """Write bookkeeping outside the file types scanned by the EEE validator."""
+    legacy_path = output_dir / LEGACY_MANIFEST_FILENAME
+    if legacy_path.exists():
+        legacy = _read_json(legacy_path)
+        if legacy.get("format_version") != 1 or "records" not in legacy:
+            raise ExportError(
+                f"Refusing to replace unrelated legacy manifest: {legacy_path}"
+            )
+        legacy_path.unlink()
+    # JSON is valid YAML. Keeping JSON syntax avoids a runtime YAML dependency,
+    # while the .yaml extension prevents EEE from treating it as EvaluationLog.
+    _write_json(output_dir / MANIFEST_FILENAME, manifest)
+
+
+def _find_manifest(output_dir: Path) -> Path:
+    """Prefer current manifests while accepting exports made before the rename."""
+    current = output_dir / MANIFEST_FILENAME
+    if current.is_file():
+        return current
+    return output_dir / LEGACY_MANIFEST_FILENAME
 
 
 def _find_results_file(path: Path) -> Path:
@@ -1120,20 +1145,20 @@ def export_results(
         "warnings": sorted(set(warnings)),
         "publishing_performed": False,
     }
-    _write_json(output_dir / "manifest.json", manifest)
+    _write_manifest(output_dir, manifest)
     return manifest
 
 
 def validate_export(output_dir: Path) -> list[str]:
     """Validate the exporter manifest, aggregate records, and checksums."""
     errors: list[str] = []
-    manifest_path = output_dir / "manifest.json"
+    manifest_path = _find_manifest(output_dir)
     try:
         manifest = _read_json(manifest_path)
     except ExportError as exc:
         return [str(exc)]
     if manifest.get("publishing_performed") is not False:
-        errors.append("manifest.json: publishing_performed must be false")
+        errors.append(f"{manifest_path.name}: publishing_performed must be false")
     for item in manifest.get("records", []):
         record_path = output_dir / item["eee_record"]
         try:
