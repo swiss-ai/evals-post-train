@@ -49,7 +49,7 @@ usage() {
     echo "  API_MAX_RETRIES: Retries per request (default: 3)."
     echo "  OPENAI_API_KEY: Bearer token for the endpoint (default: CSCS_SERVING_API)."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
-    echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from swiss-ai/lm-evaluation-harness (default: repository default branch)."
+    echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from the task-selected harness repository (default: repository default branch)."
     echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
     echo "  ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: false)."
     echo "  AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
@@ -99,6 +99,9 @@ API_MAX_RETRIES=${API_MAX_RETRIES:-3}
 export HF_TOKEN="${HF_TOKEN:-$(tr -d '\r\n' < ./scripts/hf_token.txt)}"
 export WANDB_API_KEY="${WANDB_API_KEY:-$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)}"
 export CSCS_SERVING_API="${CSCS_SERVING_API:-$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)}"
+if [[ -z "${OPENAI_API_KEY:-}" && -f ./scripts/openai_api_key.txt ]]; then
+    export OPENAI_API_KEY="$(tr -d '\r\n' < ./scripts/openai_api_key.txt)"
+fi
 export OPENAI_API_KEY="${OPENAI_API_KEY:-${CSCS_SERVING_API:-}}"
 
 warn_if_empty() {
@@ -454,7 +457,17 @@ if echo "$TASKS" | grep -q "ruler"; then
     fi
 fi
 
-LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/ymetz/lm-evaluation-harness.git"
+# bfcl_v3 and Swiss AI Charter Alignment are not yet available in the Swiss-AI
+# fork. Use ymetz only for jobs containing those tasks; everything else,
+# including the experimental GPT suite, stays on Swiss-AI.
+if echo "$TASKS" | grep -qE '(^|,)(bfcl_v3([^,]*)?|swiss_ai_charter_alignment([^,]*)?)(,|$)'; then
+    LM_EVAL_HARNESS_REPO="ymetz/lm-evaluation-harness"
+else
+    LM_EVAL_HARNESS_REPO="swiss-ai/lm-evaluation-harness"
+fi
+echo "Selected lm-evaluation-harness repository: $LM_EVAL_HARNESS_REPO"
+
+LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/${LM_EVAL_HARNESS_REPO}.git"
 if [[ -n "$LM_EVAL_HARNESS_BRANCH" ]]; then
     LM_EVAL_HARNESS_PIP_SPEC="${LM_EVAL_HARNESS_PIP_SPEC}@${LM_EVAL_HARNESS_BRANCH}"
 fi

@@ -24,4 +24,5 @@ Megatron-LM/
 scripts/cscs_serving_api_key.txt
 scripts/hf_token.txt
 scripts/wandb_api_key.txt
+scripts/openai_api_key.txt
 eval_output/

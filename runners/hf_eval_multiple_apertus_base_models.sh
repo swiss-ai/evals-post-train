@@ -18,8 +18,7 @@ declare -A MODEL_CHECKPOINTS=(
     # aligned (only for uler)
     ["Apertus-8B-sft-mixture-8e-aligned"]="/capstor/store/cscs/swissai/infra01/swiss-alignment/checkpoints/Apertus-8B-sft-mixture-8e-aligned"
     ["Apertus-70B-sft-mixture-8e-aligned"]="/capstor/store/cscs/swissai/infra01/swiss-alignment/checkpoints/Apertus-70B-sft-mixture-8e-aligned"
-
-
+)
 
 export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 export WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals}

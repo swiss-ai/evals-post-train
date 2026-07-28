@@ -74,8 +74,9 @@ The launcher selects a benchmark suite from its first positional argument (`<mod
 | Mode | Task list | Tasks | Description |
 |------|-----------|-------|-------------|
 | `default` | `tasks_default.txt` | 48 | Full Apertus 1.5 post-training suite: knowledge, math, code, reasoning, multilingual, instruction following, bias, cultural knowledge, safety |
-| `posttrain` | `tasks_posttrain_final.txt` | 48 | Post-training suite incl. chat/arena (alpaca_eval, arena_hard_v01/v2), AIME, MATH-500, o(r)bench, system-prompt adherence (RealGuardrails: S-IFEval, TensorTrust, S-RuLES) |
+| `posttrain` | `tasks_posttrain_final.txt` | 50 | Post-training suite incl. chat/arena (alpaca_eval, arena_hard_v01/v2), AIME, MATH-500, BFCL v3, Swiss AI Charter Alignment, o(r)bench, and system-prompt adherence (RealGuardrails: S-IFEval, TensorTrust, S-RuLES) |
 | `best-of-k` | `tasks_best_of_k.txt` | 8 | Multi-repeat/self-consistency suite for math and code, with mean@k, majority-vote, and pass@k metrics |
+| `gpt` | `tasks_gpt.txt` | 3 | Experimental AlpacaEval and Arena-Hard path for a future OpenAI GPT judge type in the Swiss-AI harness |
 | `multi-lingual` | `tasks_multilingual.txt` | 12 | Multilingual-only subset (global_mmlu, mgsm, hellaswag_multilingual, include, cultural_bench, multi-if, aya_redteaming, ...) |
 | `apertus-previous` | `tasks_english.txt` | 19 | Previous (Apertus 1.0) English benchmark suite |
 | `pretrain` | `tasks_pretrain.txt` | 30 | Pretraining suite (base-model loglikelihood/MC variants, few-shot MMLU); logs to W&B project `apertus-1.5-pre-training-v0.0` |
@@ -131,7 +132,7 @@ bash scripts/launch_evaluations.sh <mode>
 | `--splits K` | Split task list across K parallel SLURM nodes per model (auto-clamped to the task count) |
 | `--limit N` | Limit number of samples per task (forwarded as `--limit` to lm-eval-harness; default: no limit). Useful for quick sanity checks. |
 | `--megatron-iter <iter>` | For Megatron-LM checkpoints, the iteration to evaluate (e.g. `8926`); defaults to `latest`. Exported as `CKPT_ITERATION`. |
-| `--harness-branch B` | Install lm-evaluation-harness from a specific branch/ref (default: repo default branch) |
+| `--harness-branch B` | Install lm-evaluation-harness from a specific branch/ref of the task-selected repository (default: repository default branch) |
 | `--reservation <name>` | Submit evaluation jobs and any automatically launched judge under this SLURM reservation. |
 | `--judge <none\|auto\|preset>` | Judge-model control for LLM-as-a-judge tasks. `none` (default) disables auto-launch; `auto` scans the task list using the mapping in `scripts/launch_judge.py`; a preset name (e.g. `qwen3.5-27b`, `llama-3.3-70b`) launches that judge. |
 | `--judge-args <str>` | Extra arguments forwarded to `scripts/launch_judge.py` |
@@ -192,6 +193,24 @@ python3 scripts/launch_judge.py \
 ```
 
 By default the evaluation launcher submits a cleanup job that cancels automatically launched judges after all evaluation jobs finish. Pass `--keep-judge` to leave them running. Additional judge-specific options, such as `--health-timeout 1800`, can be supplied through `--judge-args`.
+
+#### Experimental OpenAI GPT judge path
+
+The separate `gpt` suite reserves a stable task/config path for the planned
+OpenAI GPT judge implementation in `swiss-ai/lm-evaluation-harness`:
+
+```bash
+export OPENAI_API_KEY="..."
+bash scripts/launch_evaluations.sh gpt \
+  --model /capstor/store/.../checkpoint
+```
+
+The key may instead be stored in the ignored `scripts/openai_api_key.txt` file.
+This is experimental scaffolding: the launcher deliberately does not pass a
+speculative `--judge-type` (or similar) flag yet. Until the corresponding
+Swiss-AI harness support lands, the mode prints a warning and is not expected
+to provide the future GPT-judge behavior. The ordinary `posttrain` suite
+continues to use the CSCS judge setup described above.
 
 
 ### Examples
@@ -255,6 +274,9 @@ the step-4 aggregator, which runs `--merge_only` and loads no model.
 | Extra controls       | judge / splits / backend / fewshot flags                | `--force_tasks <substr,...>` to force re-eval, `--merge_only`, `--debug` (dry run) |
 
 Key flags: `--task_file` and `--model` (required), `--table_metrics`, `--eval_prefix`, `--account`, `--reservation`, `--wandb_entity`, `--wandb_project`, `--group_size`, `--tokenizer`, `--name <run-name>` (override the run name — dirs + W&B run; defaults to the model basename, with a `-think` suffix for thinking runs), `--force_tasks <comma-separated substrings>` (drop matching tasks from the completed set to re-run them), `--merge_only` (skip launching, just rebuild markers + aggregate), and `--debug` (dry run — prints what would be submitted without submitting).
+
+The multi-model convenience wrapper `launcher_graceful.sh` accepts the same
+thinking flags and forwards them to the resumable launcher.
 
 > [!NOTE]
 > Under the hood the graceful launcher delegates each task to `launch_evaluations.sh` in `single` mode and always applies the chat template, so it is intended primarily for post-training (instruct) checkpoints.
@@ -583,6 +605,10 @@ Do not otherwise use fuzzy matching for benchmark variants. For example,
 `gpqa_main_cot_zeroshot` is not mapped to the datastore's `gpqa_diamond`
 collection, and `gsm8k_platinum` is not mapped to `gsm8k`. Add mappings only
 after confirming that the dataset and evaluation protocol are equivalent.
+For the same reason, `bfcl_v3` and `swiss_ai_charter_alignment` currently remain
+explicitly unmapped: the EEE datastore has no reviewed one-to-one mapping for
+these exact lm-eval protocols and native score scales. They are reported in the
+export manifest's `skipped_unmapped_tasks` list.
 
 The exporter preserves scores in their native lm-eval scale. It never
 automatically multiplies proportions by 100.
@@ -751,7 +777,8 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `API_MODEL_NAME` | same as model | `openai` backend only: the `model` field sent in requests, when the server registers the model under a different id |
 | `API_NUM_CONCURRENT` | `8` | `openai` backend only: concurrent requests (batch size is pinned to 1; this is the throughput knob) |
 | `API_MAX_RETRIES` | `3` | `openai` backend only: retries per failed request |
-| `OPENAI_API_KEY` | `CSCS_SERVING_API` | `openai` backend only: bearer token sent to the endpoint |
+| `OPENAI_API_KEY` | `scripts/openai_api_key.txt`, then `CSCS_SERVING_API` | OpenAI GPT judge or `openai` backend bearer token |
+| `LM_EVAL_HARNESS_BRANCH` | repository default | Branch/ref installed from the task-selected harness repository |
 | `APPLY_CHAT_TEMPLATE` | `false` | Apply chat template for instruct models |
 | `TOKENIZER` | same as model | Custom tokenizer path |
 | `BOS` | `false` | Prepend BOS token |
@@ -835,6 +862,7 @@ Dependencies (lm-eval-harness, vLLM, etc.) are installed at runtime inside the c
 - **Time limits**: The default 12h SLURM limit works for most evaluations. For large suites on large models, use `--splits` to parallelize.
 - **WANDB_API_KEY**: Must be available either as an environment variable or in `scripts/wandb_api_key.txt`.
 - **HF_TOKEN**: Must be available either as an environment variable or in  `scripts/hf_token.txt`.
+- **OPENAI_API_KEY**: Required for the optional `gpt` suite, either as an environment variable or in `scripts/openai_api_key.txt`.
 - **CSCS_SERVING_API**: Must be available either as an environment variable or in `scripts/cscs_serving_api_key.txt` to run LLM-as-a-judge evals (e.g. AlpacaEval). Key can be optained [here](https://serving.swissai.cscs.ch).
 
 ---

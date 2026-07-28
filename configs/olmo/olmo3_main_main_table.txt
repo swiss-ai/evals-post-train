@@ -1,5 +1,5 @@
 gsm8k_cot/exact_match
-minerva_math/exact_match
+minerva_math/math_verify
 hendrycks_math500/math_verify
 humaneval_instruct/pass_at_1
 mbpp/pass_at_1

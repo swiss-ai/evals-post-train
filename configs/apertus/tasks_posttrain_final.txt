@@ -60,3 +60,6 @@ realguardrails_s_ifeval
 realguardrails_tensortrust
 realguardrails_s_rules
 # Tool Use
+bfcl_v3
+# Charter Alignment
+swiss_ai_charter_alignment
