@@ -305,7 +305,7 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" || $LM_EVAL_BACKEND == "openai" ]]; then
 fi
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,language_model_only=True,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS},max_model_len=65536"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,language_model_only=True,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS}"
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer_path=$TOKENIZER$MAYBE_REVISION,dp_size=$DP,tp_size=$MP,mem_fraction_static=$VLLM_MEMORY_FRACTION,dtype=auto"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
