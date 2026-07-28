@@ -17,10 +17,10 @@ arena_hard_v2/arena_hard_score
 # Math
 gsm8k_cot/exact_match
 hendrycks_math/math_verify
-minerva_math/exact_match
+minerva_math/math_verify
 mathqa/acc
 gsm8k_platinum_cot_zeroshot/exact_match
-minerva_math500/exact_match
+minerva_math500/math_verify
 aime24/exact_match
 aime25/exact_match
 # Coding
@@ -53,3 +53,6 @@ realguardrails_s_ifeval/prompt_level_strict_acc
 realguardrails_tensortrust/passed
 realguardrails_s_rules_br/passed
 # Tool Use
+bfcl_v3/acc
+# Charter Alignment
+swiss_ai_charter_alignment/swiss_ai_charter_length_controlled_winrate

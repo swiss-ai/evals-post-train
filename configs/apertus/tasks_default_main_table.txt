@@ -22,7 +22,7 @@ gsm8k_platinum_cot_zeroshot/exact_match
 hendrycks_math/exact_match
 mathqa/acc
 mgsm_en_cot_en/exact_match
-minerva_math/exact_match
+minerva_math/math_verify
 # Coding
 humaneval_instruct/pass@10
 mbpp_instruct/pass_at_1
@@ -63,5 +63,4 @@ realtoxicitypromptsllama_small/score
 
 # translations
 wmt_translation/cometkiwi22
-
 

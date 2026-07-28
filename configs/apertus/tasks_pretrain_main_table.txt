@@ -21,7 +21,7 @@ gsm8k_platinum/exact_match
 hendrycks_math/exact_match
 mathqa/acc
 mgsm_en_cot/exact_match
-minerva_math/exact_match
+minerva_math/math_verify
 # Coding
 humaneval/pass@10
 mbpp/pass_at_1
@@ -50,5 +50,4 @@ harmbench/score
 # hallulens - TODO: verify
 toxigen/acc
 wmdp/acc
-
 

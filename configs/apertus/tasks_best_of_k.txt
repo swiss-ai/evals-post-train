@@ -1,0 +1,21 @@
+# Multi-repeat (self-consistency) suite — for thinking / instruction-tuned models.
+#
+# Every task here samples multiple completions per question (zero-shot, no few-shot)
+# and reports score-first, mean@k (averaged pass@1), maj@k (majority vote, where
+# meaningful), and pass@k. Built to measure thinking-model performance under
+# repeated sampling rather than a single greedy decode.
+#
+# NOTE: these are 8x–32x the cost of greedy decoding, and the code tasks execute
+# every sampled solution. Use HARNESS_LIMIT for smoke tests.
+#
+# Math — answer extraction, repeats=8
+aime
+aime24
+aime25
+# Math problems — repeats=4 to avoid overly long run-times
+gsm8k_cot_zeroshot_self_consistency
+minerva_math500_self_consistency
+# Code — execute unit tests, repeats=8 (pass@1 == mean@8; no majority vote)
+humaneval_instruct_self_consistency
+mbpp_instruct_self_consistency
+mbpp_plus_instruct_self_consistency

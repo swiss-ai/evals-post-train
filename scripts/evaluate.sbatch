@@ -10,7 +10,7 @@
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --exclusive
 #SBATCH --partition=normal
-#SBATCH --time=03:59:00
+#SBATCH --time=11:59:00
 #SBATCH --exclude=nid006784
 #SBATCH --exclude=nid007014
 #SBATCH --exclude=nid007127
@@ -39,7 +39,7 @@ usage() {
 	echo " TASKS: Tasks to run with lm eval harness."
 	echo " WANDB_ENTITY: WandB entity name for uploading results (default: apertus)."
 	echo " WANDB_PROJECT: WandB project name for uploading results (default: swissai-evals)."
-	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: hf). - options are: hf, vllm, megatron_lm, openai"
+	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: hf). - options are: hf, vllm, sglang, megatron_lm, openai"
     echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
     echo " OpenAI-compatible API backend (LM_EVAL_BACKEND=openai; no model is loaded in the job):"
     echo "  API_BASE_URL: Endpoint to evaluate against. Required. Accepts a bare host (http://host:8000), a /v1 root, or a full /v1/(chat/)completions URL."
@@ -49,7 +49,7 @@ usage() {
     echo "  API_MAX_RETRIES: Retries per request (default: 3)."
     echo "  OPENAI_API_KEY: Bearer token for the endpoint (default: CSCS_SERVING_API)."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
-    echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from swiss-ai/lm-evaluation-harness (default: repository default branch)."
+    echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from the task-selected harness repository (default: repository default branch)."
     echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
     echo "  ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: false)."
     echo "  AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
@@ -99,7 +99,9 @@ API_MAX_RETRIES=${API_MAX_RETRIES:-3}
 export HF_TOKEN="${HF_TOKEN:-$(tr -d '\r\n' < ./scripts/hf_token.txt)}"
 export WANDB_API_KEY="${WANDB_API_KEY:-$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)}"
 export CSCS_SERVING_API="${CSCS_SERVING_API:-$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)}"
-# Bearer token the openai backend sends (lm-eval reads OPENAI_API_KEY); CSCS serving key by default.
+if [[ -z "${OPENAI_API_KEY:-}" && -f ./scripts/openai_api_key.txt ]]; then
+    export OPENAI_API_KEY="$(tr -d '\r\n' < ./scripts/openai_api_key.txt)"
+fi
 export OPENAI_API_KEY="${OPENAI_API_KEY:-${CSCS_SERVING_API:-}}"
 
 warn_if_empty() {
@@ -306,7 +308,9 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" || $LM_EVAL_BACKEND == "openai" ]]; then
 fi
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS}"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,language_model_only=True,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS}"
+elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer_path=$TOKENIZER$MAYBE_REVISION,dp_size=$DP,tp_size=$MP,mem_fraction_static=$VLLM_MEMORY_FRACTION,dtype=auto"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,load=$MODEL,tokenizer_type=HuggingFaceTokenizer,tokenizer_model=$TOKENIZER$MAYBE_REVISION,devices=4"
     if [[ "$CKPT_ITER" =~ ^[0-9]+$ ]]; then
@@ -453,7 +457,17 @@ if echo "$TASKS" | grep -q "ruler"; then
     fi
 fi
 
-LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/swiss-ai/lm-evaluation-harness.git"
+# bfcl_v3 and Swiss AI Charter Alignment are not yet available in the Swiss-AI
+# fork. Use ymetz only for jobs containing those tasks; everything else,
+# including the experimental GPT suite, stays on Swiss-AI.
+if echo "$TASKS" | grep -qE '(^|,)(bfcl_v3([^,]*)?|swiss_ai_charter_alignment([^,]*)?)(,|$)'; then
+    LM_EVAL_HARNESS_REPO="ymetz/lm-evaluation-harness"
+else
+    LM_EVAL_HARNESS_REPO="swiss-ai/lm-evaluation-harness"
+fi
+echo "Selected lm-evaluation-harness repository: $LM_EVAL_HARNESS_REPO"
+
+LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/${LM_EVAL_HARNESS_REPO}.git"
 if [[ -n "$LM_EVAL_HARNESS_BRANCH" ]]; then
     LM_EVAL_HARNESS_PIP_SPEC="${LM_EVAL_HARNESS_PIP_SPEC}@${LM_EVAL_HARNESS_BRANCH}"
 fi
@@ -461,13 +475,15 @@ fi
 INSTALL_CMD="pip install --no-cache-dir --upgrade \"$LM_EVAL_HARNESS_PIP_SPEC\" && \
 pip install --no-cache-dir --upgrade \
     \"huggingface-hub>=1.3.0,<2.0\" \
-    \"transformers==5.1.0\" \
+    \"transformers==5.12.1\" \
     \"accelerate>=1.1.0\" \
     \"antlr4-python3-runtime==4.11\" \
     \"datasketch<2.0\" \
     segtok \
-    \"tokenizers==0.22.2\" \
+    \"tokenizers>=0.22.0,<0.23.0\" \
     mistral-common \
+    \"humming-kernels[cu13]==0.1.2\" \
+    tenacity \
     sympy \
     spacy \
     math_verify \
@@ -479,7 +495,7 @@ pip install --no-cache-dir --upgrade \
     hf-transfer \
     subset2evaluate \
     \"alpaca-eval>=0.6.2\" \
-    \"peft>=0.18.0\"  "
+    \"peft>=0.19.0\"  "
 
 if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
   INSTALL_CMD="$INSTALL_CMD && pip install megatron-core --no-deps && export MEGATRON_PATH=$(pwd)/Megatron-LM"
@@ -498,6 +514,8 @@ if [[ "$COMMON_MODEL_ARGS" == *\'* ]]; then
 fi
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
+    CMD="lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
+elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     CMD="lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     CMD="lm_eval --model $API_LM_EVAL_MODEL --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
@@ -562,6 +580,16 @@ elif [[ $LM_EVAL_BACKEND == "vllm" ]]; then
     $INSTALL_CMD
     # Make torch CUDA libs discoverable for vllm._C import
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
+    $CMD
+    "
+elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
+  srun -n 1 --mpi=pmix -ul --environment=./containers/env_sglang.toml bash -lc "
+    set -euo pipefail
+    unset SSL_CERT_FILE
+    export HF_DATASETS_TRUST_REMOTE_CODE=1
+    $CACHE_EXPORTS
+
+    $INSTALL_CMD
     $CMD
     "
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
