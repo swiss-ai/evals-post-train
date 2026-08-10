@@ -90,7 +90,7 @@ JUDGE_PRESETS = {
         "account": "infra01",
         "partition": "normal",
         "framework_args": (
-            "--model /capstor/store/cscs/swissai/infra01/hf_models/models/cais/HarmBench-Llama-2-13b-cls "
+            f"--model {MODEL_REGISTRY / 'cais/HarmBench-Llama-2-13b-cls'} "
             "--host 0.0.0.0 "
             "--served-model-name cais/HarmBench-Llama-2-13b-cls "
             "--tensor-parallel-size 4 --max-model-len 35000"
@@ -104,7 +104,7 @@ JUDGE_PRESETS = {
         "account": "infra01",
         "partition": "normal",
         "framework_args": (
-            "--model /capstor/store/cscs/swissai/infra01/hf_models/models/meta-llama/Llama-Guard-4-12B "
+            f"--model {MODEL_REGISTRY / 'meta-llama/Llama-Guard-4-12B'} "
             "--host 0.0.0.0 "
             "--served-model-name cais/Llama-Guard-13b "
             "--tensor-parallel-size 4 --max-model-len 35000"
