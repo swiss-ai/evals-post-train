@@ -159,7 +159,7 @@ LOG_LENGTH_METRICS=$(_norm_bool LOG_LENGTH_METRICS "$LOG_LENGTH_METRICS")
 
 # Thinking emits a trace before the answer; raise the budget unless the caller set it.
 if [[ "$ENABLE_THINKING" == "True" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then
-    MAX_NEW_TOKENS=8192
+    MAX_NEW_TOKENS=16384
     echo "ENABLE_THINKING=True: raising default MAX_NEW_TOKENS to $MAX_NEW_TOKENS"
 fi
 
@@ -288,6 +288,7 @@ fi
 export OMP_NUM_THREADS=$(( 8 * $GPUS_PER_NODE ))
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export VLLM_DISABLE_COMPILE_CACHE=1
+export VLLM_USE_FLASHINFER_SAMPLER=0
 
 #export VLLM_TORCH_COMPILE=0
 #export NCCL_P2P_DISABLE=1
@@ -366,7 +367,6 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
 else
     die "Unsupported LM_EVAL_BACKEND: $LM_EVAL_BACKEND"
 fi
-#,tokenizer_mode=slow"
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
 
@@ -390,18 +390,23 @@ elif [[ -n "${NOTHINK_TEMPERATURE:-}" ]]; then
     echo "No-think sampling: do_sample=true temperature=$NOTHINK_TEMPERATURE top_p=$NOTHINK_TOP_P"
 fi
 
+MAX_BATCH_SIZE=${MAX_BATCH_SIZE:-""}
+
 COMMON_EVAL_ARGS=(
 	--trust_remote_code
 	--batch_size $BS
 	--tasks $TASKS
 	--output_path $HARNESS_EVAL_DIR
-	--max_batch_size 32
 	--log_samples
 	--write_out
 	--confirm_run_unsafe_code
-    # --cache_requests true - causes problems for long model names due to file name length limits
+    --cache_requests true # was disabled until recently, but we can enable it because the upstream file length problem was patched
     --gen_kwargs "$GEN_KWARGS"
 )
+
+if [[ -n "$MAX_BATCH_SIZE" ]]; then
+    COMMON_EVAL_ARGS+=(--max_batch_size "$MAX_BATCH_SIZE")
+fi
 
 if [[ -n "${HARNESS_LIMIT}" ]]; then
     COMMON_EVAL_ARGS+=(--limit $HARNESS_LIMIT)
@@ -475,8 +480,8 @@ fi
 INSTALL_CMD="pip install --no-cache-dir --upgrade \"$LM_EVAL_HARNESS_PIP_SPEC\" && \
 pip install --no-cache-dir --upgrade \
     \"huggingface-hub>=1.3.0,<2.0\" \
-    \"transformers==5.12.1\" \
-    \"accelerate>=1.1.0\" \
+    \"transformers==5.14.1\" \
+    \"accelerate>=1.14.0\" \
     \"antlr4-python3-runtime==4.11\" \
     \"datasketch<2.0\" \
     segtok \

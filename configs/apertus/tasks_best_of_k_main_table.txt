@@ -6,15 +6,13 @@
 # still uploaded to W&B, just not promoted to this table.
 #
 # Math — answer extraction, repeats=8
-aime/exact_match,mean@8
-aime/exact_match,maj@8
-aime/exact_match,pass@8
 aime24/exact_match,mean@8
 aime24/exact_match,maj@8
 aime24/exact_match,pass@8
 aime25/exact_match,mean@8
 aime25/exact_match,maj@8
 aime25/exact_match,pass@8
+hendrycks_math/math_verify
 minerva_math500_self_consistency/math_verify,mean@4
 minerva_math500_self_consistency/math_verify,maj@4
 minerva_math500_self_consistency/math_verify,pass@4
@@ -25,7 +23,5 @@ gsm8k_cot_zeroshot_self_consistency/exact_match,pass@32
 # Code — execute unit tests, repeats=8 (pass@1 == mean@8; pass@8 == any-correct)
 humaneval_instruct_self_consistency/pass@1,all
 humaneval_instruct_self_consistency/pass@8,all
-mbpp_instruct_self_consistency/pass@1,all
-mbpp_instruct_self_consistency/pass@8,all
 mbpp_plus_instruct_self_consistency/pass@1,all
 mbpp_plus_instruct_self_consistency/pass@8,all
