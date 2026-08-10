@@ -4,10 +4,9 @@
 # Usage: hf_base_runner.sh <model_type_description>
 #
 # This script expects MODEL_CHECKPOINTS associative array to be defined before calling
-# and optionally WANDB_ENTITY, WANDB_PROJECT, APPLY_CHAT_TEMPLATE, NUM_SPLITS environment variables
-#
-# When NUM_SPLITS > 1, each model's tasks are split across NUM_SPLITS parallel sbatch jobs.
-# A dependency-chained aggregation job merges results and uploads to W&B.
+# and optionally WANDB_ENTITY, WANDB_PROJECT, and APPLY_CHAT_TEMPLATE environment variables.
+# Task chunking, retries, environment preparation, and aggregation are delegated
+# to scripts/evaluation_orchestrator.sh.
 
 # Get model type description from argument (for display purposes)
 MODEL_TYPE_DESC=${1:-"models"}
@@ -16,18 +15,30 @@ MODEL_TYPE_DESC=${1:-"models"}
 export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 export WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals}
 export APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-false}
-NUM_SPLITS=${NUM_SPLITS:-1}
+export LOGS_ROOT=${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}
+export EVAL_CHUNK_SIZE=${EVAL_CHUNK_SIZE:-8}
+export EVAL_MAX_PARALLEL=${EVAL_MAX_PARALLEL:-}
+export EVAL_MAX_RETRIES=${EVAL_MAX_RETRIES:-1}
+export EVAL_FAILURE_POLICY=${EVAL_FAILURE_POLICY:-resume}
+export EVAL_FORCE_TASKS=${EVAL_FORCE_TASKS:-}
+export EVAL_MERGE_ONLY=${EVAL_MERGE_ONLY:-false}
+export EVAL_DRY_RUN=${EVAL_DRY_RUN:-false}
 
 # Allow overriding the sbatch script (e.g. evaluate.sbatch)
 SBATCH_SCRIPT=${SBATCH_SCRIPT:-scripts/evaluate.sbatch}
+export SBATCH_SCRIPT
+
+source scripts/evaluation_orchestrator.sh
 
 # Launch evaluation jobs for each model
 echo "Launching evaluation jobs for ${#MODEL_CHECKPOINTS[@]} ${MODEL_TYPE_DESC}..."
 echo "WANDB Project: ${WANDB_PROJECT}"
 echo "Apply Chat Template: ${APPLY_CHAT_TEMPLATE}"
 echo "Sbatch script: ${SBATCH_SCRIPT}"
-if (( NUM_SPLITS > 1 )); then
-    echo "Task splits: ${NUM_SPLITS} parallel nodes per model"
+echo "Failure policy: ${EVAL_FAILURE_POLICY:-resume}"
+if [[ "${EVAL_FAILURE_POLICY:-resume}" == "resume" ]]; then
+    echo "Task chunk size: ${EVAL_CHUNK_SIZE:-8}"
+    echo "Maximum parallel chunks: ${EVAL_MAX_PARALLEL:-all}"
 fi
 echo ""
 
@@ -53,38 +64,9 @@ for MODEL in "${!MODEL_CHECKPOINTS[@]}"; do
     echo "  Checkpoint path: $CKPT_PATH"
     echo "  Checkpoint iter: $CKPT_ITER (only applies to local Megatron checkpoints)"
 
-    if (( NUM_SPLITS <= 1 )); then
-        # Single-node execution (original behavior)
-        JOB_ID=$(sbatch --parsable --job-name eval-$MODEL \
-            --export=ALL,CKPT_ITER=$CKPT_ITER \
-            "$SBATCH_SCRIPT" "$CKPT_PATH" "$MODEL")
-        echo "  Submitted batch job $JOB_ID"
-        EVAL_JOB_IDS+=("$JOB_ID")
-    else
-        # Submit K split jobs, then one aggregation job with dependency
-        SPLIT_JOB_IDS=()
-        for (( i=0; i<NUM_SPLITS; i++ )); do
-            JOB_ID=$(sbatch --parsable \
-                --job-name "eval-${MODEL}-split${i}" \
-                --export=ALL,NUM_SPLITS=$NUM_SPLITS,SPLIT_INDEX=$i,CKPT_ITER=$CKPT_ITER \
-                "$SBATCH_SCRIPT" "$CKPT_PATH" "$MODEL")
-            SPLIT_JOB_IDS+=("$JOB_ID")
-            echo "  Split $((i+1))/$NUM_SPLITS submitted: job $JOB_ID"
-            sleep 1
-        done
-
-        # Build dependency string: afterok:job1:job2:...
-        DEP_STRING=$(IFS=':'; echo "${SPLIT_JOB_IDS[*]}")
-
-        # Submit aggregation job to merge results and upload to W&B
-        AGG_JOB_ID=$(sbatch --parsable \
-            --job-name "eval-${MODEL}-aggregate" \
-            --dependency="afterok:${DEP_STRING}" \
-            --export=ALL,NUM_SPLITS=$NUM_SPLITS \
-            scripts/aggregate_splits.sbatch "$CKPT_PATH" "$MODEL")
-        echo "  Aggregation job submitted: job $AGG_JOB_ID (depends on splits)"
-        EVAL_JOB_IDS+=("$AGG_JOB_ID")
-    fi
+    export CKPT_ITER
+    submit_evaluation "$CKPT_PATH" "$MODEL"
+    EVAL_JOB_IDS+=("$ORCHESTRATION_FINAL_JOB_ID")
 
     # Add a small delay between submissions to avoid overwhelming the scheduler
     sleep 1

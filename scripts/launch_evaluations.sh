@@ -47,7 +47,13 @@
 #   --api-base-url <url> - OpenAI-compatible endpoint for the 'openai' backend (required with it,
 #                          unless API_BASE_URL is exported). Bare host, /v1 root, or full endpoint URL.
 #   --api-model-name <n> - 'model' field sent in API requests (default: the --model value)
-#   --splits K           - Split tasks across K parallel nodes per model
+#   --chunk-size N       - Tasks per resumable job chunk (default: 8)
+#   --max-parallel N     - Cap concurrent chunks (default: all generated chunks)
+#   --max-retries N      - Retry waves for missing tasks; chunks halve each wave (default: 1)
+#   --failure-policy P   - resume (default) or fail-fast
+#   --task-file <path>   - Task list for custom mode
+#   --table-metrics <p>  - Main-metrics list for custom mode
+#   --force-tasks <csv>  - Re-run completed tasks matching these substrings
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
 #   --reservation <name> - Submit jobs under a SLURM reservation, including an auto-launched judge
@@ -82,8 +88,8 @@
 #   # Single HF model, auto-detect everything
 #   bash launch_evaluations.sh complete --model meta-llama/Llama-3.1-8B-Instruct
 #
-#   # Single model with splits
-#   bash launch_evaluations.sh main --model allenai/OLMo-2-1124-7B --splits 4
+#   # Single model in resumable chunks
+#   bash launch_evaluations.sh main --model allenai/OLMo-2-1124-7B --chunk-size 8
 #
 #   # Base model, explicit no chat template
 #   bash launch_evaluations.sh easy --model Qwen/Qwen2.5-7B --no-chat-template
@@ -92,7 +98,7 @@
 #   bash launch_evaluations.sh complete --script runners/hf_eval_multiple_other_models.sh
 #
 #   # Use default EVALUATION_SCRIPTS (edit the array below)
-#   bash launch_evaluations.sh complete --splits 4
+#   bash launch_evaluations.sh complete --chunk-size 8
 #
 #   # Run a single task
 #   bash launch_evaluations.sh single --task hellaswag --model meta-llama/Llama-3.1-8B-Instruct
@@ -103,7 +109,10 @@ set -euo pipefail
 EVAL_MODE=${1:-complete}
 shift || true
 
-NUM_SPLITS=1
+EVAL_CHUNK_SIZE=8
+EVAL_MAX_PARALLEL=""
+EVAL_MAX_RETRIES=1
+EVAL_FAILURE_POLICY="resume"
 MODEL_PATH=""
 MODEL_NAME=""
 SCRIPT_PATH=""
@@ -131,13 +140,25 @@ THINK_START_TOKEN=""
 AUTODETECT_THINK_TOKENS=""
 TRACK_THINKING_METRICS=""     # "", "true", "false"
 LOG_LENGTH_METRICS=""
+TASK_FILE_OVERRIDE=""
+TABLE_METRICS_OVERRIDE=""
+LOGS_ROOT_FLAG=""
+WANDB_ENTITY_FLAG=""
+WANDB_PROJECT_FLAG=""
+SBATCH_ACCOUNT_FLAG=""
+FORCE_TASKS=""
+EVAL_MERGE_ONLY="false"
+EVAL_DRY_RUN="false"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --model)        MODEL_PATH="$2";              shift 2 ;;
         --name)         MODEL_NAME="$2";              shift 2 ;;
         --script)       SCRIPT_PATH="$2";             shift 2 ;;
-        --splits)       NUM_SPLITS="$2";              shift 2 ;;
+        --chunk-size)   EVAL_CHUNK_SIZE="$2";         shift 2 ;;
+        --max-parallel) EVAL_MAX_PARALLEL="$2";       shift 2 ;;
+        --max-retries)  EVAL_MAX_RETRIES="$2";        shift 2 ;;
+        --failure-policy) EVAL_FAILURE_POLICY="$2";   shift 2 ;;
         --num-fewshot)  FEWSHOT_FLAG="$2";            shift 2 ;;
         --task)         SINGLE_TASK="$2";             shift 2 ;;
         --chat-template)    CHAT_TEMPLATE_OVERRIDE="true";  shift ;;
@@ -154,6 +175,15 @@ while [[ $# -gt 0 ]]; do
         --judge)         JUDGE_MODE="$2";              shift 2 ;;
         --judge-args)    JUDGE_EXTRA_ARGS="$2";        shift 2 ;;
         --keep-judge)    KEEP_JUDGE="true";            shift ;;
+        --task-file)     TASK_FILE_OVERRIDE="$2";       shift 2 ;;
+        --table-metrics) TABLE_METRICS_OVERRIDE="$2";   shift 2 ;;
+        --logs-root)     LOGS_ROOT_FLAG="$2";           shift 2 ;;
+        --wandb-entity)  WANDB_ENTITY_FLAG="$2";        shift 2 ;;
+        --wandb-project) WANDB_PROJECT_FLAG="$2";       shift 2 ;;
+        --account)       SBATCH_ACCOUNT_FLAG="$2";      shift 2 ;;
+        --force-tasks)   FORCE_TASKS="$2";              shift 2 ;;
+        --merge-only)    EVAL_MERGE_ONLY="true";        shift ;;
+        --debug)         EVAL_DRY_RUN="true";           shift ;;
         --thinking)                  THINKING_UMBRELLA="true";          shift ;;
         --enable-thinking)           ENABLE_THINKING_OVERRIDE="true";   shift ;;
         --no-enable-thinking)        ENABLE_THINKING_OVERRIDE="false";  shift ;;
@@ -191,8 +221,20 @@ elif [[ -n "$SINGLE_TASK" ]]; then
     exit 1
 fi
 
-if (( NUM_SPLITS < 1 )); then
-    echo "Error: --splits must be >= 1"
+if [[ ! "$EVAL_CHUNK_SIZE" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: --chunk-size must be >= 1"
+    exit 1
+fi
+if [[ -n "$EVAL_MAX_PARALLEL" && ! "$EVAL_MAX_PARALLEL" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: --max-parallel must be >= 1"
+    exit 1
+fi
+if [[ ! "$EVAL_MAX_RETRIES" =~ ^[0-9]+$ ]]; then
+    echo "Error: --max-retries must be >= 0"
+    exit 1
+fi
+if [[ "$EVAL_FAILURE_POLICY" != "resume" && "$EVAL_FAILURE_POLICY" != "fail-fast" ]]; then
+    echo "Error: --failure-policy must be 'resume' or 'fail-fast'"
     exit 1
 fi
 
@@ -309,7 +351,13 @@ fi
 [[ -n "$RESERVATION_FLAG" ]] && export SBATCH_RESERVATION="$RESERVATION_FLAG"
 export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 export WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
-export NUM_SPLITS
+export LOGS_ROOT=${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}
+[[ -n "$WANDB_ENTITY_FLAG" ]] && export WANDB_ENTITY="$WANDB_ENTITY_FLAG"
+[[ -n "$WANDB_PROJECT_FLAG" ]] && export WANDB_PROJECT="$WANDB_PROJECT_FLAG"
+[[ -n "$LOGS_ROOT_FLAG" ]] && export LOGS_ROOT="$LOGS_ROOT_FLAG"
+[[ -n "$SBATCH_ACCOUNT_FLAG" ]] && export SBATCH_ACCOUNT="$SBATCH_ACCOUNT_FLAG"
+export EVAL_CHUNK_SIZE EVAL_MAX_PARALLEL EVAL_MAX_RETRIES EVAL_FAILURE_POLICY
+export EVAL_FORCE_TASKS="$FORCE_TASKS" EVAL_MERGE_ONLY EVAL_DRY_RUN KEEP_JUDGE
 export SBATCH_SCRIPT=${SBATCH_SCRIPT:-scripts/evaluate.sbatch}
 # Global checkpoint iteration override for Megatron checkpoints.
 # Consumed by the runner and forwarded to evaluate.sbatch as CKPT_ITER.
@@ -388,6 +436,13 @@ case "$EVAL_MODE" in
         export WANDB_PROJECT="${WANDB_PROJECT}-single"
         ;;
     "custom")
+        [[ -n "$TASK_FILE_OVERRIDE" ]] && export TASKS="$TASK_FILE_OVERRIDE"
+        [[ -n "$TABLE_METRICS_OVERRIDE" ]] && export TABLE_METRICS="$TABLE_METRICS_OVERRIDE"
+        if [[ -z "${TASKS:-}" ]]; then
+            echo "Error: custom mode requires --task-file <path> (or exported TASKS)"
+            exit 1
+        fi
+        export TABLE_METRICS=${TABLE_METRICS:-$TASKS}
         ;;
 esac
 
@@ -399,16 +454,6 @@ if [[ "$EVAL_MODE" == "gpt" ]]; then
     echo "         It requires the corresponding GPT-judge support to exist in the Swiss-AI harness." >&2
     if [[ -z "${OPENAI_API_KEY:-}" && ! -f ./scripts/openai_api_key.txt ]]; then
         echo "WARNING: neither OPENAI_API_KEY nor scripts/openai_api_key.txt is available." >&2
-    fi
-fi
-
-# --- Validate split count vs task count ---
-if (( NUM_SPLITS > 1 )); then
-    TASK_COUNT=$(grep -v '^\s*#' "$TASKS" | grep -v '^\s*$' | wc -l | tr -d ' ')
-    if (( TASK_COUNT < NUM_SPLITS )); then
-        echo "WARNING: Only $TASK_COUNT tasks but $NUM_SPLITS splits requested. Reducing."
-        NUM_SPLITS=$TASK_COUNT
-        export NUM_SPLITS
     fi
 fi
 
@@ -453,7 +498,12 @@ echo "======================================"
 echo "Apertus Evaluation Launcher"
 echo "  Mode:   $EVAL_MODE"
 [[ "$EVAL_MODE" == "single" ]] && echo "  Task:   $SINGLE_TASK"
-echo "  Splits: $NUM_SPLITS"
+echo "  Failure policy: $EVAL_FAILURE_POLICY"
+if [[ "$EVAL_FAILURE_POLICY" == "resume" ]]; then
+    echo "  Chunk size: $EVAL_CHUNK_SIZE"
+    echo "  Max parallel: ${EVAL_MAX_PARALLEL:-all chunks}"
+    echo "  Retry waves: $EVAL_MAX_RETRIES"
+fi
 echo "  Harness: auto (Swiss-AI; ymetz only for BFCL/Charter)${HARNESS_BRANCH:+@$HARNESS_BRANCH}"
 if [[ "$THINKING_TOUCHED" == "true" ]]; then
     echo "  Thinking: enable=${ENABLE_THINKING_OVERRIDE:-<unset>} autodetect=${AUTODETECT_THINK_TOKENS:-false} track=${TRACK_THINKING_METRICS:-<derive>} lengths=${LOG_LENGTH_METRICS:-false}"
@@ -535,6 +585,9 @@ if [[ -n "$MODEL_PATH" ]]; then
     # ===== MODE 1: Single model =====
     if [[ -z "$MODEL_NAME" ]]; then
         MODEL_NAME=$(auto_derive_name "$MODEL_PATH")
+        if [[ "$THINKING_UMBRELLA" == "true" || "$ENABLE_THINKING_OVERRIDE" == "true" ]]; then
+            MODEL_NAME="${MODEL_NAME}-think"
+        fi
     fi
 
     if [[ -z "$CHAT_TEMPLATE_OVERRIDE" ]]; then
@@ -558,11 +611,13 @@ if [[ -n "$MODEL_PATH" ]]; then
     echo "  W&B:    $WANDB_ENTITY/$WANDB_PROJECT"
     echo "======================================"
 
-    # Build a single-model checkpoint array and source the runner
-    declare -A MODEL_CHECKPOINTS=(
-        ["$MODEL_NAME"]="$MODEL_PATH"
-    )
-    source runners/hf_base_runner.sh "model"
+    # A single model does not need the associative-array runner (and remains
+    # usable with the older Bash shipped by macOS for local --debug checks).
+    source scripts/evaluation_orchestrator.sh
+    EVAL_JOB_IDS=()
+    export CKPT_ITER="${CKPT_ITERATION:-latest}"
+    submit_evaluation "$MODEL_PATH" "$MODEL_NAME"
+    EVAL_JOB_IDS+=("$ORCHESTRATION_FINAL_JOB_ID")
 
 elif [[ -n "$SCRIPT_PATH" ]]; then
     # ===== MODE 2: Run a model-list script =====
@@ -617,7 +672,8 @@ fi
 # --- Judge cleanup job ---
 # After all eval jobs are submitted, schedule a cleanup job that cancels judge
 # SLURM jobs once all evaluations finish.
-if [[ -n "$JUDGE_JOB_IDS" && "$KEEP_JUDGE" != "true" && ${#EVAL_JOB_IDS[@]} -gt 0 ]]; then
+if [[ "$EVAL_FAILURE_POLICY" == "fail-fast" && -n "$JUDGE_JOB_IDS" \
+      && "$KEEP_JUDGE" != "true" && ${#EVAL_JOB_IDS[@]} -gt 0 ]]; then
     DEP_STRING=$(IFS=':'; echo "${EVAL_JOB_IDS[*]}")
     SCANCEL_CMD="scancel $JUDGE_JOB_IDS"
     CLEANUP_JOB=$(sbatch --parsable \

@@ -8,7 +8,7 @@ Evaluation infrastructure for benchmarking Large Language Models on SLURM cluste
 2. [The Launch Script](#the-launch-script)
 3. [Graceful / Resumable Launcher](#graceful--resumable-launcher)
 4. [Task Configuration](#task-configuration)
-5. [Parallel Task Splitting](#parallel-task-splitting)
+5. [Parallel Task Chunking](#parallel-task-chunking)
 6. [Thinking / Reasoning Metrics](#thinking--reasoning-metrics)
 7. [Every Eval Ever and Hugging Face exports](#every-eval-ever-and-hugging-face-exports)
 8. [W&B Integration](#wb-integration)
@@ -30,8 +30,9 @@ This pipeline **launches evaluations** on the cluster (see [The Launch Script](#
 # Evaluate a single model on the benchmark suite (with custom name)
 bash scripts/launch_evaluations.sh default --model meta-llama/Llama-3.1-8B-Instruct --name Llama-Baseline
 
-# Same, but split tasks across 4 parallel nodes for faster evaluation, name automatically inferred
-bash scripts/launch_evaluations.sh default --model meta-llama/Llama-3.1-8B-Instruct --splits 4
+# Resumable chunks of 8 tasks, with at most 4 chunks running concurrently
+bash scripts/launch_evaluations.sh default --model meta-llama/Llama-3.1-8B-Instruct \
+  --chunk-size 8 --max-parallel 4
 
 # Launch Megatron checkpoint without conversion (TODO: Verify), Megatron-iter defaults to: latest
 bash scripts/launch_evaluations.sh olmo-easy --model /capstor/store/../apertus-.../checkpoints/ --backend megatron_lm --name Megatron-Test-260216 --megatron-iter 4000000
@@ -53,8 +54,9 @@ bash scripts/launch_evaluations.sh olmo-easy --model Qwen/Qwen2.5-7B --num-fewsh
 # Evaluate a small model on a single task, useful for testing newly implemented tasks
 bash scripts/launch_evaluations.sh single --task multijail --model meta-llama/Llama-3.2-3B --backend vllm
 
-# Thinking / reasoning eval: run the suite and auto-aggregate results to a "<model>-think" W&B run
-bash scripts/launch_evaluations_gracefuly.sh --task_file configs/apertus/tasks_posttrain_final.txt --model Qwen/Qwen3-8B --thinking
+# Thinking / reasoning eval with an isolated W&B run name
+bash scripts/launch_evaluations.sh posttrain --model Qwen/Qwen3-8B \
+  --thinking --name Qwen3-8B-think
 # ...then build the thinking-only table from that run (details: "Building a thinking-only table")
 python make_html_table.py --thinking --metrics-file configs/apertus/tasks_posttrain_final.txt --entity apertus --project <project> --models Qwen3-8B-think --output thinking_table.html
 ```
@@ -81,7 +83,7 @@ The launcher selects a benchmark suite from its first positional argument (`<mod
 | `apertus-previous` | `tasks_english.txt` | 19 | Previous (Apertus 1.0) English benchmark suite |
 | `pretrain` | `tasks_pretrain.txt` | 30 | Pretraining suite (base-model loglikelihood/MC variants, few-shot MMLU); logs to W&B project `apertus-1.5-pre-training-v0.0` |
 | `eval-debug` | `eval_debug.txt` | 8 | Small mix of loglikelihood + generative tasks to smoke-test the eval pipeline |
-| `custom` | (none) | — | No suite configured; export `TASKS` and `TABLE_METRICS` yourself before launching |
+| `custom` | `--task-file` | — | User-specified task file and optional `--table-metrics` file |
 | `single` | `--task` | 1 | One task, user-specified through `--task` (comma-separated tasks allowed) |
 
 **OLMo3 suites** (`configs/olmo/`)
@@ -129,10 +131,14 @@ bash scripts/launch_evaluations.sh <mode>
 | `--backend <hf\|vllm\|sglang\|megatron_lm\|openai>` | Inference backend (default: from sbatch script). `vllm` recommended for in-job inference; `openai` evaluates against an already-running OpenAI-compatible endpoint instead of loading the model. |
 | `--api-base-url <url>` | Endpoint for the `openai` backend (required with it). Accepts a bare host (`http://host:8000`), a `/v1` root, or a full `/v1/(chat/)completions` URL. |
 | `--api-model-name <name>` | `model` field sent in API requests (default: the `--model` value) |
-| `--splits K` | Split task list across K parallel SLURM nodes per model (auto-clamped to the task count) |
+| `--chunk-size N` | Maximum tasks per resumable Slurm-array element (default: 8) |
+| `--max-parallel N` | Cap concurrently running chunks; omitted means all generated chunks may run |
+| `--max-retries N` | Retry waves for missing tasks (default: 1); retry chunk size is halved |
+| `--failure-policy <resume\|fail-fast>` | `resume` scans existing results, runs missing tasks, retries, and aggregates (default); `fail-fast` runs the full suite once |
+| `--force-tasks <patterns>` | Comma-separated task substrings to evaluate again even when results exist |
 | `--limit N` | Limit number of samples per task (forwarded as `--limit` to lm-eval-harness; default: no limit). Useful for quick sanity checks. |
 | `--megatron-iter <iter>` | For Megatron-LM checkpoints, the iteration to evaluate (e.g. `8926`); defaults to `latest`. Exported as `CKPT_ITERATION`. |
-| `--harness-branch B` | Install lm-evaluation-harness from a specific branch/ref of the task-selected repository (default: repository default branch) |
+| `--harness-branch B` | Resolve lm-evaluation-harness from a branch, tag, or full commit SHA (default: repository HEAD); the resolved commit is shared by every chunk |
 | `--reservation <name>` | Submit evaluation jobs and any automatically launched judge under this SLURM reservation. |
 | `--judge <none\|auto\|preset>` | Judge-model control for LLM-as-a-judge tasks. `none` (default) disables auto-launch; `auto` scans the task list using the mapping in `scripts/launch_judge.py`; a preset name (e.g. `qwen3.5-27b`, `llama-3.3-70b`) launches that judge. |
 | `--judge-args <str>` | Extra arguments forwarded to `scripts/launch_judge.py` |
@@ -219,13 +225,14 @@ continues to use the CSCS judge setup described above.
 # OLMo3 paper-faithful 5-shot evaluation
 bash scripts/launch_evaluations.sh olmo-complete --model allenai/OLMo-2-1124-7B --num-fewshot 5
 
-# Large model with vLLM and 8-way task splitting
+# Large model with vLLM, eight tasks per chunk and four concurrent chunks
 bash scripts/launch_evaluations.sh default \
-  --model Qwen/Qwen2.5-72B-Instruct --backend vllm --splits 8
+  --model Qwen/Qwen2.5-72B-Instruct --backend vllm \
+  --chunk-size 8 --max-parallel 4
 
 # Run all models from a batch script on the safety suite
 bash scripts/launch_evaluations.sh olmo-safety \
-  --script runners/hf_eval_multiple_other_models.sh --splits 4
+  --script runners/hf_eval_multiple_other_models.sh --chunk-size 4
 ```
 
 #### Deprecated option:
@@ -236,50 +243,26 @@ bash scripts/launch_evaluations.sh olmo-safety \
 
 ## Graceful / Resumable Launcher
 
-`scripts/launch_evaluations_gracefuly.sh` is a **resumable, idempotent wrapper** around `launch_evaluations.sh`. Instead of launching a whole suite as one job, it inspects which tasks already have results on disk and only (re)launches the *missing* ones, then automatically aggregates everything once complete. This makes it the recommended entry point for large post-training suites where individual tasks may fail or time out and you don't want to re-run the entire suite.
+Graceful execution is the default behavior of `scripts/launch_evaluations.sh`. The launcher scans existing harness outputs, evaluates only missing tasks, and uploads one aggregate W&B run. The old `scripts/launch_evaluations_gracefuly.sh` command remains as a deprecated compatibility wrapper.
 
 ```bash
-bash scripts/launch_evaluations_gracefuly.sh \
-  --task_file configs/apertus/tasks_posttrain_final.txt \
+bash scripts/launch_evaluations.sh custom \
+  --task-file configs/apertus/tasks_posttrain_final.txt \
   --model /capstor/store/.../apertus-1.5-checkpoint \
-  --table_metrics configs/apertus/tasks_posttrain_final_main_table.txt \
-  --wandb_entity apertus --wandb_project apertus-1.5-post-training-v0.0 \
-  --group_size 1
+  --table-metrics configs/apertus/tasks_posttrain_final_main_table.txt \
+  --wandb-entity apertus --wandb-project apertus-1.5-post-training-v0.0 \
+  --chunk-size 8 --max-parallel 4 --max-retries 1
 ```
 
 ### How it works
 
-1. **Scan**: reads `--task_file`, then scans the run's harness output directories (`<eval_prefix>/<run-name>/harness/eval_*/results_*.json`, plus the `-single` project variant) and marks each task that already has a result. The run name defaults to the model basename; thinking runs get a `-think` suffix and `--name` overrides it outright, so a reasoning run never collides with the same model's non-thinking results.
-2. **Diff**: computes the set of *missing* tasks (expected − completed).
-3. **Launch missing only**: groups missing tasks into batches of `--group_size` and submits each group via `launch_evaluations.sh single --task <group> --chat-template` (with `WANDB_MODE=disabled` for the per-task runs).
-4. **Aggregate**: submits a follow-up job (`--dependency=afterok:<all_task_jobs>`) that re-runs this same script in `--merge_only` mode, which rebuilds the split markers and submits `aggregate_splits.sbatch` to merge all results and upload the final run to W&B.
-5. If no tasks are missing on the first pass, it skips straight to marker rebuild + aggregation.
+1. The task list is normalized and existing `eval_*` result directories are scanned.
+2. Missing tasks are grouped into `--chunk-size N` chunks and submitted as one Slurm array. `--max-parallel` adds the array `%N` concurrency limit; by default every chunk may run.
+3. A CPU controller runs with an `afterany` dependency, so it runs even when an array element fails.
+4. The controller rescans results. If tasks remain and retry budget is available, it submits only those tasks again with the chunk size halved.
+5. Completed outputs are merged and uploaded once. When retries are exhausted, successful tasks are still aggregated and `final_failed_tasks.txt` is retained in the run's controller state directory.
 
-All [thinking flags](#thinking--reasoning-metrics) (`--thinking`, `--think-end-token`, …) are accepted
-and forwarded verbatim to the per-task `single` runs in step 3. They are deliberately *not* forwarded to
-the step-4 aggregator, which runs `--merge_only` and loads no model.
-
-### Differences vs. `launch_evaluations.sh`
-
-| Aspect               | `launch_evaluations.sh`                                 | `launch_evaluations_gracefuly.sh`                                                  |
-|----------------------|---------------------------------------------------------|------------------------------------------------------------------------------------|
-| Purpose              | One-shot launch of a full suite (or split across nodes) | Resume/complete a partially-finished suite; only launches missing tasks            |
-| Suite selection      | Positional `<mode>` (named suite)                       | Explicit `--task_file <path>` (any task list)                                      |
-| Model arg            | `--model` / `--script` / default array                  | `--model` only                                                                     |
-| Granularity          | One job per model (optionally `--splits K`)             | One job per **task group** (`--group_size`, default 1 = per-task)                  |
-| Idempotency          | Re-runs everything every time                           | Skips tasks that already have results on disk                                      |
-| Aggregation          | Triggered by `--splits` flow                            | Always; chained automatically via `afterok` + `--merge_only`                       |
-| W&B during task runs | Uploads per job                                         | `WANDB_MODE=disabled` per task; only the final aggregator uploads                  |
-| SLURM placement      | Defaults from sbatch script                             | `--account` / `--reservation` flags (cache dirs redirected to `$SCRATCH/.cache`)   |
-| Extra controls       | judge / splits / backend / fewshot flags                | `--force_tasks <substr,...>` to force re-eval, `--merge_only`, `--debug` (dry run) |
-
-Key flags: `--task_file` and `--model` (required), `--table_metrics`, `--eval_prefix`, `--account`, `--reservation`, `--wandb_entity`, `--wandb_project`, `--group_size`, `--tokenizer`, `--name <run-name>` (override the run name — dirs + W&B run; defaults to the model basename, with a `-think` suffix for thinking runs), `--force_tasks <comma-separated substrings>` (drop matching tasks from the completed set to re-run them), `--merge_only` (skip launching, just rebuild markers + aggregate), and `--debug` (dry run — prints what would be submitted without submitting).
-
-The multi-model convenience wrapper `launcher_graceful.sh` accepts the same
-thinking flags and forwards them to the resumable launcher.
-
-> [!NOTE]
-> Under the hood the graceful launcher delegates each task to `launch_evaluations.sh` in `single` mode and always applies the chat template, so it is intended primarily for post-training (instruct) checkpoints.
+Use `--failure-policy fail-fast` to recover the original single-job behavior. `--force-tasks`, `--merge-only`, and `--debug` support targeted reruns, aggregation-only recovery, and submission dry runs.
 
 ---
 
@@ -331,30 +314,28 @@ Available task names can be found in `lm_eval_reference/tasks/` or by running `l
 
 ---
 
-## Parallel Task Splitting
+## Parallel Task Chunking
 
-For evaluations that would exceed the 12h SLURM time limit (or just to get results faster), the `--splits K` option distributes tasks across K parallel SLURM nodes.
+`--chunk-size N` controls failure isolation and the amount of cross-task lm-eval batching within each job. `--max-parallel N` independently limits resource usage. If `--max-parallel` is omitted, it defaults to the number of generated chunks.
 
 ### How It Works
 
-1. The launcher submits K `sbatch` jobs, each with `NUM_SPLITS=K` and `SPLIT_INDEX=0..K-1`
-2. Each job reads the task list, splits it into K chunks, and runs only its chunk
-3. Each split job writes a marker file to `$HARNESS_DIR/split_markers/split_<i>.txt`
-4. An aggregation job (`aggregate_splits.sbatch`) is submitted with `--dependency=afterok:<all_split_job_ids>` -- it only runs once all splits succeed
-5. The aggregation job calls `merge_split_results.py` to combine `results_*.json` files and copy sample JSONL files, then uploads merged results to W&B
+1. The launcher computes chunks from the currently missing tasks.
+2. A CPU preparation job resolves one harness commit and creates or reuses its environment.
+3. The chunks run as a Slurm job array after environment preparation succeeds.
+4. An `afterany` controller scans outputs, retries missing tasks, and submits aggregation.
+5. The aggregation job combines `results_*.json` files and sample JSONL files, then uploads one W&B run.
 
 ```
-sbatch split-0  ─┐
-sbatch split-1  ─┤
-sbatch split-2  ─┤──> afterok ──> sbatch aggregate ──> W&B upload
-sbatch split-3  ─┘
+prepare environment ──> chunk array ──> afterany controller ──> aggregate ──> W&B
+                                      └── retry missing chunks, if needed
 ```
 
 No manual dependency management is needed -- the launcher handles everything via `sbatch --parsable` and `--dependency`.
 
 ### Race Condition Safety
 
-- Split jobs do **not** upload to W&B individually. Only the single aggregation job does the upload, avoiding concurrent `wandb.init(resume="allow")` conflicts.
+- Chunk jobs do **not** upload to W&B individually. Only the aggregation job does the upload, avoiding concurrent `wandb.init(resume="allow")` conflicts.
 - Output directories are unique per job ID (`eval_<timestamp>_$SLURM_JOBID`), so file writes never collide.
 
 ---
@@ -452,10 +433,10 @@ bash scripts/launch_evaluations.sh olmo-main --model my/reasoner --autodetect-th
 bash scripts/launch_evaluations.sh posttrain --model meta-llama/Llama-3.1-8B-Instruct --log-length-metrics
 ```
 
-The graceful launcher accepts and forwards all of these to its per-task `single` runs:
+The main launcher forwards all of these flags to every chunk:
 
 ```bash
-bash scripts/launch_evaluations_gracefuly.sh --task_file configs/apertus/tasks_posttrain_final.txt \
+bash scripts/launch_evaluations.sh posttrain \
   --model /capstor/.../my-reasoner --thinking
 ```
 
@@ -516,7 +497,7 @@ requests, or read an HF token.
 ### Export a completed run
 
 Point the exporter at either a single `results_*.json` file or a directory that
-contains exactly one result file. For split runs, use the merged directory
+contains exactly one result file. For chunked runs, use the merged directory
 produced by `merge_split_results.py`.
 
 ```bash
@@ -619,7 +600,7 @@ automatically multiplies proportions by 100.
 
 ### Metrics Upload
 
-Results are automatically uploaded to W&B after evaluation completes (or after aggregation for split jobs). Each model gets a W&B run with:
+Results are automatically uploaded to W&B after evaluation completes (or after aggregation for chunked jobs). Each model gets a W&B run with:
 
 - **`main_results`** table: summary metrics specified in the `*_main_table.txt` config
 - **Flat metrics**: all task metrics logged as `task_name/metric_name`
@@ -791,7 +772,8 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `NOTHINK_TEMPERATURE` / `NOTHINK_TOP_P` | (unset) / `0.95` | Optional sampling for NO-think runs (greedy-vs-sampling ablations); inert unless `NOTHINK_TEMPERATURE` is set |
 | `LIMIT` | (unset) | Limit number of samples per task |
 | `NUM_FEWSHOT` | (unset) | Global few-shot override |
-| `NUM_SPLITS` / `SPLIT_INDEX` | `1` / `0` | Task splitting (set automatically by launcher) |
+| `EVAL_ENV_MANIFEST` | required | Immutable base-environment and harness-overlay paths produced by `prepare_eval_env.sbatch` |
+| `EVAL_CHUNKS_FILE` | (unset) | One comma-separated task chunk per line; indexed by `SLURM_ARRAY_TASK_ID` |
 | `LOGS_ROOT` | `/capstor/.../eval-logs` | Root directory for evaluation logs |
 | `WANDB_ENTITY` | `apertus` | W&B entity |
 | `WANDB_PROJECT` | `swissai-evals-test` | W&B project |
@@ -825,7 +807,7 @@ export APPLY_CHAT_TEMPLATE=true
 source runners/hf_base_runner.sh "SFT models"
 ```
 
-`hf_base_runner.sh` handles the submission loop and split-aware job orchestration. It respects `NUM_SPLITS`, `SBATCH_SCRIPT`, and `WANDB_*` environment variables from the launcher.
+`hf_base_runner.sh` handles the model loop and delegates resumable chunk orchestration to `scripts/evaluation_orchestrator.sh`. It respects `EVAL_CHUNK_SIZE`, `EVAL_MAX_PARALLEL`, `EVAL_MAX_RETRIES`, `SBATCH_SCRIPT`, and `WANDB_*`.
 
 ### Model Registry
 
@@ -849,7 +831,20 @@ The pipeline runs inside containers managed by enroot/pyxis on SLURM. The availa
 | `env_vllm.toml` | CSCS base image + vLLM 0.16 built from source | vLLM evals |
 | `env_sglang.toml` | CSCS SGLang CUDA 13 image | SGLang evals |
 
-Dependencies (lm-eval-harness, vLLM, etc.) are installed at runtime inside the container via `pip install`. This ensures the latest versions but adds ~2-3 minutes of startup overhead per job.
+Evaluation dependencies use a shared two-tier cache under `${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}`:
+
+1. A base virtual environment is keyed by backend, Python/container configuration, and `requirements/eval-runtime.txt`.
+2. A lightweight harness overlay is keyed by the base environment, harness repository, and resolved commit SHA.
+
+`prepare_eval_env.sbatch` builds missing tiers once on a CPU node using a file lock. Evaluation chunks only activate the immutable base and prepend the overlay to `PYTHONPATH`. A moving branch is therefore resolved once per model run: pushed changes propagate on the next launch, while all chunks in one run use exactly the same commit.
+
+The cache is disposable. If `$SCRATCH` retention removes either tier, the next
+launch rebuilds it automatically. Cache hits validate the environment rather
+than trusting the completion marker alone. Evaluation jobs also re-check the
+prepared paths and perform a last-resort rebuild if retention removes them
+between the CPU preparation job and GPU-job startup. Set `EVAL_ENV_CACHE_ROOT`
+to a longer-lived shared filesystem if retaining environments beyond the
+cluster's scratch window is preferable.
 
 ---
 
@@ -859,7 +854,7 @@ Dependencies (lm-eval-harness, vLLM, etc.) are installed at runtime inside the c
 > **vLLM vs HF inference**: Generation task results (gsm8k, squadv2) may differ slightly between backends (for instruction-tuned models). Only compare results across models using the same backend. We recommend performing all evaluations with the `vllm` backend (default) to ensure reproducibility.
 - **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). With the chat template on, the harness renders the model's template client-side via the HF tokenizer — so the tokenizer must be resolvable (use `--tokenizer` when the served model name is not a pullable HF repo). `API_CHAT_ENDPOINT=true` switches to `/v1/chat/completions` (server-side template; generative tasks ONLY). Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Note the job still requests the resources declared in `evaluate.sbatch` even though no GPU is used.
 - **Megatron-LM**: To run Megatron-LM models natively, clone the [NVIDIA Megatron-LM repository](https://github.com/NVIDIA/Megatron-LM) into the evals-post-train directory (or change the location via the launch script).
-- **Time limits**: The default 12h SLURM limit works for most evaluations. For large suites on large models, use `--splits` to parallelize.
+- **Time limits**: The default 12h SLURM limit applies to each chunk. Adjust `--chunk-size` to keep individual jobs below it and `--max-parallel` to control concurrent nodes.
 - **WANDB_API_KEY**: Must be available either as an environment variable or in `scripts/wandb_api_key.txt`.
 - **HF_TOKEN**: Must be available either as an environment variable or in  `scripts/hf_token.txt`.
 - **OPENAI_API_KEY**: Required for the optional `gpt` suite, either as an environment variable or in `scripts/openai_api_key.txt`.
@@ -935,20 +930,22 @@ evals/
 │   ├── olmo/                        # OLMo3 benchmark suites (easy, main, heldout, safety, longcontext, complete)
 ├── scripts/
 │   ├── launch_evaluations.sh  # Main launcher (recommended entry point)
-│   ├── launch_evaluations_gracefuly.sh # Resumable launcher (only runs missing tasks, auto-aggregates)
+│   ├── launch_evaluations_gracefuly.sh # Deprecated compatibility wrapper
+│   ├── evaluation_orchestrator.sh # Resumable chunk arrays, retries, aggregation
+│   ├── prepare_eval_env.sbatch # Builds/reuses the two-tier environment
 │   ├── launch_judge.py        # Launches judge models for LLM-as-a-judge tasks
 │   ├── evaluate.sbatch        # SLURM job script for HF/vLLM model evaluation
-│   ├── aggregate_splits.sbatch   # Aggregation job for split evaluations
+│   ├── aggregate_splits.sbatch   # Aggregation job for chunked evaluations
 │   └── alignment/                   # Python package for W&B upload and data handling
 │       ├── wandb_alignment_utils.py # Core upload logic with stratified sample selection
 │       ├── update_wandb_alignment.py       # Per-model W&B upload script
 │       ├── update_wandb_all_models.py      # Batch upload for all models
-│       ├── merge_split_results.py          # Merges results from split evaluation jobs
+│       ├── merge_split_results.py          # Merges results from chunk jobs
 │       └── data_structures.py              # Sample, Metric, Task, ModelEvaluation classes
 ├── make_html_table.py                # Reporting: interactive HTML results table (reads W&B)
 ├── make_table.py                     # Reporting: hyperparameter-sweep table, PNG + CSV (reads W&B)
 ├── runners/              # Multi-model evaluation scripts
-│   ├── hf_base_runner.sh            # Generic runner (handles split-aware job submission)
+│   ├── hf_base_runner.sh            # Generic runner (delegates chunk orchestration)
 │   ├── hf_eval_multiple_other_models.sh
 │   ├── hf_eval_multiple_other_base_models.sh
 │   ├── hf_eval_multiple_apertus_models.sh

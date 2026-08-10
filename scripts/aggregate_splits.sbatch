@@ -10,10 +10,8 @@
 #SBATCH --partition=normal
 #SBATCH --time=00:30:00
 
-# aggregate_splits.sbatch - Merge results from split evaluation jobs and upload to W&B
-# Usage: sbatch --dependency=afterok:JOB1:JOB2:... aggregate_splits.sbatch <model> <name>
-#
-# Required env vars: HARNESS_DIR, NUM_SPLITS, WANDB_ENTITY, WANDB_PROJECT, TABLE_METRICS
+# aggregate_splits.sbatch - Merge completed chunk outputs and upload to W&B
+# Usage: EVAL_DIRS_FILE=<file> sbatch aggregate_splits.sbatch <model> <name>
 
 set -e
 echo "START TIME: $(date)"
@@ -30,7 +28,8 @@ LOGS_ROOT=${LOGS_ROOT:-/iopsstor/scratch/cscs/dmelikidze/eval_logs_start}
 WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 WANDB_PROJECT=${WANDB_PROJECT:-apertus-1.5-post-training-v0.0}
 TABLE_METRICS=${TABLE_METRICS:-""}
-NUM_SPLITS=${NUM_SPLITS:-1}
+: "${EVAL_DIRS_FILE:?EVAL_DIRS_FILE is required}"
+EVAL_INCOMPLETE_TASKS_FILE=${EVAL_INCOMPLETE_TASKS_FILE:-""}
 
 export WANDB_API_KEY=${WANDB_API_KEY:-$(cat ./scripts/wandb_api_key.txt)}
 export HF_HOME=${HF_HOME:-/iopsstor/scratch/cscs/ymetz/huggingface}
@@ -42,27 +41,17 @@ fi
 
 RUN_ROOT=$LOGS_ROOT/$WANDB_ENTITY/$WANDB_PROJECT/$NAME
 HARNESS_DIR=$RUN_ROOT/harness
-SPLIT_MARKER_DIR=$HARNESS_DIR/split_markers
-
-echo "Aggregating $NUM_SPLITS split results for $NAME"
-echo "Looking for markers in: $SPLIT_MARKER_DIR"
-
-# Collect all split eval directories from markers
-SPLIT_DIRS=()
-for (( i=0; i<NUM_SPLITS; i++ )); do
-    MARKER="$SPLIT_MARKER_DIR/split_${i}.txt"
-    if [ ! -f "$MARKER" ]; then
-        echo "ERROR: Missing marker for split $i: $MARKER"
-        exit 1
-    fi
-    SPLIT_DIR=$(cat "$MARKER")
-    if [ ! -d "$SPLIT_DIR" ]; then
-        echo "ERROR: Split dir does not exist: $SPLIT_DIR"
-        exit 1
-    fi
-    SPLIT_DIRS+=("$SPLIT_DIR")
-    echo "  Split $i: $SPLIT_DIR"
+mapfile -t SPLIT_DIRS < <(sed '/^[[:space:]]*$/d' "$EVAL_DIRS_FILE")
+(( ${#SPLIT_DIRS[@]} > 0 )) || { echo "ERROR: no evaluation directories" >&2; exit 1; }
+echo "Aggregating ${#SPLIT_DIRS[@]} completed chunk outputs for $NAME"
+for split_dir in "${SPLIT_DIRS[@]}"; do
+    [[ -d "$split_dir" ]] || { echo "ERROR: result directory does not exist: $split_dir" >&2; exit 1; }
+    echo "  $split_dir"
 done
+if [[ -n "$EVAL_INCOMPLETE_TASKS_FILE" && -s "$EVAL_INCOMPLETE_TASKS_FILE" ]]; then
+    echo "WARNING: uploading partial results; failed tasks:"
+    sed 's/^/  - /' "$EVAL_INCOMPLETE_TASKS_FILE"
+fi
 
 # Create merged output directory
 MERGED_DIR=$HARNESS_DIR/eval_merged_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
@@ -71,24 +60,21 @@ mkdir -p "$MERGED_DIR"
 echo "Merging results into: $MERGED_DIR"
 
 # Merge using Python script
-MERGE_CMD="cd $PWD && python -m scripts.alignment.merge_split_results --split_dirs ${SPLIT_DIRS[*]} --output_dir $MERGED_DIR"
+MERGE_CMD="cd $PWD && python -m scripts.alignment.merge_split_results --split_dirs_file '$EVAL_DIRS_FILE' --output_dir '$MERGED_DIR'"
+if [[ -n "$EVAL_INCOMPLETE_TASKS_FILE" && -s "$EVAL_INCOMPLETE_TASKS_FILE" ]]; then
+    MERGE_CMD="$MERGE_CMD --exclude_tasks_file '$EVAL_INCOMPLETE_TASKS_FILE'"
+fi
 echo "Merge command: $MERGE_CMD"
 
-srun -ul --mpi=pmix --environment=./containers/env.toml bash -c " \
-    pip install --no-cache-dir --upgrade \"git+https://github.com/swiss-ai/lm-evaluation-harness.git\" && \
-    pip install --no-cache-dir --upgrade --no-deps \
-        \"huggingface-hub>=1.3.0,<2.0\" \
-        \"transformers==5.1.0\" && \
-    $MERGE_CMD
-"
+srun -ul --mpi=pmix --environment=./containers/env.toml bash -c "$MERGE_CMD"
 
-# Compute total duration from all splits (sum)
+# Compute total duration from all chunks (placeholder for future log parsing)
 TOTAL_DURATION=0
 for SPLIT_DIR in "${SPLIT_DIRS[@]}"; do
-    # Try to extract duration from the split's log (best effort)
+    # Try to extract duration from the chunk's log (best effort)
     TOTAL_DURATION=$((TOTAL_DURATION + 1))
 done
-# Use a rough estimate - actual duration is wall-clock of the longest split
+# Actual duration should eventually use the wall-clock time of the longest chunk.
 # The real value could be parsed from logs, but the wall-clock time is most relevant
 DURATION=${EVAL_DURATION:-0}
 
@@ -98,9 +84,6 @@ echo "Running: $WANDB_CMD"
 srun -ul --mpi=pmix --environment=./containers/env.toml bash -c " \
     $WANDB_CMD
 "
-
-# Clean up markers
-rm -rf "$SPLIT_MARKER_DIR"
 
 echo "Aggregation complete"
 echo "END TIME: $(date)"
