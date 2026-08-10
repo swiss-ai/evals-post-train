@@ -11,6 +11,8 @@
 #   default          - Apertus multilingual suite
 #   multi-lingual    - Multi-lingual suite (taken from 1.0)
 #   apertus-previous - Apertus previous benchmark suite (from 1.0)
+#   best-of-k        - Multi-repeat/self-consistency suite
+#   gpt              - Experimental OpenAI GPT-judge chat suite (future harness support)
 #   eval-debug       - Small set of loglikelihood and generative benchmarks to test eval script
 #   single           - Run a single task (requires --task <task_name>)
 
@@ -41,16 +43,40 @@
 #   --num-fewshot N      - Override num_fewshot for all tasks (default: use task YAML defaults)
 #                          Note: tasks with num_fewshot=0 in YAML are never overridden.
 #                          OLMo3 uses 5-shot for most MC tasks; pass --num-fewshot 5 to match.
-#   --backend <backend>  - lm-eval backend: hf, vllm, sglang, megatron_lm (default: from sbatch script)
+#   --backend <backend>  - lm-eval backend: hf, vllm, sglang, megatron_lm, openai (default: from sbatch script)
+#   --api-base-url <url> - OpenAI-compatible endpoint for the 'openai' backend (required with it,
+#                          unless API_BASE_URL is exported). Bare host, /v1 root, or full endpoint URL.
+#   --api-model-name <n> - 'model' field sent in API requests (default: the --model value)
 #   --splits K           - Split tasks across K parallel nodes per model
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
+#   --reservation <name> - Submit jobs under a SLURM reservation, including an auto-launched judge
+#                          (exported as SBATCH_RESERVATION; ambient SBATCH_RESERVATION is respected
+#                          for evaluation jobs when the flag is absent)
 #   --judge <none|auto|preset> - Judge model control:
 #                          none (default): disable judge auto-launch
 #                          auto: detect judge-dependent tasks and launch needed judges
 #                          <preset>: launch a specific preset (qwen3.5-27b, llama-3.3-70b)
 #   --judge-args <str>   - Extra arguments forwarded to scripts/launch_judge.py
 #   --keep-judge         - Do not auto-cancel judge model after evaluation finishes
+#
+# Thinking / reasoning metrics (hf and vllm backends only):
+#   --thinking           - Umbrella flag: make the model reason AND record the thinking metrics.
+#                          Implies --enable-thinking, --autodetect-think-tokens (unless
+#                          --think-end-token is given), --track-thinking-metrics true,
+#                          --log-length-metrics, and forces the chat template on.
+#   --enable-thinking    - Chat-template argument: let the model reason. On its own this records
+#   --no-enable-thinking   NOTHING - a reasoning close token must also be known.
+#   --think-end-token <s>  - Force the reasoning close token, e.g. '</think>'. Arms the trace
+#                            strip and the thinking metrics.
+#   --think-start-token <s> - Force the reasoning open token, e.g. '<think>'. Needed for
+#                             thinking_format_has_open; without it thinking_format_correct
+#                             degrades to == thinking_format_has_close.
+#   --autodetect-think-tokens - Read the open/close tokens from the model's chat template.
+#   --track-thinking-metrics <true|false>  - Force the thinking metrics on/off.
+#   --no-track-thinking-metrics              Default: on iff a close token is known.
+#   --log-length-metrics - Aggregate response_length_* / thinking_length_* into results and W&B.
+#                          thinking_format_* is aggregated regardless.
 #
 # Examples:
 #   # Single HF model, auto-detect everything
@@ -85,14 +111,26 @@ CHAT_TEMPLATE_OVERRIDE=""  # "", "true", "false"
 CUSTOM_TOKENIZER=""
 BOS_FLAG=""
 BACKEND_FLAG=""
+API_BASE_URL_FLAG=""
+API_MODEL_NAME_FLAG=""
 FEWSHOT_FLAG=""
-HARNESS_LIMIT=""
+# Keep an ambient HARNESS_LIMIT (the graceful launcher has no --limit flag, so callers export
+# it); blanking it here would ship the cleared value into the job. --limit still overrides.
+HARNESS_LIMIT="${HARNESS_LIMIT:-}"
 MEGATRON_ITER=""
 SINGLE_TASK=""
 HARNESS_BRANCH=""
+RESERVATION_FLAG=""
 JUDGE_MODE="none"       # auto, none, or a preset name
 JUDGE_EXTRA_ARGS=""
 KEEP_JUDGE="false"
+THINKING_UMBRELLA=""
+ENABLE_THINKING_OVERRIDE=""   # "", "true", "false"
+THINK_END_TOKEN=""
+THINK_START_TOKEN=""
+AUTODETECT_THINK_TOKENS=""
+TRACK_THINKING_METRICS=""     # "", "true", "false"
+LOG_LENGTH_METRICS=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -107,12 +145,24 @@ while [[ $# -gt 0 ]]; do
         --tokenizer)    CUSTOM_TOKENIZER="$2";        shift 2 ;;
         --bos)          BOS_FLAG="true";              shift ;;
         --backend)      BACKEND_FLAG="$2";            shift 2 ;;
+        --api-base-url) API_BASE_URL_FLAG="$2";       shift 2 ;;
+        --api-model-name) API_MODEL_NAME_FLAG="$2";   shift 2 ;;
         --megatron-iter) MEGATRON_ITER="$2";            shift 2 ;;
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --harness-branch) HARNESS_BRANCH="$2";        shift 2 ;;
+        --reservation)   RESERVATION_FLAG="$2";        shift 2 ;;
         --judge)         JUDGE_MODE="$2";              shift 2 ;;
         --judge-args)    JUDGE_EXTRA_ARGS="$2";        shift 2 ;;
         --keep-judge)    KEEP_JUDGE="true";            shift ;;
+        --thinking)                  THINKING_UMBRELLA="true";          shift ;;
+        --enable-thinking)           ENABLE_THINKING_OVERRIDE="true";   shift ;;
+        --no-enable-thinking)        ENABLE_THINKING_OVERRIDE="false";  shift ;;
+        --think-end-token)           THINK_END_TOKEN="$2";              shift 2 ;;
+        --think-start-token)         THINK_START_TOKEN="$2";            shift 2 ;;
+        --autodetect-think-tokens)   AUTODETECT_THINK_TOKENS="true";    shift ;;
+        --track-thinking-metrics)    TRACK_THINKING_METRICS="$2";       shift 2 ;;
+        --no-track-thinking-metrics) TRACK_THINKING_METRICS="false";    shift ;;
+        --log-length-metrics)        LOG_LENGTH_METRICS="true";         shift ;;
         *)
             echo "Error: Unknown option '$1'"
             echo "Run with no arguments for usage."
@@ -122,7 +172,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Validate mode ---
-VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "posttrain" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "single" "custom")
+VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "posttrain" "best-of-k" "gpt" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "single" "custom")
 if [[ ! " ${VALID_MODES[*]} " =~ " ${EVAL_MODE} " ]]; then
     echo "Error: Invalid mode '$EVAL_MODE'"
     echo "Valid modes: ${VALID_MODES[*]}"
@@ -157,9 +207,108 @@ if [[ -n "$MODEL_PATH" && -n "$SCRIPT_PATH" ]]; then
     exit 1
 fi
 
+# --- Resolve thinking / reasoning configuration ---
+# Must run before dispatch so the forced chat template reaches all model-selection modes.
+if [[ -n "$TRACK_THINKING_METRICS" && "$TRACK_THINKING_METRICS" != "true" && "$TRACK_THINKING_METRICS" != "false" ]]; then
+    echo "Error: --track-thinking-metrics expects 'true' or 'false' (got '$TRACK_THINKING_METRICS')"
+    exit 1
+fi
+# lm_eval splits --model_args on commas, so a comma in a token would inject an extra key.
+for _tok_var in THINK_END_TOKEN THINK_START_TOKEN; do
+    if [[ "${!_tok_var}" == *,* ]]; then
+        echo "Error: ${_tok_var} must not contain a comma (got '${!_tok_var}')"
+        exit 1
+    fi
+done
+
+if [[ "$THINKING_UMBRELLA" == "true" ]]; then
+    [[ -z "$ENABLE_THINKING_OVERRIDE" ]] && ENABLE_THINKING_OVERRIDE="true"
+    [[ -z "$TRACK_THINKING_METRICS"   ]] && TRACK_THINKING_METRICS="true"
+    [[ -z "$LOG_LENGTH_METRICS"       ]] && LOG_LENGTH_METRICS="true"
+    # A close token must come from somewhere; prefer the user's if they named one.
+    [[ -z "$THINK_END_TOKEN" && -z "$AUTODETECT_THINK_TOKENS" ]] && AUTODETECT_THINK_TOKENS="true"
+fi
+
+# Two distinct questions (conflating them rejected every "off" switch):
+#   THINKING_TOUCHED       - any thinking/length flag was passed; drives the megatron guard.
+#   THINKING_METRICS_ASKED - the user asked to RECORD metrics; needs a close token + chat template.
+# --log-length-metrics alone is neither: response_length_* is recorded for any generative response.
+THINKING_TOUCHED="false"
+if [[ "$THINKING_UMBRELLA" == "true" || -n "$ENABLE_THINKING_OVERRIDE" \
+      || -n "$THINK_END_TOKEN" || -n "$THINK_START_TOKEN" \
+      || "$AUTODETECT_THINK_TOKENS" == "true" \
+      || -n "$TRACK_THINKING_METRICS" || "$LOG_LENGTH_METRICS" == "true" ]]; then
+    THINKING_TOUCHED="true"
+fi
+
+THINKING_METRICS_ASKED="false"
+if [[ "$THINKING_UMBRELLA" == "true" || "$ENABLE_THINKING_OVERRIDE" == "true" \
+      || "$TRACK_THINKING_METRICS" == "true" \
+      || -n "$THINK_END_TOKEN" || -n "$THINK_START_TOKEN" \
+      || "$AUTODETECT_THINK_TOKENS" == "true" ]]; then
+    THINKING_METRICS_ASKED="true"
+fi
+
+# Length/reasoning producers exist only for hf/vllm/sglang. Resolve the backend as
+# evaluate.sbatch will, so an ambient LM_EVAL_BACKEND fails here, not after scheduling.
+EFFECTIVE_BACKEND="${BACKEND_FLAG:-${LM_EVAL_BACKEND:-}}"
+if [[ "$THINKING_TOUCHED" == "true" && ( "$EFFECTIVE_BACKEND" == "megatron_lm" || "$EFFECTIVE_BACKEND" == "openai" ) ]]; then
+    echo "Error: thinking and length metrics are not supported with the $EFFECTIVE_BACKEND backend"
+    exit 1
+fi
+
+# The openai backend needs an endpoint; fail here, not after scheduling.
+if [[ "$EFFECTIVE_BACKEND" == "openai" && -z "${API_BASE_URL_FLAG:-${API_BASE_URL:-}}" ]]; then
+    echo "Error: --backend openai requires --api-base-url <url> (or an exported API_BASE_URL)"
+    exit 1
+fi
+if [[ -n "$API_BASE_URL_FLAG" || -n "$API_MODEL_NAME_FLAG" ]] && [[ "$EFFECTIVE_BACKEND" != "openai" ]]; then
+    echo "Error: --api-base-url/--api-model-name only apply with --backend openai"
+    exit 1
+fi
+[[ -n "$API_BASE_URL_FLAG"   ]] && export API_BASE_URL="$API_BASE_URL_FLAG"
+[[ -n "$API_MODEL_NAME_FLAG" ]] && export API_MODEL_NAME="$API_MODEL_NAME_FLAG"
+
+if [[ "$THINKING_METRICS_ASKED" == "true" ]]; then
+    # The reasoning tokens live in the chat template, so it has to be rendered.
+    if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" ]]; then
+        echo "Error: thinking metrics require the chat template; drop --no-chat-template"
+        exit 1
+    fi
+    CHAT_TEMPLATE_OVERRIDE="true"
+
+    # Without a close token nothing is stripped or recorded -- the run silently produces nothing.
+    if [[ -z "$THINK_END_TOKEN" && "$AUTODETECT_THINK_TOKENS" != "true" ]]; then
+        echo "Error: thinking metrics requested but no reasoning close token is known."
+        echo "       Pass --think-end-token '</think>', --autodetect-think-tokens, or use --thinking."
+        exit 1
+    fi
+
+    if [[ -z "$THINK_START_TOKEN" && "$AUTODETECT_THINK_TOKENS" != "true" ]]; then
+        echo "WARNING: no reasoning open token (--think-start-token). thinking_format_has_open"
+        echo "         will not be recorded and thinking_format_correct degrades to == has_close."
+    fi
+fi
+
+if [[ "$TRACK_THINKING_METRICS" == "false" && "$LOG_LENGTH_METRICS" == "true" ]]; then
+    echo "WARNING: --track-thinking-metrics false drops thinking_length_*;"
+    echo "         --log-length-metrics will only aggregate response_length_*."
+fi
+
+# Export only what was set: unset ENABLE_THINKING keeps the hf template default; unset
+# TRACK_THINKING_METRICS lets the harness derive it.
+[[ -n "$ENABLE_THINKING_OVERRIDE"       ]] && export ENABLE_THINKING="$ENABLE_THINKING_OVERRIDE"
+[[ -n "$THINK_END_TOKEN"                ]] && export THINK_END_TOKEN
+[[ -n "$THINK_START_TOKEN"              ]] && export THINK_START_TOKEN
+[[ "$AUTODETECT_THINK_TOKENS" == "true" ]] && export AUTODETECT_THINK_TOKENS="true"
+[[ -n "$TRACK_THINKING_METRICS"         ]] && export TRACK_THINKING_METRICS
+[[ "$LOG_LENGTH_METRICS" == "true"      ]] && export LOG_LENGTH_METRICS="true"
+
 # --- Environment defaults ---
+# sbatch reads SBATCH_RESERVATION natively (CLI > env > script directives).
+[[ -n "$RESERVATION_FLAG" ]] && export SBATCH_RESERVATION="$RESERVATION_FLAG"
 export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
-export WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
+export WANDB_PROJECT=${WANDB_PROJECT:-apertus-1.5-post-training-v0.0}
 export NUM_SPLITS
 export SBATCH_SCRIPT=${SBATCH_SCRIPT:-scripts/evaluate.sbatch}
 # Global checkpoint iteration override for Megatron checkpoints.
@@ -181,13 +330,23 @@ case "$EVAL_MODE" in
         export TABLE_METRICS=./configs/apertus/tasks_english_main_table.txt
         ;;
     "pretrain")
-        export TASKS=./configs/apertus/tasks_pretrain.txt
+        export TASKS=./configs/apertus/tasks_pretrain_report.txt
         export TABLE_METRICS=./configs/apertus/tasks_pretrain_main_table.txt
         export WANDB_PROJECT="apertus-1.5-pre-training-v0.0"
         ;;
     "posttrain")
         export TASKS=./configs/apertus/tasks_posttrain_final.txt
         export TABLE_METRICS=./configs/apertus/tasks_posttrain_final_main_table.txt
+        ;;
+    "best-of-k")
+        export TASKS=./configs/apertus/tasks_best_of_k.txt
+        export TABLE_METRICS=./configs/apertus/tasks_best_of_k_main_table.txt
+        export WANDB_PROJECT="${WANDB_PROJECT}-best-of-k"
+        ;;
+    "gpt")
+        export TASKS=./configs/apertus/tasks_gpt.txt
+        export TABLE_METRICS=./configs/apertus/tasks_gpt_main_table.txt
+        [[ -z "$CHAT_TEMPLATE_OVERRIDE" ]] && CHAT_TEMPLATE_OVERRIDE="true"
         ;;
     "olmo-easy")
         export TASKS=./configs/olmo/olmo3_easy.txt
@@ -231,6 +390,17 @@ case "$EVAL_MODE" in
     "custom")
         ;;
 esac
+
+# The GPT path is deliberately only a suite/config placeholder for now. It uses
+# the normal Swiss-AI harness and will gain an explicit judge selector once that
+# support lands upstream; do not pass a speculative flag today.
+if [[ "$EVAL_MODE" == "gpt" ]]; then
+    echo "WARNING: gpt mode is experimental; no judge-type flag is passed to lm-eval yet." >&2
+    echo "         It requires the corresponding GPT-judge support to exist in the Swiss-AI harness." >&2
+    if [[ -z "${OPENAI_API_KEY:-}" && ! -f ./scripts/openai_api_key.txt ]]; then
+        echo "WARNING: neither OPENAI_API_KEY nor scripts/openai_api_key.txt is available." >&2
+    fi
+fi
 
 # --- Validate split count vs task count ---
 if (( NUM_SPLITS > 1 )); then
@@ -284,6 +454,14 @@ echo "Apertus Evaluation Launcher"
 echo "  Mode:   $EVAL_MODE"
 [[ "$EVAL_MODE" == "single" ]] && echo "  Task:   $SINGLE_TASK"
 echo "  Splits: $NUM_SPLITS"
+echo "  Harness: auto (Swiss-AI; ymetz only for BFCL/Charter)${HARNESS_BRANCH:+@$HARNESS_BRANCH}"
+if [[ "$THINKING_TOUCHED" == "true" ]]; then
+    echo "  Thinking: enable=${ENABLE_THINKING_OVERRIDE:-<unset>} autodetect=${AUTODETECT_THINK_TOKENS:-false} track=${TRACK_THINKING_METRICS:-<derive>} lengths=${LOG_LENGTH_METRICS:-false}"
+    [[ -n "$THINK_START_TOKEN" || -n "$THINK_END_TOKEN" ]] && echo "  Think tokens: start='${THINK_START_TOKEN:-<none>}' end='${THINK_END_TOKEN:-<none>}'"
+fi
+if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
+    echo "  API:    ${API_BASE_URL} (model=${API_MODEL_NAME:-<from --model>})"
+fi
 
 # --- Few-shot override ---
 [[ -n "$FEWSHOT_FLAG" ]] && export NUM_FEWSHOT="$FEWSHOT_FLAG"
@@ -294,7 +472,7 @@ echo "  Splits: $NUM_SPLITS"
 
 # --- Judge model launch - if none is set, rely on already hosted judge or manual launch ---
 JUDGE_JOB_IDS=""
-JUDGE_TASKS_PATTERN="alpaca_eval|multijail|aya_redteaming|arena_hard_v01|arena_hard_v2"
+JUDGE_TASKS_PATTERN="alpaca_eval|multijail|aya_redteaming|arena_hard_v01|arena_hard_v2|harmbench|hallulens|realtoxicitypromptsllama"
 
 if [[ "$JUDGE_MODE" != "none" ]]; then
 
@@ -302,15 +480,10 @@ if [[ "$JUDGE_MODE" != "none" ]]; then
     JUDGE_LAUNCH_ARGS=""
 
     if [[ "$JUDGE_MODE" == "auto" ]]; then
-        # Auto-detect: scan task list for judge-dependent tasks
-        if [[ -f "$TASKS" ]]; then
-            grep -qE "$JUDGE_TASKS_PATTERN" "$TASKS" && NEEDS_JUDGE=true
-        elif echo "$TASKS" | grep -qE "$JUDGE_TASKS_PATTERN"; then
-            NEEDS_JUDGE=true
-        fi
-        if [[ "$NEEDS_JUDGE" == "true" ]]; then
-            JUDGE_LAUNCH_ARGS="--detect-from-tasks $TASKS"
-        fi
+        # Delegate detection to launch_judge.py so TASK_TO_JUDGE remains the
+        # single source of truth for automatic judge selection.
+        NEEDS_JUDGE=true
+        JUDGE_LAUNCH_ARGS="--detect-from-tasks $TASKS"
     else
         # Explicit preset
         NEEDS_JUDGE=true
@@ -320,6 +493,9 @@ if [[ "$JUDGE_MODE" != "none" ]]; then
     if [[ "$NEEDS_JUDGE" == "true" ]]; then
         echo ""
         echo "--- Judge Model Launch ---"
+        if [[ -n "$RESERVATION_FLAG" ]]; then
+            JUDGE_LAUNCH_ARGS="$JUDGE_LAUNCH_ARGS --reservation $RESERVATION_FLAG"
+        fi
         # Capture machine-readable output (JUDGE_JOB_ID=...) from stdout,
         # while letting human-readable logs flow to stderr (visible to user).
         JUDGE_STDOUT=$(python3 scripts/launch_judge.py $JUDGE_LAUNCH_ARGS $JUDGE_EXTRA_ARGS)
@@ -344,7 +520,7 @@ if [[ "$JUDGE_MODE" != "none" ]]; then
 fi
 
 # warn if tasks are detected but judge is explicitly disabled (mode=none)
-if [[ "$JUDGE_MODE" == "none" ]]; then
+if [[ "$JUDGE_MODE" == "none" && "$EVAL_MODE" != "gpt" ]]; then
     if [[ -f "$TASKS" ]]; then
         if grep -qE "$JUDGE_TASKS_PATTERN" "$TASKS"; then
             echo "WARNING: Detected judge-dependent tasks but judge model launching is disabled (--judge none)"

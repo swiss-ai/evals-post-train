@@ -1,4 +1,4 @@
-minerva_math/exact_match
+minerva_math/math_verify
 hendrycks_math/math_verify
 humaneval_instruct/pass_at_1
 mbpp/pass_at_1

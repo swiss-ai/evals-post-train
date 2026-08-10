@@ -1,0 +1,199 @@
+{
+  "mapping_version": 1,
+  "eee_schema_version": "0.2.2",
+  "datastore": {
+    "repo_id": "evaleval/EEE_datastore",
+    "revision": "main",
+    "verified_at": "2026-07-27"
+  },
+  "tasks": {
+    "alpaca_eval": {
+      "eee": {
+        "benchmark": "alpaca_eval_v2",
+        "evaluation_name": "alpaca_eval_v2",
+        "dataset_id": "tatsu-lab/alpaca_eval"
+      }
+    },
+    "bbh": {
+      "eee": {
+        "benchmark": "big_bench_hard",
+        "evaluation_name": "big_bench_hard",
+        "dataset_id": "lukaemon/bbh"
+      }
+    },
+    "commonsense_qa": {
+      "eee": {
+        "benchmark": "commonsense_qa",
+        "evaluation_name": "commonsense_qa",
+        "dataset_id": "tau/commonsense_qa"
+      }
+    },
+    "gsm8k": {
+      "eee": {
+        "benchmark": "gsm8k",
+        "evaluation_name": "gsm8k",
+        "dataset_id": "openai/gsm8k",
+        "metric_candidates": [
+          "exact_match,strict-match",
+          "exact_match,none",
+          "exact_match"
+        ]
+      },
+      "huggingface": {
+        "dataset_id": "openai/gsm8k",
+        "task_id": "gsm8k",
+        "metric_candidates": [
+          "exact_match,strict-match",
+          "exact_match,none",
+          "exact_match"
+        ]
+      }
+    },
+    "gsm8k_cot": {
+      "eee": {
+        "benchmark": "gsm8k",
+        "evaluation_name": "gsm8k",
+        "dataset_id": "openai/gsm8k",
+        "metric_candidates": [
+          "exact_match,strict-match",
+          "exact_match,none",
+          "exact_match"
+        ]
+      },
+      "huggingface": {
+        "dataset_id": "openai/gsm8k",
+        "task_id": "gsm8k",
+        "metric_candidates": [
+          "exact_match,strict-match",
+          "exact_match,none",
+          "exact_match"
+        ]
+      }
+    },
+    "gsm8k_cot_zeroshot": {
+      "eee": {
+        "benchmark": "gsm8k",
+        "evaluation_name": "gsm8k",
+        "dataset_id": "openai/gsm8k",
+        "metric_candidates": [
+          "exact_match,strict-match",
+          "exact_match,none",
+          "exact_match"
+        ],
+        "self_consistency_metric_candidates": [
+          "exact_match,mean@{repeats}"
+        ]
+      },
+      "huggingface": {
+        "dataset_id": "openai/gsm8k",
+        "task_id": "gsm8k",
+        "metric_candidates": [
+          "exact_match,strict-match",
+          "exact_match,none",
+          "exact_match"
+        ],
+        "self_consistency_metric_candidates": [
+          "exact_match,mean@{repeats}"
+        ]
+      }
+    },
+    "hellaswag": {
+      "eee": {
+        "benchmark": "hellaswag",
+        "evaluation_name": "hellaswag",
+        "dataset_id": "Rowan/hellaswag"
+      }
+    },
+    "humaneval": {
+      "eee": {
+        "benchmark": "openai_humaneval",
+        "evaluation_name": "openai_humaneval",
+        "dataset_id": "openai/openai_humaneval"
+      }
+    },
+    "humaneval_instruct": {
+      "eee": {
+        "benchmark": "openai_humaneval",
+        "evaluation_name": "openai_humaneval",
+        "dataset_id": "openai/openai_humaneval",
+        "self_consistency_metric_candidates": [
+          "pass@1,all"
+        ]
+      }
+    },
+    "ifeval": {
+      "eee": {
+        "benchmark": "IFEval",
+        "evaluation_name": "IFEval",
+        "dataset_id": "google/IFEval"
+      }
+    },
+    "mbpp": {
+      "eee": {
+        "benchmark": "mbpp",
+        "evaluation_name": "mbpp",
+        "dataset_id": "google-research-datasets/mbpp"
+      }
+    },
+    "mbpp_instruct": {
+      "eee": {
+        "benchmark": "mbpp",
+        "evaluation_name": "mbpp",
+        "dataset_id": "google-research-datasets/mbpp",
+        "self_consistency_metric_candidates": [
+          "pass@1,all"
+        ]
+      }
+    },
+    "mmlu_pro": {
+      "eee": {
+        "benchmark": "MMLU-Pro",
+        "evaluation_name": "MMLU-Pro",
+        "dataset_id": "TIGER-Lab/MMLU-Pro",
+        "metric_candidates": [
+          "exact_match,none",
+          "exact_match,ordered-extract",
+          "exact_match",
+          "acc,none",
+          "acc"
+        ],
+        "metric_overrides": {
+          "exact_match": {
+            "metric_id": "mmlu_pro/overall",
+            "metric_name": "MMLU-Pro overall accuracy",
+            "metric_kind": "accuracy",
+            "metric_unit": "proportion",
+            "min_score": 0.0,
+            "max_score": 1.0
+          },
+          "acc": {
+            "metric_id": "mmlu_pro/overall",
+            "metric_name": "MMLU-Pro overall accuracy",
+            "metric_kind": "accuracy",
+            "metric_unit": "proportion",
+            "min_score": 0.0,
+            "max_score": 1.0
+          }
+        }
+      },
+      "huggingface": {
+        "dataset_id": "TIGER-Lab/MMLU-Pro",
+        "task_id": "mmlu_pro",
+        "metric_candidates": [
+          "exact_match,none",
+          "exact_match,ordered-extract",
+          "exact_match",
+          "acc,none",
+          "acc"
+        ]
+      }
+    },
+    "piqa": {
+      "eee": {
+        "benchmark": "piqa",
+        "evaluation_name": "piqa",
+        "dataset_id": "ybisk/piqa"
+      }
+    }
+  }
+}

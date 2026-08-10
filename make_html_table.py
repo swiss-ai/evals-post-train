@@ -2,6 +2,7 @@
 
 import os
 import json
+import math
 import argparse
 import wandb
 import wandb.sdk.lib.server
@@ -53,6 +54,64 @@ def parse_metrics_file(path):
     if current_group is not None:
         groups.append((current_group, current_metrics))
     return groups
+
+
+# --- Thinking / reasoning metrics ---
+# W&B summary keys are exactly "<task>/<metric>". Rates live in [0,1] and render as percentages;
+# counts are raw word/char/token lengths and must never be rescaled.
+THINKING_COUNT_SUFFIXES = frozenset({
+    "response_length_words", "response_length_chars", "response_length_tokens",
+    "thinking_length_words", "thinking_length_chars", "thinking_length_tokens",
+})
+
+
+def metric_kind(metric_key):
+    """"count" for a raw length metric, "rate" for everything else."""
+    return "count" if metric_key.split("/", 1)[-1] in THINKING_COUNT_SUFFIXES else "rate"
+
+
+def thinking_specs(length_unit="tokens", format_detail=False):
+    """(group label, metric suffix) pairs in render order. The unit lives in the label because
+    updateBest() rewrites the text of every cell it touches."""
+    specs = []
+    if format_detail:
+        specs.append(("Thinking Format: Has Open (%)", "thinking_format_has_open"))
+        specs.append(("Thinking Format: Has Close (%)", "thinking_format_has_close"))
+    specs.append(("Thinking Format Correct (%)", "thinking_format_correct"))
+    specs.append((f"Thinking Length ({length_unit})", f"thinking_length_{length_unit}"))
+    specs.append((f"Response Length ({length_unit})", f"response_length_{length_unit}"))
+    return specs
+
+
+def thinking_tasks_from_file(path):
+    """Task names from a suite file (`tasks_*.txt` list or `*_main_table.txt`).
+
+    Not parse_metrics_file(): that returns nothing for a file with no `#` header. Inline
+    comments are stripped, matching the graceful launcher.
+    """
+    seen, tasks = set(), []
+    with open(path) as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            task = line.split("/")[0].strip()
+            if task and task not in seen:
+                seen.add(task)
+                tasks.append(task)
+    return tasks
+
+
+def build_thinking_groups(tasks, specs, label_with_group=False):
+    """One group per metric family, one row per task (the transpose of a main table).
+
+    `label_with_group` folds the family into the row label for flat rendering, where the
+    unit-carrying group headers aren't drawn.
+    """
+    return [
+        (label, [(f"{task}/{suffix}", f"{task} - {label}" if label_with_group else task) for task in tasks])
+        for label, suffix in specs
+    ]
 
 
 def compute_mgsm_avg(summary):
@@ -109,13 +168,21 @@ def compute_mmlu_pro_detail(summary):
     return {"accuracy": accuracy, "subjects": subjects}
 
 
-def get_metric(summary, metric):
-    if "mgsm" in metric.lower() and "mgsm_en" not in metric.lower():
-        return compute_mgsm_avg(summary)
+def is_mgsm_aggregate(task, metric_name):
+    """True when a request means the MGSM average across per-language subtasks.
+    """
+    if metric_name != "exact_match":
+        return False
+    task = task.lower()
+    return "mgsm" in task and "mgsm_en" not in task
 
-    if metric in summary:
-        return summary[metric]
 
+def get_metric(summary, metric, fuzzy=True):
+    """Resolve a `task/metric[,filter]` key against a W&B run summary.
+
+    Hand-written main-table keys often omit the filter suffix, so fuzzy=True falls back to a
+    substring scan. Pass fuzzy=False for synthesized keys, which must match exactly.
+    """
     parts = metric.split("/", 1)
     task = parts[0]
     metric_name = parts[1] if len(parts) > 1 else None
@@ -123,6 +190,15 @@ def get_metric(summary, metric):
     metric_filter = None
     if metric_name and "," in metric_name:
         metric_name, metric_filter = metric_name.split(",", 1)
+
+    if is_mgsm_aggregate(task, metric_name):
+        return compute_mgsm_avg(summary)
+
+    if metric in summary:
+        return summary[metric]
+
+    if not fuzzy:
+        return None
 
     candidates = []
     for k, v in summary.items():
@@ -158,8 +234,14 @@ def normalize_score(val):
     return val
 
 
-def _prepare_group_data(groups, models, scores, metric_filter):
-    """Build group_data and overall_avgs for a subset of metrics selected by metric_filter."""
+def _prepare_group_data(groups, models, scores, metric_filter, thinking=False):
+    """Build group_data and overall_avgs for the metrics selected by metric_filter.
+
+    Each group_data entry is (group_name, benchmarks, group_avgs, kind). Averages are an
+    unweighted macro-mean over resolved tasks; counts never enter overall_avgs (averaging a
+    length with a rate is meaningless). `kind` is only derived in thinking mode, where each
+    group is a synthesized family sharing one unit -- a main table can mix units per group.
+    """
     group_data = []
     all_model_scores = {m: [] for m in models}
 
@@ -167,22 +249,27 @@ def _prepare_group_data(groups, models, scores, metric_filter):
         filtered = [(k, d) for k, d in metric_list if metric_filter(k)]
         if not filtered and metric_list:
             continue
+        kind = metric_kind(filtered[0][0]) if (thinking and filtered) else "rate"
         group_scores = {m: [] for m in models}
         benchmarks = []
         for metric_key, display_name in filtered:
-            row = {}
-            for model in models:
-                val = scores.get(model, {}).get(metric_key)
-                row[model] = val
+            row = {model: scores.get(model, {}).get(metric_key) for model in models}
+            # Drop tasks that emit no thinking metrics (loglikelihood / MC) rather than show dashes.
+            if thinking and all(v is None for v in row.values()):
+                continue
+            for model, val in row.items():
                 if val is not None:
                     group_scores[model].append(val)
-                    all_model_scores[model].append(val)
+                    if kind == "rate":
+                        all_model_scores[model].append(val)
             benchmarks.append((display_name, row))
+        if thinking and not benchmarks:
+            continue
         group_avgs = {}
         for m in models:
             vals = group_scores[m]
             group_avgs[m] = sum(vals) / len(vals) if vals else None
-        group_data.append((group_name, benchmarks, group_avgs))
+        group_data.append((group_name, benchmarks, group_avgs, kind))
 
     overall_avgs = {}
     for m in models:
@@ -191,8 +278,29 @@ def _prepare_group_data(groups, models, scores, metric_filter):
     return group_data, overall_avgs
 
 
+def _na_cell(col, indent):
+    return f'{indent}<div class="cell na" data-col="{col}">-</div>\n'
+
+
+def _value_cell(val, col, kind, indent):
+    """One data cell. A count carries no data-val, keeping it out of updateBest()'s sweep:
+    raw lengths are never rescaled and never win a "best" badge."""
+    if val is None:
+        return _na_cell(col, indent)
+    if kind == "count":
+        # Round half up: "{412.5:.0f}" is banker's rounding and yields 412.
+        return f'{indent}<div class="cell" data-col="{col}">{math.floor(val + 0.5):.0f}</div>\n'
+    return f'{indent}<div class="cell" data-col="{col}" data-val="{val * 100:.1f}">{val * 100:.1f}</div>\n'
+
+
+def _row_classes(base, kind):
+    return base if kind == "count" else f"{base} score-row"
+
+
 def _render_table(html, table_id, models, group_data, overall_avgs, n_models, info_rows=None, flat=False):
     """Render one table-box with the given group_data."""
+    # An overall average needs every group to share a unit; a count group alongside rates has none.
+    show_overall = all(kind == "rate" for _, _, _, kind in group_data)
     html.append(f'<div class="table-box" id="{table_id}">\n')
     html.append(f'  <div class="grid-row header-row">\n    <div class="cell">{"Benchmark" if flat else "Category / Benchmark"}</div>\n')
     for i, model in enumerate(models):
@@ -200,56 +308,41 @@ def _render_table(html, table_id, models, group_data, overall_avgs, n_models, in
     html.append("  </div>\n")
 
     if flat:
-        for _, benchmarks, _ in group_data:
+        for _, benchmarks, _, kind in group_data:
             for display_name, row_vals in benchmarks:
-                html.append(f'  <div class="bench-row score-row">\n    <div class="cell">{display_name}</div>\n')
+                html.append(f'  <div class="{_row_classes("bench-row", kind)}">\n    <div class="cell">{display_name}</div>\n')
                 for i, model in enumerate(models):
-                    val = row_vals[model]
-                    if val is None:
-                        html.append(f'    <div class="cell na" data-col="{i+1}">-</div>\n')
-                    else:
-                        html.append(f'    <div class="cell" data-col="{i+1}" data-val="{val * 100:.1f}">{val * 100:.1f}</div>\n')
+                    html.append(_value_cell(row_vals[model], i + 1, kind, "    "))
                 html.append("  </div>\n")
     else:
-        for group_name, benchmarks, group_avgs in group_data:
+        for group_name, benchmarks, group_avgs, kind in group_data:
             if not benchmarks:
                 html.append('  <div class="section"><div class="grid-row empty-group">\n')
                 html.append(f'    <div class="cell">{group_name}</div>\n')
                 for i, model in enumerate(models):
-                    html.append(f'    <div class="cell na" data-col="{i+1}">-</div>\n')
+                    html.append(_na_cell(i + 1, "    "))
                 html.append("  </div></div>\n")
                 continue
 
-            html.append('  <div class="section"><details>\n  <summary class="grid-row score-row">\n')
+            html.append(f'  <div class="section"><details>\n  <summary class="{_row_classes("grid-row", kind)}">\n')
             html.append(f'    <div class="cell"><span class="arrow">&#9654;</span>{group_name}</div>\n')
             for i, model in enumerate(models):
-                avg = group_avgs[model]
-                if avg is None:
-                    html.append(f'    <div class="cell na" data-col="{i+1}">-</div>\n')
-                else:
-                    html.append(f'    <div class="cell" data-col="{i+1}" data-val="{avg * 100:.1f}">{avg * 100:.1f}</div>\n')
+                html.append(_value_cell(group_avgs[model], i + 1, kind, "    "))
             html.append('  </summary>\n  <div class="bench-rows">\n')
 
             for display_name, row_vals in benchmarks:
-                html.append(f'    <div class="bench-row score-row">\n      <div class="cell">{display_name}</div>\n')
+                html.append(f'    <div class="{_row_classes("bench-row", kind)}">\n      <div class="cell">{display_name}</div>\n')
                 for i, model in enumerate(models):
-                    val = row_vals[model]
-                    if val is None:
-                        html.append(f'      <div class="cell na" data-col="{i+1}">-</div>\n')
-                    else:
-                        html.append(f'      <div class="cell" data-col="{i+1}" data-val="{val * 100:.1f}">{val * 100:.1f}</div>\n')
+                    html.append(_value_cell(row_vals[model], i + 1, kind, "      "))
                 html.append("    </div>\n")
 
             html.append("  </div>\n  </details></div>\n")
 
-    html.append('  <div class="grid-row overall score-row">\n    <div class="cell">Overall Average</div>\n')
-    for i, model in enumerate(models):
-        avg = overall_avgs[model]
-        if avg is None:
-            html.append(f'    <div class="cell na" data-col="{i+1}">-</div>\n')
-        else:
-            html.append(f'    <div class="cell" data-col="{i+1}" data-val="{avg * 100:.1f}">{avg * 100:.1f}</div>\n')
-    html.append("  </div>\n")
+    if show_overall:
+        html.append('  <div class="grid-row overall score-row">\n    <div class="cell">Overall Average</div>\n')
+        for i, model in enumerate(models):
+            html.append(_value_cell(overall_avgs[model], i + 1, "rate", "    "))
+        html.append("  </div>\n")
 
     if info_rows:
         for label, row_vals in info_rows:
@@ -257,7 +350,7 @@ def _render_table(html, table_id, models, group_data, overall_avgs, n_models, in
             for i, model in enumerate(models):
                 val = row_vals.get(model)
                 if val is None:
-                    html.append(f'    <div class="cell na" data-col="{i+1}">-</div>\n')
+                    html.append(_na_cell(i + 1, "    "))
                 else:
                     html.append(f'    <div class="cell" data-col="{i+1}">{val:.1f}</div>\n')
             html.append("  </div>\n")
@@ -265,25 +358,37 @@ def _render_table(html, table_id, models, group_data, overall_avgs, n_models, in
     html.append("</div>\n")
 
 
-def build_html(groups, models, scores, output_path, info_rows=None, olmo_default_hidden=False, apertus_default_hidden=False, apertus_baselines=None, no_split=False, flat=False, title="Evaluation Results"):
+def build_html(groups, models, scores, output_path, info_rows=None, olmo_default_hidden=False, apertus_default_hidden=False, apertus_baselines=None, no_split=False, flat=False, title="Evaluation Results", thinking=False):
     """Generate a self-contained HTML file with collapsible skill groups and train/test toggle."""
+
+    def _count(group_data):
+        # In thinking mode a task appears once per metric family, so summing row-counts would
+        # over-report; count distinct resolved tasks from the metric keys instead.
+        if thinking:
+            return len({
+                key.split("/")[0]
+                for _, metric_list in groups
+                for key, _ in metric_list
+                if any(scores.get(m, {}).get(key) is not None for m in models)
+            })
+        return sum(len(b) for _, b, _, _ in group_data)
 
     if no_split:
         all_group_data, all_overall = _prepare_group_data(
-            groups, models, scores, lambda k: True)
-        total_benchmarks = sum(len(b) for _, b, _ in all_group_data)
+            groups, models, scores, lambda k: True, thinking=thinking)
+        total_benchmarks = _count(all_group_data)
     else:
         train_group_data, train_overall = _prepare_group_data(
-            groups, models, scores, lambda k: k not in TEST_BENCHMARKS)
+            groups, models, scores, lambda k: k not in TEST_BENCHMARKS, thinking=thinking)
         test_group_data, test_overall = _prepare_group_data(
-            groups, models, scores, lambda k: k in TEST_BENCHMARKS)
+            groups, models, scores, lambda k: k in TEST_BENCHMARKS, thinking=thinking)
 
     if no_split:
         train_benchmarks = total_benchmarks
         test_benchmarks = 0
     else:
-        train_benchmarks = sum(len(b) for _, b, _ in train_group_data)
-        test_benchmarks = sum(len(b) for _, b, _ in test_group_data)
+        train_benchmarks = _count(train_group_data)
+        test_benchmarks = _count(test_group_data)
 
     n_models = len(models)
 
@@ -723,11 +828,12 @@ details[open] .arrow {{ transform: rotate(90deg); }}
     print(f"Saved HTML table to {output_path}")
 
 
-def build_json(groups, models, scores, output_path, info_rows=None, summaries=None):
+def build_json(groups, models, scores, output_path, info_rows=None, summaries=None, thinking=False):
     """Write combined metrics to JSON: grouped by task, with per-group and overall averages.
 
-    Score values are the normalized fractions (0-1) used internally by the table; the
-    group/overall averages exclude missing (null) entries, matching the HTML rendering.
+    Score values are the normalized fractions (0-1) used internally by the table -- except
+    "count"-kind groups (lengths), stored raw. Averages exclude null entries. In thinking mode
+    the overall average is omitted (it would mix rates with token counts).
     When summaries are provided, an 'mmlu_pro_detail' section with overall accuracy and
     per-subject scores is added for each model that has MMLU-Pro results.
     """
@@ -735,23 +841,35 @@ def build_json(groups, models, scores, output_path, info_rows=None, summaries=No
     all_vals = {m: [] for m in models}
 
     for group_name, metric_list in groups:
+        # See _prepare_group_data: kind is only meaningful for the families we synthesized.
+        kind = metric_kind(metric_list[0][0]) if (thinking and metric_list) else "rate"
         metrics_out = []
         group_vals = {m: [] for m in models}
         for metric_key, display_name in metric_list:
-            row = {}
-            for m in models:
-                v = scores.get(m, {}).get(metric_key)
-                row[m] = v
+            row = {m: scores.get(m, {}).get(metric_key) for m in models}
+            if thinking and all(v is None for v in row.values()):
+                continue
+            for m, v in row.items():
                 if v is not None:
                     group_vals[m].append(v)
-                    all_vals[m].append(v)
+                    if kind == "rate":
+                        all_vals[m].append(v)
             metrics_out.append({"key": metric_key, "display": display_name, "scores": row})
+        if thinking and not metrics_out:
+            continue
         group_avg = {m: (sum(group_vals[m]) / len(group_vals[m]) if group_vals[m] else None) for m in models}
-        out_groups.append({"name": group_name, "average": group_avg, "metrics": metrics_out})
+        group_out = {"name": group_name, "average": group_avg, "metrics": metrics_out}
+        if thinking:
+            # Only thinking groups carry a named unit; adding "kind" elsewhere would change the
+            # existing --json-output schema.
+            group_out["kind"] = kind
+        out_groups.append(group_out)
 
-    overall = {m: (sum(all_vals[m]) / len(all_vals[m]) if all_vals[m] else None) for m in models}
-
-    result = {"models": models, "groups": out_groups, "overall_average": overall}
+    result = {"models": models, "groups": out_groups}
+    if not thinking:
+        result["overall_average"] = {
+            m: (sum(all_vals[m]) / len(all_vals[m]) if all_vals[m] else None) for m in models
+        }
     if info_rows:
         result["info_rows"] = {label: {m: row_vals.get(m) for m in models} for label, row_vals in info_rows}
 
@@ -791,7 +909,7 @@ PINNED_SUFFIX = [
 ALWAYS_PINNED = {run for run, _ in PINNED_PREFIX + PINNED_SUFFIX}
 
 
-def fetch_model(api, project_path, run_name, display_name, groups, scores, debug=False, summaries=None):
+def fetch_model(api, project_path, run_name, display_name, groups, scores, debug=False, summaries=None, thinking=False):
     try:
         matched = list(api.runs(project_path, filters={"display_name": run_name}, order="-created_at", per_page=1))
     except Exception as e:
@@ -812,7 +930,12 @@ def fetch_model(api, project_path, run_name, display_name, groups, scores, debug
     model_scores = {}
     for _, metric_list in groups:
         for metric_key, _ in metric_list:
-            val = normalize_score(get_metric(summary, metric_key))
+            if thinking:
+                raw = get_metric(summary, metric_key, fuzzy=False)
+                raw = None if raw is None else float(raw)
+                val = raw if metric_kind(metric_key) == "count" else normalize_score(raw)
+            else:
+                val = normalize_score(get_metric(summary, metric_key))
             model_scores[metric_key] = val
 
     scores[display_name] = model_scores
@@ -824,7 +947,17 @@ def fetch_model(api, project_path, run_name, display_name, groups, scores, debug
 def main():
     parser = argparse.ArgumentParser(description="Generate an HTML eval table from W&B results")
     parser.add_argument("--metrics-file", required=True,
-                        help="Metrics file with # group headers (e.g. tasks_posttrain_final_main_table.txt)")
+                        help="Metrics file with # group headers (e.g. tasks_posttrain_final_main_table.txt). "
+                             "With --thinking this is read as a task source instead: any tasks_*.txt list or "
+                             "*_main_table.txt works, only the task names are used.")
+    parser.add_argument("--thinking", action="store_true",
+                        help="Render a thinking-only table: one group per thinking metric family, one row per "
+                             "task. Baselines and the train/test split are disabled; lengths render raw.")
+    parser.add_argument("--length-unit", choices=["tokens", "words", "chars"], default="tokens",
+                        help="Unit for the thinking/response length groups (default: tokens). "
+                             "Prefer chars when comparing across backends.")
+    parser.add_argument("--thinking-format-detail", action="store_true",
+                        help="With --thinking, also show thinking_format_has_open / has_close groups.")
     parser.add_argument("--models", nargs="*", default=[],
                         help="Additional W&B run names to include between pinned columns")
     parser.add_argument("--models-file", default=None,
@@ -872,7 +1005,17 @@ def main():
         old, new = pair.split("=", 1)
         rename_map[old] = new
 
-    groups = parse_metrics_file(args.metrics_file)
+    if args.thinking:
+        tasks = thinking_tasks_from_file(args.metrics_file)
+        # Under --flat the unit-carrying group headers aren't drawn, so fold the family into
+        # the row label or a rate and a token count look alike.
+        groups = build_thinking_groups(
+            tasks, thinking_specs(args.length_unit, args.thinking_format_detail),
+            label_with_group=args.flat,
+        )
+        print(f"Thinking mode: {len(tasks)} task(s) x {len(groups)} metric group(s) from {args.metrics_file}")
+    else:
+        groups = parse_metrics_file(args.metrics_file)
 
     api = wandb.Api()
     project_path = f"{args.entity}/{args.project}"
@@ -891,7 +1034,9 @@ def main():
     if args.no_sft_baseline:
         prefix_baselines = [b for b in PINNED_PREFIX if b[1] != "Apertus 1.5 8B SFT"]
 
-    if not args.no_baselines:
+    # Pinned baselines ran without thinking, so their columns would be all-None (and dropped
+    # below anyway); skipping the fetch just saves W&B round-trips.
+    if not args.no_baselines and not args.thinking:
         for run_name, display in prefix_baselines:
             if fetch_model(api, BASELINE_PROJECT, run_name, display, groups, scores, args.debug, summaries):
                 display_names.append(display)
@@ -906,16 +1051,25 @@ def main():
                 apertus_baselines.add(display)
 
     for model_name in all_models:
-        if model_name in fetched_runs or model_name in ALWAYS_PINNED:
+        if model_name in fetched_runs or (model_name in ALWAYS_PINNED and not args.thinking):
             continue
         display = rename_map.get(model_name, model_name)
-        if fetch_model(api, project_path, model_name, display, groups, scores, args.debug, summaries):
+        if fetch_model(api, project_path, model_name, display, groups, scores, args.debug, summaries, thinking=args.thinking):
             display_names.append(display)
             requested_display_names.append(display)
 
-    for run_name, display in PINNED_SUFFIX:
-        if fetch_model(api, BASELINE_PROJECT, run_name, display, groups, scores, args.debug, summaries):
-            display_names.append(display)
+    if not args.thinking:
+        for run_name, display in PINNED_SUFFIX:
+            if fetch_model(api, BASELINE_PROJECT, run_name, display, groups, scores, args.debug, summaries):
+                display_names.append(display)
+
+    if args.thinking:
+        # Drop a model with no thinking metrics (thinking never enabled) instead of a dash column.
+        keep = [d for d in display_names if any(v is not None for v in scores.get(d, {}).values())]
+        for dropped in [d for d in display_names if d not in keep]:
+            print(f"Warning: '{dropped}' has no thinking metrics; dropping its column")
+        display_names = keep
+        requested_display_names = [d for d in requested_display_names if d in keep]
 
     if not display_names:
         print("No models found. Nothing to render.")
@@ -956,11 +1110,13 @@ def main():
         info_rows = None
 
     if args.json_output:
-        build_json(groups, requested_display_names, scores, args.json_output, info_rows=info_rows, summaries=summaries)
+        build_json(groups, requested_display_names, scores, args.json_output, info_rows=info_rows,
+                   summaries=summaries, thinking=args.thinking)
 
     build_html(groups, display_names, scores, args.output, info_rows=info_rows,
                olmo_default_hidden=args.no_baselines, apertus_baselines=apertus_baselines,
-               no_split=args.no_split, flat=args.flat, title=args.title)
+               no_split=args.no_split or args.thinking, flat=args.flat, title=args.title,
+               thinking=args.thinking)
 
 
 if __name__ == "__main__":

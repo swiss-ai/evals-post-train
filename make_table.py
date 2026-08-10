@@ -44,15 +44,15 @@ def compute_mgsm_avg(summary):
     return sum(vals) / len(vals)
 
 
+def is_mgsm_aggregate(task, metric_name):
+    """True when a request means the MGSM average across per-language subtasks."""
+    if metric_name != "exact_match":
+        return False
+    task = task.lower()
+    return "mgsm" in task and "mgsm_en" not in task
+
+
 def get_metric(summary, metric):
-    # Dynamically average MGSM
-    if "mgsm" in metric.lower():
-        return compute_mgsm_avg(summary)
-
-    # Exact match first
-    if metric in summary:
-        return summary[metric]
-
     # Split metric into task and metric_name parts for fuzzy matching
     # e.g. "agieval/acc" -> task="agieval", metric_name="acc"
     # e.g. "mmlu_flan_cot_zeroshot/exact_match,ordered-extract" -> task="mmlu_flan_cot_zeroshot", metric_name="exact_match", filter="ordered-extract"
@@ -64,6 +64,14 @@ def get_metric(summary, metric):
     metric_filter = None
     if metric_name and "," in metric_name:
         metric_name, metric_filter = metric_name.split(",", 1)
+
+    # Dynamically average MGSM
+    if is_mgsm_aggregate(task, metric_name):
+        return compute_mgsm_avg(summary)
+
+    # Exact match first
+    if metric in summary:
+        return summary[metric]
 
     # Search for matching keys in summary
     candidates = []
