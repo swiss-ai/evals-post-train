@@ -10,14 +10,15 @@ Evaluation infrastructure for benchmarking Large Language Models on SLURM cluste
 4. [Task Configuration](#task-configuration)
 5. [Parallel Task Splitting](#parallel-task-splitting)
 6. [Thinking / Reasoning Metrics](#thinking--reasoning-metrics)
-7. [W&B Integration](#wb-integration)
-8. [Reporting: Building Result Tables](#reporting-building-result-tables)
-9. [SBATCH Scripts](#sbatch-scripts)
-10. [Multi-Model Scripts](#multi-model-scripts)
-11. [Container Setup](#container-setup)
-12. [Notes](#notes)
-13. [Extending the Pipeline](#extending-the-pipeline)
-14. [Repository Structure](#repository-structure)
+7. [Every Eval Ever and Hugging Face exports](#every-eval-ever-and-hugging-face-exports)
+8. [W&B Integration](#wb-integration)
+9. [Reporting: Building Result Tables](#reporting-building-result-tables)
+10. [SBATCH Scripts](#sbatch-scripts)
+11. [Multi-Model Scripts](#multi-model-scripts)
+12. [Container Setup](#container-setup)
+13. [Notes](#notes)
+14. [Extending the Pipeline](#extending-the-pipeline)
+15. [Repository Structure](#repository-structure)
 
 ---
 
@@ -73,7 +74,9 @@ The launcher selects a benchmark suite from its first positional argument (`<mod
 | Mode | Task list | Tasks | Description |
 |------|-----------|-------|-------------|
 | `default` | `tasks_default.txt` | 48 | Full Apertus 1.5 post-training suite: knowledge, math, code, reasoning, multilingual, instruction following, bias, cultural knowledge, safety |
-| `posttrain` | `tasks_posttrain_final.txt` | 48 | Post-training suite incl. chat/arena (alpaca_eval, arena_hard_v01/v2), AIME, MATH-500, o(r)bench, system-prompt adherence (RealGuardrails: S-IFEval, TensorTrust, S-RuLES) |
+| `posttrain` | `tasks_posttrain_final.txt` | 50 | Post-training suite incl. chat/arena (alpaca_eval, arena_hard_v01/v2), AIME, MATH-500, BFCL v3, Swiss AI Charter Alignment, o(r)bench, and system-prompt adherence (RealGuardrails: S-IFEval, TensorTrust, S-RuLES) |
+| `best-of-k` | `tasks_best_of_k.txt` | 8 | Multi-repeat/self-consistency suite for math and code, with mean@k, majority-vote, and pass@k metrics |
+| `gpt` | `tasks_gpt.txt` | 3 | Experimental AlpacaEval and Arena-Hard path for a future OpenAI GPT judge type in the Swiss-AI harness |
 | `multi-lingual` | `tasks_multilingual.txt` | 12 | Multilingual-only subset (global_mmlu, mgsm, hellaswag_multilingual, include, cultural_bench, multi-if, aya_redteaming, ...) |
 | `apertus-previous` | `tasks_english.txt` | 19 | Previous (Apertus 1.0) English benchmark suite |
 | `pretrain` | `tasks_pretrain.txt` | 30 | Pretraining suite (base-model loglikelihood/MC variants, few-shot MMLU); logs to W&B project `apertus-1.5-pre-training-v0.0` |
@@ -129,8 +132,9 @@ bash scripts/launch_evaluations.sh <mode>
 | `--splits K` | Split task list across K parallel SLURM nodes per model (auto-clamped to the task count) |
 | `--limit N` | Limit number of samples per task (forwarded as `--limit` to lm-eval-harness; default: no limit). Useful for quick sanity checks. |
 | `--megatron-iter <iter>` | For Megatron-LM checkpoints, the iteration to evaluate (e.g. `8926`); defaults to `latest`. Exported as `CKPT_ITERATION`. |
-| `--harness-branch B` | Install lm-evaluation-harness from a specific branch/ref (default: repo default branch) |
-| `--judge <none\|auto\|preset>` | Judge-model control for LLM-as-a-judge tasks (alpaca_eval, arena_hard_v01/v2, multijail, aya_redteaming). `none` (default) disables auto-launch; `auto` scans the task list and launches needed judges; a preset name (e.g. `qwen3.5-27b`, `llama-3.3-70b`) launches that judge. |
+| `--harness-branch B` | Install lm-evaluation-harness from a specific branch/ref of the task-selected repository (default: repository default branch) |
+| `--reservation <name>` | Submit evaluation jobs and any automatically launched judge under this SLURM reservation. |
+| `--judge <none\|auto\|preset>` | Judge-model control for LLM-as-a-judge tasks. `none` (default) disables auto-launch; `auto` scans the task list using the mapping in `scripts/launch_judge.py`; a preset name (e.g. `qwen3.5-27b`, `llama-3.3-70b`) launches that judge. |
 | `--judge-args <str>` | Extra arguments forwarded to `scripts/launch_judge.py` |
 | `--keep-judge` | Do not auto-cancel the judge model after evaluation finishes (otherwise a cleanup job cancels it via `afterany` dependency) |
 | `--thinking` | Umbrella flag for reasoning models: make the model think **and** record the thinking metrics. See [Thinking / Reasoning Metrics](#thinking--reasoning-metrics). |
@@ -143,6 +147,70 @@ bash scripts/launch_evaluations.sh <mode>
 
 > [!TIP]
 > Inference hyperparameters such as batch size (`BS`), `MAX_LENGTH`, `MAX_NEW_TOKENS`, and `SIZE` (model size in billions, for parallelism) are not exposed as launcher flags — set them as environment variables consumed by `evaluate.sbatch` (see [SBATCH Scripts](#sbatch-scripts)).
+
+### Judge Model Launching
+
+Some LLM-as-a-judge tasks require a separate model to be available through the CSCS serving API. Pass `--judge auto` to scan the selected task list and launch the required judge models before submitting the evaluations:
+
+```bash
+bash scripts/launch_evaluations.sh posttrain \
+  --model /capstor/store/.../checkpoint \
+  --judge auto
+```
+
+The task-to-judge mapping is defined by `TASK_TO_JUDGE` in `scripts/launch_judge.py`:
+
+| Tasks | Judge preset |
+|-------|--------------|
+| `alpaca_eval`, `multijail`, `aya_redteaming` | `llama-3.3-70b` |
+| `arena_hard_v01`, `arena_hard_v2`, `hallulens` | `qwen3.5-27b` |
+| `harmbench` | `cais-llama-harmbench` |
+| `realtoxicitypromptsllama` | `llama-guard` |
+
+Automatic judge launching runs on the login node, so the `python3` used to invoke the evaluation launcher must have the [Swiss AI Model Launch](https://github.com/swiss-ai/model-launch) (`swiss_ai_model_launch`) package installed. With the `model-launch/` checkout included in this repository:
+
+```bash
+python3 -m pip install -e ./model-launch
+python3 -c "import swiss_ai_model_launch"
+```
+
+`CSCS_SERVING_API` must also be exported or stored in `scripts/cscs_serving_api_key.txt` so the launcher can verify that the judge is healthy.
+
+An explicit preset can be launched through the evaluation launcher or directly:
+
+```bash
+# Evaluation launcher; --reservation is forwarded to the judge job
+bash scripts/launch_evaluations.sh single \
+  --task arena_hard_v2 \
+  --model /capstor/store/.../checkpoint \
+  --judge qwen3.5-27b \
+  --reservation my-reservation
+
+# Direct judge launch
+python3 scripts/launch_judge.py \
+  --preset qwen3.5-27b \
+  --reservation my-reservation
+```
+
+By default the evaluation launcher submits a cleanup job that cancels automatically launched judges after all evaluation jobs finish. Pass `--keep-judge` to leave them running. Additional judge-specific options, such as `--health-timeout 1800`, can be supplied through `--judge-args`.
+
+#### Experimental OpenAI GPT judge path
+
+The separate `gpt` suite reserves a stable task/config path for the planned
+OpenAI GPT judge implementation in `swiss-ai/lm-evaluation-harness`:
+
+```bash
+export OPENAI_API_KEY="..."
+bash scripts/launch_evaluations.sh gpt \
+  --model /capstor/store/.../checkpoint
+```
+
+The key may instead be stored in the ignored `scripts/openai_api_key.txt` file.
+This is experimental scaffolding: the launcher deliberately does not pass a
+speculative `--judge-type` (or similar) flag yet. Until the corresponding
+Swiss-AI harness support lands, the mode prints a warning and is not expected
+to provide the future GPT-judge behavior. The ordinary `posttrain` suite
+continues to use the CSCS judge setup described above.
 
 
 ### Examples
@@ -206,6 +274,9 @@ the step-4 aggregator, which runs `--merge_only` and loads no model.
 | Extra controls       | judge / splits / backend / fewshot flags                | `--force_tasks <substr,...>` to force re-eval, `--merge_only`, `--debug` (dry run) |
 
 Key flags: `--task_file` and `--model` (required), `--table_metrics`, `--eval_prefix`, `--account`, `--reservation`, `--wandb_entity`, `--wandb_project`, `--group_size`, `--tokenizer`, `--name <run-name>` (override the run name — dirs + W&B run; defaults to the model basename, with a `-think` suffix for thinking runs), `--force_tasks <comma-separated substrings>` (drop matching tasks from the completed set to re-run them), `--merge_only` (skip launching, just rebuild markers + aggregate), and `--debug` (dry run — prints what would be submitted without submitting).
+
+The multi-model convenience wrapper `launcher_graceful.sh` accepts the same
+thinking flags and forwards them to the resumable launcher.
 
 > [!NOTE]
 > Under the hood the graceful launcher delegates each task to `launch_evaluations.sh` in `single` mode and always applies the chat template, so it is intended primarily for post-training (instruct) checkpoints.
@@ -431,6 +502,119 @@ Behaviour specific to `--thinking`:
 
 ---
 
+## Every Eval Ever and Hugging Face exports
+
+Completed lm-evaluation-harness runs can be converted into:
+
+- [Every Eval Ever (EEE)](https://huggingface.co/datasets/evaleval/EEE_datastore) schema `0.2.2` aggregate records
+- optional EEE instance-level JSONL records from lm-eval sample logs
+- reviewable Hugging Face `.eval_results/*.yaml` previews for registered Hub benchmarks
+
+The exporter is deliberately local-only: it does not upload files, open pull
+requests, or read an HF token.
+
+### Export a completed run
+
+Point the exporter at either a single `results_*.json` file or a directory that
+contains exactly one result file. For split runs, use the merged directory
+produced by `merge_split_results.py`.
+
+```bash
+python scripts/export_eval_results.py export \
+  /path/to/merged_eval/results_2026-07-27T12-00-00.json \
+  --output-dir eval-results/Apertus-release-2026-07 \
+  --model-id swiss-ai/Apertus-8B-Instruct-2607 \
+  --include-samples
+```
+
+`--model-id` is optional when the result log contains an `owner/model` ID, but
+it is required when the evaluation used a local checkpoint path.
+Evaluator provenance defaults to `first_party` for `swiss-ai/*` models and
+`third_party` for other owners; override it with `--evaluator-relationship`
+when a run was collaborative or has a different relationship.
+
+The output is organized for review and later submission:
+
+```text
+eval-results/Apertus-release-2026-07/
+├── manifest.yaml
+├── eee/data/
+│   └── <canonical-benchmark>/<developer>/<model>/
+│       ├── <uuid>.json
+│       └── <uuid>_samples.jsonl
+└── huggingface/.eval_results/
+    ├── gsm8k.yaml
+    └── mmlu-pro.yaml
+```
+
+The generated Hugging Face YAML links to the EEE record's expected immutable
+`flat/objects/<uuid-prefix>/<uuid>.json` location. Submit and merge the EEE
+records before copying those YAML previews into a model repository, otherwise
+the source links will not resolve yet.
+
+### Validate and review
+
+```bash
+# Check generated records, instance checksums, and expected files.
+python scripts/export_eval_results.py validate \
+  eval-results/Apertus-release-2026-07
+
+# Verify EEE collection names and Hugging Face benchmark task IDs remotely.
+python scripts/export_eval_results.py check-mappings
+```
+
+The export manifest (`manifest.yaml`, containing JSON-compatible YAML) lists:
+
+- generated EEE records and HF previews
+- lm-eval tasks skipped because they have no reviewed mapping
+- `_self_consistency` task names resolved to a reviewed base-task mapping
+- missing run-level metadata such as generation temperature or maximum tokens
+- `publishing_performed: false`, confirming that the exporter only wrote local files
+
+The YAML extension is intentional: the official EEE validator recursively
+treats every `.json` file as an aggregate `EvaluationLog`. Keeping exporter
+bookkeeping out of `.json` means the complete output directory can be passed
+directly to `every_eval_ever validate`. The local validator still accepts
+legacy exports containing `manifest.json`, and re-exporting migrates that file
+to `manifest.yaml`.
+
+Use `--strict-mappings` when every numeric task in a run must be mapped. Without
+it, unmapped tasks are skipped and reported rather than guessed.
+
+### Task mappings
+
+Mappings live in `configs/eval_export/task_mappings.json`. Each entry maps an
+exact lm-eval task name to:
+
+- the canonical EEE datastore collection directory
+- the EEE `evaluation_name`
+- the source dataset ID
+- optional ordered EEE metric candidates and canonical metric-ID overrides
+- optionally, a registered Hugging Face benchmark dataset, task ID, and ordered
+  metric candidates
+
+The repository's `_self_consistency` suffix is handled as a controlled task
+variant: the exporter removes only that exact suffix and requires the remaining
+base task to have a reviewed mapping. Its mapping can define
+`self_consistency_metric_candidates`; `{repeats}` is expanded from the lm-eval
+task config so, for example, `exact_match,mean@{repeats}` selects
+`exact_match,mean@32`. The original task name, repeat count, and
+`self_consistency` variant remain recorded in the exported metadata.
+
+Do not otherwise use fuzzy matching for benchmark variants. For example,
+`gpqa_main_cot_zeroshot` is not mapped to the datastore's `gpqa_diamond`
+collection, and `gsm8k_platinum` is not mapped to `gsm8k`. Add mappings only
+after confirming that the dataset and evaluation protocol are equivalent.
+For the same reason, `bfcl_v3` and `swiss_ai_charter_alignment` currently remain
+explicitly unmapped: the EEE datastore has no reviewed one-to-one mapping for
+these exact lm-eval protocols and native score scales. They are reported in the
+export manifest's `skipped_unmapped_tasks` list.
+
+The exporter preserves scores in their native lm-eval scale. It never
+automatically multiplies proportions by 100.
+
+---
+
 ## W&B Integration
 
 ### Metrics Upload
@@ -449,10 +633,14 @@ with `--log-length-metrics`, which is what makes the harness aggregate them in t
 
 ### Sample Upload (Stratified)
 
-Per task, **10 example prompts** are uploaded as W&B tables at `samples/{model_name}/{task_name}`:
+Per task, example prompts are uploaded as W&B tables below `samples/{task_name}`.
+The model name is not repeated in the table key because the table already belongs
+to that model's W&B run. Long run IDs and task names are shortened with stable
+hashes, leaving room for W&B's generated artifact suffix and avoiding its
+128-character artifact-name limit. The run keeps its full display name.
 
-- **3 positive samples** (correctly answered, metric = 1.0)
-- **7 negative samples** (incorrectly answered, metric = 0.0)
+- **2 positive samples** by default (correctly answered, metric = 1.0)
+- **3 negative samples** by default (incorrectly answered, metric = 0.0)
 
 Samples are classified using binary metrics (`acc`, `exact_match`, `em`, `pass@1`). Each sample includes an `is_correct` field (`true`/`false`/`null`) for downstream filtering. If a task has no binary metric (e.g., perplexity), 10 random samples are uploaded instead.
 
@@ -470,14 +658,17 @@ import wandb
 api = wandb.Api()
 run = api.run("entity/project/run_id")
 
-# Get a specific task's samples
-table = run.summary["samples/Llama-3.1-8B-Instruct/mmlu"]
+# Get a specific task's samples. This also works when its table key was shortened.
+task_name = "mmlu"
+table_key = run.summary["sample_table_keys"][task_name]
+table = run.summary[table_key]
 ```
 
 Each row in the table is a flattened sample dict containing:
 
 | Field | Description |
 |-------|-------------|
+| `task_name` | Full lm-eval task name, even if the W&B table key was shortened |
 | `doc/*` | Original question/document fields from the dataset |
 | `target` | Expected answer |
 | `arguments/*` | The prompt sent to the model |
@@ -586,7 +777,8 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `API_MODEL_NAME` | same as model | `openai` backend only: the `model` field sent in requests, when the server registers the model under a different id |
 | `API_NUM_CONCURRENT` | `8` | `openai` backend only: concurrent requests (batch size is pinned to 1; this is the throughput knob) |
 | `API_MAX_RETRIES` | `3` | `openai` backend only: retries per failed request |
-| `OPENAI_API_KEY` | `CSCS_SERVING_API` | `openai` backend only: bearer token sent to the endpoint |
+| `OPENAI_API_KEY` | `scripts/openai_api_key.txt`, then `CSCS_SERVING_API` | OpenAI GPT judge or `openai` backend bearer token |
+| `LM_EVAL_HARNESS_BRANCH` | repository default | Branch/ref installed from the task-selected harness repository |
 | `APPLY_CHAT_TEMPLATE` | `false` | Apply chat template for instruct models |
 | `TOKENIZER` | same as model | Custom tokenizer path |
 | `BOS` | `false` | Prepend BOS token |
@@ -665,11 +857,12 @@ Dependencies (lm-eval-harness, vLLM, etc.) are installed at runtime inside the c
 
 > [!NOTE]
 > **vLLM vs HF inference**: Generation task results (gsm8k, squadv2) may differ slightly between backends (for instruction-tuned models). Only compare results across models using the same backend. We recommend performing all evaluations with the `vllm` backend (default) to ensure reproducibility.
-- **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. With the chat template on it uses lm-eval's `local-chat-completions` (`/v1/chat/completions`) — **generative tasks only**; loglikelihood/multiple-choice tasks (mmlu, hellaswag, ...) cannot be scored through a chat endpoint. With the chat template off it uses `local-completions` (`/v1/completions`), which also handles loglikelihood tasks *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Note the job still requests the resources declared in `evaluate.sbatch` even though no GPU is used.
+- **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). With the chat template on, the harness renders the model's template client-side via the HF tokenizer — so the tokenizer must be resolvable (use `--tokenizer` when the served model name is not a pullable HF repo). `API_CHAT_ENDPOINT=true` switches to `/v1/chat/completions` (server-side template; generative tasks ONLY). Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Note the job still requests the resources declared in `evaluate.sbatch` even though no GPU is used.
 - **Megatron-LM**: To run Megatron-LM models natively, clone the [NVIDIA Megatron-LM repository](https://github.com/NVIDIA/Megatron-LM) into the evals-post-train directory (or change the location via the launch script).
 - **Time limits**: The default 12h SLURM limit works for most evaluations. For large suites on large models, use `--splits` to parallelize.
 - **WANDB_API_KEY**: Must be available either as an environment variable or in `scripts/wandb_api_key.txt`.
 - **HF_TOKEN**: Must be available either as an environment variable or in  `scripts/hf_token.txt`.
+- **OPENAI_API_KEY**: Required for the optional `gpt` suite, either as an environment variable or in `scripts/openai_api_key.txt`.
 - **CSCS_SERVING_API**: Must be available either as an environment variable or in `scripts/cscs_serving_api_key.txt` to run LLM-as-a-judge evals (e.g. AlpacaEval). Key can be optained [here](https://serving.swissai.cscs.ch).
 
 ---
@@ -703,8 +896,8 @@ The stratified sample selection in `scripts/alignment/wandb_alignment_utils.py` 
 model_eval = create_model_evaluation_from_results(
     model_name="my-model",
     eval_dir=Path("/path/to/eval_dir"),
-    n_positive=5,   # number of correct samples to upload (default: 3)
-    n_negative=15,  # number of incorrect samples to upload (default: 7)
+    n_positive=5,   # number of correct samples to upload (default: 2)
+    n_negative=15,  # number of incorrect samples to upload (default: 3)
 )
 ```
 

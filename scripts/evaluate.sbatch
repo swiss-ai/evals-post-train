@@ -9,8 +9,8 @@
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --exclusive
-#SBATCH --partition=debug
-#SBATCH --time=00:59:00
+#SBATCH --partition=normal
+#SBATCH --time=11:59:00
 #SBATCH --exclude=nid006784
 #SBATCH --exclude=nid007014
 #SBATCH --exclude=nid007127
@@ -43,12 +43,13 @@ usage() {
     echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
     echo " OpenAI-compatible API backend (LM_EVAL_BACKEND=openai; no model is loaded in the job):"
     echo "  API_BASE_URL: Endpoint to evaluate against. Required. Accepts a bare host (http://host:8000), a /v1 root, or a full /v1/(chat/)completions URL."
+    echo "  API_CHAT_ENDPOINT: 'true' to use /v1/chat/completions (server-side chat template; generative tasks ONLY). Default: /v1/completions, which serves mixed suites."
     echo "  API_MODEL_NAME: 'model' field sent in requests (default: the <model> positional argument)."
     echo "  API_NUM_CONCURRENT: Concurrent requests (default: 8)."
     echo "  API_MAX_RETRIES: Retries per request (default: 3)."
     echo "  OPENAI_API_KEY: Bearer token for the endpoint (default: CSCS_SERVING_API)."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
-    echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from swiss-ai/lm-evaluation-harness (default: repository default branch)."
+    echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from the task-selected harness repository (default: repository default branch)."
     echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
     echo "  ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: false)."
     echo "  AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
@@ -98,7 +99,9 @@ API_MAX_RETRIES=${API_MAX_RETRIES:-3}
 export HF_TOKEN="${HF_TOKEN:-$(tr -d '\r\n' < ./scripts/hf_token.txt)}"
 export WANDB_API_KEY="${WANDB_API_KEY:-$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)}"
 export CSCS_SERVING_API="${CSCS_SERVING_API:-$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)}"
-# Bearer token the openai backend sends (lm-eval reads OPENAI_API_KEY); CSCS serving key by default.
+if [[ -z "${OPENAI_API_KEY:-}" && -f ./scripts/openai_api_key.txt ]]; then
+    export OPENAI_API_KEY="$(tr -d '\r\n' < ./scripts/openai_api_key.txt)"
+fi
 export OPENAI_API_KEY="${OPENAI_API_KEY:-${CSCS_SERVING_API:-}}"
 
 warn_if_empty() {
@@ -325,9 +328,14 @@ elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     [[ -n "$API_BASE_URL" ]] || die "API_BASE_URL must be set when LM_EVAL_BACKEND=openai (e.g. http://<host>:8000/v1)."
     API_MODEL_NAME=${API_MODEL_NAME:-$MODEL}
-    # Chat template -> chat/completions; otherwise raw completions, which also serves the
-    # loglikelihood/MC tasks (the server must return prompt logprobs with echo, as vLLM does).
-    if [[ $APPLY_CHAT_TEMPLATE = true ]]; then
+    # Always the completions endpoint: it serves BOTH generative and loglikelihood/MC
+    # requests, so mixed suites work (chat/completions raises NotImplementedError on
+    # loglikelihood). With the chat template on, the harness renders the model's template
+    # client-side via the HF tokenizer. For purely generative suites the server-side
+    # template path can be forced with API_CHAT_ENDPOINT=true.
+    API_CHAT_ENDPOINT=${API_CHAT_ENDPOINT:-false}
+    if [[ "$API_CHAT_ENDPOINT" == "true" ]]; then
+        [[ $APPLY_CHAT_TEMPLATE = true ]] || die "API_CHAT_ENDPOINT=true requires the chat template (chat/completions takes messages)."
         API_LM_EVAL_MODEL="local-chat-completions"
         API_ENDPOINT_SUFFIX="chat/completions"
     else
@@ -449,7 +457,17 @@ if echo "$TASKS" | grep -q "ruler"; then
     fi
 fi
 
-LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/ymetz/lm-evaluation-harness.git"
+# bfcl_v3 and Swiss AI Charter Alignment are not yet available in the Swiss-AI
+# fork. Use ymetz only for jobs containing those tasks; everything else,
+# including the experimental GPT suite, stays on Swiss-AI.
+if echo "$TASKS" | grep -qE '(^|,)(bfcl_v3([^,]*)?|swiss_ai_charter_alignment([^,]*)?)(,|$)'; then
+    LM_EVAL_HARNESS_REPO="ymetz/lm-evaluation-harness"
+else
+    LM_EVAL_HARNESS_REPO="swiss-ai/lm-evaluation-harness"
+fi
+echo "Selected lm-evaluation-harness repository: $LM_EVAL_HARNESS_REPO"
+
+LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/${LM_EVAL_HARNESS_REPO}.git"
 if [[ -n "$LM_EVAL_HARNESS_BRANCH" ]]; then
     LM_EVAL_HARNESS_PIP_SPEC="${LM_EVAL_HARNESS_PIP_SPEC}@${LM_EVAL_HARNESS_BRANCH}"
 fi
@@ -477,7 +495,7 @@ pip install --no-cache-dir --upgrade \
     hf-transfer \
     subset2evaluate \
     \"alpaca-eval>=0.6.2\" \
-    \"peft>=0.18.0\"  "
+    \"peft>=0.19.0\"  "
 
 if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
   INSTALL_CMD="$INSTALL_CMD && pip install megatron-core --no-deps && export MEGATRON_PATH=$(pwd)/Megatron-LM"

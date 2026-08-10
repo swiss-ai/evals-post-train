@@ -11,6 +11,8 @@
 #   default          - Apertus multilingual suite
 #   multi-lingual    - Multi-lingual suite (taken from 1.0)
 #   apertus-previous - Apertus previous benchmark suite (from 1.0)
+#   best-of-k        - Multi-repeat/self-consistency suite
+#   gpt              - Experimental OpenAI GPT-judge chat suite (future harness support)
 #   eval-debug       - Small set of loglikelihood and generative benchmarks to test eval script
 #   single           - Run a single task (requires --task <task_name>)
 
@@ -48,8 +50,9 @@
 #   --splits K           - Split tasks across K parallel nodes per model
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
-#   --reservation <name> - Submit jobs under a SLURM reservation (exported as SBATCH_RESERVATION;
-#                          ambient SBATCH_RESERVATION is respected when the flag is absent)
+#   --reservation <name> - Submit jobs under a SLURM reservation, including an auto-launched judge
+#                          (exported as SBATCH_RESERVATION; ambient SBATCH_RESERVATION is respected
+#                          for evaluation jobs when the flag is absent)
 #   --judge <none|auto|preset> - Judge model control:
 #                          none (default): disable judge auto-launch
 #                          auto: detect judge-dependent tasks and launch needed judges
@@ -169,7 +172,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Validate mode ---
-VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "posttrain" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "single" "custom")
+VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "posttrain" "best-of-k" "gpt" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "single" "custom")
 if [[ ! " ${VALID_MODES[*]} " =~ " ${EVAL_MODE} " ]]; then
     echo "Error: Invalid mode '$EVAL_MODE'"
     echo "Valid modes: ${VALID_MODES[*]}"
@@ -335,6 +338,16 @@ case "$EVAL_MODE" in
         export TASKS=./configs/apertus/tasks_posttrain_final.txt
         export TABLE_METRICS=./configs/apertus/tasks_posttrain_final_main_table.txt
         ;;
+    "best-of-k")
+        export TASKS=./configs/apertus/tasks_best_of_k.txt
+        export TABLE_METRICS=./configs/apertus/tasks_best_of_k_main_table.txt
+        export WANDB_PROJECT="${WANDB_PROJECT}-best-of-k"
+        ;;
+    "gpt")
+        export TASKS=./configs/apertus/tasks_gpt.txt
+        export TABLE_METRICS=./configs/apertus/tasks_gpt_main_table.txt
+        [[ -z "$CHAT_TEMPLATE_OVERRIDE" ]] && CHAT_TEMPLATE_OVERRIDE="true"
+        ;;
     "olmo-easy")
         export TASKS=./configs/olmo/olmo3_easy.txt
         export TABLE_METRICS=./configs/olmo/olmo3_easy_main_table.txt
@@ -377,6 +390,17 @@ case "$EVAL_MODE" in
     "custom")
         ;;
 esac
+
+# The GPT path is deliberately only a suite/config placeholder for now. It uses
+# the normal Swiss-AI harness and will gain an explicit judge selector once that
+# support lands upstream; do not pass a speculative flag today.
+if [[ "$EVAL_MODE" == "gpt" ]]; then
+    echo "WARNING: gpt mode is experimental; no judge-type flag is passed to lm-eval yet." >&2
+    echo "         It requires the corresponding GPT-judge support to exist in the Swiss-AI harness." >&2
+    if [[ -z "${OPENAI_API_KEY:-}" && ! -f ./scripts/openai_api_key.txt ]]; then
+        echo "WARNING: neither OPENAI_API_KEY nor scripts/openai_api_key.txt is available." >&2
+    fi
+fi
 
 # --- Validate split count vs task count ---
 if (( NUM_SPLITS > 1 )); then
@@ -430,6 +454,7 @@ echo "Apertus Evaluation Launcher"
 echo "  Mode:   $EVAL_MODE"
 [[ "$EVAL_MODE" == "single" ]] && echo "  Task:   $SINGLE_TASK"
 echo "  Splits: $NUM_SPLITS"
+echo "  Harness: auto (Swiss-AI; ymetz only for BFCL/Charter)${HARNESS_BRANCH:+@$HARNESS_BRANCH}"
 if [[ "$THINKING_TOUCHED" == "true" ]]; then
     echo "  Thinking: enable=${ENABLE_THINKING_OVERRIDE:-<unset>} autodetect=${AUTODETECT_THINK_TOKENS:-false} track=${TRACK_THINKING_METRICS:-<derive>} lengths=${LOG_LENGTH_METRICS:-false}"
     [[ -n "$THINK_START_TOKEN" || -n "$THINK_END_TOKEN" ]] && echo "  Think tokens: start='${THINK_START_TOKEN:-<none>}' end='${THINK_END_TOKEN:-<none>}'"
@@ -447,7 +472,7 @@ fi
 
 # --- Judge model launch - if none is set, rely on already hosted judge or manual launch ---
 JUDGE_JOB_IDS=""
-JUDGE_TASKS_PATTERN="alpaca_eval|multijail|aya_redteaming|arena_hard_v01|arena_hard_v2"
+JUDGE_TASKS_PATTERN="alpaca_eval|multijail|aya_redteaming|arena_hard_v01|arena_hard_v2|harmbench|hallulens|realtoxicitypromptsllama"
 
 if [[ "$JUDGE_MODE" != "none" ]]; then
 
@@ -455,15 +480,10 @@ if [[ "$JUDGE_MODE" != "none" ]]; then
     JUDGE_LAUNCH_ARGS=""
 
     if [[ "$JUDGE_MODE" == "auto" ]]; then
-        # Auto-detect: scan task list for judge-dependent tasks
-        if [[ -f "$TASKS" ]]; then
-            grep -qE "$JUDGE_TASKS_PATTERN" "$TASKS" && NEEDS_JUDGE=true
-        elif echo "$TASKS" | grep -qE "$JUDGE_TASKS_PATTERN"; then
-            NEEDS_JUDGE=true
-        fi
-        if [[ "$NEEDS_JUDGE" == "true" ]]; then
-            JUDGE_LAUNCH_ARGS="--detect-from-tasks $TASKS"
-        fi
+        # Delegate detection to launch_judge.py so TASK_TO_JUDGE remains the
+        # single source of truth for automatic judge selection.
+        NEEDS_JUDGE=true
+        JUDGE_LAUNCH_ARGS="--detect-from-tasks $TASKS"
     else
         # Explicit preset
         NEEDS_JUDGE=true
@@ -473,6 +493,9 @@ if [[ "$JUDGE_MODE" != "none" ]]; then
     if [[ "$NEEDS_JUDGE" == "true" ]]; then
         echo ""
         echo "--- Judge Model Launch ---"
+        if [[ -n "$RESERVATION_FLAG" ]]; then
+            JUDGE_LAUNCH_ARGS="$JUDGE_LAUNCH_ARGS --reservation $RESERVATION_FLAG"
+        fi
         # Capture machine-readable output (JUDGE_JOB_ID=...) from stdout,
         # while letting human-readable logs flow to stderr (visible to user).
         JUDGE_STDOUT=$(python3 scripts/launch_judge.py $JUDGE_LAUNCH_ARGS $JUDGE_EXTRA_ARGS)
@@ -497,7 +520,7 @@ if [[ "$JUDGE_MODE" != "none" ]]; then
 fi
 
 # warn if tasks are detected but judge is explicitly disabled (mode=none)
-if [[ "$JUDGE_MODE" == "none" ]]; then
+if [[ "$JUDGE_MODE" == "none" && "$EVAL_MODE" != "gpt" ]]; then
     if [[ -f "$TASKS" ]]; then
         if grep -qE "$JUDGE_TASKS_PATTERN" "$TASKS"; then
             echo "WARNING: Detected judge-dependent tasks but judge model launching is disabled (--judge none)"

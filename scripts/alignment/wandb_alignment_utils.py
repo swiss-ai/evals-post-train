@@ -3,16 +3,21 @@ Shared utilities for W&B alignment evaluation scripts.
 Contains common functions for collecting, processing, and uploading evaluation results.
 """
 
-import hashlib
 import json
-import os
 import random
+from collections import defaultdict
+from pathlib import Path
+from typing import List
+
 import wandb
 import wandb.sdk.lib.server
-from pathlib import Path
-from typing import List, Tuple
+
+from .data_structures import Sample, Metric, Task, ModelEvaluation
+from .wandb_names import make_sample_table_key, make_wandb_run_id
+
 
 _orig_query_with_timeout = wandb.sdk.lib.server.Server.query_with_timeout
+
 
 def _patched_query_with_timeout(self):
     try:
@@ -25,9 +30,6 @@ def _patched_query_with_timeout(self):
             self._flags = {}
 
 wandb.sdk.lib.server.Server.query_with_timeout = _patched_query_with_timeout
-from collections import defaultdict
-
-from .data_structures import Sample, Metric, Task, ModelEvaluation
 
 
 # Binary metrics that indicate per-sample correctness (1.0 = correct, 0.0 = incorrect)
@@ -91,8 +93,8 @@ def _select_stratified_samples(
 def create_model_evaluation_from_results(
     model_name: str,
     eval_dir: Path,
-    n_positive: int = 3,
-    n_negative: int = 7,
+    n_positive: int = 2,
+    n_negative: int = 3,
 ) -> ModelEvaluation:
     """Create a ModelEvaluation directly from evaluation directory.
 
@@ -202,17 +204,7 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
             main_log_data[eval_metric] = log_data[eval_metric]
     
     run_id_suffix = "-001"
-    full_id = model_eval.model_name + run_id_suffix
-    if len(full_id) <= 110:
-        wandb_id = full_id
-    else:
-        # Names longer than the cap may share an identical 110-char prefix
-        # (e.g. differing only by a later suffix), which would collide and,
-        # with resume="allow", overwrite each other's run. Append a
-        # deterministic hash of the full name so the id stays stable per model
-        # (resume still works) but is unique across distinct models.
-        name_hash = hashlib.sha1(model_eval.model_name.encode()).hexdigest()[:8]
-        wandb_id = full_id[:110 - len(name_hash) - 1] + "-" + name_hash
+    wandb_id = make_wandb_run_id(model_eval.model_name, run_id_suffix)
     with wandb.init(
         id=wandb_id,
         resume="allow",
@@ -226,26 +218,36 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
         run.log({"eval_duration": eval_duration})
 
         # Upload samples as a table directly from the structured data
+        existing_sample_keys = run.summary.get("sample_table_keys", {})
+        sample_table_keys = (
+            dict(existing_sample_keys)
+            if isinstance(existing_sample_keys, dict)
+            else {}
+        )
         for task in model_eval.tasks:
             if not task.samples:
                 print(f"  - No samples for task {task.task_name}, skipping")
                 continue
 
             samples_table = upload_structured_samples_as_table(task)
-            # Cap key length so artifact name "run-{id}-{key}" stays under 128
-            samples_key = f"samples/{model_eval.model_name}/{task.task_name}"
-            samples_key = samples_key[:128 - len("run-") - len(wandb_id) - 1]
+            samples_key = make_sample_table_key(wandb_id, task.task_name)
             try:
                 run.log({samples_key: samples_table})
+                sample_table_keys[task.task_name] = samples_key
             except Exception as e:
                 print(f"  - Failed to log samples for task {task.task_name}: {e}")
+        run.summary["sample_table_keys"] = sample_table_keys
 
         print(f"Logged to WandB for {model_eval.model_name}: {len(log_data)} entries")
 
 
 def upload_structured_samples_as_table(task: Task):
     """Create and return a W&B table with samples from a single task."""
-    all_rows = [_flatten_dict(sample.sample_data) for sample in task.samples]
+    all_rows = []
+    for sample in task.samples:
+        row = {"task_name": task.task_name}
+        row.update(_flatten_dict(sample.sample_data))
+        all_rows.append(row)
     columns = list(all_rows[0].keys())
     table_data = [[row.get(col) for col in columns] for row in all_rows]
     return wandb.Table(data=table_data, columns=columns)
@@ -264,4 +266,3 @@ def _flatten_dict(d, parent_key='', sep='/'):
         else:
             items.append((new_key, v))
     return dict(items)
-
