@@ -19,11 +19,11 @@ export PYTHONUSERBASE="$CACHE_ROOT/python_userbase"
 mkdir -p "$HF_HOME" "$HF_DATASETS_CACHE" "$NLTK_DATA" "$TRITON_CACHE_DIR" "$WANDB_DIR" "$WANDB_CACHE_DIR" "$MPLCONFIGDIR" "$TIKTOKEN_CACHE_DIR" "$PYTHONUSERBASE"
 
 # --- Defaults ---
-EVAL_PREFIX="$SCRATCH/eval_logs_start/apertus/apertus-1.5-pre-training-v0.0/"
+EVAL_PREFIX="$SCRATCH/eval_logs_start/apertus/apertus-1.5-post-training-v0.0/"
 ACCOUNT="infra01"
 RESERVATION="SD-69241-apertus-1-5-0"
 WANDB_ENTITY="apertus"
-WANDB_PROJECT="apertus-1.5-pre-training-v0.0"
+WANDB_PROJECT="apertus-1.5-post-training-v0.0"
 TABLE_METRICS=""
 DEBUG=0
 MERGE_ONLY=0
