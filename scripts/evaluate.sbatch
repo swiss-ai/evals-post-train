@@ -123,7 +123,7 @@ warn_if_empty CSCS_SERVING_API \
   "Optional key missing. LLM-as-a-judge benchmarks via CSCS serving API will fail."
 
 # optional eval arguments
-MAX_LENGTH=${MAX_LENGTH:-16384}
+MAX_LENGTH=${MAX_LENGTH:-4096}
 # Capture explicitness before defaulting: thinking raises the default, but a caller value wins.
 if [[ -n "${MAX_NEW_TOKENS:+x}" ]]; then MAX_NEW_TOKENS_EXPLICIT=1; else MAX_NEW_TOKENS_EXPLICIT=0; fi
 MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
@@ -321,8 +321,6 @@ elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     else
         die "CKPT_ITER must be an integer or 'latest' when LM_EVAL_BACKEND=megatron_lm (got '$CKPT_ITER')."
     fi
-elif [[ $LM_EVAL_BACKEND == "swissai-api" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,model=local-completions,base_url=https://api.swissai.svc.cscs.ch/v1,num_concurrent=1,max_retries=3,tokenized_requests=False,batch_size=16"
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION"
     # Forward enable_thinking only when explicitly set; unset lets the template default apply.
@@ -369,8 +367,6 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
 else
     die "Unsupported LM_EVAL_BACKEND: $LM_EVAL_BACKEND"
 fi
-
-# special case for ministral, need to pass 
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
 
@@ -472,7 +468,7 @@ fi
 if echo "$TASKS" | grep -qE '(^|,)(bfcl_v3([^,]*)?|swiss_ai_charter_alignment([^,]*)?)(,|$)'; then
     LM_EVAL_HARNESS_REPO="ymetz/lm-evaluation-harness"
 else
-    LM_EVAL_HARNESS_REPO="ymetz/lm-evaluation-harness"
+    LM_EVAL_HARNESS_REPO="swiss-ai/lm-evaluation-harness"
 fi
 echo "Selected lm-evaluation-harness repository: $LM_EVAL_HARNESS_REPO"
 
