@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=infra01
+#SBATCH --account=a0186
 #SBATCH --cpus-per-task=200
 #SBATCH --gres=gpu:4
 #SBATCH --job-name=evaluation
@@ -103,6 +103,19 @@ if [[ -z "${OPENAI_API_KEY:-}" && -f ./scripts/openai_api_key.txt ]]; then
     export OPENAI_API_KEY="$(tr -d '\r\n' < ./scripts/openai_api_key.txt)"
 fi
 export OPENAI_API_KEY="${OPENAI_API_KEY:-${CSCS_SERVING_API:-}}"
+
+# ADDED: Redirect vLLM and Triton caches to /tmp to avoid filling up HOME. The harness will create a unique subdir per job. ############################
+export VLLM_CACHE_ROOT=/tmp/vllm_cache_${SLURM_JOB_ID}
+export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_JOB_ID}
+# FlashInfer JIT-compiles kernels and takes an fcntl.flock in $FLASHINFER_WORKSPACE_BASE/.cache/
+# flashinfer, which defaults to Path.home() -- it ignores XDG_CACHE_HOME. HOME is NFS here, and
+# flock on NFS either fails outright ("OSError: [Errno 37] No locks available" during EngineCore
+# init) or blocks indefinitely when many jobs contend for the same lock file, which is the
+# "No available shared memory broadcast block found in 60 seconds" hang seen right after
+# "Auto-selected flashinfer allreduce backend: trtllm". Keep it node-local and per-job.
+export FLASHINFER_WORKSPACE_BASE=/tmp/flashinfer_${SLURM_JOB_ID}
+mkdir -p "$FLASHINFER_WORKSPACE_BASE"
+export HF_HUB_DISABLE_XET=1
 
 warn_if_empty() {
   local var="$1"
@@ -218,7 +231,11 @@ export HF_HOME=${HF_HOME:-/iopsstor/scratch/cscs/$USER/huggingface}
 CACHE_ROOT="${SCRATCH:-/tmp}/.cache"
 export HF_DATASETS_CACHE="$CACHE_ROOT/huggingface/datasets"
 export NLTK_DATA="$CACHE_ROOT/nltk_data"
-export TRITON_CACHE_DIR="$CACHE_ROOT/triton"
+# NOTE: TRITON_CACHE_DIR is deliberately NOT set here. It is already pointed at node-local
+# per-job /tmp above (see the VLLM_CACHE_ROOT/TRITON_CACHE_DIR block), and re-pointing it at
+# Lustre silently undid that. Triton takes file locks in its cache dir, and flock on a network
+# filesystem is exactly what produced the FlashInfer ENOLCK/hang failures - same class of bug,
+# just a different library. Keep compile caches node-local; only data caches belong on $SCRATCH.
 export TIKTOKEN_CACHE_DIR="$CACHE_ROOT/tiktoken"
 export PYTHONUSERBASE="$CACHE_ROOT/python_userbase"
 export MPLCONFIGDIR="$CACHE_ROOT/matplotlib"
@@ -261,8 +278,15 @@ if [ -z ${TOKENIZER+x} ]; then
 fi
 
 
-# Use only model parallel because of vLLM
-MP=$GPUS_PER_NODE
+# Use only model parallel because of vLLM.
+# TENSOR_PARALLEL_SIZE overrides this (default: unchanged, = GPUS_PER_NODE). Setting it to 1
+# gives tensor_parallel_size=1 / data_parallel_size=$GPUS_PER_NODE, i.e. independent replicas
+# instead of a sharded model. That avoids vLLM's multi-GPU allreduce init, which hangs
+# intermittently on this cluster ("No available shared memory broadcast block found in 60
+# seconds", right after "Auto-selected flashinfer allreduce backend: trtllm") and burns the
+# full walltime without processing a single prompt. An 8B bf16 model is 15 GiB against ~96 GiB
+# per GPU, so a full replica fits comfortably.
+MP=${TENSOR_PARALLEL_SIZE:-$GPUS_PER_NODE}
 echo "Using model size ~${SIZE}B, model parallel size of $MP"
 
 # Prepare logs root.
@@ -277,7 +301,14 @@ export HF_ALLOW_CODE_EVAL=1
 
 # Finally, run the actual evaluations.
 HF_CHECKPOINT_PATH=$MODEL
-DP=$(( GPUS_PER_NODE / MP ))
+# DATA_PARALLEL_SIZE overrides this (default: unchanged, = GPUS_PER_NODE / MP).
+# NOTE: lm-eval's vLLM wrapper only works with DP=1 against the currently pinned vLLM. It puts
+# "swap_space" into model_args unconditionally, but the data_parallel_size>1 branch feeds those
+# args straight to EngineArgs, which no longer accepts it:
+#   TypeError: EngineArgs.__init__() got an unexpected keyword argument 'swap_space'
+# The DP<=1 branch calls LLM(**model_args) instead and is unaffected. So TENSOR_PARALLEL_SIZE=1
+# must be paired with DATA_PARALLEL_SIZE=1 (one GPU, no allreduce) until that is fixed upstream.
+DP=${DATA_PARALLEL_SIZE:-$(( GPUS_PER_NODE / MP ))}
 COMMON_MODEL_ARGS="dtype=bfloat16"
 if [[ $BOS = true ]]; then
 	echo "Adding BOS token."
@@ -497,6 +528,19 @@ pip install --no-cache-dir --upgrade \
     \"alpaca-eval>=0.6.2\" \
     \"peft>=0.19.0\"  "
 
+# qwen 3.5
+# Patch hallulens judge model to a self-launched judge (JUDGE_MODEL set at submit time)   #################################################
+# One-off: repoint hallulens judge to self-launched judge server
+# INSTALL_CMD="$INSTALL_CMD && \
+# UTILS=\$(python -c 'import lm_eval.tasks.hallulens.utils as u; print(u.__file__)') && \
+# sed -i 's#Qwen/Qwen3.5-27B#deepseek-ai/DeepSeek-R1-Distill-Qwen-32B-lLge#' \"\$UTILS\" && \
+# grep -q 'deepseek-ai/DeepSeek-R1-Distill-Qwen-32B-lLge' \"\$UTILS\""
+
+# llama-guard
+# INSTALL_CMD="$INSTALL_CMD && \
+# source /users/ichalkiadakis/patches/patch_step.sh"
+
+
 if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
   INSTALL_CMD="$INSTALL_CMD && pip install megatron-core --no-deps && export MEGATRON_PATH=$(pwd)/Megatron-LM"
 fi
@@ -505,6 +549,10 @@ fi
 if [[ $LM_EVAL_BACKEND == "openai" ]]; then
   INSTALL_CMD="$INSTALL_CMD && pip install --no-cache-dir tenacity aiohttp"
 fi
+
+
+
+
 
 # $CMD is re-parsed by the inner `bash -lc`, so --model_args is single-quoted (a token like
 # think_end_token=</think> would otherwise redirect, and $(...) in a path would execute).
@@ -554,7 +602,8 @@ export PYTHONUSERBASE=$PYTHONUSERBASE
 export MPLCONFIGDIR=$MPLCONFIGDIR
 export SPACY_DATA=$SPACY_DATA
 export XDG_CACHE_HOME=$XDG_CACHE_HOME
-mkdir -p $HF_DATASETS_CACHE $NLTK_DATA $TRITON_CACHE_DIR $TIKTOKEN_CACHE_DIR $PYTHONUSERBASE $MPLCONFIGDIR $SPACY_DATA
+export FLASHINFER_WORKSPACE_BASE=$FLASHINFER_WORKSPACE_BASE
+mkdir -p $HF_DATASETS_CACHE $NLTK_DATA $TRITON_CACHE_DIR $TIKTOKEN_CACHE_DIR $PYTHONUSERBASE $MPLCONFIGDIR $SPACY_DATA $FLASHINFER_WORKSPACE_BASE
 "
 
 if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then

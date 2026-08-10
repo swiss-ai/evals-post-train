@@ -358,7 +358,7 @@ def _render_table(html, table_id, models, group_data, overall_avgs, n_models, in
     html.append("</div>\n")
 
 
-def build_html(groups, models, scores, output_path, info_rows=None, olmo_default_hidden=False, apertus_default_hidden=False, apertus_baselines=None, no_split=False, flat=False, title="Evaluation Results", thinking=False):
+def build_html(groups, models, scores, output_path, info_rows=None, olmo_default_hidden=False, apertus_default_hidden=False, apertus_baselines=None, no_split=False, flat=False, title="Evaluation Results", thinking=False, with_olmo=False, legacy_sft=False, footer_html=None):
     """Generate a self-contained HTML file with collapsible skill groups and train/test toggle."""
 
     def _count(group_data):
@@ -665,21 +665,30 @@ details[open] .arrow {{ transform: rotate(90deg); }}
     {'<div class="toggle-group"><button id="btn-train" class="active">Training</button><button id="btn-test">Test</button></div>' if not no_split else ''}
     <div class="toggle-group">
       <button id="btn-all" class="active">All</button>
-      <button id="btn-sft">SFT</button>
+      <button id="btn-class2">{'SFT' if legacy_sft else 'Base'}</button>
       <button id="btn-instruct">Instruct</button>
     </div>
     <button id="btn-apertus" class="{'active' if not apertus_default_hidden else ''}">Apertus</button>
-    <button id="btn-olmo" class="{'active' if not olmo_default_hidden else ''}">OLMo</button>
+    {f'<button id="btn-olmo" class="{"active" if not olmo_default_hidden else ""}">OLMo</button>' if with_olmo else ''}
     {'<div class="toggle-group"><button id="btn-collapse">Collapse</button><button id="btn-expand">Expand</button></div>' if not flat else ''}
   </div>
 </div>
 
 """)
 
-    model_types_js = '[' + ','.join(
-        f'"sft"' if 'sft' in m.lower() and 'instruct' not in m.lower() and 'dpo' not in m.lower()
-        else f'"instruct"' for m in models
-    ) + ']'
+    # Model-class filter. Default (legacy_sft=False): split base vs instruction-following
+    # models by whether the run name contains "instruct" -- the pretrain/SFT distinction is
+    # no longer meaningful for these comparisons. Pass --legacy-sft-filter to restore the
+    # original SFT-vs-instruct classification.
+    if legacy_sft:
+        model_types_js = '[' + ','.join(
+            f'"class2"' if 'sft' in m.lower() and 'instruct' not in m.lower() and 'dpo' not in m.lower()
+            else f'"instruct"' for m in models
+        ) + ']'
+    else:
+        model_types_js = '[' + ','.join(
+            f'"instruct"' if 'instruct' in m.lower() else f'"class2"' for m in models
+        ) + ']'
 
     is_olmo_js = '[' + ','.join(
         'true' if 'olmo' in m.lower() else 'false' for m in models
@@ -711,7 +720,7 @@ details[open] .arrow {{ transform: rotate(90deg); }}
   var wrapAll = document.getElementById('wrap-all');
   var btnTrain = document.getElementById('btn-train');
   var btnTest = document.getElementById('btn-test');
-  var btnOlmo = document.getElementById('btn-olmo');
+  var btnOlmo = document.getElementById('btn-olmo');   // null unless --with-olmo
   var btnApertus = document.getElementById('btn-apertus');
   var modelTypes = {model_types_js};
   var isOlmo = {is_olmo_js};
@@ -751,11 +760,13 @@ details[open] .arrow {{ transform: rotate(90deg); }}
     }});
   }}
 
-  btnOlmo.addEventListener('click', function() {{
-    showOlmo = !showOlmo;
-    btnOlmo.classList.toggle('active', showOlmo);
-    applyFilters();
-  }});
+  if (btnOlmo) {{
+    btnOlmo.addEventListener('click', function() {{
+      showOlmo = !showOlmo;
+      btnOlmo.classList.toggle('active', showOlmo);
+      applyFilters();
+    }});
+  }}
 
   btnApertus.addEventListener('click', function() {{
     showApertus = !showApertus;
@@ -787,7 +798,7 @@ details[open] .arrow {{ transform: rotate(90deg); }}
   function filterModels(type) {{
     currentTypeFilter = type;
     document.getElementById('btn-all').classList.toggle('active', type === 'all');
-    document.getElementById('btn-sft').classList.toggle('active', type === 'sft');
+    document.getElementById('btn-class2').classList.toggle('active', type === 'class2');
     document.getElementById('btn-instruct').classList.toggle('active', type === 'instruct');
     applyFilters();
   }}
@@ -817,9 +828,16 @@ details[open] .arrow {{ transform: rotate(90deg); }}
 
   applyFilters();
   document.getElementById('btn-all').addEventListener('click', function() {{ filterModels('all'); }});
-  document.getElementById('btn-sft').addEventListener('click', function() {{ filterModels('sft'); }});
+  document.getElementById('btn-class2').addEventListener('click', function() {{ filterModels('class2'); }});
   document.getElementById('btn-instruct').addEventListener('click', function() {{ filterModels('instruct'); }});
-</script>
+</script>""")
+
+    # Optional free-form notes appended below the table. Kept generic (a file path, injected
+    # verbatim) so this shared script stays free of any one experiment's commentary.
+    if footer_html:
+        html.append(footer_html)
+
+    html.append("""
 </body>
 </html>""")
 
@@ -977,6 +995,16 @@ def main():
                         help="Show averaged degeneration (across all benchmarks) as an info row")
     parser.add_argument("--overrefusal", action="store_true",
                         help="Show orbench overrefusal rate as an info row")
+    parser.add_argument("--with-olmo", action="store_true",
+                        help="Restore the pinned OLMo 3 baseline columns and the OLMo filter "
+                             "button. Off by default: these comparisons are Apertus-only.")
+    parser.add_argument("--legacy-sft-filter", action="store_true",
+                        help="Restore the old SFT-vs-Instruct model classification and label "
+                             "the second filter button 'SFT'. By default the button is 'Base' "
+                             "and the split is base vs instruction-following models.")
+    parser.add_argument("--footer-html", metavar="FILE",
+                        help="Path to an HTML fragment injected verbatim below the table, for "
+                             "run-specific takeaways or caveats. Omitted if not given.")
     parser.add_argument("--no-baselines", action="store_true",
                         help="Skip all baseline models; only use models from --models / --models-file")
     parser.add_argument("--no-split", action="store_true",
@@ -1058,7 +1086,7 @@ def main():
             display_names.append(display)
             requested_display_names.append(display)
 
-    if not args.thinking:
+    if not args.thinking and args.with_olmo:
         for run_name, display in PINNED_SUFFIX:
             if fetch_model(api, BASELINE_PROJECT, run_name, display, groups, scores, args.debug, summaries):
                 display_names.append(display)
@@ -1116,7 +1144,9 @@ def main():
     build_html(groups, display_names, scores, args.output, info_rows=info_rows,
                olmo_default_hidden=args.no_baselines, apertus_baselines=apertus_baselines,
                no_split=args.no_split or args.thinking, flat=args.flat, title=args.title,
-               thinking=args.thinking)
+               thinking=args.thinking, with_olmo=args.with_olmo,
+               legacy_sft=args.legacy_sft_filter,
+               footer_html=open(args.footer_html).read() if args.footer_html else None)
 
 
 if __name__ == "__main__":
