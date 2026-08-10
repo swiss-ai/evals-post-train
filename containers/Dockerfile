@@ -74,3 +74,8 @@ RUN git clone https://github.com/swiss-ai/vllm.git /workspace/vllm && \
 RUN pip install -v --no-cache-dir --no-build-isolation  -U \
     "lm-eval[vllm] @ git+https://github.com/swiss-ai/lm-evaluation-harness.git@main" \
     --constraint /workspace/frozen.txt
+
+######## ADDED
+RUN pip install "huggingface_hub<1.0" --system-site-packages
+RUN pip freeze | grep -iE "huggingface_hub|^datasets|^transformers"
+
