@@ -36,7 +36,7 @@ hellaswag_multilingual/acc_norm
 lambada/acc
 lambada_multilingual/acc
 mlogiqa_gen/exact_match
-xcopa/acc
+# xcopa/acc    #####################
 xnli/acc
 # Instruction Following
 alpaca_eval/length_controlled_winrate
@@ -48,8 +48,8 @@ bbq/acc
 blend_sample/acc_norm
 cultural_bench/acc_norm
 include_base_44_gen_0shot/exact_match
-include_base_new_45_gen_0shot/exact_match
-switzerland_qa_0shot/exact_match
+# include_base_new_45_gen_0shot/exact_match    #####################
+# switzerland_qa_0shot/exact_match     #####################
 # Safety
 harmbench/score
 hallulens_precisewiki/hallu_rate
