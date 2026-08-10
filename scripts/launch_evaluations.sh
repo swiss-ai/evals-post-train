@@ -330,7 +330,7 @@ case "$EVAL_MODE" in
         export TABLE_METRICS=./configs/apertus/tasks_english_main_table.txt
         ;;
     "pretrain")
-        export TASKS=./configs/apertus/tasks_pretrain_report.txt
+        export TASKS=./configs/apertus/tasks_pretrain.txt
         export TABLE_METRICS=./configs/apertus/tasks_pretrain_main_table.txt
         export WANDB_PROJECT="apertus-1.5-pre-training-v0.0"
         ;;
