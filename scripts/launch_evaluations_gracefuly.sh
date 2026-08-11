@@ -37,10 +37,6 @@ RUN_NAME=""
 # preserves the previous hardcoded behaviour; base/pretrain models need --no-chat-template,
 # without which raw-completion tasks silently degenerate (lambada acc 0.0, squadv2 F1 10.4).
 CHAT_TEMPLATE_FLAG="--chat-template"
-declare -A TASK_COMPLETION_ALIAS=(
-    [lambada]="lambada_openai"
-    [lambada_multilingual]="lambada_openai_mt_en"
-)
 # Thinking flags are forwarded verbatim to the inner `launch_evaluations.sh single` runs (which
 # load the model), never to the --merge_only aggregator re-invocation (which loads none).
 declare -a THINKING_ARGS=()
@@ -138,9 +134,7 @@ scan_harness_dir() {
                 if [[ $DEBUG -eq 1 ]]; then echo "[DEBUG] Found JSON: $res_file"; fi
                 for task in "${ORDERED_TASKS[@]}"; do
                     # Safe grep search without '|| true' causing false positives.
-                    # `tag:` tasks never emit their own JSON key, so probe a leaf subtask.
-                    probe="${TASK_COMPLETION_ALIAS[$task]:-$task}"
-                    if grep -E -q "\"$probe\"[[:space:]]*:" "$res_file" 2>/dev/null; then
+                    if grep -E -q "\"$task\"[[:space:]]*:" "$res_file" 2>/dev/null; then
                         COMPLETED_MAP["$task"]="$edir"
                         if [[ $DEBUG -eq 1 ]]; then echo "[DEBUG]   -> Marked complete: $task"; fi
                     fi
