@@ -31,15 +31,18 @@ usage() {
 	echo " TOKENIZER: A huggingface tokenizer path/name. Needed if 'model' is a megatron checkpoint, otherwise the default will be set as the same value as 'model'."
 	echo " BS: Batch size."
 	echo " REVISION: Only used in huggingface models. If set, this revision of the model will be evaluated."
-	echo " SIZE: The (approximate) size of the model in billions of parameters. Used to set model parallelism (needs to be set in larger models)."
-	echo " MAX_LENGTH: The maximum length of the input sequence to the model. By default, it is unset."
-	echo " MAX_NEW_TOKENS: The maximum number of new tokens to generate. By default, it is unset."
+	echo " SIZE: Legacy/informational approximate model size in billions."
+	echo " MAX_LENGTH: Optional backend context limit (vLLM max_model_len; Megatron seq_length)."
+	echo " MAX_NEW_TOKENS: Thinking-run default for tasks without a task-local max_gen_toks (default: 8192 when thinking)."
+	echo " VLLM_TP_SIZE / VLLM_DP_SIZE: Explicit vLLM topology. Defaults to TP=4/DP=1, or TP=1/DP=4 when a model name unambiguously indicates <30B."
+	echo " VLLM_MEMORY_FRACTION: vLLM/SGLang GPU memory fraction (default: 0.8)."
+	echo " MEGATRON_MICRO_BATCH_SIZE: Megatron micro-batch override; otherwise uses numeric BS or 1 when BS=auto."
 	echo " BOS: Set this to 'true' if you wish to prepend the BOS token when evaluating models."
 	echo " LOGS_ROOT: Where are your evaluation wandb&harness logs going to."
 	echo " TASKS: Tasks to run with lm eval harness."
 	echo " WANDB_ENTITY: WandB entity name for uploading results (default: apertus)."
-	echo " WANDB_PROJECT: WandB project name for uploading results (default: swissai-evals)."
-	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: hf). - options are: hf, vllm, sglang, megatron_lm, openai"
+	echo " WANDB_PROJECT: WandB project name for uploading results (default: swissai-evals-test)."
+	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: vllm). - options are: hf, vllm, sglang, megatron_lm, openai"
     echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
     echo " OpenAI-compatible API backend (LM_EVAL_BACKEND=openai; no model is loaded in the job):"
     echo "  API_BASE_URL: Endpoint to evaluate against. Required. Accepts a bare host (http://host:8000), a /v1 root, or a full /v1/(chat/)completions URL."
@@ -164,8 +167,11 @@ warn_if_empty WANDB_API_KEY \
 warn_if_empty CSCS_SERVING_API \
   "Optional key missing. LLM-as-a-judge benchmarks via CSCS serving API will fail."
 
-# optional eval arguments
-MAX_LENGTH=${MAX_LENGTH:-4096}
+# Optional eval arguments. An unset MAX_LENGTH leaves the backend/model default intact.
+MAX_LENGTH=${MAX_LENGTH:-""}
+if [[ -n "$MAX_LENGTH" && ! "$MAX_LENGTH" =~ ^[1-9][0-9]*$ ]]; then
+    die "MAX_LENGTH must be a positive integer when set (got '$MAX_LENGTH')."
+fi
 # Capture explicitness before defaulting: thinking raises the default, but a caller value wins.
 if [[ -n "${MAX_NEW_TOKENS:+x}" ]]; then MAX_NEW_TOKENS_EXPLICIT=1; else MAX_NEW_TOKENS_EXPLICIT=0; fi
 MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
@@ -265,7 +271,6 @@ printf '%s\n' "ENABLE_THINKING=$ENABLE_THINKING (explicit=$ENABLE_THINKING_EXPLI
 # Generic envs.
 export MASTER_ADDR=$(hostname)
 export MASTER_PORT=25678
-export CUDA_DEVICE_MAX_CONNECTIONS=1
 
 export WORLD_SIZE=$GPUS_PER_NODE
 
@@ -283,9 +288,54 @@ if [ -z ${TOKENIZER+x} ]; then
 fi
 
 
-# Use only model parallel because of vLLM
+# Preserve the historically compatible TP=4/DP=1 default. For an unambiguous
+# sub-30B model name, prefer four independent replicas for throughput. Explicit
+# VLLM_TP_SIZE/VLLM_DP_SIZE values always win; either side may be omitted and is
+# derived from the four allocated GPUs.
 MP=$GPUS_PER_NODE
-echo "Using model size ~${SIZE}B, model parallel size of $MP"
+DP=1
+DETECTED_MODEL_SIZE_B=""
+if [[ "$LM_EVAL_BACKEND" == "vllm" ]]; then
+    VLLM_TP_SIZE=${VLLM_TP_SIZE:-""}
+    VLLM_DP_SIZE=${VLLM_DP_SIZE:-""}
+    VLLM_AUTO_PARALLELISM=${VLLM_AUTO_PARALLELISM:-true}
+    VLLM_AUTO_PARALLELISM=$(_norm_bool VLLM_AUTO_PARALLELISM "$VLLM_AUTO_PARALLELISM")
+
+    if [[ -n "$VLLM_TP_SIZE" || -n "$VLLM_DP_SIZE" ]]; then
+        [[ -z "$VLLM_TP_SIZE" || "$VLLM_TP_SIZE" =~ ^[1-9][0-9]*$ ]] \
+            || die "VLLM_TP_SIZE must be a positive integer (got '$VLLM_TP_SIZE')."
+        [[ -z "$VLLM_DP_SIZE" || "$VLLM_DP_SIZE" =~ ^[1-9][0-9]*$ ]] \
+            || die "VLLM_DP_SIZE must be a positive integer (got '$VLLM_DP_SIZE')."
+        if [[ -z "$VLLM_TP_SIZE" ]]; then
+            (( GPUS_PER_NODE % VLLM_DP_SIZE == 0 )) \
+                || die "VLLM_DP_SIZE=$VLLM_DP_SIZE does not divide $GPUS_PER_NODE GPUs."
+            VLLM_TP_SIZE=$(( GPUS_PER_NODE / VLLM_DP_SIZE ))
+        elif [[ -z "$VLLM_DP_SIZE" ]]; then
+            (( GPUS_PER_NODE % VLLM_TP_SIZE == 0 )) \
+                || die "VLLM_TP_SIZE=$VLLM_TP_SIZE does not divide $GPUS_PER_NODE GPUs."
+            VLLM_DP_SIZE=$(( GPUS_PER_NODE / VLLM_TP_SIZE ))
+        fi
+        (( VLLM_TP_SIZE * VLLM_DP_SIZE == GPUS_PER_NODE )) \
+            || die "VLLM_TP_SIZE * VLLM_DP_SIZE must equal $GPUS_PER_NODE GPUs."
+        MP=$VLLM_TP_SIZE
+        DP=$VLLM_DP_SIZE
+        echo "Using explicit vLLM topology: TP=$MP DP=$DP"
+    elif [[ "$VLLM_AUTO_PARALLELISM" == "True" ]]; then
+        DETECTED_MODEL_SIZE_B=$(python3 -m scripts.infer_model_size "$MODEL" 2>/dev/null || true)
+        if [[ -n "$DETECTED_MODEL_SIZE_B" ]] \
+            && awk -v size="$DETECTED_MODEL_SIZE_B" 'BEGIN { exit !(size < 30) }'; then
+            MP=1
+            DP=$GPUS_PER_NODE
+            echo "Detected ${DETECTED_MODEL_SIZE_B}B model from path; using faster vLLM topology TP=$MP DP=$DP"
+        else
+            echo "No unambiguous <30B model size detected; using compatible vLLM topology TP=$MP DP=$DP"
+        fi
+    else
+        echo "vLLM topology auto-detection disabled; using TP=$MP DP=$DP"
+    fi
+else
+    echo "Using backend topology TP=$MP DP=$DP"
+fi
 
 # Prepare logs root.
 RUN_ROOT=$LOGS_ROOT/$WANDB_ENTITY/$WANDB_PROJECT/$NAME
@@ -299,7 +349,6 @@ export HF_ALLOW_CODE_EVAL=1
 
 # Finally, run the actual evaluations.
 HF_CHECKPOINT_PATH=$MODEL
-DP=$(( GPUS_PER_NODE / MP ))
 COMMON_MODEL_ARGS="dtype=bfloat16"
 if [[ $BOS = true ]]; then
 	echo "Adding BOS token."
@@ -310,6 +359,7 @@ fi
 export OMP_NUM_THREADS=$(( 8 * $GPUS_PER_NODE ))
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export VLLM_DISABLE_COMPILE_CACHE=1
+export VLLM_USE_FLASHINFER_SAMPLER=0 # might crash on some nodes
 
 #export VLLM_TORCH_COMPILE=0
 #export NCCL_P2P_DISABLE=1
@@ -317,8 +367,11 @@ export VLLM_DISABLE_COMPILE_CACHE=1
 # export NCCL_IB_DISABLE=1
 # export NCCL_NET="Socket"
 # export NCCL_DEBUG=WARN
-# Reduce memory fraction to avoid OOM during initialization
-VLLM_MEMORY_FRACTION=0.75
+# Keep headroom for node-to-node variation while exposing more KV-cache space.
+VLLM_MEMORY_FRACTION=${VLLM_MEMORY_FRACTION:-0.8}
+awk -v fraction="$VLLM_MEMORY_FRACTION" \
+    'BEGIN { exit !(fraction > 0 && fraction <= 1) }' \
+    || die "VLLM_MEMORY_FRACTION must be in (0, 1] (got '$VLLM_MEMORY_FRACTION')."
 # export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export VLLM_DISABLE_CUSTOM_ALL_REDUCE=1
 
@@ -329,12 +382,32 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" || $LM_EVAL_BACKEND == "openai" ]]; then
     fi
 fi
 
+THINKING_DEFAULT_MODEL_ARG=""
+if [[ "$ENABLE_THINKING" == "True" ]]; then
+    # This is a backend default, not a CLI --gen_kwargs override: task-local
+    # generation_kwargs therefore retain priority.
+    THINKING_DEFAULT_MODEL_ARG=",max_gen_toks=$MAX_NEW_TOKENS"
+fi
+
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,language_model_only=True,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS}"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,language_model_only=True,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS}${THINKING_DEFAULT_MODEL_ARG},disable_flashinfer_allreduce_fusion=True"
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer_path=$TOKENIZER$MAYBE_REVISION,dp_size=$DP,tp_size=$MP,mem_fraction_static=$VLLM_MEMORY_FRACTION,dtype=auto"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer_path=$TOKENIZER$MAYBE_REVISION,dp_size=$DP,tp_size=$MP,mem_fraction_static=$VLLM_MEMORY_FRACTION,dtype=auto${THINKING_DEFAULT_MODEL_ARG}"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,load=$MODEL,tokenizer_type=HuggingFaceTokenizer,tokenizer_model=$TOKENIZER$MAYBE_REVISION,devices=4"
+    MEGATRON_MICRO_BATCH_SIZE=${MEGATRON_MICRO_BATCH_SIZE:-""}
+    if [[ -z "$MEGATRON_MICRO_BATCH_SIZE" ]]; then
+        if [[ "$BS" =~ ^[1-9][0-9]*$ ]]; then
+            MEGATRON_MICRO_BATCH_SIZE=$BS
+        else
+            MEGATRON_MICRO_BATCH_SIZE=1
+            echo "Megatron does not support BS=$BS auto-detection; using micro_batch_size=1 (override with MEGATRON_MICRO_BATCH_SIZE or numeric BS)."
+        fi
+    fi
+    [[ "$MEGATRON_MICRO_BATCH_SIZE" =~ ^[1-9][0-9]*$ ]] \
+        || die "MEGATRON_MICRO_BATCH_SIZE must be a positive integer (got '$MEGATRON_MICRO_BATCH_SIZE')."
+    BS=$MEGATRON_MICRO_BATCH_SIZE
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,load=$MODEL,tokenizer_type=HuggingFaceTokenizer,tokenizer_model=$TOKENIZER$MAYBE_REVISION,devices=4,micro_batch_size=$MEGATRON_MICRO_BATCH_SIZE${THINKING_DEFAULT_MODEL_ARG}"
+    echo "Megatron effective batch size: $BS"
     if [[ "$CKPT_ITER" =~ ^[0-9]+$ ]]; then
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,ckpt_step=$CKPT_ITER"
     elif [[ "$CKPT_ITER" == "latest" ]]; then
@@ -347,6 +420,9 @@ elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
     # Forward enable_thinking only when explicitly set; unset lets the template default apply.
     (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS${THINK_ARGS}"
+    if [[ "$ENABLE_THINKING" == "True" ]]; then
+        echo "HF backend: preserving task-local max_gen_toks; no model-level thinking default is available."
+    fi
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     [[ -n "$API_BASE_URL" ]] || die "API_BASE_URL must be set when LM_EVAL_BACKEND=openai (e.g. http://<host>:8000/v1)."
     API_MODEL_NAME=${API_MODEL_NAME:-$MODEL}
@@ -371,7 +447,7 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
         API_BASE_URL="$API_BASE_URL/$API_ENDPOINT_SUFFIX"
     fi
     # Rebuilt from scratch: no model is loaded in-job, so dtype etc. do not apply.
-    COMMON_MODEL_ARGS="model=$API_MODEL_NAME,base_url=$API_BASE_URL,num_concurrent=$API_NUM_CONCURRENT,max_retries=$API_MAX_RETRIES,max_length=$MAX_LENGTH"
+    COMMON_MODEL_ARGS="model=$API_MODEL_NAME,base_url=$API_BASE_URL,num_concurrent=$API_NUM_CONCURRENT,max_retries=$API_MAX_RETRIES"
     if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then
         # Client-side tokenization: loglikelihood scoring needs token-aligned context/continuation.
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER"
@@ -392,38 +468,47 @@ fi
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
 
-# Generation kwargs (CLI): lm-eval dict-updates each task's YAML generation_kwargs with these.
-# max_gen_toks is the EFFECTIVE_MAX_GEN_TOKS floor (see below). Thinking also forces sampling
-# (do_sample=true is needed or normalize_gen_kwargs pins temperature=0 for do_sample=False tasks).
-GEN_KWARGS="max_gen_toks=\$EFFECTIVE_MAX_GEN_TOKS"
+# Generation kwargs supplied through the CLI update every task's YAML. Deliberately
+# omit max_gen_toks here so task-local budgets retain priority. Thinking's longer
+# fallback is passed as a model default above and is used only when a task has no
+# local max_gen_toks.
+GEN_KWARGS=""
 if [[ "$ENABLE_THINKING" == "True" ]]; then
     THINK_TEMPERATURE=${THINK_TEMPERATURE:-0.6}
     THINK_TOP_P=${THINK_TOP_P:-0.95}
-    GEN_KWARGS="${GEN_KWARGS},do_sample=true,temperature=${THINK_TEMPERATURE},top_p=${THINK_TOP_P}"
+    GEN_KWARGS="do_sample=true,temperature=${THINK_TEMPERATURE},top_p=${THINK_TOP_P}"
     # Optional knob for degenerate looping (e.g. 1.05); unset leaves vLLM's default (1.0).
     if [[ -n "${THINK_REPETITION_PENALTY:-}" ]]; then
         GEN_KWARGS="${GEN_KWARGS},repetition_penalty=${THINK_REPETITION_PENALTY}"
     fi
-    echo "Thinking sampling: do_sample=true temperature=$THINK_TEMPERATURE top_p=$THINK_TOP_P repetition_penalty=${THINK_REPETITION_PENALTY:-<unset>} (max_gen_toks via floor)"
+    echo "Thinking sampling: do_sample=true temperature=$THINK_TEMPERATURE top_p=$THINK_TOP_P repetition_penalty=${THINK_REPETITION_PENALTY:-<unset>} (task-local max_gen_toks takes priority; backend default=$MAX_NEW_TOKENS)"
 elif [[ -n "${NOTHINK_TEMPERATURE:-}" ]]; then
     # Optional no-think sampling (inert unless NOTHINK_TEMPERATURE is set): greedy-vs-sampling ablation.
     NOTHINK_TOP_P=${NOTHINK_TOP_P:-0.95}
-    GEN_KWARGS="${GEN_KWARGS},do_sample=true,temperature=${NOTHINK_TEMPERATURE},top_p=${NOTHINK_TOP_P}"
+    GEN_KWARGS="do_sample=true,temperature=${NOTHINK_TEMPERATURE},top_p=${NOTHINK_TOP_P}"
     echo "No-think sampling: do_sample=true temperature=$NOTHINK_TEMPERATURE top_p=$NOTHINK_TOP_P"
 fi
+
+MAX_BATCH_SIZE=${MAX_BATCH_SIZE:-""}
 
 COMMON_EVAL_ARGS=(
 	--trust_remote_code
 	--batch_size $BS
 	--tasks $TASKS
 	--output_path $HARNESS_EVAL_DIR
-	--max_batch_size 32
 	--log_samples
 	--write_out
 	--confirm_run_unsafe_code
-    # --cache_requests true - causes problems for long model names due to file name length limits
-    --gen_kwargs "$GEN_KWARGS"
+	--cache_requests true # was disabled until recently, but we can enable it because the upstream file length problem was patched
 )
+
+if [[ -n "$GEN_KWARGS" ]]; then
+    COMMON_EVAL_ARGS+=(--gen_kwargs "$GEN_KWARGS")
+fi
+
+if [[ -n "$MAX_BATCH_SIZE" ]]; then
+    COMMON_EVAL_ARGS+=(--max_batch_size "$MAX_BATCH_SIZE")
+fi
 
 if [[ -n "${HARNESS_LIMIT}" ]]; then
     COMMON_EVAL_ARGS+=(--limit $HARNESS_LIMIT)
@@ -444,8 +529,10 @@ if [[ "$LOG_LENGTH_METRICS" == "True" ]]; then
 	COMMON_EVAL_ARGS+=(--log_length_metrics)
 fi
 
-# Detect long context length only when 'ruler' is among tasks.
+# Detect long context length only when 'ruler' is among tasks. RULER needs a
+# little engine headroom beyond the requested sequence length.
 CONTEXT_LEN=""
+BACKEND_MAX_LENGTH="$MAX_LENGTH"
 if echo "$TASKS" | grep -q "ruler"; then
     if echo "$TASKS" | grep -qE "/[0-9]+"; then
         CONTEXT_LEN=$(echo "$TASKS" | grep -oE '/[0-9]+' | head -n1 | tr -d '/')
@@ -457,26 +544,37 @@ if echo "$TASKS" | grep -q "ruler"; then
         fi
     fi
     if [[ -n "$CONTEXT_LEN" ]]; then
-        export MAX_LENGTH="$CONTEXT_LEN"
         # Only add metadata and model arg if CONTEXT_LEN is numeric
         if [[ "$CONTEXT_LEN" =~ ^[0-9]+$ ]]; then
 			COMMON_EVAL_ARGS+=( --metadata \'{\"max_seq_lengths\":[${CONTEXT_LEN}]}\' )
 
-            MAX_MODEL_LEN_WITH_MARGIN=$(( CONTEXT_LEN + 600 ))
-            if [[ $LM_EVAL_BACKEND == "openai" ]]; then
-                # No in-job engine to configure; raise the client-side truncation length instead
-                # (duplicate max_length key: lm_eval keeps the last occurrence).
-                COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_length=$MAX_MODEL_LEN_WITH_MARGIN"
-                echo "Detected ruler context length: $CONTEXT_LEN (set MAX_LENGTH, max_length=$MAX_MODEL_LEN_WITH_MARGIN and lm-eval metadata)"
-            else
-                export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
-                COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$MAX_MODEL_LEN_WITH_MARGIN"
-                echo "Detected ruler context length: $CONTEXT_LEN (set MAX_LENGTH, max_model_len=$MAX_MODEL_LEN_WITH_MARGIN and lm-eval metadata)"
-            fi
+            BACKEND_MAX_LENGTH=$(( CONTEXT_LEN + 600 ))
+            echo "Detected ruler context length: $CONTEXT_LEN (backend context limit=$BACKEND_MAX_LENGTH and lm-eval metadata)"
         else
-            echo "Warning: Ruler detected but no numeric context length found; skipping metadata and max_model_len."
+            echo "Warning: Ruler detected but no numeric context length found; skipping metadata and automatic context limit."
         fi
     fi
+fi
+
+# MAX_LENGTH is a backend context limit, not a generation override. Keep each
+# adapter's native argument name and omit it entirely when no value was set.
+if [[ -n "$BACKEND_MAX_LENGTH" ]]; then
+    case "$LM_EVAL_BACKEND" in
+        vllm)
+            COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$BACKEND_MAX_LENGTH"
+            [[ -n "$CONTEXT_LEN" ]] && export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+            ;;
+        sglang)
+            COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$BACKEND_MAX_LENGTH"
+            ;;
+        megatron_lm)
+            COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,seq_length=$BACKEND_MAX_LENGTH"
+            ;;
+        hf|openai)
+            COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_length=$BACKEND_MAX_LENGTH"
+            ;;
+    esac
+    echo "Using $LM_EVAL_BACKEND backend context limit: $BACKEND_MAX_LENGTH"
 fi
 
 # bfcl_v3 and Swiss AI Charter Alignment are not yet available in the Swiss-AI
@@ -524,17 +622,6 @@ elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 fi
 
-# Resolve the generation budget in-container, after loading the harness overlay (task YAMLs present):
-# a MAX_NEW_TOKENS floor, never lowered below a task's own larger max_gen_toks (AIME's 32768).
-# Fail-safe: falls back to MAX_NEW_TOKENS on any error. Prepended so it runs before lm_eval.
-COMPUTE_MAX_GEN_TOKS="
-EFFECTIVE_MAX_GEN_TOKS=\$(cd $PWD && python -m scripts.get_max_gen_toks --tasks '$TASKS' --floor $MAX_NEW_TOKENS 2>/dev/null || echo $MAX_NEW_TOKENS)
-# Guard against stray stdout corrupting the value.
-[[ \"\$EFFECTIVE_MAX_GEN_TOKS\" =~ ^[0-9]+\$ ]] || EFFECTIVE_MAX_GEN_TOKS=$MAX_NEW_TOKENS
-echo \"Effective max_gen_toks: \$EFFECTIVE_MAX_GEN_TOKS (floor $MAX_NEW_TOKENS)\"
-"
-CMD="$COMPUTE_MAX_GEN_TOKS$CMD"
-
 echo "Environment manifest: $EVAL_ENV_MANIFEST"
 echo "Final command: $CMD"
 
@@ -562,6 +649,7 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     set -euo pipefail
     unset SSL_CERT_FILE
     export HF_DATASETS_TRUST_REMOTE_CODE=1
+    export CUDA_DEVICE_MAX_CONNECTIONS=1
     $CACHE_EXPORTS
 
     $LOAD_ENV_CMD

@@ -34,7 +34,7 @@ bash scripts/launch_evaluations.sh default --model meta-llama/Llama-3.1-8B-Instr
 bash scripts/launch_evaluations.sh default --model meta-llama/Llama-3.1-8B-Instruct \
   --chunk-size 8 --max-parallel 4
 
-# Launch Megatron checkpoint without conversion (TODO: Verify), Megatron-iter defaults to: latest
+# Launch a Megatron checkpoint without conversion; --megatron-iter defaults to latest
 bash scripts/launch_evaluations.sh olmo-easy --model /capstor/store/../apertus-.../checkpoints/ --backend megatron_lm --name Megatron-Test-260216 --megatron-iter 4000000
 
 # Launch with vllm backend - recommended!
@@ -77,7 +77,7 @@ The launcher selects a benchmark suite from its first positional argument (`<mod
 |------|-----------|-------|-------------|
 | `default` | `tasks_default.txt` | 48 | Full Apertus 1.5 post-training suite: knowledge, math, code, reasoning, multilingual, instruction following, bias, cultural knowledge, safety |
 | `posttrain` | `tasks_posttrain_final.txt` | 50 | Post-training suite incl. chat/arena (alpaca_eval, arena_hard_v01/v2), AIME, MATH-500, BFCL v3, Swiss AI Charter Alignment, o(r)bench, and system-prompt adherence (RealGuardrails: S-IFEval, TensorTrust, S-RuLES) |
-| `best-of-k` | `tasks_best_of_k.txt` | 8 | Multi-repeat/self-consistency suite for math and code, with mean@k, majority-vote, and pass@k metrics |
+| `best-of-k` | `tasks_best_of_k.txt` | 7 | Multi-repeat/self-consistency suite for math and code, with mean@k, majority-vote, and pass@k metrics |
 | `gpt` | `tasks_gpt.txt` | 3 | Experimental AlpacaEval and Arena-Hard path for a future OpenAI GPT judge type in the Swiss-AI harness |
 | `multi-lingual` | `tasks_multilingual.txt` | 12 | Multilingual-only subset (global_mmlu, mgsm, hellaswag_multilingual, include, cultural_bench, multi-if, aya_redteaming, ...) |
 | `apertus-previous` | `tasks_english.txt` | 19 | Previous (Apertus 1.0) English benchmark suite |
@@ -90,12 +90,12 @@ The launcher selects a benchmark suite from its first positional argument (`<mod
 
 | Mode | Tasks | Description |
 |------|-------|-------------|
-| `olmo-easy` | 21 tasks | Base Easy Suite: perplexity/BPB-style evaluation (mmlu, hellaswag, arc, etc.) |
-| `olmo-main` | 23 tasks | Base Main Suite: generation + MC (gsm8k_cot, humaneval, drop, etc.) |
+| `olmo-easy` | 17 tasks | Base Easy Suite: perplexity/BPB-style evaluation (mmlu, hellaswag, arc, etc.) |
+| `olmo-main` | 21 tasks | Base Main Suite: generation + MC (gsm8k_cot, humaneval, drop, etc.) |
 | `olmo-heldout` | 2 tasks | Held-out Suite: mmlu_pro, bbh |
 | `olmo-safety` | 4 tasks | Safety Suite: harmbench, toxigen, wmdp, bbq |
 | `olmo-longcontext` | 1 task | Long-Context: RULER (8192 tokens) |
-| `olmo-complete` | 30 tasks | Union of all above (excludes long-context), deduplicated |
+| `olmo-complete` | 24 tasks | Curated combined suite (excludes long-context; see the task file for intentionally omitted tasks) |
 
 Each mode maps to a task list and a metric config (`*_main_table.txt`) in the same directory. OLMo3 modes log to a per-mode W&B project (the base `WANDB_PROJECT` with a `-olmo-<suite>` suffix, e.g. `swissai-evals-test-olmo-easy`); the `single` mode appends `-single`.
 
@@ -136,9 +136,15 @@ bash scripts/launch_evaluations.sh <mode>
 | `--max-retries N` | Retry waves for missing tasks (default: 1); retry chunk size is halved |
 | `--failure-policy <resume\|fail-fast>` | `resume` scans existing results, runs missing tasks, retries, and aggregates (default); `fail-fast` runs the full suite once |
 | `--force-tasks <patterns>` | Comma-separated task substrings to evaluate again even when results exist |
+| `--task-file <path>` / `--table-metrics <path>` | Task and main-metric files for `custom` mode |
+| `--logs-root <path>` | Override the evaluation output root |
+| `--wandb-entity <name>` / `--wandb-project <name>` | Override the W&B destination |
+| `--account <name>` | Override the Slurm account used by submitted jobs |
+| `--merge-only` | Skip evaluation and aggregate the already completed task outputs |
+| `--debug` | Resolve and print the orchestration plan without submitting jobs |
 | `--limit N` | Limit number of samples per task (forwarded as `--limit` to lm-eval-harness; default: no limit). Useful for quick sanity checks. |
 | `--megatron-iter <iter>` | For Megatron-LM checkpoints, the iteration to evaluate (e.g. `8926`); defaults to `latest`. Exported as `CKPT_ITERATION`. |
-| `--harness-branch B` | Resolve lm-evaluation-harness from a branch, tag, or full commit SHA (default: repository HEAD); the resolved commit is shared by every chunk |
+| `--harness-branch B` | Resolve lm-evaluation-harness from a branch, tag, or full commit SHA in the task-selected repository (default: repository HEAD); the resolved commit is shared by every chunk |
 | `--reservation <name>` | Submit evaluation jobs and any automatically launched judge under this SLURM reservation. |
 | `--judge <none\|auto\|preset>` | Judge-model control for LLM-as-a-judge tasks. `none` (default) disables auto-launch; `auto` scans the task list using the mapping in `scripts/launch_judge.py`; a preset name (e.g. `qwen3.5-27b`, `llama-3.3-70b`) launches that judge. |
 | `--judge-args <str>` | Extra arguments forwarded to `scripts/launch_judge.py` |
@@ -152,7 +158,7 @@ bash scripts/launch_evaluations.sh <mode>
 | `--log-length-metrics` | Aggregate `response_length_*` / `thinking_length_*` into results and W&B. `thinking_format_*` is aggregated regardless. |
 
 > [!TIP]
-> Inference hyperparameters such as batch size (`BS`), `MAX_LENGTH`, `MAX_NEW_TOKENS`, and `SIZE` (model size in billions, for parallelism) are not exposed as launcher flags — set them as environment variables consumed by `evaluate.sbatch` (see [SBATCH Scripts](#sbatch-scripts)).
+> Inference hyperparameters such as batch size (`BS`), `MAX_LENGTH`, and `MAX_NEW_TOKENS` are not exposed as launcher flags — set them as environment variables consumed by `evaluate.sbatch` (see [SBATCH Scripts](#sbatch-scripts)). `SIZE` is retained as informational/legacy metadata. vLLM keeps the compatible TP=4/DP=1 topology unless the model name unambiguously identifies a model below 30B, in which case it uses TP=1/DP=4; explicit topology variables always win.
 
 ### Judge Model Launching
 
@@ -173,7 +179,7 @@ The task-to-judge mapping is defined by `TASK_TO_JUDGE` in `scripts/launch_judge
 | `harmbench` | `cais-llama-harmbench` |
 | `realtoxicitypromptsllama` | `llama-guard` |
 
-Automatic judge launching runs on the login node, so the `python3` used to invoke the evaluation launcher must have the [Swiss AI Model Launch](https://github.com/swiss-ai/model-launch) (`swiss_ai_model_launch`) package installed. With the `model-launch/` checkout included in this repository:
+Automatic judge launching runs on the login node, so the `python3` used to invoke the evaluation launcher must have the [Swiss AI Model Launch](https://github.com/swiss-ai/model-launch) (`swiss_ai_model_launch`) package installed. With a local `model-launch/` checkout:
 
 ```bash
 python3 -m pip install -e ./model-launch
@@ -235,15 +241,13 @@ bash scripts/launch_evaluations.sh olmo-safety \
   --script runners/hf_eval_multiple_other_models.sh --chunk-size 4
 ```
 
-#### Deprecated option:
-
-| `--bos` | Prepend BOS token (deprecated: previously for Apertus models, now automatically infered from chat temlate) |
+`--bos` explicitly prepends a BOS token. Normally leave it unset unless the model requires it; chat-template detection does not infer this option.
 
 ---
 
 ## Graceful / Resumable Launcher
 
-Graceful execution is the default behavior of `scripts/launch_evaluations.sh`. The launcher scans existing harness outputs, evaluates only missing tasks, and uploads one aggregate W&B run. The old `scripts/launch_evaluations_gracefuly.sh` command remains as a deprecated compatibility wrapper.
+Graceful execution is the default behavior of `scripts/launch_evaluations.sh`. The launcher scans existing harness outputs, evaluates only missing tasks, and uploads one aggregate W&B run.
 
 ```bash
 bash scripts/launch_evaluations.sh custom \
@@ -268,7 +272,7 @@ Use `--failure-policy fail-fast` to recover the original single-job behavior. `-
 
 ## Task Configuration
 
-Task lists are plain text files in `configs/apertus/...` with one task name per line. Comments (`#`) and blank lines are supported:
+Task lists are plain text files under `configs/` (principally `configs/apertus/` and `configs/olmo/`) with one task name per line. Comments (`#`) and blank lines are supported:
 
 ```
 # Math
@@ -310,7 +314,7 @@ export TABLE_METRICS=./configs/my_suite_main_table.txt
 bash scripts/launch_evaluations.sh olmo-complete --model my-model
 ```
 
-Available task names can be found in `lm_eval_reference/tasks/` or by running `lm_eval --tasks list`.
+Available task names can be found in the selected lm-evaluation-harness checkout under `lm_eval/tasks/` or by running `lm_eval --tasks list` in the prepared evaluation environment.
 
 ---
 
@@ -372,8 +376,9 @@ template on (the reasoning tokens live in it). Any granular flag you pass overri
 
 Thinking runs also change **generation**: sampling is forced (`do_sample=true`,
 `THINK_TEMPERATURE=0.6`, `THINK_TOP_P=0.95` — reasoning degrades under greedy), and the default
-generation budget rises to 8192 tokens, floored at each task's own YAML `max_gen_toks` (AIME keeps
-its 32768). Override via the `THINK_*` / `MAX_NEW_TOKENS` env vars (see
+generation budget rises to 8192 tokens for tasks that do not define `max_gen_toks`. A task's own
+YAML value always takes priority (so AIME keeps its 32768). Override the fallback via the
+`THINK_*` / `MAX_NEW_TOKENS` env vars (see
 [SBATCH Scripts](#sbatch-scripts)); `NOTHINK_TEMPERATURE` enables the same sampling for no-think
 ablations.
 
@@ -604,7 +609,7 @@ Results are automatically uploaded to W&B after evaluation completes (or after a
 
 - **`main_results`** table: summary metrics specified in the `*_main_table.txt` config
 - **Flat metrics**: all task metrics logged as `task_name/metric_name`
-- **`eval_duration`**: wall-clock time for the evaluation
+- **`eval_duration`**: wall-clock time for a direct/fail-fast evaluation; chunk aggregation uses `EVAL_DURATION` when supplied and otherwise records `0`
 
 Because *every* flat metric is uploaded — not just the `*_main_table.txt` subset — the
 [thinking metrics](#thinking--reasoning-metrics) reach W&B as `task_name/thinking_format_correct`
@@ -743,7 +748,7 @@ python make_table.py \
 
 Primary SLURM job script for HuggingFace-compatible model evaluation.
 
-**Resources**: 1 node, 4 GPUs, 288 CPUs, 460GB memory, 12h time limit.
+**Resources**: 1 node, 4 GPUs, 200 CPUs, 460GB memory, 11h59m time limit.
 
 **Positional arguments**: `<model_path> <name>`
 
@@ -751,30 +756,34 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TASKS` | `configs/apertus/tasks_constrained.txt` | Task list file or comma-separated task names |
-| `TABLE_METRICS` | `configs/apertus/tasks_constrained_main_table.txt` | Metrics for W&B summary table |
-| `LM_EVAL_BACKEND` | `hf` | Backend: `hf` (accelerate), `vllm`, `sglang`, `megatron_lm`, `openai` (OpenAI-compatible API) |
+| `TASKS` | `configs/apertus/tasks_default.txt` | Task list file or comma-separated task names |
+| `TABLE_METRICS` | `configs/apertus/tasks_default_main_table.txt` | Metrics for W&B summary table |
+| `LM_EVAL_BACKEND` | `vllm` | Backend: `hf` (accelerate), `vllm`, `sglang`, `megatron_lm`, `openai` (OpenAI-compatible API) |
 | `API_BASE_URL` | (unset) | `openai` backend only, **required**: the OpenAI-compatible endpoint. Bare host / `/v1` root / full endpoint URL all accepted. |
 | `API_MODEL_NAME` | same as model | `openai` backend only: the `model` field sent in requests, when the server registers the model under a different id |
 | `API_NUM_CONCURRENT` | `8` | `openai` backend only: concurrent requests (batch size is pinned to 1; this is the throughput knob) |
 | `API_MAX_RETRIES` | `3` | `openai` backend only: retries per failed request |
 | `OPENAI_API_KEY` | `scripts/openai_api_key.txt`, then `CSCS_SERVING_API` | OpenAI GPT judge or `openai` backend bearer token |
-| `LM_EVAL_HARNESS_BRANCH` | repository default | Branch/ref installed from the task-selected harness repository |
-| `APPLY_CHAT_TEMPLATE` | `false` | Apply chat template for instruct models |
+| `LM_EVAL_HARNESS_BRANCH` | repository HEAD | Branch, tag, or commit installed from the task-selected harness repository |
+| `APPLY_CHAT_TEMPLATE` | `true` | Apply chat template for instruct models |
 | `TOKENIZER` | same as model | Custom tokenizer path |
 | `BOS` | `false` | Prepend BOS token |
 | `BS` | `auto:20` | Batch size |
-| `SIZE` | `1` | Model size in billions (for model parallelism) |
-| `MAX_LENGTH` | `4096` | Maximum input sequence length |
-| `MAX_NEW_TOKENS` | `2048` (`8192` with thinking) | Generation-budget *floor*: raised to the largest per-task YAML `max_gen_toks` (e.g. AIME's 32768), never lowered. Thinking raises the default; an explicit value always wins. |
+| `SIZE` | `1` | Informational/legacy model-size metadata; topology inference uses the model name/path instead |
+| `MAX_LENGTH` | (backend/model default) | Optional total context limit, passed as the backend-native setting (`max_model_len` for vLLM/SGLang, `seq_length` for Megatron, `max_length` for HF/API) |
+| `MAX_NEW_TOKENS` | `8192` with thinking; otherwise unused | Model-level generation fallback for thinking runs. Task YAML `max_gen_toks` always takes priority; an explicit value overrides the fallback. HF has no model-level override and therefore keeps its native fallback for tasks without a value. |
+| `VLLM_TP_SIZE` / `VLLM_DP_SIZE` | auto | Explicit vLLM topology; either value can be omitted and is derived from the four allocated GPUs. Both values must multiply to 4. |
+| `VLLM_AUTO_PARALLELISM` | `true` | With no explicit topology, use TP=1/DP=4 only when the model name unambiguously identifies `<30B`; otherwise retain TP=4/DP=1. |
+| `VLLM_MEMORY_FRACTION` | `0.8` | vLLM `gpu_memory_utilization` / SGLang `mem_fraction_static` |
+| `MEGATRON_MICRO_BATCH_SIZE` | numeric `BS`, otherwise `1` | Megatron micro-batch override. A numeric `BS` is forwarded automatically; `BS=auto:*` cannot be inferred by the adapter and falls back to 1. |
 | `THINK_TEMPERATURE` / `THINK_TOP_P` | `0.6` / `0.95` | Sampling for thinking runs (`do_sample=true` is forced — reasoning degrades under greedy) |
 | `THINK_REPETITION_PENALTY` | (unset) | Optional knob against degenerate looping in thinking runs (e.g. `1.05`) |
 | `NOTHINK_TEMPERATURE` / `NOTHINK_TOP_P` | (unset) / `0.95` | Optional sampling for NO-think runs (greedy-vs-sampling ablations); inert unless `NOTHINK_TEMPERATURE` is set |
-| `LIMIT` | (unset) | Limit number of samples per task |
+| `HARNESS_LIMIT` | (unset) | Limit number of samples per task (set by launcher flag `--limit`) |
 | `NUM_FEWSHOT` | (unset) | Global few-shot override |
 | `EVAL_ENV_MANIFEST` | required | Immutable base-environment and harness-overlay paths produced by `prepare_eval_env.sbatch` |
 | `EVAL_CHUNKS_FILE` | (unset) | One comma-separated task chunk per line; indexed by `SLURM_ARRAY_TASK_ID` |
-| `LOGS_ROOT` | `/capstor/.../eval-logs` | Root directory for evaluation logs |
+| `LOGS_ROOT` | `$SCRATCH/eval_logs_start/` | Root directory for evaluation logs |
 | `WANDB_ENTITY` | `apertus` | W&B entity |
 | `WANDB_PROJECT` | `swissai-evals-test` | W&B project |
 | `ENABLE_THINKING` | `false` | Chat-template argument: whether the model reasons. Emitted for `hf` **only when set explicitly**. |
@@ -784,7 +793,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `TRACK_THINKING_METRICS` | (unset → derive) | `true`/`false` to force the thinking metrics on/off |
 | `LOG_LENGTH_METRICS` | `false` | Add `--log_length_metrics` (aggregates `response_length_*` / `thinking_length_*`) |
 
-The script auto-detects RULER long-context tasks and adjusts `MAX_LENGTH` and `max_model_len` accordingly.
+The script auto-detects RULER long-context tasks, adds 600 tokens of engine headroom, and passes the resulting limit using the selected backend's native argument.
 
 Requesting any thinking metric with `LM_EVAL_BACKEND=megatron_lm` aborts the job: the harness has no
 reasoning-token support for that backend, so it would otherwise record nothing silently. See
@@ -811,9 +820,9 @@ source runners/hf_base_runner.sh "SFT models"
 
 ### Model Registry
 
-See `configs/models.md` for the full list of available models with their HF paths, local checkpoint paths, and required special flags. Key model families:
+See `configs/models.md` for a reference list of models with their HF paths, local checkpoint paths, and required special flags. Key model families:
 
-- **Apertus** (1.0)
+- **Apertus** (1.0, 1.5, and aligned checkpoints)
 - **Meta Llama** (3.1, 3.3)
 - **OLMo** (2-1124, 2-0325, 3)
 - **Qwen** (2.5, 3)
@@ -827,8 +836,8 @@ The pipeline runs inside containers managed by enroot/pyxis on SLURM. The availa
 
 | Config | Base Image | Use Case |
 |--------|-----------|----------|
-| `env.toml` | Based on CSCS container image | Standard HF evals |
-| `env_vllm.toml` | CSCS base image + vLLM 0.16 built from source | vLLM evals |
+| `env.toml` | CSCS NGC PyTorch 25.12 image | Standard HF evals |
+| `env_vllm.toml` | CSCS vLLM 0.22.1 runtime image | vLLM and Megatron-LM evals |
 | `env_sglang.toml` | CSCS SGLang CUDA 13 image | SGLang evals |
 
 Evaluation dependencies use a shared two-tier cache under `${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}`:
@@ -854,7 +863,7 @@ cluster's scratch window is preferable.
 > **vLLM vs HF inference**: Generation task results (gsm8k, squadv2) may differ slightly between backends (for instruction-tuned models). Only compare results across models using the same backend. We recommend performing all evaluations with the `vllm` backend (default) to ensure reproducibility.
 - **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). With the chat template on, the harness renders the model's template client-side via the HF tokenizer — so the tokenizer must be resolvable (use `--tokenizer` when the served model name is not a pullable HF repo). `API_CHAT_ENDPOINT=true` switches to `/v1/chat/completions` (server-side template; generative tasks ONLY). Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Note the job still requests the resources declared in `evaluate.sbatch` even though no GPU is used.
 - **Megatron-LM**: To run Megatron-LM models natively, clone the [NVIDIA Megatron-LM repository](https://github.com/NVIDIA/Megatron-LM) into the evals-post-train directory (or change the location via the launch script).
-- **Time limits**: The default 12h SLURM limit applies to each chunk. Adjust `--chunk-size` to keep individual jobs below it and `--max-parallel` to control concurrent nodes.
+- **Time limits**: The default 11h59m SLURM limit applies to each chunk. Adjust `--chunk-size` to keep individual jobs below it and `--max-parallel` to control concurrent nodes.
 - **WANDB_API_KEY**: Must be available either as an environment variable or in `scripts/wandb_api_key.txt`.
 - **HF_TOKEN**: Must be available either as an environment variable or in  `scripts/hf_token.txt`.
 - **OPENAI_API_KEY**: Required for the optional `gpt` suite, either as an environment variable or in `scripts/openai_api_key.txt`.
@@ -870,7 +879,8 @@ The sbatch scripts support `hf`, `vllm`, `sglang`, `megatron_lm`, and `openai` b
 
 1. Add a new `elif` block in `evaluate.sbatch` at the `LM_EVAL_BACKEND` dispatch section
 2. Set appropriate `COMMON_MODEL_ARGS` for the new backend
-3. Add any required pip install commands to `INSTALL_CMD`
+3. Add backend-independent Python dependencies to `requirements/eval-runtime.txt`; provide backend runtimes through the corresponding container configuration
+4. Include the new backend/container identity in `scripts/build_eval_env.sh` fingerprinting if it needs distinct cached environments
 
 ### Adding a New Task
 
@@ -879,7 +889,7 @@ If the task exists in lm-eval-harness:
 2. Add the `task_name/metric_name` entry to the corresponding `*_main_table.txt`
 
 If you need a custom task:
-1. Create a YAML task config in `lm_eval_reference/tasks/your_task/`
+1. Create a YAML task config in `lm_eval/tasks/your_task/` in the selected harness repository
 2. Register it following the [lm-eval-harness task guide](https://github.com/EleutherAI/lm-evaluation-harness/blob/main/docs/task_guide.md)
 
 ### Customizing Sample Upload
@@ -900,42 +910,25 @@ The binary metrics used for correctness classification are defined in `BINARY_ME
 
 ---
 
-### Task Separation (Legacy)
-
-The `swissai_eval` hierarchy and approximate time distribution:
-
-```
-swissai_eval (100%)
-├── english  (~46%)
-│   ├── english_pt1 (~10%)
-│   └── english_pt2 (~36%)
-└── multilingual (~54%)
-    ├── multilingual_pt1 (~8%)
-    └── multilingual_pt2 (~46%)
-```
-
-Rule of thumb for fitting within the 12h limit: ensure `2.5 * percentage * model_size_B < 100`.
-
----
-
 ## Repository Structure
 
 ```
 evals/
 ├── configs/                         # Task lists and model registry
-│   ├── _*.txt                       # actual task lists
-│   ├── _*_main_table.txt            # Corresponding metric specs for W&B summary tables
 │   ├── models.md                    # Model registry with paths and special flags
-│   ├── apertus/                     # Apertus task lists (english, multilingual, etc.)
-│   ├── olmo/                        # OLMo3 benchmark suites (easy, main, heldout, safety, longcontext, complete)
+│   ├── apertus/                     # Apertus task lists and W&B metric specs
+│   ├── olmo/                        # OLMo3 task lists and W&B metric specs
+│   └── eval_export/                 # Export schema mappings
 ├── scripts/
 │   ├── launch_evaluations.sh  # Main launcher (recommended entry point)
-│   ├── launch_evaluations_gracefuly.sh # Deprecated compatibility wrapper
 │   ├── evaluation_orchestrator.sh # Resumable chunk arrays, retries, aggregation
+│   ├── evaluation_controller.sbatch # CPU controller submitted after each chunk wave
 │   ├── prepare_eval_env.sbatch # Builds/reuses the two-tier environment
+│   ├── build_eval_env.sh      # Fingerprinted base environment and harness overlay
+│   ├── eval_state.py          # Task normalization, result scanning, and chunking
 │   ├── launch_judge.py        # Launches judge models for LLM-as-a-judge tasks
 │   ├── evaluate.sbatch        # SLURM job script for HF/vLLM model evaluation
-│   ├── aggregate_splits.sbatch   # Aggregation job for chunked evaluations
+│   ├── aggregate_chunks.sbatch # Aggregation job for chunked evaluations
 │   └── alignment/                   # Python package for W&B upload and data handling
 │       ├── wandb_alignment_utils.py # Core upload logic with stratified sample selection
 │       ├── update_wandb_alignment.py       # Per-model W&B upload script
@@ -950,8 +943,8 @@ evals/
 │   ├── hf_eval_multiple_other_base_models.sh
 │   ├── hf_eval_multiple_apertus_models.sh
 │   └── hf_eval_multiple_apertus_base_models.sh
-├── containers/                      # Container specs (Docker, env.toml for enroot/pyxis)
-│   ├── Dockerfile                   # CUDA 9.0+PTX, vLLM, FlashAttention-3
-│   ├── env.toml                     # Standard container config
-└── └── env_vllm.toml                # VLLM-based container config
+└── containers/                      # Enroot/Pyxis runtime configurations
+    ├── env.toml                     # Standard HF/OpenAI container config
+    ├── env_vllm.toml                # vLLM/Megatron container config
+    └── env_sglang.toml              # SGLang container config
 ```

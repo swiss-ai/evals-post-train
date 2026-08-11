@@ -9,7 +9,6 @@
 # every sampled solution. Use HARNESS_LIMIT for smoke tests.
 #
 # Math — answer extraction, repeats=8
-aime
 aime24
 aime25
 # Math problems — repeats=4 to avoid overly long run-times

@@ -10,14 +10,14 @@
 #SBATCH --partition=normal
 #SBATCH --time=00:30:00
 
-# aggregate_splits.sbatch - Merge completed chunk outputs and upload to W&B
-# Usage: EVAL_DIRS_FILE=<file> sbatch aggregate_splits.sbatch <model> <name>
+# aggregate_chunks.sbatch - Merge completed chunk outputs and upload to W&B
+# Usage: EVAL_DIRS_FILE=<file> sbatch aggregate_chunks.sbatch <model> <name>
 
 set -e
 echo "START TIME: $(date)"
 
 if (( $# != 2 )); then
-    echo "Usage: sbatch aggregate_splits.sbatch <model> <name>"
+    echo "Usage: sbatch aggregate_chunks.sbatch <model> <name>"
     exit 1
 fi
 MODEL=$1
