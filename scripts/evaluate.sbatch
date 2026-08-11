@@ -43,7 +43,7 @@ usage() {
     echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
     echo " OpenAI-compatible API backend (LM_EVAL_BACKEND=openai; no model is loaded in the job):"
     echo "  API_BASE_URL: Endpoint to evaluate against (default: https://api.swissai.svc.cscs.ch/v1). Accepts a bare host, a /v1 root, or a full /v1/(chat/)completions URL."
-    echo "  API_CHAT_ENDPOINT: 'true' to use /v1/chat/completions (server-side chat template; generative tasks ONLY). Default: /v1/completions, which serves mixed suites."
+    echo "  API_CHAT_ENDPOINT: 'true' to use /v1/chat/completions (generative tasks ONLY). For api.openai.com this selects lm-eval's OpenAI adapter; other hosts use the local-compatible adapter. Default: /v1/completions."
     echo "  API_MODEL_NAME: 'model' field sent in requests (default: the <model> positional argument)."
     echo "  API_NUM_CONCURRENT: Concurrent requests (default: 8)."
     echo "  API_MAX_RETRIES: Retries per request (default: 3)."
@@ -344,7 +344,13 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     API_CHAT_ENDPOINT=${API_CHAT_ENDPOINT:-false}
     if [[ "$API_CHAT_ENDPOINT" == "true" ]]; then
         [[ $APPLY_CHAT_TEMPLATE = true ]] || die "API_CHAT_ENDPOINT=true requires the chat template (chat/completions takes messages)."
-        API_LM_EVAL_MODEL="local-chat-completions"
+        if [[ "$API_BASE_URL" == "https://api.openai.com" || "$API_BASE_URL" == https://api.openai.com/* ]]; then
+            # The provider-specific adapter emits max_completion_tokens and removes parameters
+            # unsupported by GPT-5-family models. The generic local adapter still emits max_tokens.
+            API_LM_EVAL_MODEL="openai-chat-completions"
+        else
+            API_LM_EVAL_MODEL="local-chat-completions"
+        fi
         API_ENDPOINT_SUFFIX="chat/completions"
     else
         API_LM_EVAL_MODEL="local-completions"
