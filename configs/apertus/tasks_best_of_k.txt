@@ -14,9 +14,7 @@ aime24
 minerva_math500_self_consistency
 
 aime25
-minerva_math500_self_consistency
-# Grade-school math word problems — repeats=32
-gsm8k_cot_zeroshot_self_consistency
+# Math problems — repeats=4 to avoid overly long run-times
 hendrycks_math
 # Code — execute unit tests, repeats=8 (pass@1 == mean@8; no majority vote)
 mbpp_plus_instruct_self_consistency

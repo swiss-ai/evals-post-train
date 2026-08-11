@@ -12,9 +12,10 @@ aime24/exact_match,pass@8
 aime25/exact_match,mean@8
 aime25/exact_match,maj@8
 aime25/exact_match,pass@8
-minerva_math500_self_consistency/exact_match,mean@8
-minerva_math500_self_consistency/exact_match,maj@8
-minerva_math500_self_consistency/exact_match,pass@8
+hendrycks_math/math_verify
+minerva_math500_self_consistency/math_verify,mean@4
+minerva_math500_self_consistency/math_verify,maj@4
+minerva_math500_self_consistency/math_verify,pass@4
 # Grade-school math word problems — repeats=32
 gsm8k_cot_zeroshot_self_consistency/exact_match,mean@32
 gsm8k_cot_zeroshot_self_consistency/exact_match,maj@32
