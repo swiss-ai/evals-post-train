@@ -288,6 +288,7 @@ fi
 export OMP_NUM_THREADS=$(( 8 * $GPUS_PER_NODE ))
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export VLLM_DISABLE_COMPILE_CACHE=1
+export VLLM_USE_FLASHINFER_SAMPLER=0 # might crash on some nodes
 
 #export VLLM_TORCH_COMPILE=0
 #export NCCL_P2P_DISABLE=1
@@ -390,18 +391,23 @@ elif [[ -n "${NOTHINK_TEMPERATURE:-}" ]]; then
     echo "No-think sampling: do_sample=true temperature=$NOTHINK_TEMPERATURE top_p=$NOTHINK_TOP_P"
 fi
 
+MAX_BATCH_SIZE=${MAX_BATCH_SIZE:-""}
+
 COMMON_EVAL_ARGS=(
 	--trust_remote_code
 	--batch_size $BS
 	--tasks $TASKS
 	--output_path $HARNESS_EVAL_DIR
-	--max_batch_size 32
 	--log_samples
 	--write_out
 	--confirm_run_unsafe_code
-    # --cache_requests true - causes problems for long model names due to file name length limits
+    --cache_requests true # was disabled until recently, but we can enable it because the upstream file length problem was patched
     --gen_kwargs "$GEN_KWARGS"
 )
+
+if [[ -n "$MAX_BATCH_SIZE" ]]; then
+    COMMON_EVAL_ARGS+=(--max_batch_size "$MAX_BATCH_SIZE")
+fi
 
 if [[ -n "${HARNESS_LIMIT}" ]]; then
     COMMON_EVAL_ARGS+=(--limit $HARNESS_LIMIT)
