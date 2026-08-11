@@ -83,7 +83,7 @@ JUDGE_PRESETS = {
         ),
     },
     "cais-llama-harmbench": {
-        "served_model_name": "cais/HarmBench-Llama-2-13b-cls",
+        "served_model_name": "cais/HarmBench-Llama-2-13b-cls ",
         "framework": "vllm",
         "nodes": 1,
         "time": "04:00:00",
