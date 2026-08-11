@@ -634,6 +634,12 @@ echo "Time taken for installation and evaluation: ${DURATION} seconds ($(($DURAT
 # Goodbye.
 echo "Evaluation finished"
 
+# Record the requested tasks so the launcher can tell what ran without inferring it from the
+# results JSON. Tag tasks (e.g. lambada) never emit their own key there, so name-matching alone
+# can never see them. Written only on success -- else an entry left by a crashed run would be read
+# as "done" and the task would never be retried.
+printf '%s\n' "${TASKS//,/$'\n'}" > "$HARNESS_EVAL_DIR/requested_tasks.txt"
+
 if (( NUM_SPLITS > 1 )); then
     # When running as a split job, write a marker file with the eval dir path
     # so the aggregation job can find all split results
