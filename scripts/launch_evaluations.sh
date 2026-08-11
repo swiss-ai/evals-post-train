@@ -44,8 +44,8 @@
 #                          Note: tasks with num_fewshot=0 in YAML are never overridden.
 #                          OLMo3 uses 5-shot for most MC tasks; pass --num-fewshot 5 to match.
 #   --backend <backend>  - lm-eval backend: hf, vllm, sglang, megatron_lm, openai (default: from sbatch script)
-#   --api-base-url <url> - OpenAI-compatible endpoint for the 'openai' backend (required with it,
-#                          unless API_BASE_URL is exported). Bare host, /v1 root, or full endpoint URL.
+#   --api-base-url <url> - OpenAI-compatible endpoint for the 'openai' backend (default:
+#                          https://api.swissai.svc.cscs.ch/v1). Bare host, /v1 root, or full endpoint URL.
 #   --api-model-name <n> - 'model' field sent in API requests (default: the --model value)
 #   --splits K           - Split tasks across K parallel nodes per model
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
@@ -113,6 +113,7 @@ BOS_FLAG=""
 BACKEND_FLAG=""
 API_BASE_URL_FLAG=""
 API_MODEL_NAME_FLAG=""
+DEFAULT_API_BASE_URL="https://api.swissai.svc.cscs.ch/v1"
 FEWSHOT_FLAG=""
 # Keep an ambient HARNESS_LIMIT (the graceful launcher has no --limit flag, so callers export
 # it); blanking it here would ship the cleared value into the job. --limit still overrides.
@@ -257,16 +258,14 @@ if [[ "$THINKING_TOUCHED" == "true" && ( "$EFFECTIVE_BACKEND" == "megatron_lm" |
     exit 1
 fi
 
-# The openai backend needs an endpoint; fail here, not after scheduling.
-if [[ "$EFFECTIVE_BACKEND" == "openai" && -z "${API_BASE_URL_FLAG:-${API_BASE_URL:-}}" ]]; then
-    echo "Error: --backend openai requires --api-base-url <url> (or an exported API_BASE_URL)"
-    exit 1
-fi
 if [[ -n "$API_BASE_URL_FLAG" || -n "$API_MODEL_NAME_FLAG" ]] && [[ "$EFFECTIVE_BACKEND" != "openai" ]]; then
     echo "Error: --api-base-url/--api-model-name only apply with --backend openai"
     exit 1
 fi
-[[ -n "$API_BASE_URL_FLAG"   ]] && export API_BASE_URL="$API_BASE_URL_FLAG"
+if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
+    # Precedence: CLI flag > exported environment value > Swiss-AI service default.
+    export API_BASE_URL="${API_BASE_URL_FLAG:-${API_BASE_URL:-$DEFAULT_API_BASE_URL}}"
+fi
 [[ -n "$API_MODEL_NAME_FLAG" ]] && export API_MODEL_NAME="$API_MODEL_NAME_FLAG"
 
 if [[ "$THINKING_METRICS_ASKED" == "true" ]]; then

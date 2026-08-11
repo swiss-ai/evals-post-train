@@ -42,10 +42,10 @@ bash scripts/launch_evaluations.sh olmo-easy --model /capstor/store/../apertus-.
 # Launch with the SGLang backend
 bash scripts/launch_evaluations.sh olmo-easy --model /capstor/store/../apertus-.../checkpoints/ --backend sglang
 
-# Evaluate against an already-running OpenAI-compatible endpoint (vLLM serve, CSCS serving, ...)
-# instead of loading the model in the job
-bash scripts/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B \
-  --backend openai --api-base-url http://nid001234:8000
+# Evaluate through the default Swiss-AI OpenAI-compatible endpoint instead of loading the model.
+# The full CSCS catalog id is sent as the API's model field; the HF tokenizer id is inferred.
+bash scripts/launch_evaluations.sh single --task mmlu \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --backend openai
 
 # Evaluate a base model with 5-shot and easy eval set (matching OLMo3 technical report settings)
 bash scripts/launch_evaluations.sh olmo-easy --model Qwen/Qwen2.5-7B --num-fewshot 5
@@ -124,10 +124,10 @@ bash scripts/launch_evaluations.sh <mode>
 | `--task <task>` | Task name(s) for `single` mode (single task or comma-separated list) |
 | `--chat-template` | Force enable chat template (auto-detected for Instruct/Chat/SFT/DPO/-it/-aligned models) |
 | `--no-chat-template` | Force disable chat template |
-| `--tokenizer <path>` | Custom tokenizer (default: same as model) |
+| `--tokenizer <path>` | Custom tokenizer (default: same as model; for routed OpenAI API ids `<namespace>/<org>/<model>`, `<org>/<model>` is inferred) |
 | `--num-fewshot N` | Override num_fewshot globally. Tasks with explicit `num_fewshot: 0` in their YAML are never overridden. OLMo3 paper uses 5-shot for most MC tasks. |
 | `--backend <hf\|vllm\|sglang\|megatron_lm\|openai>` | Inference backend (default: from sbatch script). `vllm` recommended for in-job inference; `openai` evaluates against an already-running OpenAI-compatible endpoint instead of loading the model. |
-| `--api-base-url <url>` | Endpoint for the `openai` backend (required with it). Accepts a bare host (`http://host:8000`), a `/v1` root, or a full `/v1/(chat/)completions` URL. |
+| `--api-base-url <url>` | Endpoint for the `openai` backend (default: `https://api.swissai.svc.cscs.ch/v1`). Accepts a bare host, a `/v1` root, or a full `/v1/(chat/)completions` URL. |
 | `--api-model-name <name>` | `model` field sent in API requests (default: the `--model` value) |
 | `--splits K` | Split task list across K parallel SLURM nodes per model (auto-clamped to the task count) |
 | `--limit N` | Limit number of samples per task (forwarded as `--limit` to lm-eval-harness; default: no limit). Useful for quick sanity checks. |
@@ -773,14 +773,14 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `TASKS` | `configs/apertus/tasks_constrained.txt` | Task list file or comma-separated task names |
 | `TABLE_METRICS` | `configs/apertus/tasks_constrained_main_table.txt` | Metrics for W&B summary table |
 | `LM_EVAL_BACKEND` | `hf` | Backend: `hf` (accelerate), `vllm`, `sglang`, `megatron_lm`, `openai` (OpenAI-compatible API) |
-| `API_BASE_URL` | (unset) | `openai` backend only, **required**: the OpenAI-compatible endpoint. Bare host / `/v1` root / full endpoint URL all accepted. |
+| `API_BASE_URL` | `https://api.swissai.svc.cscs.ch/v1` | `openai` backend only: the OpenAI-compatible endpoint. Bare host / `/v1` root / full endpoint URL all accepted. |
 | `API_MODEL_NAME` | same as model | `openai` backend only: the `model` field sent in requests, when the server registers the model under a different id |
 | `API_NUM_CONCURRENT` | `8` | `openai` backend only: concurrent requests (batch size is pinned to 1; this is the throughput knob) |
 | `API_MAX_RETRIES` | `3` | `openai` backend only: retries per failed request |
 | `OPENAI_API_KEY` | `scripts/openai_api_key.txt`, then `CSCS_SERVING_API` | OpenAI GPT judge or `openai` backend bearer token |
 | `LM_EVAL_HARNESS_BRANCH` | repository default | Branch/ref installed from the task-selected harness repository |
 | `APPLY_CHAT_TEMPLATE` | `false` | Apply chat template for instruct models |
-| `TOKENIZER` | same as model | Custom tokenizer path |
+| `TOKENIZER` | same as model | Custom tokenizer path. For an OpenAI backend model named `<namespace>/<org>/<model>`, defaults to `<org>/<model>`. |
 | `BOS` | `false` | Prepend BOS token |
 | `BS` | `auto:20` | Batch size |
 | `SIZE` | `1` | Model size in billions (for model parallelism) |
@@ -857,7 +857,7 @@ Dependencies (lm-eval-harness, vLLM, etc.) are installed at runtime inside the c
 
 > [!NOTE]
 > **vLLM vs HF inference**: Generation task results (gsm8k, squadv2) may differ slightly between backends (for instruction-tuned models). Only compare results across models using the same backend. We recommend performing all evaluations with the `vllm` backend (default) to ensure reproducibility.
-- **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). With the chat template on, the harness renders the model's template client-side via the HF tokenizer — so the tokenizer must be resolvable (use `--tokenizer` when the served model name is not a pullable HF repo). `API_CHAT_ENDPOINT=true` switches to `/v1/chat/completions` (server-side template; generative tasks ONLY). Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Note the job still requests the resources declared in `evaluate.sbatch` even though no GPU is used.
+- **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (the Swiss-AI service by default) instead of loading the model inside the job. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo. The endpoint model name is passed unchanged as the request's `model` field. Requests are sent as text (`tokenized_requests=False`), but loglikelihood tasks still need an HF tokenizer locally to determine token boundaries. For routed names `<namespace>/<org>/<model>` (for example `CSCS-Inference/swiss-ai/Apertus-v1.5-8B` or `RCP-AIaaS/openai/gpt-oss-120b`), the launcher derives tokenizer `<org>/<model>`; use `--tokenizer` for other non-HF endpoint names. `API_CHAT_ENDPOINT=true` switches to `/v1/chat/completions` (server-side template; generative tasks ONLY). Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Note the job still requests the resources declared in `evaluate.sbatch` even though no GPU is used.
 - **Megatron-LM**: To run Megatron-LM models natively, clone the [NVIDIA Megatron-LM repository](https://github.com/NVIDIA/Megatron-LM) into the evals-post-train directory (or change the location via the launch script).
 - **Time limits**: The default 12h SLURM limit works for most evaluations. For large suites on large models, use `--splits` to parallelize.
 - **WANDB_API_KEY**: Must be available either as an environment variable or in `scripts/wandb_api_key.txt`.

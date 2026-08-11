@@ -42,7 +42,7 @@ usage() {
 	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: hf). - options are: hf, vllm, sglang, megatron_lm, openai"
     echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
     echo " OpenAI-compatible API backend (LM_EVAL_BACKEND=openai; no model is loaded in the job):"
-    echo "  API_BASE_URL: Endpoint to evaluate against. Required. Accepts a bare host (http://host:8000), a /v1 root, or a full /v1/(chat/)completions URL."
+    echo "  API_BASE_URL: Endpoint to evaluate against (default: https://api.swissai.svc.cscs.ch/v1). Accepts a bare host, a /v1 root, or a full /v1/(chat/)completions URL."
     echo "  API_CHAT_ENDPOINT: 'true' to use /v1/chat/completions (server-side chat template; generative tasks ONLY). Default: /v1/completions, which serves mixed suites."
     echo "  API_MODEL_NAME: 'model' field sent in requests (default: the <model> positional argument)."
     echo "  API_NUM_CONCURRENT: Concurrent requests (default: 8)."
@@ -91,7 +91,7 @@ HARNESS_LIMIT=${HARNESS_LIMIT:-""}
 LM_EVAL_HARNESS_BRANCH=${LM_EVAL_HARNESS_BRANCH:-""}
 
 # OpenAI-compatible API backend (LM_EVAL_BACKEND=openai).
-API_BASE_URL=${API_BASE_URL:-""}
+API_BASE_URL=${API_BASE_URL:-"https://api.swissai.svc.cscs.ch/v1"}
 API_MODEL_NAME=${API_MODEL_NAME:-""}
 API_NUM_CONCURRENT=${API_NUM_CONCURRENT:-8}
 API_MAX_RETRIES=${API_MAX_RETRIES:-3}
@@ -255,9 +255,16 @@ if [ ! -z ${REVISION+x} ]; then
     MAYBE_REVISION=",revision=$REVISION"
     MAYBE_DOWNLOAD_REVISION="--revision=$REVISION"
 fi
-if [ -z ${TOKENIZER+x} ]; then
-    echo "TOKENIZER not set, using TOKENIZER=$MODEL"
-    TOKENIZER=$MODEL
+if [[ -z "${TOKENIZER:-}" ]]; then
+    if [[ $LM_EVAL_BACKEND == "openai" && "$MODEL" != /* && "$MODEL" == */*/* ]]; then
+        # CSCS endpoint ids use <routing-namespace>/<hf-org>/<model>. The full id must
+        # stay in the API request, while AutoTokenizer needs only <hf-org>/<model>.
+        TOKENIZER=${MODEL#*/}
+        echo "TOKENIZER not set; derived TOKENIZER=$TOKENIZER from routed endpoint model $MODEL"
+    else
+        echo "TOKENIZER not set, using TOKENIZER=$MODEL"
+        TOKENIZER=$MODEL
+    fi
 fi
 
 
@@ -352,8 +359,9 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     # Rebuilt from scratch: no model is loaded in-job, so dtype etc. do not apply.
     COMMON_MODEL_ARGS="model=$API_MODEL_NAME,base_url=$API_BASE_URL,num_concurrent=$API_NUM_CONCURRENT,max_retries=$API_MAX_RETRIES,max_length=$MAX_LENGTH"
     if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then
-        # Client-side tokenization: loglikelihood scoring needs token-aligned context/continuation.
-        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER"
+        # Loglikelihood scoring still needs client-side token boundaries, but the OpenAI API
+        # accepts string prompts. Keep the API's routing id separate from its HF tokenizer id.
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER,tokenized_requests=False"
         [[ $BOS = true ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
     else
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenized_requests=False"
