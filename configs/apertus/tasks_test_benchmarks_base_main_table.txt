@@ -1,0 +1,3 @@
+# Test Benchmarks
+agieval/acc
+arc_multilingual/acc
