@@ -47,7 +47,9 @@ usage() {
     echo "  API_MODEL_NAME: 'model' field sent in requests (default: the <model> positional argument)."
     echo "  API_NUM_CONCURRENT: Concurrent requests (default: 8)."
     echo "  API_MAX_RETRIES: Retries per request (default: 3)."
-    echo "  OPENAI_API_KEY: Bearer token for the endpoint (default: CSCS_SERVING_API)."
+    echo "  API_TOKENIZED_REQUESTS: Send token ids to local completion endpoints. Default: false for Swiss-AI, true otherwise."
+    echo "  CSCS_API_KEY: Preferred bearer token for the Swiss-AI endpoint; internally exposed to lm-eval as OPENAI_API_KEY."
+    echo "  OPENAI_API_KEY: Bearer token for non-CSCS OpenAI-compatible endpoints."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from the task-selected harness repository (default: repository default branch)."
     echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
@@ -62,6 +64,12 @@ usage() {
 die() {
 	echo "$*" >& 2
 	exit 1
+}
+
+SWISS_AI_API_ORIGIN="https://api.swissai.svc.cscs.ch"
+_is_swiss_ai_endpoint() {
+    local url="${1%/}"
+    [[ "$url" == "$SWISS_AI_API_ORIGIN" || "$url" == "$SWISS_AI_API_ORIGIN"/* ]]
 }
 
 # Wakeup logs.
@@ -91,10 +99,11 @@ HARNESS_LIMIT=${HARNESS_LIMIT:-""}
 LM_EVAL_HARNESS_BRANCH=${LM_EVAL_HARNESS_BRANCH:-""}
 
 # OpenAI-compatible API backend (LM_EVAL_BACKEND=openai).
-API_BASE_URL=${API_BASE_URL:-"https://api.swissai.svc.cscs.ch/v1"}
+API_BASE_URL=${API_BASE_URL:-"$SWISS_AI_API_ORIGIN/v1"}
 API_MODEL_NAME=${API_MODEL_NAME:-""}
 API_NUM_CONCURRENT=${API_NUM_CONCURRENT:-8}
 API_MAX_RETRIES=${API_MAX_RETRIES:-3}
+API_TOKENIZED_REQUESTS=${API_TOKENIZED_REQUESTS:-""}
 
 export HF_TOKEN="${HF_TOKEN:-$(tr -d '\r\n' < ./scripts/hf_token.txt)}"
 export WANDB_API_KEY="${WANDB_API_KEY:-$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)}"
@@ -102,7 +111,22 @@ export CSCS_SERVING_API="${CSCS_SERVING_API:-$(tr -d '\r\n' < ./scripts/cscs_ser
 if [[ -z "${OPENAI_API_KEY:-}" && -f ./scripts/openai_api_key.txt ]]; then
     export OPENAI_API_KEY="$(tr -d '\r\n' < ./scripts/openai_api_key.txt)"
 fi
-export OPENAI_API_KEY="${OPENAI_API_KEY:-${CSCS_SERVING_API:-}}"
+
+# lm-eval's OpenAI-compatible adapters only read OPENAI_API_KEY. Use the provider-specific
+# credential for Swiss-AI, while retaining warning-only compatibility with older setups.
+if [[ "$LM_EVAL_BACKEND" == "openai" ]] && _is_swiss_ai_endpoint "$API_BASE_URL"; then
+    if [[ -n "${CSCS_API_KEY:-}" ]]; then
+        export OPENAI_API_KEY="$CSCS_API_KEY"
+    elif [[ -n "${CSCS_SERVING_API:-}" ]]; then
+        echo "WARNING: CSCS_API_KEY is not set; using legacy CSCS_SERVING_API for the Swiss-AI endpoint." >&2
+        export OPENAI_API_KEY="$CSCS_SERVING_API"
+    elif [[ -n "${OPENAI_API_KEY:-}" ]]; then
+        echo "WARNING: CSCS_API_KEY is not set; using OPENAI_API_KEY for the Swiss-AI endpoint." >&2
+        echo "         Verify that this is a CSCS credential and not an external OpenAI key." >&2
+    else
+        echo "WARNING: CSCS_API_KEY is not set; Swiss-AI API requests are likely to fail authentication." >&2
+    fi
+fi
 
 warn_if_empty() {
   local var="$1"
@@ -156,6 +180,16 @@ ENABLE_THINKING=$(_norm_bool ENABLE_THINKING "$ENABLE_THINKING")
 AUTODETECT_THINK_TOKENS=$(_norm_bool AUTODETECT_THINK_TOKENS "$AUTODETECT_THINK_TOKENS")
 LOG_LENGTH_METRICS=$(_norm_bool LOG_LENGTH_METRICS "$LOG_LENGTH_METRICS")
 [[ -z "$TRACK_THINKING_METRICS" ]] || TRACK_THINKING_METRICS=$(_norm_bool TRACK_THINKING_METRICS "$TRACK_THINKING_METRICS")
+if [[ "$LM_EVAL_BACKEND" == "openai" ]]; then
+    if [[ -z "$API_TOKENIZED_REQUESTS" ]]; then
+        if _is_swiss_ai_endpoint "$API_BASE_URL"; then
+            API_TOKENIZED_REQUESTS=false
+        else
+            API_TOKENIZED_REQUESTS=true
+        fi
+    fi
+    API_TOKENIZED_REQUESTS=$(_norm_bool API_TOKENIZED_REQUESTS "$API_TOKENIZED_REQUESTS")
+fi
 
 # Thinking emits a trace before the answer; raise the budget unless the caller set it.
 if [[ "$ENABLE_THINKING" == "True" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then
@@ -256,7 +290,8 @@ if [ ! -z ${REVISION+x} ]; then
     MAYBE_DOWNLOAD_REVISION="--revision=$REVISION"
 fi
 if [[ -z "${TOKENIZER:-}" ]]; then
-    if [[ $LM_EVAL_BACKEND == "openai" && "$MODEL" != /* && "$MODEL" == */*/* ]]; then
+    if [[ $LM_EVAL_BACKEND == "openai" ]] && _is_swiss_ai_endpoint "$API_BASE_URL" \
+        && [[ "$MODEL" != /* && "$MODEL" == */*/* ]]; then
         # CSCS endpoint ids use <routing-namespace>/<hf-org>/<model>. The full id must
         # stay in the API request, while AutoTokenizer needs only <hf-org>/<model>.
         TOKENIZER=${MODEL#*/}
@@ -365,9 +400,9 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     # Rebuilt from scratch: no model is loaded in-job, so dtype etc. do not apply.
     COMMON_MODEL_ARGS="model=$API_MODEL_NAME,base_url=$API_BASE_URL,num_concurrent=$API_NUM_CONCURRENT,max_retries=$API_MAX_RETRIES,max_length=$MAX_LENGTH"
     if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then
-        # Loglikelihood scoring still needs client-side token boundaries, but the OpenAI API
-        # accepts string prompts. Keep the API's routing id separate from its HF tokenizer id.
-        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER,tokenized_requests=False"
+        # Loglikelihood scoring needs the tokenizer locally. Swiss-AI accepts text prompts;
+        # local vLLM supports token ids and keeps that behavior unless explicitly overridden.
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER,tokenized_requests=$API_TOKENIZED_REQUESTS"
         [[ $BOS = true ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
     else
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenized_requests=False"

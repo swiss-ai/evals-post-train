@@ -47,6 +47,9 @@
 #   --api-base-url <url> - OpenAI-compatible endpoint for the 'openai' backend (default:
 #                          https://api.swissai.svc.cscs.ch/v1). Bare host, /v1 root, or full endpoint URL.
 #   --api-model-name <n> - 'model' field sent in API requests (default: the --model value)
+#   --api-tokenized-requests <true|false>
+#                        - Send token ids to local completion endpoints. Default: false for
+#                          Swiss-AI, true for other completion endpoints.
 #   --splits K           - Split tasks across K parallel nodes per model
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
@@ -113,7 +116,9 @@ BOS_FLAG=""
 BACKEND_FLAG=""
 API_BASE_URL_FLAG=""
 API_MODEL_NAME_FLAG=""
-DEFAULT_API_BASE_URL="https://api.swissai.svc.cscs.ch/v1"
+API_TOKENIZED_REQUESTS_FLAG=""
+SWISS_AI_API_ORIGIN="https://api.swissai.svc.cscs.ch"
+DEFAULT_API_BASE_URL="$SWISS_AI_API_ORIGIN/v1"
 FEWSHOT_FLAG=""
 # Keep an ambient HARNESS_LIMIT (the graceful launcher has no --limit flag, so callers export
 # it); blanking it here would ship the cleared value into the job. --limit still overrides.
@@ -148,6 +153,7 @@ while [[ $# -gt 0 ]]; do
         --backend)      BACKEND_FLAG="$2";            shift 2 ;;
         --api-base-url) API_BASE_URL_FLAG="$2";       shift 2 ;;
         --api-model-name) API_MODEL_NAME_FLAG="$2";   shift 2 ;;
+        --api-tokenized-requests) API_TOKENIZED_REQUESTS_FLAG="$2"; shift 2 ;;
         --megatron-iter) MEGATRON_ITER="$2";            shift 2 ;;
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --harness-branch) HARNESS_BRANCH="$2";        shift 2 ;;
@@ -258,13 +264,40 @@ if [[ "$THINKING_TOUCHED" == "true" && ( "$EFFECTIVE_BACKEND" == "megatron_lm" |
     exit 1
 fi
 
-if [[ -n "$API_BASE_URL_FLAG" || -n "$API_MODEL_NAME_FLAG" ]] && [[ "$EFFECTIVE_BACKEND" != "openai" ]]; then
-    echo "Error: --api-base-url/--api-model-name only apply with --backend openai"
+if [[ -n "$API_BASE_URL_FLAG" || -n "$API_MODEL_NAME_FLAG" || -n "$API_TOKENIZED_REQUESTS_FLAG" ]] && [[ "$EFFECTIVE_BACKEND" != "openai" ]]; then
+    echo "Error: --api-base-url/--api-model-name/--api-tokenized-requests only apply with --backend openai"
     exit 1
 fi
+
+_is_swiss_ai_endpoint() {
+    local url="${1%/}"
+    [[ "$url" == "$SWISS_AI_API_ORIGIN" || "$url" == "$SWISS_AI_API_ORIGIN"/* ]]
+}
+
 if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
     # Precedence: CLI flag > exported environment value > Swiss-AI service default.
     export API_BASE_URL="${API_BASE_URL_FLAG:-${API_BASE_URL:-$DEFAULT_API_BASE_URL}}"
+
+    if [[ -n "$API_TOKENIZED_REQUESTS_FLAG" ]]; then
+        case "$API_TOKENIZED_REQUESTS_FLAG" in
+            true|True|TRUE|1|yes)   export API_TOKENIZED_REQUESTS=true ;;
+            false|False|FALSE|0|no) export API_TOKENIZED_REQUESTS=false ;;
+            *)
+                echo "Error: --api-tokenized-requests must be true or false (got '$API_TOKENIZED_REQUESTS_FLAG')"
+                exit 1
+                ;;
+        esac
+    fi
+
+    if _is_swiss_ai_endpoint "$API_BASE_URL"; then
+        if [[ -n "${CSCS_API_KEY:-}" ]]; then
+            # lm-eval's OpenAI-compatible adapters read OPENAI_API_KEY.
+            export OPENAI_API_KEY="$CSCS_API_KEY"
+        else
+            echo "WARNING: CSCS_API_KEY is not set for the Swiss-AI endpoint." >&2
+            echo "         The job will fall back to a legacy CSCS credential or OPENAI_API_KEY if available." >&2
+        fi
+    fi
 fi
 [[ -n "$API_MODEL_NAME_FLAG" ]] && export API_MODEL_NAME="$API_MODEL_NAME_FLAG"
 
@@ -419,6 +452,7 @@ auto_detect_chat_template() {
        [[ "$model" =~ -[Cc]hat ]] || \
        [[ "$model" =~ -[Ss][Ff][Tt] ]] || \
        [[ "$model" =~ -[Dd][Pp][Oo] ]] || \
+       [[ "$model" =~ -[Th]ink ]] || \
        [[ "$model" =~ -[Ii]t$ ]] || \
        [[ "$model" =~ -aligned ]]; then
         echo "true"
