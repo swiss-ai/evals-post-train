@@ -207,7 +207,7 @@ LOG_LENGTH_METRICS=$(_norm_bool LOG_LENGTH_METRICS "$LOG_LENGTH_METRICS")
 
 # Thinking emits a trace before the answer; raise the budget unless the caller set it.
 if [[ "$ENABLE_THINKING" == "True" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then
-    MAX_NEW_TOKENS=8192
+    MAX_NEW_TOKENS=16384
     echo "ENABLE_THINKING=True: raising default MAX_NEW_TOKENS to $MAX_NEW_TOKENS"
 fi
 
@@ -464,7 +464,6 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
 else
     die "Unsupported LM_EVAL_BACKEND: $LM_EVAL_BACKEND"
 fi
-#,tokenizer_mode=slow"
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
 

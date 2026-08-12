@@ -350,7 +350,7 @@ fi
 # sbatch reads SBATCH_RESERVATION natively (CLI > env > script directives).
 [[ -n "$RESERVATION_FLAG" ]] && export SBATCH_RESERVATION="$RESERVATION_FLAG"
 export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
-export WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
+export WANDB_PROJECT=${WANDB_PROJECT:-apertus-1.5-post-training-v0.1}
 export LOGS_ROOT=${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}
 [[ -n "$WANDB_ENTITY_FLAG" ]] && export WANDB_ENTITY="$WANDB_ENTITY_FLAG"
 [[ -n "$WANDB_PROJECT_FLAG" ]] && export WANDB_PROJECT="$WANDB_PROJECT_FLAG"

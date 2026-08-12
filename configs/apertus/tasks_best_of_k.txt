@@ -8,13 +8,13 @@
 # NOTE: these are 8x–32x the cost of greedy decoding, and the code tasks execute
 # every sampled solution. Use HARNESS_LIMIT for smoke tests.
 #
+humaneval_instruct_self_consistency
 # Math — answer extraction, repeats=8
 aime24
+minerva_math500_self_consistency
+
 aime25
 # Math problems — repeats=4 to avoid overly long run-times
-gsm8k_cot_zeroshot_self_consistency
-minerva_math500_self_consistency
+hendrycks_math
 # Code — execute unit tests, repeats=8 (pass@1 == mean@8; no majority vote)
-humaneval_instruct_self_consistency
-mbpp_instruct_self_consistency
 mbpp_plus_instruct_self_consistency
