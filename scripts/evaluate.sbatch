@@ -47,7 +47,7 @@ usage() {
     echo "  API_MODEL_NAME: 'model' field sent in requests (default: the <model> positional argument)."
     echo "  API_NUM_CONCURRENT: Concurrent requests (default: 8)."
     echo "  API_MAX_RETRIES: Retries per request (default: 3)."
-    echo "  API_TOKENIZED_REQUESTS: Send token ids to local completion endpoints. Default: false for Swiss-AI, true otherwise."
+    echo "  API_TOKENIZED_REQUESTS: Send token ids to local completion endpoints. Default: false for Swiss-AI/OpenAI, true otherwise; ignored by chat adapters."
     echo "  CSCS_API_KEY: Preferred bearer token for the Swiss-AI endpoint; internally exposed to lm-eval as OPENAI_API_KEY."
     echo "  OPENAI_API_KEY: Bearer token for non-CSCS OpenAI-compatible endpoints."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
@@ -67,9 +67,14 @@ die() {
 }
 
 SWISS_AI_API_ORIGIN="https://api.swissai.svc.cscs.ch"
+OPENAI_API_ORIGIN="https://api.openai.com"
 _is_swiss_ai_endpoint() {
     local url="${1%/}"
     [[ "$url" == "$SWISS_AI_API_ORIGIN" || "$url" == "$SWISS_AI_API_ORIGIN"/* ]]
+}
+_is_official_openai_endpoint() {
+    local url="${1%/}"
+    [[ "$url" == "$OPENAI_API_ORIGIN" || "$url" == "$OPENAI_API_ORIGIN"/* ]]
 }
 
 # Wakeup logs.
@@ -180,16 +185,6 @@ ENABLE_THINKING=$(_norm_bool ENABLE_THINKING "$ENABLE_THINKING")
 AUTODETECT_THINK_TOKENS=$(_norm_bool AUTODETECT_THINK_TOKENS "$AUTODETECT_THINK_TOKENS")
 LOG_LENGTH_METRICS=$(_norm_bool LOG_LENGTH_METRICS "$LOG_LENGTH_METRICS")
 [[ -z "$TRACK_THINKING_METRICS" ]] || TRACK_THINKING_METRICS=$(_norm_bool TRACK_THINKING_METRICS "$TRACK_THINKING_METRICS")
-if [[ "$LM_EVAL_BACKEND" == "openai" ]]; then
-    if [[ -z "$API_TOKENIZED_REQUESTS" ]]; then
-        if _is_swiss_ai_endpoint "$API_BASE_URL"; then
-            API_TOKENIZED_REQUESTS=false
-        else
-            API_TOKENIZED_REQUESTS=true
-        fi
-    fi
-    API_TOKENIZED_REQUESTS=$(_norm_bool API_TOKENIZED_REQUESTS "$API_TOKENIZED_REQUESTS")
-fi
 
 # Thinking emits a trace before the answer; raise the budget unless the caller set it.
 if [[ "$ENABLE_THINKING" == "True" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then
@@ -379,7 +374,7 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     API_CHAT_ENDPOINT=${API_CHAT_ENDPOINT:-false}
     if [[ "$API_CHAT_ENDPOINT" == "true" ]]; then
         [[ $APPLY_CHAT_TEMPLATE = true ]] || die "API_CHAT_ENDPOINT=true requires the chat template (chat/completions takes messages)."
-        if [[ "$API_BASE_URL" == "https://api.openai.com" || "$API_BASE_URL" == https://api.openai.com/* ]]; then
+        if _is_official_openai_endpoint "$API_BASE_URL"; then
             # The provider-specific adapter emits max_completion_tokens and removes parameters
             # unsupported by GPT-5-family models. The generic local adapter still emits max_tokens.
             API_LM_EVAL_MODEL="openai-chat-completions"
@@ -400,6 +395,14 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     # Rebuilt from scratch: no model is loaded in-job, so dtype etc. do not apply.
     COMMON_MODEL_ARGS="model=$API_MODEL_NAME,base_url=$API_BASE_URL,num_concurrent=$API_NUM_CONCURRENT,max_retries=$API_MAX_RETRIES,max_length=$MAX_LENGTH"
     if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then
+        if [[ -z "$API_TOKENIZED_REQUESTS" ]]; then
+            if _is_swiss_ai_endpoint "$API_BASE_URL" || _is_official_openai_endpoint "$API_BASE_URL"; then
+                API_TOKENIZED_REQUESTS=false
+            else
+                API_TOKENIZED_REQUESTS=true
+            fi
+        fi
+        API_TOKENIZED_REQUESTS=$(_norm_bool API_TOKENIZED_REQUESTS "$API_TOKENIZED_REQUESTS")
         # Loglikelihood scoring needs the tokenizer locally. Swiss-AI accepts text prompts;
         # local vLLM supports token ids and keeps that behavior unless explicitly overridden.
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER,tokenized_requests=$API_TOKENIZED_REQUESTS"

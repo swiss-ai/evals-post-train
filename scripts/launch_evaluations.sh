@@ -49,7 +49,7 @@
 #   --api-model-name <n> - 'model' field sent in API requests (default: the --model value)
 #   --api-tokenized-requests <true|false>
 #                        - Send token ids to local completion endpoints. Default: false for
-#                          Swiss-AI, true for other completion endpoints.
+#                          Swiss-AI/OpenAI, true for other completion endpoints; ignored for chat.
 #   --splits K           - Split tasks across K parallel nodes per model
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
