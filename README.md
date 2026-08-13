@@ -859,13 +859,16 @@ commit.
 
 The cache is disposable. If `$SCRATCH` retention removes either tier, the next
 launch rebuilds it automatically. Cache hits validate the environment rather
-than trusting the completion marker alone. Evaluation jobs also re-check the
-prepared paths and perform a last-resort rebuild if retention removes them
-between the CPU preparation job and GPU-job startup. Set `EVAL_ENV_CACHE_ROOT`
-to a longer-lived shared filesystem if retaining environments beyond the
-cluster's scratch window is preferable. Successful cache use refreshes the
-completion-marker timestamps so recently used entries remain active under
-age-based scratch retention policies.
+than trusting the completion marker alone. Evaluation jobs use a fast
+in-container structural preflight (completion markers, Python executable, and
+harness package) and perform a last-resort rebuild if retention removes those
+paths between the CPU preparation job and GPU-job startup. They do not repeat
+the expensive Python import validation by default; set
+`EVAL_VERIFY_ENV_IMPORTS=true` to enable it for diagnosis. Set
+`EVAL_ENV_CACHE_ROOT` to a longer-lived shared filesystem if retaining
+environments beyond the cluster's scratch window is preferable. Successful
+cache use refreshes the completion-marker timestamps so recently used entries
+remain active under age-based scratch retention policies.
 
 ---
 

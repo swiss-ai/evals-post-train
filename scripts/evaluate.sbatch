@@ -54,6 +54,7 @@ usage() {
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref resolved once by the environment-preparation job."
     echo " EVAL_ENV_MANIFEST: Prepared base environment and harness overlay (required; set by launcher)."
+    echo " EVAL_VERIFY_ENV_IMPORTS: 'true' to repeat the preparation job's deep Python import checks inside the evaluation job (default: false)."
     echo " EVAL_CHUNKS_FILE: Resumable array chunk manifest (set automatically by launcher)."
     echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
     echo " ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: false)."
@@ -97,6 +98,13 @@ LM_EVAL_HARNESS_BRANCH=${LM_EVAL_HARNESS_BRANCH:-""}
 EVAL_ENV_MANIFEST=${EVAL_ENV_MANIFEST:-""}
 EVAL_CHUNKS_FILE=${EVAL_CHUNKS_FILE:-""}
 EVAL_CHUNKED=${EVAL_CHUNKED:-false}
+EVAL_VERIFY_ENV_IMPORTS=${EVAL_VERIFY_ENV_IMPORTS:-false}
+
+case "${EVAL_VERIFY_ENV_IMPORTS,,}" in
+    true|1|yes) EVAL_VERIFY_ENV_IMPORTS=true ;;
+    false|0|no|"") EVAL_VERIFY_ENV_IMPORTS=false ;;
+    *) die "EVAL_VERIFY_ENV_IMPORTS must be true or false, got: $EVAL_VERIFY_ENV_IMPORTS" ;;
+esac
 
 if [[ -n "$EVAL_CHUNKS_FILE" ]]; then
     [[ -n "${SLURM_ARRAY_TASK_ID:-}" ]] || die "EVAL_CHUNKS_FILE requires a Slurm array task"
@@ -125,7 +133,7 @@ load_prepared_eval_env() {
     # Do not test EVAL_BASE_ENV/bin/python with -x here. This shell runs outside
     # the container, while venv's python may be an absolute symlink to a path
     # that exists only inside it (for example /usr/local/bin/python). The
-    # in-container LOAD_ENV_CMD below performs the executable/import check.
+    # in-container preflight below performs the executable check.
     [[ -n "${EVAL_BASE_ENV:-}" ]] \
         || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_BASE_ENV"; return 1; }
     [[ -n "${EVAL_HARNESS_OVERLAY:-}" ]] \
@@ -618,14 +626,31 @@ fi
 echo "Using lm-evaluation-harness: $EVAL_RESOLVED_HARNESS_REPO@$EVAL_RESOLVED_HARNESS_COMMIT"
 
 LOAD_ENV_CMD="
-if ! '$EVAL_BASE_ENV/bin/python' -c 'import accelerate, datasets, transformers, wandb' >/dev/null 2>&1 \
-    || ! PYTHONPATH='$EVAL_HARNESS_OVERLAY' '$EVAL_BASE_ENV/bin/python' -c 'import lm_eval' >/dev/null 2>&1; then
-    echo 'Cached evaluation environment failed its import check; rebuilding it now.'
+echo Container entered: \$(date -Is)
+eval_env_is_ready() {
+    [[ -f '$EVAL_BASE_ENV/.complete' ]] \
+        && [[ -x '$EVAL_BASE_ENV/bin/python' ]] \
+        && [[ -f '$EVAL_HARNESS_OVERLAY/.complete' ]] \
+        && [[ -d '$EVAL_HARNESS_OVERLAY/lm_eval' ]] \
+        || return 1
+    if [[ '$EVAL_VERIFY_ENV_IMPORTS' == 'true' ]]; then
+        '$EVAL_BASE_ENV/bin/python' -c 'import accelerate, datasets, transformers, wandb' >/dev/null 2>&1 \
+            && PYTHONPATH='$EVAL_HARNESS_OVERLAY' '$EVAL_BASE_ENV/bin/python' -c 'import lm_eval' >/dev/null 2>&1 \
+            || return 1
+    fi
+}
+if ! eval_env_is_ready; then
+    echo 'Cached evaluation environment failed its in-container preflight; rebuilding it now.'
     bash '$EVAL_REPO_ROOT/scripts/build_eval_env.sh'
     source '$EVAL_ENV_MANIFEST'
 fi
+if ! eval_env_is_ready; then
+    echo 'Evaluation environment repair did not pass its in-container preflight.' >&2
+    exit 1
+fi
 source '$EVAL_BASE_ENV/bin/activate'
 export PYTHONPATH='$EVAL_HARNESS_OVERLAY'\${PYTHONPATH:+:\$PYTHONPATH}
+echo Evaluation environment activated: \$(date -Is) deep_import_check=$EVAL_VERIFY_ENV_IMPORTS
 "
 if [[ $LM_EVAL_BACKEND == "megatron_lm" && -d "$PWD/Megatron-LM" ]]; then
     LOAD_ENV_CMD="$LOAD_ENV_CMD
@@ -651,14 +676,16 @@ elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 fi
+TIMED_CMD="echo Evaluation process starting: \$(date -Is)
+$CMD"
 
 echo "Environment manifest: $EVAL_ENV_MANIFEST"
 echo "Final command: $CMD"
 
 # Environment preparation happens once in a dependency job. This duration is
 # therefore evaluation-only and remains meaningful when results are aggregated.
-echo "Starting evaluation timing..."
 START_TIME=$(date +%s)
+echo "Starting evaluation timing: $(date -Is)"
 
 # Cache redirection exports to pass into the container
 CACHE_EXPORTS="
@@ -685,7 +712,7 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     $LOAD_ENV_CMD
     # Make torch CUDA libs discoverable for vllm._C import
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
-    $CMD
+    $TIMED_CMD
     "
 elif [[ $LM_EVAL_BACKEND == "vllm" ]]; then
   # vLLM runs as one process which manages all GPUs.
@@ -698,7 +725,7 @@ elif [[ $LM_EVAL_BACKEND == "vllm" ]]; then
     $LOAD_ENV_CMD
     # Make torch CUDA libs discoverable for vllm._C import
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
-    $CMD
+    $TIMED_CMD
     "
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
   srun -n 1 --mpi=pmix -ul --environment=./containers/env_sglang.toml bash -lc "
@@ -708,7 +735,7 @@ elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     $CACHE_EXPORTS
 
     $LOAD_ENV_CMD
-    $CMD
+    $TIMED_CMD
     "
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
   # No model is loaded in-job; the harness only makes HTTP calls against API_BASE_URL.
@@ -720,7 +747,7 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
 
     $LOAD_ENV_CMD
 
-    $CMD
+    $TIMED_CMD
     "
 else
   # hf (via accelerate)
@@ -735,7 +762,7 @@ else
     # Make torch CUDA libs discoverable for vllm._C import - is just ignored for Huggingface
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
 
-    $CMD
+    $TIMED_CMD
     "
 fi
 
