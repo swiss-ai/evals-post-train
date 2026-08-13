@@ -43,7 +43,8 @@ usage() {
 	echo " WANDB_ENTITY: WandB entity name for uploading results (default: apertus)."
 	echo " WANDB_PROJECT: WandB project name for uploading results (default: swissai-evals-test)."
 	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: vllm). - options are: hf, vllm, sglang, megatron_lm, openai"
-    echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
+    echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm. CKPT_ITERATION is accepted as an alias."
+    echo " MEGATRON_EXTRA_ARGS: Extra MCore CLI args for the megatron_lm backend, e.g. '--distributed-timeout-minutes 120' for long generation phases."
     echo " OpenAI-compatible API backend (LM_EVAL_BACKEND=openai; no model is loaded in the job):"
     echo "  API_BASE_URL: Endpoint to evaluate against. Required. Accepts a bare host (http://host:8000), a /v1 root, or a full /v1/(chat/)completions URL."
     echo "  API_CHAT_ENDPOINT: 'true' to use /v1/chat/completions (server-side chat template; generative tasks ONLY). Default: /v1/completions, which serves mixed suites."
@@ -81,7 +82,10 @@ if (( $# != 2 )); then
 fi
 MODEL=$1
 NAME=$2
-CKPT_ITER=${CKPT_ITER:-"latest"}
+# CKPT_ITERATION is the launcher-side name (launch_evaluations.sh exports it; the
+# runner forwards it as CKPT_ITER). Accept both so direct sbatch submissions that
+# use the launcher's name don't silently evaluate the wrong ("latest") iteration.
+CKPT_ITER=${CKPT_ITER:-${CKPT_ITERATION:-"latest"}}
 BS=${BS:-"auto:20"}
 SIZE=${SIZE:-1}
 BOS=${BOS:-false}
@@ -408,6 +412,12 @@ elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     BS=$MEGATRON_MICRO_BATCH_SIZE
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,load=$MODEL,tokenizer_type=HuggingFaceTokenizer,tokenizer_model=$TOKENIZER$MAYBE_REVISION,devices=4,micro_batch_size=$MEGATRON_MICRO_BATCH_SIZE${THINKING_DEFAULT_MODEL_ARG}"
     echo "Megatron effective batch size: $BS"
+    # Optional extra MCore CLI args, forwarded via the backend's extra_args passthrough.
+    # E.g. MEGATRON_EXTRA_ARGS="--distributed-timeout-minutes 120": the backend runs DP
+    # over the 4 devices and the shards finish generation at different times; on long
+    # runs the default 10-min NCCL timeout kills the job at the end-of-phase sync. The
+    # value must not contain a comma (model_args is comma-separated); spaces are fine.
+    [[ -n "${MEGATRON_EXTRA_ARGS:-}" ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,extra_args=$MEGATRON_EXTRA_ARGS"
     if [[ "$CKPT_ITER" =~ ^[0-9]+$ ]]; then
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,ckpt_step=$CKPT_ITER"
     elif [[ "$CKPT_ITER" == "latest" ]]; then
@@ -596,7 +606,10 @@ fi
 source '$EVAL_BASE_ENV/bin/activate'
 export PYTHONPATH='$EVAL_HARNESS_OVERLAY'\${PYTHONPATH:+:\$PYTHONPATH}
 "
-if [[ $LM_EVAL_BACKEND == "megatron_lm" && -d "$PWD/Megatron-LM" ]]; then
+if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
+    # Fail loudly: without the checkout the job would die mid-run with a bare
+    # ModuleNotFoundError after the model-load wait.
+    [[ -d "$PWD/Megatron-LM" ]] || die "LM_EVAL_BACKEND=megatron_lm requires a Megatron-LM checkout or symlink at $PWD/Megatron-LM (e.g. ln -s \$SCRATCH/Megatron-LM $PWD/Megatron-LM)."
     LOAD_ENV_CMD="$LOAD_ENV_CMD
 export MEGATRON_PATH='$PWD/Megatron-LM'
 "
