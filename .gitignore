@@ -4,6 +4,7 @@ logs/*.err
 wandb
 
 __pycache__
+*.egg-info/
 
 # vim
 **.un~

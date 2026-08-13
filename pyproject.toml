@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "swissai-evals"
 version = "0.1.0"
@@ -8,3 +12,12 @@ dependencies = [
     "pandas>=2.3.0",
     "wandb>=0.20.1",
 ]
+
+[project.optional-dependencies]
+ci = [
+    "shellcheck-py>=0.10.0.1",
+    "swiss-ai-model-launch @ git+https://github.com/swiss-ai/model-launch.git@fa000afd670f3ae95b2748b58113297279e86dc9",
+]
+
+[tool.setuptools.packages.find]
+include = ["scripts*"]
