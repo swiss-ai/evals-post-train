@@ -116,7 +116,20 @@ scan_harness_dir() {
     if [[ -d "$target_dir" ]]; then
         while IFS= read -r edir; do
             if [[ "$(basename "$edir")" == *"eval_merged"* ]]; then continue; fi
-            
+
+            # Preferred source: the task list the job recorded on success. Covers tag tasks,
+            # whose names never appear in the results JSON. Absent for pre-existing eval dirs,
+            # which fall through to the name-matching scan below.
+            manifest="$edir/requested_tasks.txt"
+            if [[ -f "$manifest" ]]; then
+                for task in "${ORDERED_TASKS[@]}"; do
+                    if grep -qxF "$task" "$manifest" 2>/dev/null; then
+                        COMPLETED_MAP["$task"]="$edir"
+                        if [[ $DEBUG -eq 1 ]]; then echo "[DEBUG]   -> Marked complete (manifest): $task"; fi
+                    fi
+                done
+            fi
+
             while IFS= read -r res_file; do
                 if [[ $DEBUG -eq 1 ]]; then echo "[DEBUG] Found JSON: $res_file"; fi
                 for task in "${ORDERED_TASKS[@]}"; do
@@ -142,10 +155,14 @@ rebuild_split_markers() {
         echo -e "\nRebuilding $split_dir mapping..."
         rm -rf "$split_dir"
         mkdir -p "$split_dir"
+        # Number markers densely: the aggregator reads split_0..split_(N-1) and aborts on the
+        # first gap, so an undetected task must not leave a hole in the range.
+        local n=0
         for i in "${!ORDERED_TASKS[@]}"; do
             local task="${ORDERED_TASKS[$i]}"
             if [[ -n "${COMPLETED_MAP[$task]:-}" ]]; then
-                echo "${COMPLETED_MAP[$task]}" > "$split_dir/split_${i}.txt"
+                echo "${COMPLETED_MAP[$task]}" > "$split_dir/split_${n}.txt"
+                n=$((n + 1))
             fi
         done
     fi
@@ -154,7 +171,8 @@ rebuild_split_markers() {
 submit_aggregator() {
     export WANDB_ENTITY="$WANDB_ENTITY"
     export WANDB_PROJECT="$WANDB_PROJECT"
-    export NUM_SPLITS="${#ORDERED_TASKS[@]}"
+    # Must match the markers actually written, not the tasks requested.
+    export NUM_SPLITS="${#COMPLETED_MAP[@]}"
     
     # Export metrics file safely
     if [[ -n "$TABLE_METRICS" ]]; then
