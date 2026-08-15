@@ -14,6 +14,29 @@ EVAL_RUNTIME_REQUIREMENTS=${EVAL_RUNTIME_REQUIREMENTS:-${EVAL_REPO_ROOT:-$PWD}/r
 EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 HARNESS_URL="https://github.com/${EVAL_HARNESS_REPO}.git"
 
+[[ -r "$EVAL_RUNTIME_REQUIREMENTS" ]] \
+    || { echo "Runtime requirements are not readable inside the container: $EVAL_RUNTIME_REQUIREMENTS" >&2; exit 1; }
+[[ -r "$EVAL_CONTAINER_CONFIG" ]] \
+    || { echo "Container configuration is not readable inside the container: $EVAL_CONTAINER_CONFIG" >&2; exit 1; }
+if [[ -n "${EVAL_REPO_ROOT:-}" && ! -d "$EVAL_REPO_ROOT" ]]; then
+    echo "Repository root is not visible inside the container: $EVAL_REPO_ROOT" >&2
+    exit 1
+fi
+
+# prepare_eval_env.sbatch creates these files outside the container. Seeing and
+# updating them here proves that the cache and manifest directories are
+# identity-mounted rather than accidentally landing in ephemeral container
+# storage. Direct repair calls do not set probes and skip this preflight.
+acknowledge_mount_probe() {
+    local name="$1" path="${!1:-}"
+    [[ -n "$path" ]] || return 0
+    [[ -f "$path" ]] \
+        || { echo "$name is not visible inside the container: $path" >&2; return 1; }
+    printf 'container-visible\n' >> "$path"
+}
+acknowledge_mount_probe EVAL_CONTAINER_CACHE_PROBE
+acknowledge_mount_probe EVAL_CONTAINER_MANIFEST_PROBE
+
 mkdir -p "$EVAL_ENV_CACHE_ROOT/base" "$EVAL_ENV_CACHE_ROOT/harness" \
     "$EVAL_ENV_CACHE_ROOT/locks" "$(dirname "$EVAL_ENV_MANIFEST")"
 
@@ -71,47 +94,50 @@ overlay_is_ready() {
 build_base() {
     exec 9>"$EVAL_ENV_CACHE_ROOT/locks/base-${BASE_KEY}.lock"
     flock 9
-    if base_is_ready; then
-        return
+    if ! base_is_ready; then
+        # A venv embeds its creation path in console-script shebangs, so it must be
+        # built at its final location. Preserve an interrupted or partially purged
+        # build for diagnosis.
+        if [[ -e "$BASE_ENV" ]]; then
+            mv "$BASE_ENV" "${BASE_ENV}.incomplete.$(date +%s).$$"
+        fi
+        python -m venv --system-site-packages "$BASE_ENV"
+        "$BASE_ENV/bin/python" -m pip install --upgrade pip
+        "$BASE_ENV/bin/python" -m pip install -r "$EVAL_RUNTIME_REQUIREMENTS"
+        if [[ "$EVAL_BACKEND" == "megatron_lm" ]]; then
+            "$BASE_ENV/bin/python" -m pip install --no-deps megatron-core
+        fi
+        "$BASE_ENV/bin/python" -c "import accelerate, datasets, transformers, wandb"
+        touch "$BASE_ENV/.complete"
     fi
-
-    # A venv embeds its creation path in console-script shebangs, so it must be
-    # built at its final location. Preserve an interrupted or partially purged
-    # build for diagnosis.
-    if [[ -e "$BASE_ENV" ]]; then
-        mv "$BASE_ENV" "${BASE_ENV}.incomplete.$(date +%s).$$"
-    fi
-    python -m venv --system-site-packages "$BASE_ENV"
-    "$BASE_ENV/bin/python" -m pip install --upgrade pip
-    "$BASE_ENV/bin/python" -m pip install -r "$EVAL_RUNTIME_REQUIREMENTS"
-    if [[ "$EVAL_BACKEND" == "megatron_lm" ]]; then
-        "$BASE_ENV/bin/python" -m pip install --no-deps megatron-core
-    fi
-    "$BASE_ENV/bin/python" -c "import accelerate, datasets, transformers, wandb"
+    # Refresh the cache entry for retention policies without mutating packages.
     touch "$BASE_ENV/.complete"
+    flock -u 9
+    exec 9>&-
 }
 
 build_overlay() {
     local tmp_dir
     exec 8>"$EVAL_ENV_CACHE_ROOT/locks/harness-${OVERLAY_KEY}.lock"
     flock 8
-    if overlay_is_ready; then
-        return
-    fi
+    if ! overlay_is_ready; then
+        if [[ -e "$HARNESS_OVERLAY" ]]; then
+            mv "$HARNESS_OVERLAY" \
+                "${HARNESS_OVERLAY}.incomplete.$(date +%s).$$"
+        fi
 
-    if [[ -e "$HARNESS_OVERLAY" ]]; then
-        mv "$HARNESS_OVERLAY" \
-            "${HARNESS_OVERLAY}.incomplete.$(date +%s).$$"
+        tmp_dir=$(mktemp -d "$EVAL_ENV_CACHE_ROOT/harness/.build-${OVERLAY_KEY:0:12}.XXXXXX")
+        trap 'rm -rf "${tmp_dir:-}"' RETURN
+        "$BASE_ENV/bin/python" -m pip install --no-deps --target "$tmp_dir" \
+            "git+${HARNESS_URL}@${HARNESS_COMMIT}"
+        PYTHONPATH="$tmp_dir" "$BASE_ENV/bin/python" -c "import lm_eval"
+        touch "$tmp_dir/.complete"
+        mv "$tmp_dir" "$HARNESS_OVERLAY"
+        trap - RETURN
     fi
-
-    tmp_dir=$(mktemp -d "$EVAL_ENV_CACHE_ROOT/harness/.build-${OVERLAY_KEY:0:12}.XXXXXX")
-    trap 'rm -rf "${tmp_dir:-}"' RETURN
-    "$BASE_ENV/bin/python" -m pip install --no-deps --target "$tmp_dir" \
-        "git+${HARNESS_URL}@${HARNESS_COMMIT}"
-    PYTHONPATH="$tmp_dir" "$BASE_ENV/bin/python" -c "import lm_eval"
-    touch "$tmp_dir/.complete"
-    mv "$tmp_dir" "$HARNESS_OVERLAY"
-    trap - RETURN
+    touch "$HARNESS_OVERLAY/.complete"
+    flock -u 8
+    exec 8>&-
 }
 
 build_base

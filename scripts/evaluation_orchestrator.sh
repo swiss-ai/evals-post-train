@@ -78,7 +78,7 @@ _eval_submit_wave() {
     local model="$1" name="$2" state_dir="$3" attempt="$4" chunk_size="$5"
     local missing_file="$state_dir/missing_${attempt}.txt"
     local chunks_file="$state_dir/chunks_${attempt}.txt"
-    local chunk_count array_spec array_job controller_job safe_name
+    local chunk_count array_spec array_job controller_job safe_name controller_name
 
     python3 -m scripts.eval_state chunk --tasks-file "$missing_file" \
         --chunk-size "$chunk_size" --output "$chunks_file"
@@ -90,6 +90,9 @@ _eval_submit_wave() {
         array_spec="${array_spec}%${EVAL_MAX_PARALLEL}"
     fi
     safe_name=${name//[^a-zA-Z0-9_.-]/-}
+    # Keep controller jobs and their %x-based log filenames attributable to the
+    # evaluation run. The attempt suffix distinguishes retry-wave controllers.
+    controller_name="eval-ctrl-${safe_name:0:80}-a${attempt}"
 
     local -a eval_command=(sbatch --parsable --array="$array_spec"
         --job-name="eval-${safe_name}"
@@ -107,9 +110,11 @@ _eval_submit_wave() {
         echo "[DRY RUN] ${eval_command[*]}" >&2
         array_job="dry-array-$attempt"
         controller_job="dry-controller-$attempt"
+        echo "[DRY RUN] sbatch --parsable --job-name=$controller_name --dependency=afterany:$array_job scripts/evaluation_controller.sbatch" >&2
     else
         array_job=$("${eval_command[@]}")
-        controller_job=$(sbatch --parsable --dependency="afterany:$array_job" \
+        controller_job=$(sbatch --parsable --job-name="$controller_name" \
+            --dependency="afterany:$array_job" \
             --export=ALL scripts/evaluation_controller.sbatch \
             "$model" "$name" "$state_dir" "$attempt" "$chunk_size")
     fi

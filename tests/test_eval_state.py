@@ -119,6 +119,7 @@ class EvalStateTests(unittest.TestCase):
             self.assertIn("--array=0-2%2", output)
             self.assertIn("scripts/prepare_eval_env.sbatch", output)
             self.assertIn("afterany:dry-array-0", output)
+            self.assertIn("--job-name=eval-ctrl-test-model-a0", output)
 
     def test_merge_prefers_newer_metrics_and_samples(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

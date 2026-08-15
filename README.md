@@ -845,15 +845,30 @@ Evaluation dependencies use a shared two-tier cache under `${EVAL_ENV_CACHE_ROOT
 1. A base virtual environment is keyed by backend, Python/container configuration, and `requirements/eval-runtime.txt`.
 2. A lightweight harness overlay is keyed by the base environment, harness repository, and resolved commit SHA.
 
-`prepare_eval_env.sbatch` builds missing tiers once on a CPU node using a file lock. Evaluation chunks only activate the immutable base and prepend the overlay to `PYTHONPATH`. A moving branch is therefore resolved once per model run: pushed changes propagate on the next launch, while all chunks in one run use exactly the same commit.
+`prepare_eval_env.sbatch` first verifies that the cache and per-run manifest
+directories are visible from both the host job and the selected container. It
+then builds missing tiers on a CPU node. Each base and overlay fingerprint has
+its own `flock`: simultaneous launches with the same fingerprint wait for the
+first builder, re-check the completed environment, and reuse it; unrelated
+fingerprints can build concurrently. Packages are published only after import
+validation, and manifests are replaced atomically. Evaluation chunks only
+activate the immutable base and prepend the overlay to `PYTHONPATH`. A moving
+branch is therefore resolved once per model run: pushed changes propagate on
+the next launch, while all chunks and repairs in one run use exactly the same
+commit.
 
 The cache is disposable. If `$SCRATCH` retention removes either tier, the next
 launch rebuilds it automatically. Cache hits validate the environment rather
-than trusting the completion marker alone. Evaluation jobs also re-check the
-prepared paths and perform a last-resort rebuild if retention removes them
-between the CPU preparation job and GPU-job startup. Set `EVAL_ENV_CACHE_ROOT`
-to a longer-lived shared filesystem if retaining environments beyond the
-cluster's scratch window is preferable.
+than trusting the completion marker alone. Evaluation jobs use a fast
+in-container structural preflight (completion markers, Python executable, and
+harness package) and perform a last-resort rebuild if retention removes those
+paths between the CPU preparation job and GPU-job startup. They do not repeat
+the expensive Python import validation by default; set
+`EVAL_VERIFY_ENV_IMPORTS=true` to enable it for diagnosis. Set
+`EVAL_ENV_CACHE_ROOT` to a longer-lived shared filesystem if retaining
+environments beyond the cluster's scratch window is preferable. Successful
+cache use refreshes the completion-marker timestamps so recently used entries
+remain active under age-based scratch retention policies.
 
 ---
 
