@@ -851,11 +851,22 @@ then builds missing tiers on a CPU node. Each base and overlay fingerprint has
 its own `flock`: simultaneous launches with the same fingerprint wait for the
 first builder, re-check the completed environment, and reuse it; unrelated
 fingerprints can build concurrently. Packages are published only after import
-validation, and manifests are replaced atomically. Evaluation chunks only
-activate the immutable base and prepend the overlay to `PYTHONPATH`. A moving
-branch is therefore resolved once per model run: pushed changes propagate on
-the next launch, while all chunks and repairs in one run use exactly the same
-commit.
+validation, and manifests are replaced atomically. The builder also creates one
+uncompressed tar archive per immutable harness overlay. At evaluation startup,
+each chunk reads that single archive from the shared filesystem and extracts it
+under `$SLURM_TMPDIR` (or container-local `/tmp`), then prepends the local copy
+to `PYTHONPATH`. If staging fails, the job logs a warning and safely falls back
+to the shared overlay. This avoids thousands of small-file operations against
+`/iopsstor`, including Python imports and the harness's task discovery fallback.
+
+Recent harness commits also ship a persistent task index keyed implicitly by
+the resolved commit. `TaskManager` reads that one JSON file for bundled tasks
+and lazily opens only selected task YAMLs; explicit `--include_path`
+directories remain dynamically scanned. Missing or invalid indexes retain the
+old full-scan behavior, which remains reasonably fast because the overlay has
+already been staged locally. A moving branch is therefore resolved once per
+model run: pushed changes propagate on the next launch, while all chunks and
+repairs in one run use exactly the same commit.
 
 The cache is disposable. If `$SCRATCH` retention removes either tier, the next
 launch rebuilds it automatically. Cache hits validate the environment rather
@@ -867,8 +878,8 @@ the expensive Python import validation by default; set
 `EVAL_VERIFY_ENV_IMPORTS=true` to enable it for diagnosis. Set
 `EVAL_ENV_CACHE_ROOT` to a longer-lived shared filesystem if retaining
 environments beyond the cluster's scratch window is preferable. Successful
-cache use refreshes the completion-marker timestamps so recently used entries
-remain active under age-based scratch retention policies.
+cache use refreshes the completion-marker and archive timestamps so recently
+used entries remain active under age-based scratch retention policies.
 
 ---
 

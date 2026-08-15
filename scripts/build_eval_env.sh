@@ -78,6 +78,7 @@ OVERLAY_KEY=$(printf '%s\n%s\n%s\n' "$BASE_KEY" "$EVAL_HARNESS_REPO" "$HARNESS_C
 
 BASE_ENV="$EVAL_ENV_CACHE_ROOT/base/${BASE_KEY:0:20}"
 HARNESS_OVERLAY="$EVAL_ENV_CACHE_ROOT/harness/${OVERLAY_KEY:0:20}"
+HARNESS_ARCHIVE="$EVAL_ENV_CACHE_ROOT/harness/${OVERLAY_KEY:0:20}.tar"
 
 base_is_ready() {
     [[ -f "$BASE_ENV/.complete" && -x "$BASE_ENV/bin/python" ]] || return 1
@@ -117,7 +118,7 @@ build_base() {
 }
 
 build_overlay() {
-    local tmp_dir
+    local archive_tmp tmp_dir
     exec 8>"$EVAL_ENV_CACHE_ROOT/locks/harness-${OVERLAY_KEY}.lock"
     flock 8
     if ! overlay_is_ready; then
@@ -135,6 +136,20 @@ build_overlay() {
         mv "$tmp_dir" "$HARNESS_OVERLAY"
         trap - RETURN
     fi
+
+    # Shared filesystems are particularly slow when TaskManager and Python
+    # touch thousands of small files. Store the immutable overlay as one
+    # sequentially-readable archive and expand it onto node-local storage in
+    # each evaluation job. The lock and atomic rename also make this safe when
+    # several preparation/repair jobs start concurrently.
+    if [[ ! -f "$HARNESS_ARCHIVE" ]]; then
+        archive_tmp="${HARNESS_ARCHIVE}.tmp.$$"
+        rm -f "$archive_tmp"
+        tar -C "$HARNESS_OVERLAY" -cf "$archive_tmp" .
+        mv "$archive_tmp" "$HARNESS_ARCHIVE"
+    fi
+    # Refresh both cache representations for scratch retention policies.
+    touch "$HARNESS_ARCHIVE"
     touch "$HARNESS_OVERLAY/.complete"
     flock -u 8
     exec 8>&-
@@ -147,6 +162,7 @@ manifest_tmp="${EVAL_ENV_MANIFEST}.tmp.$$"
 {
     printf 'EVAL_BASE_ENV=%q\n' "$BASE_ENV"
     printf 'EVAL_HARNESS_OVERLAY=%q\n' "$HARNESS_OVERLAY"
+    printf 'EVAL_HARNESS_ARCHIVE=%q\n' "$HARNESS_ARCHIVE"
     printf 'EVAL_RESOLVED_HARNESS_REPO=%q\n' "$EVAL_HARNESS_REPO"
     printf 'EVAL_RESOLVED_HARNESS_COMMIT=%q\n' "$HARNESS_COMMIT"
     printf 'EVAL_RESOLVED_BASE_KEY=%q\n' "$BASE_KEY"
@@ -157,3 +173,4 @@ echo "Evaluation environment ready"
 echo "  Base:    $BASE_ENV"
 echo "  Harness: $EVAL_HARNESS_REPO@$HARNESS_COMMIT"
 echo "  Overlay: $HARNESS_OVERLAY"
+echo "  Archive: $HARNESS_ARCHIVE"

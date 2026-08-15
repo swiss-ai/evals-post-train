@@ -42,6 +42,20 @@ class ContainerMountTests(unittest.TestCase):
                         f"{filename} does not expose {required}",
                     )
 
+    def test_harness_overlay_is_archived_and_staged_on_node_local_storage(self):
+        build_script = (REPO_ROOT / "scripts" / "build_eval_env.sh").read_text(
+            encoding="utf-8"
+        )
+        evaluate_script = (REPO_ROOT / "scripts" / "evaluate.sbatch").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('HARNESS_ARCHIVE="$EVAL_ENV_CACHE_ROOT/harness/', build_script)
+        self.assertIn('tar -C "$HARNESS_OVERLAY" -cf "$archive_tmp" .', build_script)
+        self.assertIn("EVAL_HARNESS_ARCHIVE", evaluate_script)
+        self.assertIn("SLURM_TMPDIR", evaluate_script)
+        self.assertIn("EVAL_RUNTIME_HARNESS_OVERLAY", evaluate_script)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -118,7 +118,7 @@ fi
 
 load_prepared_eval_env() {
     EVAL_ENV_CHECK_ERROR=""
-    unset EVAL_BASE_ENV EVAL_HARNESS_OVERLAY EVAL_RESOLVED_HARNESS_REPO \
+    unset EVAL_BASE_ENV EVAL_HARNESS_OVERLAY EVAL_HARNESS_ARCHIVE EVAL_RESOLVED_HARNESS_REPO \
         EVAL_RESOLVED_HARNESS_COMMIT EVAL_RESOLVED_BASE_KEY
     if [[ ! -f "$EVAL_ENV_MANIFEST" ]]; then
         EVAL_ENV_CHECK_ERROR="manifest is missing: $EVAL_ENV_MANIFEST"
@@ -138,6 +138,8 @@ load_prepared_eval_env() {
         || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_BASE_ENV"; return 1; }
     [[ -n "${EVAL_HARNESS_OVERLAY:-}" ]] \
         || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_HARNESS_OVERLAY"; return 1; }
+    [[ -n "${EVAL_HARNESS_ARCHIVE:-}" ]] \
+        || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_HARNESS_ARCHIVE"; return 1; }
     [[ -n "${EVAL_RESOLVED_HARNESS_REPO:-}" ]] \
         || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_RESOLVED_HARNESS_REPO"; return 1; }
     [[ -n "${EVAL_RESOLVED_HARNESS_COMMIT:-}" ]] \
@@ -150,6 +152,8 @@ load_prepared_eval_env() {
         || { EVAL_ENV_CHECK_ERROR="harness overlay directory is missing: $EVAL_HARNESS_OVERLAY"; return 1; }
     [[ -f "$EVAL_HARNESS_OVERLAY/.complete" ]] \
         || { EVAL_ENV_CHECK_ERROR="harness completion marker is missing: $EVAL_HARNESS_OVERLAY/.complete"; return 1; }
+    [[ -f "$EVAL_HARNESS_ARCHIVE" ]] \
+        || { EVAL_ENV_CHECK_ERROR="harness archive is missing: $EVAL_HARNESS_ARCHIVE"; return 1; }
 }
 
 if ! load_prepared_eval_env; then
@@ -649,8 +653,24 @@ if ! eval_env_is_ready; then
     exit 1
 fi
 source '$EVAL_BASE_ENV/bin/activate'
-export PYTHONPATH='$EVAL_HARNESS_OVERLAY'\${PYTHONPATH:+:\$PYTHONPATH}
-echo Evaluation environment activated: \$(date -Is) deep_import_check=$EVAL_VERIFY_ENV_IMPORTS
+EVAL_RUNTIME_HARNESS_OVERLAY='$EVAL_HARNESS_OVERLAY'
+runtime_root=\${SLURM_TMPDIR:-/tmp}
+if [[ ! -d \"\$runtime_root\" || ! -w \"\$runtime_root\" ]]; then
+    runtime_root=/tmp
+fi
+if [[ -r '$EVAL_HARNESS_ARCHIVE' ]]; then
+    runtime_overlay=\$(mktemp -d \"\$runtime_root/lm-eval-${EVAL_RESOLVED_HARNESS_COMMIT:0:12}.XXXXXX\")
+    echo Staging harness overlay locally: \$(date -Is) archive='$EVAL_HARNESS_ARCHIVE' destination=\$runtime_overlay
+    if tar -xf '$EVAL_HARNESS_ARCHIVE' -C \"\$runtime_overlay\"; then
+        EVAL_RUNTIME_HARNESS_OVERLAY=\$runtime_overlay
+        echo Harness overlay staged locally: \$(date -Is)
+    else
+        echo 'WARNING: local harness staging failed; using the shared overlay.' >&2
+        rm -rf \"\$runtime_overlay\"
+    fi
+fi
+export PYTHONPATH=\$EVAL_RUNTIME_HARNESS_OVERLAY\${PYTHONPATH:+:\$PYTHONPATH}
+echo Evaluation environment activated: \$(date -Is) deep_import_check=$EVAL_VERIFY_ENV_IMPORTS harness_path=\$EVAL_RUNTIME_HARNESS_OVERLAY
 "
 if [[ $LM_EVAL_BACKEND == "megatron_lm" && -d "$PWD/Megatron-LM" ]]; then
     LOAD_ENV_CMD="$LOAD_ENV_CMD
