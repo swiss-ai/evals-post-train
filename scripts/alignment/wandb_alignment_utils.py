@@ -4,6 +4,7 @@ Contains common functions for collecting, processing, and uploading evaluation r
 """
 
 import json
+import logging
 import random
 from collections import defaultdict
 from pathlib import Path
@@ -17,6 +18,8 @@ from .wandb_names import make_sample_table_key, make_wandb_run_id
 
 
 _orig_query_with_timeout = wandb.sdk.lib.server.Server.query_with_timeout
+
+logger = logging.getLogger(__name__)
 
 
 def _patched_query_with_timeout(self):
@@ -34,6 +37,31 @@ wandb.sdk.lib.server.Server.query_with_timeout = _patched_query_with_timeout
 
 # Binary metrics that indicate per-sample correctness (1.0 = correct, 0.0 = incorrect)
 BINARY_METRICS = {"acc", "accuracy", "exact_match", "exact_match_strict", "pass@1", "em"}
+
+# lm-eval includes these task-level metadata fields alongside actual metrics.
+# Keep this aligned with scripts.eval_export.exporter.SKIP_RESULT_KEYS.
+RESULT_METADATA_KEYS = {"alias", "samples", "name", "sample_len", "sample_count"}
+
+
+def _parse_metric_score(task_name: str, metric_name: str, value) -> float | None:
+    """Return a numeric metric value, or None for metadata/missing values."""
+    if metric_name in RESULT_METADATA_KEYS or value is None:
+        return None
+    if isinstance(value, str) and value.strip() in {"", "N/A"}:
+        return None
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        # Result schemas can gain new task-level metadata over time. Do not make
+        # an otherwise valid evaluation impossible to upload because of it.
+        logger.warning(
+            "Skipping non-numeric result field %r for task %r (value=%r)",
+            metric_name,
+            task_name,
+            value,
+        )
+        return None
 
 
 def _select_stratified_samples(
@@ -120,7 +148,8 @@ def create_model_evaluation_from_results(
         task_metrics = []
         task_metric_map = defaultdict(list)
         for metric, value in metrics.items():
-            if metric == "alias" or value in ["N/A", " ", None]:
+            score = _parse_metric_score(task_name, metric, value)
+            if score is None:
                 continue
 
             metric_parts = metric.split(",")
@@ -128,12 +157,12 @@ def create_model_evaluation_from_results(
             filter_name = metric_parts[1].strip() if len(metric_parts) > 1 else "none"
             if filter_name == "none":
                 # If no filter, just use the metric directly
-                task_metrics.append(Metric(name=metric_name, score=float(value)))
+                task_metrics.append(Metric(name=metric_name, score=score))
             else:
                 # If filter is specified, use full metric name
-                task_metrics.append(Metric(name=metric, score=float(value)))
+                task_metrics.append(Metric(name=metric, score=score))
                 # Store in map for later aggregation
-                task_metric_map[metric_name].append(Metric(name=metric_name, score=float(value)))
+                task_metric_map[metric_name].append(Metric(name=metric_name, score=score))
 
         for metric_name, metric_list in task_metric_map.items():
             if len(metric_list) == 1:
