@@ -36,6 +36,7 @@
 # Options:
 #   --name <name>        - Override the eval run name (default: auto-derived from model path)
 #   --task <task>         - Task name for 'single' mode (e.g. hellaswag, gsm8k_cot)
+#   --wandb-project <name> - Override the W&B project name (default: apertus-1.5-post-training-v0.1)
 #   --chat-template      - Apply chat template (auto-detected for Instruct/Chat/SFT/DPO models)
 #   --no-chat-template   - Force disable chat template
 #   --tokenizer <tok>    - Custom tokenizer (default: same as model)
