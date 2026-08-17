@@ -1,5 +1,5 @@
 {
-  "mapping_version": 1,
+  "mapping_version": 2,
   "eee_schema_version": "0.2.2",
   "datastore": {
     "repo_id": "evaleval/EEE_datastore",
@@ -9,29 +9,37 @@
   "tasks": {
     "alpaca_eval": {
       "eee": {
+        "composite": "",
+        "family": "alpaca_eval",
         "benchmark": "alpaca_eval_v2",
-        "evaluation_name": "alpaca_eval_v2",
+        "split": "overall",
         "dataset_id": "tatsu-lab/alpaca_eval"
       }
     },
     "bbh": {
       "eee": {
+        "composite": "",
+        "family": "big_bench",
         "benchmark": "big_bench_hard",
-        "evaluation_name": "big_bench_hard",
+        "split": "overall",
         "dataset_id": "lukaemon/bbh"
       }
     },
     "commonsense_qa": {
       "eee": {
+        "composite": "",
+        "family": "commonsense_qa",
         "benchmark": "commonsense_qa",
-        "evaluation_name": "commonsense_qa",
+        "split": "overall",
         "dataset_id": "tau/commonsense_qa"
       }
     },
     "gsm8k": {
       "eee": {
+        "composite": "",
+        "family": "gsm8k",
         "benchmark": "gsm8k",
-        "evaluation_name": "gsm8k",
+        "split": "overall",
         "dataset_id": "openai/gsm8k",
         "metric_candidates": [
           "exact_match,strict-match",
@@ -51,8 +59,10 @@
     },
     "gsm8k_cot": {
       "eee": {
+        "composite": "",
+        "family": "gsm8k",
         "benchmark": "gsm8k",
-        "evaluation_name": "gsm8k",
+        "split": "overall",
         "dataset_id": "openai/gsm8k",
         "metric_candidates": [
           "exact_match,strict-match",
@@ -72,8 +82,10 @@
     },
     "gsm8k_cot_zeroshot": {
       "eee": {
+        "composite": "",
+        "family": "gsm8k",
         "benchmark": "gsm8k",
-        "evaluation_name": "gsm8k",
+        "split": "overall",
         "dataset_id": "openai/gsm8k",
         "metric_candidates": [
           "exact_match,strict-match",
@@ -99,22 +111,28 @@
     },
     "hellaswag": {
       "eee": {
+        "composite": "",
+        "family": "hellaswag",
         "benchmark": "hellaswag",
-        "evaluation_name": "hellaswag",
+        "split": "overall",
         "dataset_id": "Rowan/hellaswag"
       }
     },
     "humaneval": {
       "eee": {
+        "composite": "",
+        "family": "humaneval",
         "benchmark": "openai_humaneval",
-        "evaluation_name": "openai_humaneval",
+        "split": "overall",
         "dataset_id": "openai/openai_humaneval"
       }
     },
     "humaneval_instruct": {
       "eee": {
+        "composite": "",
+        "family": "humaneval",
         "benchmark": "openai_humaneval",
-        "evaluation_name": "openai_humaneval",
+        "split": "overall",
         "dataset_id": "openai/openai_humaneval",
         "self_consistency_metric_candidates": [
           "pass@1,all"
@@ -123,22 +141,28 @@
     },
     "ifeval": {
       "eee": {
+        "composite": "",
+        "family": "IFEval",
         "benchmark": "IFEval",
-        "evaluation_name": "IFEval",
+        "split": "overall",
         "dataset_id": "google/IFEval"
       }
     },
     "mbpp": {
       "eee": {
+        "composite": "",
+        "family": "mbpp",
         "benchmark": "mbpp",
-        "evaluation_name": "mbpp",
+        "split": "overall",
         "dataset_id": "google-research-datasets/mbpp"
       }
     },
     "mbpp_instruct": {
       "eee": {
+        "composite": "",
+        "family": "mbpp",
         "benchmark": "mbpp",
-        "evaluation_name": "mbpp",
+        "split": "overall",
         "dataset_id": "google-research-datasets/mbpp",
         "self_consistency_metric_candidates": [
           "pass@1,all"
@@ -147,8 +171,10 @@
     },
     "mmlu_pro": {
       "eee": {
+        "composite": "",
+        "family": "MMLU",
         "benchmark": "MMLU-Pro",
-        "evaluation_name": "MMLU-Pro",
+        "split": "overall",
         "dataset_id": "TIGER-Lab/MMLU-Pro",
         "metric_candidates": [
           "exact_match,none",
@@ -190,8 +216,10 @@
     },
     "piqa": {
       "eee": {
+        "composite": "",
+        "family": "piqa",
         "benchmark": "piqa",
-        "evaluation_name": "piqa",
+        "split": "overall",
         "dataset_id": "ybisk/piqa"
       }
     }
