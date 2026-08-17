@@ -569,7 +569,7 @@ python scripts/export_eval_results.py check-mappings
 The export manifest (`manifest.yaml`, containing JSON-compatible YAML) lists:
 
 - generated EEE records and HF previews
-- lm-eval tasks skipped because they have no reviewed mapping
+- lm-eval tasks exported with internal names because they have no reviewed mapping
 - `_self_consistency` task names resolved to a reviewed base-task mapping
 - missing run-level metadata such as generation temperature or maximum tokens
 - `publishing_performed: false`, confirming that the exporter only wrote local files
@@ -581,8 +581,9 @@ directly to `every_eval_ever validate`. The local validator still accepts
 legacy exports containing `manifest.json`, and re-exporting migrates that file
 to `manifest.yaml`.
 
-Use `--strict-mappings` when every numeric task in a run must be mapped. Without
-it, unmapped tasks are skipped and reported rather than guessed.
+Every task with numeric results is exported. Use `--strict-mappings` when every
+numeric task in a run must have a reviewed mapping instead of using the fallback
+described below.
 
 ### Task mappings
 
@@ -596,6 +597,15 @@ exact lm-eval task name to:
 - optional ordered EEE metric candidates and canonical metric-ID overrides
 - optionally, a registered Hugging Face benchmark dataset, task ID, and ordered
   metric candidates
+
+Mappings are resolvers, not an export allowlist. An exact mapping wins; the
+controlled `_self_consistency` suffix may resolve to its reviewed base mapping.
+Any other scored task is exported under its lm-eval identifier, with that
+identifier used as both family and benchmark and `overall` as the split. For
+example, an unmapped `aime24` result becomes `aime24.aime24.overall`. Its logged
+`dataset_path` is still used as the dataset ID when present. The manifest lists
+these fallbacks in `internally_named_tasks`; `skipped_unmapped_tasks` remains an
+empty compatibility field.
 
 Evaluation names use dot notation:
 `{composite}.{family}.{benchmark}.{split}`. An empty composite is omitted, so a
@@ -618,12 +628,10 @@ task config so, for example, `exact_match,mean@{repeats}` selects
 
 Do not otherwise use fuzzy matching for benchmark variants. For example,
 `gpqa_main_cot_zeroshot` is not mapped to the datastore's `gpqa_diamond`
-collection, and `gsm8k_platinum` is not mapped to `gsm8k`. Add mappings only
-after confirming that the dataset and evaluation protocol are equivalent.
-For the same reason, `bfcl_v3` and `swiss_ai_charter_alignment` currently remain
-explicitly unmapped: the EEE datastore has no reviewed one-to-one mapping for
-these exact lm-eval protocols and native score scales. They are reported in the
-export manifest's `skipped_unmapped_tasks` list.
+collection, and `gsm8k_platinum` is not mapped to `gsm8k`. Until a mapping is
+reviewed, those tasks—as well as `bfcl_v3` and `swiss_ai_charter_alignment`—are
+exported under their exact internal names rather than being omitted or assigned
+to a possibly incorrect external benchmark.
 
 The exporter preserves scores in their native lm-eval scale. It never
 automatically multiplies proportions by 100.
