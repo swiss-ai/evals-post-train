@@ -529,6 +529,9 @@ python scripts/export_eval_results.py export \
 
 `--model-id` is optional when the result log contains an `owner/model` ID, but
 it is required when the evaluation used a local checkpoint path.
+EEE `model_info.id` uses this Hub ID, and `model_info.additional_details`
+includes its direct Hugging Face model URL for self-deployed models. API models
+do not receive a guessed Hub URL.
 Evaluator provenance defaults to `first_party` for `swiss-ai/*` models and
 `third_party` for other owners; override it with `--evaluator-relationship`
 when a run was collaborative or has a different relationship.
@@ -587,11 +590,23 @@ Mappings live in `configs/eval_export/task_mappings.json`. Each entry maps an
 exact lm-eval task name to:
 
 - the canonical EEE datastore collection directory
-- the EEE `evaluation_name`
-- the source dataset ID
+- the optional composite, benchmark family, benchmark, and split used to build
+  the EEE `evaluation_name`
+- the source dataset ID in Hugging Face `owner/dataset` format
 - optional ordered EEE metric candidates and canonical metric-ID overrides
 - optionally, a registered Hugging Face benchmark dataset, task ID, and ordered
   metric candidates
+
+Evaluation names use dot notation:
+`{composite}.{family}.{benchmark}.{split}`. An empty composite is omitted, so a
+standalone benchmark such as GSM8K exports as `gsm8k.gsm8k.overall`, without a
+leading dot. The split defaults to `overall`; lm-eval filters such as
+`strict-match` or `mean@32` describe scoring methodology and are retained in
+metric and generation metadata rather than being treated as benchmark splits.
+
+For Hugging Face datasets, both `source_data.dataset_name` and
+`source_data.hf_repo` contain the `owner/dataset` ID. The direct dataset URL is
+recorded in `source_data.additional_details.hf_dataset_url`.
 
 The repository's `_self_consistency` suffix is handled as a controlled task
 variant: the exporter removes only that exact suffix and requires the remaining
