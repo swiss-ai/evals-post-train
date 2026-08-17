@@ -159,7 +159,7 @@ LOG_LENGTH_METRICS=$(_norm_bool LOG_LENGTH_METRICS "$LOG_LENGTH_METRICS")
 
 # Thinking emits a trace before the answer; raise the budget unless the caller set it.
 if [[ "$ENABLE_THINKING" == "True" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then
-    MAX_NEW_TOKENS=8192
+    MAX_NEW_TOKENS=16384
     echo "ENABLE_THINKING=True: raising default MAX_NEW_TOKENS to $MAX_NEW_TOKENS"
 fi
 
@@ -288,7 +288,7 @@ fi
 export OMP_NUM_THREADS=$(( 8 * $GPUS_PER_NODE ))
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export VLLM_DISABLE_COMPILE_CACHE=1
-export VLLM_USE_FLASHINFER_SAMPLER=0 # might crash on some nodes
+export VLLM_USE_FLASHINFER_SAMPLER=0
 
 #export VLLM_TORCH_COMPILE=0
 #export NCCL_P2P_DISABLE=1
@@ -367,7 +367,6 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
 else
     die "Unsupported LM_EVAL_BACKEND: $LM_EVAL_BACKEND"
 fi
-#,tokenizer_mode=slow"
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
 
@@ -634,6 +633,12 @@ echo "Time taken for installation and evaluation: ${DURATION} seconds ($(($DURAT
 
 # Goodbye.
 echo "Evaluation finished"
+
+# Record the requested tasks so the launcher can tell what ran without inferring it from the
+# results JSON. Tag tasks (e.g. lambada) never emit their own key there, so name-matching alone
+# can never see them. Written only on success -- else an entry left by a crashed run would be read
+# as "done" and the task would never be retried.
+printf '%s\n' "${TASKS//,/$'\n'}" > "$HARNESS_EVAL_DIR/requested_tasks.txt"
 
 if (( NUM_SPLITS > 1 )); then
     # When running as a split job, write a marker file with the eval dir path
