@@ -515,6 +515,9 @@ python scripts/export_eval_results.py export \
 
 `--model-id` is optional when the result log contains an `owner/model` ID, but
 it is required when the evaluation used a local checkpoint path.
+EEE `model_info.id` uses this Hub ID, and `model_info.additional_details`
+includes its direct Hugging Face model URL for self-deployed models. API models
+do not receive a guessed Hub URL.
 Evaluator provenance defaults to `first_party` for `swiss-ai/*` models and
 `third_party` for other owners; override it with `--evaluator-relationship`
 when a run was collaborative or has a different relationship.
@@ -552,7 +555,7 @@ python scripts/export_eval_results.py check-mappings
 The export manifest (`manifest.yaml`, containing JSON-compatible YAML) lists:
 
 - generated EEE records and HF previews
-- lm-eval tasks skipped because they have no reviewed mapping
+- lm-eval tasks exported with internal names because they have no reviewed mapping
 - `_self_consistency` task names resolved to a reviewed base-task mapping
 - missing run-level metadata such as generation temperature or maximum tokens
 - `publishing_performed: false`, confirming that the exporter only wrote local files
@@ -564,8 +567,9 @@ directly to `every_eval_ever validate`. The local validator still accepts
 legacy exports containing `manifest.json`, and re-exporting migrates that file
 to `manifest.yaml`.
 
-Use `--strict-mappings` when every numeric task in a run must be mapped. Without
-it, unmapped tasks are skipped and reported rather than guessed.
+Every task with numeric results is exported. Use `--strict-mappings` when every
+numeric task in a run must have a reviewed mapping instead of using the fallback
+described below.
 
 ### Task mappings
 
@@ -573,11 +577,32 @@ Mappings live in `configs/eval_export/task_mappings.json`. Each entry maps an
 exact lm-eval task name to:
 
 - the canonical EEE datastore collection directory
-- the EEE `evaluation_name`
-- the source dataset ID
+- the optional composite, benchmark family, benchmark, and split used to build
+  the EEE `evaluation_name`
+- the source dataset ID in Hugging Face `owner/dataset` format
 - optional ordered EEE metric candidates and canonical metric-ID overrides
 - optionally, a registered Hugging Face benchmark dataset, task ID, and ordered
   metric candidates
+
+Mappings are resolvers, not an export allowlist. An exact mapping wins; the
+controlled `_self_consistency` suffix may resolve to its reviewed base mapping.
+Any other scored task is exported under its lm-eval identifier, with that
+identifier used as both family and benchmark and `overall` as the split. For
+example, an unmapped `aime24` result becomes `aime24.aime24.overall`. Its logged
+`dataset_path` is still used as the dataset ID when present. The manifest lists
+these fallbacks in `internally_named_tasks`; `skipped_unmapped_tasks` remains an
+empty compatibility field.
+
+Evaluation names use dot notation:
+`{composite}.{family}.{benchmark}.{split}`. An empty composite is omitted, so a
+standalone benchmark such as GSM8K exports as `gsm8k.gsm8k.overall`, without a
+leading dot. The split defaults to `overall`; lm-eval filters such as
+`strict-match` or `mean@32` describe scoring methodology and are retained in
+metric and generation metadata rather than being treated as benchmark splits.
+
+For Hugging Face datasets, both `source_data.dataset_name` and
+`source_data.hf_repo` contain the `owner/dataset` ID. The direct dataset URL is
+recorded in `source_data.additional_details.hf_dataset_url`.
 
 The repository's `_self_consistency` suffix is handled as a controlled task
 variant: the exporter removes only that exact suffix and requires the remaining
@@ -589,12 +614,10 @@ task config so, for example, `exact_match,mean@{repeats}` selects
 
 Do not otherwise use fuzzy matching for benchmark variants. For example,
 `gpqa_main_cot_zeroshot` is not mapped to the datastore's `gpqa_diamond`
-collection, and `gsm8k_platinum` is not mapped to `gsm8k`. Add mappings only
-after confirming that the dataset and evaluation protocol are equivalent.
-For the same reason, `bfcl_v3` and `swiss_ai_charter_alignment` currently remain
-explicitly unmapped: the EEE datastore has no reviewed one-to-one mapping for
-these exact lm-eval protocols and native score scales. They are reported in the
-export manifest's `skipped_unmapped_tasks` list.
+collection, and `gsm8k_platinum` is not mapped to `gsm8k`. Until a mapping is
+reviewed, those tasks—as well as `bfcl_v3` and `swiss_ai_charter_alignment`—are
+exported under their exact internal names rather than being omitted or assigned
+to a possibly incorrect external benchmark.
 
 The exporter preserves scores in their native lm-eval scale. It never
 automatically multiplies proportions by 100.
