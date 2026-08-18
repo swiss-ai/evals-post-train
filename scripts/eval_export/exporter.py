@@ -269,13 +269,70 @@ def _internal_task_mapping(raw: dict[str, Any], task_name: str) -> dict[str, Any
     return {"eee": eee}
 
 
-def _group_descendants(raw: dict[str, Any], group_name: str) -> set[str]:
+def _resolve_aggregate_task(raw: dict[str, Any], selector: str) -> str:
+    """Resolve a group selector to the scored aggregate result task."""
+    results = raw.get("results", {})
+    if not isinstance(results, dict):
+        results = {}
+    if selector in results:
+        return selector
+
+    # Some generated multilingual suites are configured by their base group
+    # name while lm-eval writes the aggregate result with this task suffix.
+    generated_candidate = f"{selector}_gen_0shot"
+    if generated_candidate in results:
+        return generated_candidate
+
+    matching_results = [
+        task_name
+        for task_name in results
+        if isinstance(task_name, str) and task_name.startswith(f"{selector}_")
+    ]
+    detail = ""
+    if matching_results:
+        detail = f" Matching result tasks: {_format_items(matching_results)}."
+    raise ExportError(
+        f"Cannot select aggregate-only task {selector!r}: the lm-eval result "
+        f"has no scored aggregate task with that name.{detail}"
+    )
+
+
+def _group_descendants(raw: dict[str, Any], selector: str) -> tuple[str, set[str]]:
+    """Return the scored aggregate task and every result below its group."""
+    aggregate_task = _resolve_aggregate_task(raw, selector)
     groups = raw.get("group_subtasks", {})
-    if not isinstance(groups, dict) or group_name not in groups:
-        raise ExportError(
-            f"Cannot select aggregate-only task {group_name!r}: the lm-eval "
-            "result has no group_subtasks entry for it"
-        )
+    group_name = next(
+        (
+            candidate
+            for candidate in (selector, aggregate_task)
+            if isinstance(groups, dict) and candidate in groups
+        ),
+        None,
+    )
+    if group_name is None:
+        results = raw.get("results", {})
+        prefix = f"{aggregate_task}_"
+        if aggregate_task.endswith("_gen_0shot"):
+            # Generated suite tasks insert their language/split between the
+            # suite name and `_gen_0shot`, for example:
+            #   include_base_44_gen_0shot                  (aggregate)
+            #   include_base_44_albanian_gen_0shot        (subtask)
+            prefix = f"{aggregate_task.removesuffix('_gen_0shot')}_"
+        descendants = {
+            task_name
+            for task_name in results
+            if isinstance(task_name, str)
+            and task_name != aggregate_task
+            and task_name.startswith(prefix)
+        }
+        if not descendants:
+            raise ExportError(
+                f"Cannot select aggregate-only task {selector!r}: the lm-eval "
+                "result has neither group_subtasks metadata nor any scored "
+                f"subtasks under the {prefix!r} prefix"
+            )
+        return aggregate_task, descendants
+
     descendants: set[str] = set()
     pending = list(groups.get(group_name) or [])
     while pending:
@@ -286,7 +343,7 @@ def _group_descendants(raw: dict[str, Any], group_name: str) -> set[str]:
         nested = groups.get(child)
         if isinstance(nested, list):
             pending.extend(nested)
-    return descendants
+    return aggregate_task, descendants
 
 
 def _metric_candidates(
@@ -984,10 +1041,12 @@ def export_results(
     resolved_task_aliases: dict[str, str] = {}
     grouped: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
     excluded_tasks = set(exclude_tasks)
-    aggregate_only = set(aggregate_only_tasks)
-    for task_name in aggregate_only:
-        excluded_tasks.update(_group_descendants(raw, task_name))
-        excluded_tasks.discard(task_name)
+    aggregate_only: set[str] = set()
+    for selector in set(aggregate_only_tasks):
+        aggregate_task, descendants = _group_descendants(raw, selector)
+        aggregate_only.add(aggregate_task)
+        excluded_tasks.update(descendants)
+        excluded_tasks.discard(aggregate_task)
 
     for task_name, task_results in raw["results"].items():
         if task_name in excluded_tasks:

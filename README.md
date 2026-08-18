@@ -587,15 +587,18 @@ described below.
 
 Use `--exclude-task TASK` to omit an exact result. For benchmark groups with
 many language or subject results, prefer `--aggregate-only-task GROUP`: it keeps
-the group's aggregate score and recursively excludes its subtasks using the
-lm-eval `group_subtasks` metadata. Both options are repeatable. For example:
+the group's aggregate score and recursively excludes its subtasks. The exporter
+uses lm-eval's `group_subtasks` metadata when available and falls back to the
+generated suite's task-name prefix when lm-eval omits that metadata. Both
+options are repeatable. Generated suites can be selected by either their base
+group name or their full aggregate result task. For example:
 
 ```bash
 python scripts/export_eval_results.py export RESULTS.json \
   --output-dir eval-results/Apertus-release \
-  --aggregate-only-task include_base_44_gen_0shot \
-  --aggregate-only-task include_base_new_45_gen_0shot \
-  --aggregate-only-task global_mmlu_gen_0shot
+  --aggregate-only-task include_base_44 \
+  --aggregate-only-task include_base_new_45 \
+  --aggregate-only-task global_mmlu
 ```
 
 The manifest records the effective choices in `aggregate_only_tasks` and

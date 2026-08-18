@@ -188,17 +188,55 @@ class EvalExportTests(unittest.TestCase):
             self.assertEqual(manifest["records"][0]["benchmark"], group)
             self.assertEqual(validate_export(root / "export"), [])
 
-    def test_aggregate_only_task_requires_group_metadata(self):
+    def test_aggregate_only_task_falls_back_to_generated_suite_prefix(self):
         raw = fixture_results()
+        aggregate = "include_base_new_45_gen_0shot"
+        leaf_one = "include_base_new_45_amharic_gen_0shot"
+        leaf_two = "include_base_new_45_czech_gen_0shot"
+        raw["results"].update(
+            {
+                aggregate: {"acc,none": 0.4},
+                leaf_one: {"acc,none": 0.3},
+                leaf_two: {"acc,none": 0.5},
+            }
+        )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             results = root / "results_no_groups.json"
             results.write_text(json.dumps(raw), encoding="utf-8")
-            with self.assertRaisesRegex(ExportError, "group_subtasks"):
+            manifest = export_results(
+                results,
+                root / "export",
+                aggregate_only_tasks=["include_base_new_45"],
+                retrieved_timestamp="1770000000.0",
+            )
+
+            self.assertEqual(manifest["aggregate_only_tasks"], [aggregate])
+            self.assertIn(leaf_one, manifest["excluded_tasks"])
+            self.assertIn(leaf_two, manifest["excluded_tasks"])
+            exported_tasks = {
+                task
+                for record in manifest["records"]
+                for task in record["lm_eval_tasks"]
+            }
+            self.assertIn(aggregate, exported_tasks)
+            self.assertNotIn(leaf_one, exported_tasks)
+            self.assertNotIn(leaf_two, exported_tasks)
+
+    def test_aggregate_only_task_requires_a_scored_aggregate(self):
+        raw = fixture_results()
+        raw["results"]["include_base_44_albanian_gen_0shot"] = {
+            "acc,none": 0.5
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = root / "results_no_aggregate.json"
+            results.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ExportError, "no scored aggregate task"):
                 export_results(
                     results,
                     root / "export",
-                    aggregate_only_tasks=["include_base_44_gen_0shot"],
+                    aggregate_only_tasks=["include_base_44"],
                 )
 
     def test_export_writes_canonical_records_samples_and_hf_previews(self):
