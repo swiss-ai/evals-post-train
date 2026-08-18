@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pandas>=2.3.0",
-    "wandb>=0.20.1",
+    "wandb>=0.26.1",
 ]
 
 [project.optional-dependencies]
