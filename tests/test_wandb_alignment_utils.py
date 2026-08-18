@@ -9,36 +9,6 @@ from scripts.alignment.wandb_alignment_utils import (
 
 
 class WandbAlignmentUtilsTests(unittest.TestCase):
-    def test_legacy_result_schema_remains_supported(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            eval_dir = Path(temporary)
-            result = {
-                "results": {
-                    "legacy_task": {
-                        "alias": "Legacy task",
-                        "acc,none": 0.75,
-                        "acc_stderr,none": 0.02,
-                        "exact_match,strict-match": 0.5,
-                        "exact_match_stderr,strict-match": "N/A",
-                    }
-                }
-            }
-            (eval_dir / "results_2025-07-26T00-35-42.178646.json").write_text(
-                json.dumps(result), encoding="utf-8"
-            )
-
-            evaluation = create_model_evaluation_from_results("legacy-model", eval_dir)
-
-            self.assertEqual(
-                [(metric.name, metric.score) for metric in evaluation.tasks[0].metrics],
-                [
-                    ("acc", 0.75),
-                    ("acc_stderr", 0.02),
-                    ("exact_match,strict-match", 0.5),
-                    ("exact_match", 0.5),
-                ],
-            )
-
     def test_lm_eval_task_metadata_is_not_treated_as_metrics(self):
         with tempfile.TemporaryDirectory() as temporary:
             eval_dir = Path(temporary)

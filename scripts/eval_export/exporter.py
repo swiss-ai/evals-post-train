@@ -28,6 +28,7 @@ DEFAULT_MAPPING_FILE = REPO_ROOT / "configs/eval_export/task_mappings.json"
 SELF_CONSISTENCY_SUFFIX = "_self_consistency"
 MANIFEST_FILENAME = "manifest.yaml"
 LEGACY_MANIFEST_FILENAME = "manifest.json"
+SELF_DEPLOYED_ENGINES = {"hf", "vllm", "sglang", "megatron_lm"}
 
 SKIP_RESULT_KEYS = {"alias", "samples", "name", "sample_len", "sample_count"}
 KNOWN_METRICS: dict[str, dict[str, Any]] = {
@@ -176,17 +177,54 @@ def _find_results_file(path: Path) -> Path:
     return matches[0]
 
 
+def _evaluation_name(eee: dict[str, Any]) -> str:
+    """Build composite.family.benchmark.split, omitting an empty composite."""
+    components: list[str] = []
+    composite = str(eee.get("composite") or "").strip()
+    if composite:
+        components.append(composite)
+    for key, default in (
+        ("family", eee.get("benchmark")),
+        ("benchmark", None),
+        ("split", "overall"),
+    ):
+        component = str(eee.get(key) or default or "").strip()
+        if not component:
+            raise ExportError(f"EEE mapping requires a non-empty {key}")
+        components.append(component)
+    for component in components:
+        if "." in component:
+            raise ExportError(
+                "EEE evaluation-name components cannot contain '.': "
+                f"{component!r}"
+            )
+    return ".".join(components)
+
+
+def _uses_evaluation_name_scheme(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    components = value.split(".")
+    return len(components) in (3, 4) and all(components)
+
+
 def _load_mapping(path: Path) -> dict[str, Any]:
     mapping = _read_json(path)
-    if mapping.get("mapping_version") != 1:
+    if mapping.get("mapping_version") != 2:
         raise ExportError(f"Unsupported mapping_version in {path}")
     tasks = mapping.get("tasks")
     if not isinstance(tasks, dict) or not tasks:
         raise ExportError(f"Mapping file has no tasks: {path}")
     for task_name, task_mapping in tasks.items():
         eee = task_mapping.get("eee", {})
-        if not eee.get("benchmark") or not eee.get("evaluation_name"):
+        if not eee.get("benchmark"):
             raise ExportError(f"Incomplete EEE mapping for {task_name}")
+        try:
+            _evaluation_name(eee)
+        except ExportError as exc:
+            raise ExportError(
+                f"Incomplete EEE mapping for {task_name}: {exc}"
+            ) from exc
     return mapping
 
 
@@ -203,6 +241,25 @@ def _resolve_task_mapping(
         if task_mapping is not None:
             return task_mapping, base_name
     return None, None
+
+
+def _internal_task_mapping(raw: dict[str, Any], task_name: str) -> dict[str, Any]:
+    """Create a lossless fallback mapping from the lm-eval task identifier."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", task_name):
+        raise ExportError(
+            f"Unmapped lm-eval task name {task_name!r} is not a safe internal "
+            "benchmark identifier; add a reviewed mapping"
+        )
+    eee: dict[str, Any] = {
+        "composite": "",
+        "family": task_name,
+        "benchmark": task_name,
+        "split": "overall",
+    }
+    dataset_id = _task_config(raw, task_name).get("dataset_path")
+    if isinstance(dataset_id, str) and dataset_id:
+        eee["dataset_id"] = dataset_id
+    return {"eee": eee}
 
 
 def _metric_candidates(
@@ -271,6 +328,15 @@ def _looks_like_hf_id(value: str) -> bool:
     return bool(re.fullmatch(r"[^/\s]+/[^/\s]+", value)) and not value.startswith(
         (".", "/")
     )
+
+
+def _hf_url(repo_id: str, *, dataset: bool = False) -> str:
+    prefix = (
+        "https://huggingface.co/datasets/"
+        if dataset
+        else "https://huggingface.co/"
+    )
+    return prefix + urllib.parse.quote(repo_id, safe="/")
 
 
 def _model_id(raw: dict[str, Any], override: str | None) -> str:
@@ -431,15 +497,19 @@ def _source_data(
     eee = task_mapping["eee"]
     config = _task_config(raw, task_name)
     dataset_id = eee.get("dataset_id") or config.get("dataset_path")
-    dataset_name = str(eee["evaluation_name"])
+    dataset_name = str(dataset_id or eee["benchmark"])
     samples = raw.get("n-samples", {}).get(task_name, {})
     count = samples.get("effective") if isinstance(samples, dict) else None
 
     if isinstance(dataset_id, str) and _looks_like_hf_id(dataset_id):
+        additional_details = {
+            "hf_dataset_url": _hf_url(dataset_id, dataset=True)
+        }
         value: dict[str, Any] = {
             "dataset_name": dataset_name,
             "source_type": "hf_dataset",
             "hf_repo": dataset_id,
+            "additional_details": additional_details,
         }
         split = config.get("test_split") or config.get("validation_split")
         if split:
@@ -448,7 +518,7 @@ def _source_data(
             value["samples_number"] = count
         dataset_config = config.get("dataset_name")
         if dataset_config:
-            value["additional_details"] = {"hf_dataset_config": str(dataset_config)}
+            additional_details["hf_dataset_config"] = str(dataset_config)
         return value
     return {
         "dataset_name": dataset_name,
@@ -528,10 +598,7 @@ def _evaluation_result(
     warnings: list[str],
 ) -> dict[str, Any]:
     metric, filter_name = _metric_parts(result_key)
-    canonical_name = task_mapping["eee"]["evaluation_name"]
-    evaluation_name = (
-        canonical_name if filter_name == "none" else f"{canonical_name}/{filter_name}"
-    )
+    evaluation_name = _evaluation_name(task_mapping["eee"])
     result_id = hashlib.sha256(
         f"{task_name}\0{result_key}\0{score}".encode()
     ).hexdigest()
@@ -617,9 +684,6 @@ def _convert_sample(
     output = _extract_output(sample, choices)
     score, is_correct = _sample_score(sample)
     filter_name = str(sample.get("filter", "none"))
-    evaluation_name = (
-        canonical_name if filter_name == "none" else f"{canonical_name}/{filter_name}"
-    )
     sample_hash = hashlib.sha256(
         json.dumps(
             {"raw": prompt, "reference": target},
@@ -631,7 +695,7 @@ def _convert_sample(
         "schema_version": "0.2.2",
         "evaluation_id": evaluation_id,
         "model_id": model_id,
-        "evaluation_name": evaluation_name,
+        "evaluation_name": canonical_name,
         "sample_id": str(sample.get("doc_id", 0)),
         "sample_hash": sample_hash,
         "interaction_type": "single_turn",
@@ -685,7 +749,7 @@ def _selected_metrics(
     if not candidates:
         return list(_numeric_metrics(task_results))
     selected = _hf_metric(task_results, candidates)
-    return [selected] if selected else []
+    return [selected] if selected else list(_numeric_metrics(task_results))
 
 
 def _yaml_string(value: str) -> str:
@@ -760,6 +824,15 @@ def _validate_record(record: dict[str, Any], path: str) -> list[str]:
     model = record.get("model_info", {})
     if not model.get("name") or not model.get("id"):
         errors.append(f"{path}: model_info requires name and id")
+    elif not _looks_like_hf_id(model["id"]):
+        errors.append(f"{path}: model_info.id must use owner/model format")
+    else:
+        model_details = model.get("additional_details", {})
+        if (
+            model_details.get("model_availability") == "open_weights"
+            and model_details.get("hf_model_url") != _hf_url(model["id"])
+        ):
+            errors.append(f"{path}: model_info requires the direct Hugging Face URL")
     results = record.get("evaluation_results")
     if not isinstance(results, list) or not results:
         errors.append(f"{path}: evaluation_results must be non-empty")
@@ -774,6 +847,31 @@ def _validate_record(record: dict[str, Any], path: str) -> list[str]:
             ):
                 if key not in result:
                     errors.append(f"{label}: missing {key}")
+            if not _uses_evaluation_name_scheme(result.get("evaluation_name")):
+                errors.append(
+                    f"{label}: evaluation_name must use "
+                    "[composite.]family.benchmark.split dot notation"
+                )
+            source_data = result.get("source_data", {})
+            if source_data.get("source_type") == "hf_dataset":
+                dataset_id = source_data.get("hf_repo")
+                if not isinstance(dataset_id, str) or not _looks_like_hf_id(
+                    dataset_id
+                ):
+                    errors.append(f"{label}: hf_repo must use owner/dataset format")
+                else:
+                    if source_data.get("dataset_name") != dataset_id:
+                        errors.append(
+                            f"{label}: dataset_name must match the Hugging Face ID"
+                        )
+                    source_details = source_data.get("additional_details", {})
+                    if source_details.get("hf_dataset_url") != _hf_url(
+                        dataset_id, dataset=True
+                    ):
+                        errors.append(
+                            f"{label}: source_data requires the direct "
+                            "Hugging Face dataset URL"
+                        )
             score = result.get("score_details", {}).get("score")
             if not isinstance(score, (int, float)) or isinstance(score, bool):
                 errors.append(f"{label}: score must be numeric")
@@ -802,6 +900,11 @@ def _validate_instance(record: dict[str, Any], path: str) -> list[str]:
         errors.append(f"{path}: expected instance schema_version 0.2.2")
     if record.get("interaction_type") != "single_turn":
         errors.append(f"{path}: lm-eval export must be single_turn")
+    if not _uses_evaluation_name_scheme(record.get("evaluation_name")):
+        errors.append(
+            f"{path}: evaluation_name must use "
+            "[composite.]family.benchmark.split dot notation"
+        )
     input_data = record.get("input", {})
     if not isinstance(input_data.get("raw"), str) or not isinstance(
         input_data.get("reference"), list
@@ -846,7 +949,7 @@ def export_results(
     evaluation_timestamp = _epoch_string(raw.get("date"), results_file.stat().st_mtime)
     retrieved = _epoch_string(retrieved_timestamp, time.time())
     warnings: list[str] = []
-    skipped: list[str] = []
+    internally_named: list[str] = []
     numeric_tasks: dict[str, list[str]] = {}
     metric_mismatches: dict[str, tuple[list[str], list[str]]] = {}
     resolved_task_aliases: dict[str, str] = {}
@@ -861,9 +964,9 @@ def export_results(
         numeric_tasks[task_name] = available_metrics
         task_mapping, mapped_task_name = _resolve_task_mapping(mapping, task_name)
         if not task_mapping:
-            skipped.append(task_name)
-            continue
-        if mapped_task_name != task_name:
+            task_mapping = _internal_task_mapping(raw, task_name)
+            internally_named.append(task_name)
+        elif mapped_task_name != task_name:
             resolved_task_aliases[task_name] = str(mapped_task_name)
         candidates = _metric_candidates(raw, task_name, task_mapping["eee"])
         if candidates and _hf_metric(task_results, candidates) is None:
@@ -871,7 +974,6 @@ def export_results(
                 available_metrics,
                 list(candidates),
             )
-            continue
         grouped[task_mapping["eee"]["benchmark"]].append((task_name, task_mapping))
 
     if not numeric_tasks:
@@ -881,48 +983,23 @@ def export_results(
             "Check that the run completed successfully and that its `results` "
             "object contains scored leaf or aggregate tasks."
         )
-    if strict_mappings and (skipped or metric_mismatches):
+    if strict_mappings and (internally_named or metric_mismatches):
         details = []
-        if skipped:
-            details.append("Unmapped lm-eval tasks: " + _format_items(skipped))
+        if internally_named:
+            details.append(
+                "Unmapped lm-eval tasks: " + _format_items(internally_named)
+            )
         if metric_mismatches:
             details.append(
                 "Mapped tasks without a configured metric match: "
                 + _format_items(metric_mismatches)
             )
         raise ExportError("\n".join(details))
-    if not grouped:
-        lines = [
-            "No exportable benchmark results were found.",
-            f"Results file: {results_file}",
-            f"Task mapping: {mapping_file}",
-            (
-                f"Detected {len(numeric_tasks)} task(s) with numeric results: "
-                f"{_format_items(numeric_tasks)}"
-            ),
-        ]
-        if skipped:
-            lines.append(
-                "None of these exact task names are mapped: " + _format_items(skipped)
-            )
-        for task_name, (available, candidates) in sorted(metric_mismatches.items()):
-            lines.append(
-                f"{task_name}: mapped, but available metrics "
-                f"[{_format_items(available)}] do not match configured "
-                f"candidates [{_format_items(candidates)}]"
-            )
-        lines.append(
-            "Add reviewed entries for these exact lm-eval task names to the "
-            "mapping file. Do not map variants such as AIME to an unrelated "
-            "EEE collection merely to make the export pass."
-        )
-        raise ExportError("\n".join(lines))
-
     for task_name, (available, candidates) in sorted(metric_mismatches.items()):
         warnings.append(
             f"{task_name}: mapped, but available metrics "
             f"[{_format_items(available)}] do not match configured candidates "
-            f"[{_format_items(candidates)}]"
+            f"[{_format_items(candidates)}]; exported all numeric metrics"
         )
 
     records_manifest: list[dict[str, Any]] = []
@@ -976,7 +1053,7 @@ def export_results(
                                     sample,
                                     evaluation_id,
                                     model_id,
-                                    task_mapping["eee"]["evaluation_name"],
+                                    _evaluation_name(task_mapping["eee"]),
                                 )
                             )
 
@@ -1066,15 +1143,25 @@ def export_results(
             elif package_version := _installed_package_version(raw, engine_name):
                 engine_data["version"] = package_version
             record["model_info"]["inference_engine"] = engine_data
+        self_deployed = engine in SELF_DEPLOYED_ENGINES
+        model_detail_values = {
+            "deployment_type": (
+                "self_deployed"
+                if self_deployed
+                else ("externally_managed" if engine else "unknown")
+            ),
+            "model_availability": "open_weights" if self_deployed else "unknown",
+            "revision": raw_config.get("model_revision"),
+            "sha": raw_config.get("model_sha"),
+            "dtype": raw_config.get("model_dtype"),
+            "num_parameters": raw_config.get("model_num_parameters"),
+            "model_args": raw_config.get("model_args"),
+        }
+        if self_deployed:
+            model_detail_values["hf_model_url"] = _hf_url(model_id)
         model_details = {
             key: str(value)
-            for key, value in {
-                "revision": raw_config.get("model_revision"),
-                "sha": raw_config.get("model_sha"),
-                "dtype": raw_config.get("model_dtype"),
-                "num_parameters": raw_config.get("model_num_parameters"),
-                "model_args": raw_config.get("model_args"),
-            }.items()
+            for key, value in model_detail_values.items()
             if value not in (None, "")
         }
         if model_details:
@@ -1091,7 +1178,7 @@ def export_results(
                     handle.write(json.dumps(row, ensure_ascii=False) + "\n")
             record["detailed_evaluation_results"] = {
                 "format": "jsonl",
-                "file_path": samples_path.name,
+                "file_path": str(samples_path.relative_to(output_dir / "eee")),
                 "hash_algorithm": "sha256",
                 "checksum": hashlib.sha256(samples_path.read_bytes()).hexdigest(),
                 "total_rows": len(instance_rows),
@@ -1140,7 +1227,8 @@ def export_results(
         "mapping_version": mapping["mapping_version"],
         "eee_schema_version": mapping["eee_schema_version"],
         "records": records_manifest,
-        "skipped_unmapped_tasks": sorted(skipped),
+        "internally_named_tasks": sorted(internally_named),
+        "skipped_unmapped_tasks": [],
         "resolved_task_aliases": dict(sorted(resolved_task_aliases.items())),
         "warnings": sorted(set(warnings)),
         "publishing_performed": False,
@@ -1169,7 +1257,12 @@ def validate_export(output_dir: Path) -> list[str]:
         errors.extend(_validate_record(record, str(record_path)))
         detailed = record.get("detailed_evaluation_results")
         if detailed:
-            samples_path = record_path.parent / detailed["file_path"]
+            detailed_path = Path(detailed["file_path"])
+            samples_path = (
+                output_dir / "eee" / detailed_path
+                if detailed_path.parts[:1] == ("data",)
+                else record_path.parent / detailed_path
+            )
             if not samples_path.is_file():
                 errors.append(f"{samples_path}: missing instance results")
             else:
@@ -1281,7 +1374,11 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     export.add_argument("--include-samples", action="store_true")
-    export.add_argument("--strict-mappings", action="store_true")
+    export.add_argument(
+        "--strict-mappings",
+        action="store_true",
+        help="fail instead of using internal names for unmapped lm-eval tasks",
+    )
     export.add_argument(
         "--retrieved-timestamp",
         help="Override record-creation epoch (mainly for reproducible rebuilds)",
@@ -1325,14 +1422,14 @@ def main(argv: list[str] | None = None) -> None:
                 f"{args.output_dir}"
             )
             print(
-                f"Skipped {len(manifest['skipped_unmapped_tasks'])} "
+                f"Used internal names for {len(manifest['internally_named_tasks'])} "
                 "unmapped task(s); "
                 f"{len(manifest['warnings'])} warning(s)."
             )
-            if manifest["skipped_unmapped_tasks"]:
+            if manifest["internally_named_tasks"]:
                 print(
-                    "Unmapped tasks: "
-                    + _format_items(manifest["skipped_unmapped_tasks"])
+                    "Internally named tasks: "
+                    + _format_items(manifest["internally_named_tasks"])
                 )
             if manifest["resolved_task_aliases"]:
                 print("Resolved self-consistency task aliases:")
