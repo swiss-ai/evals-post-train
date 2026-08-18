@@ -585,6 +585,22 @@ Every task with numeric results is exported. Use `--strict-mappings` when every
 numeric task in a run must have a reviewed mapping instead of using the fallback
 described below.
 
+Use `--exclude-task TASK` to omit an exact result. For benchmark groups with
+many language or subject results, prefer `--aggregate-only-task GROUP`: it keeps
+the group's aggregate score and recursively excludes its subtasks using the
+lm-eval `group_subtasks` metadata. Both options are repeatable. For example:
+
+```bash
+python scripts/export_eval_results.py export RESULTS.json \
+  --output-dir eval-results/Apertus-release \
+  --aggregate-only-task include_base_44_gen_0shot \
+  --aggregate-only-task include_base_new_45_gen_0shot \
+  --aggregate-only-task global_mmlu_gen_0shot
+```
+
+The manifest records the effective choices in `aggregate_only_tasks` and
+`excluded_tasks`.
+
 ### Task mappings
 
 Mappings live in `configs/eval_export/task_mappings.json`. Each entry maps an
