@@ -129,6 +129,78 @@ class EvalExportTests(unittest.TestCase):
         with self.assertRaisesRegex(ExportError, "safe internal benchmark"):
             _internal_task_mapping({}, "../escape")
 
+    def test_internal_task_name_preserves_spaces(self):
+        task_name = "include_base_44_north macedonian_gen_0shot"
+        mapping = _internal_task_mapping({}, task_name)
+        self.assertEqual(mapping["eee"]["benchmark"], task_name)
+        self.assertEqual(
+            _evaluation_name(mapping["eee"]),
+            (
+                "include_base_44_north macedonian_gen_0shot."
+                "include_base_44_north macedonian_gen_0shot.overall"
+            ),
+        )
+
+    def test_aggregate_only_task_excludes_nested_subtasks(self):
+        group = "include_base_44_gen_0shot"
+        subgroup = "include_base_44_south_slavic_gen_0shot"
+        leaf_one = "include_base_44_north macedonian_gen_0shot"
+        leaf_two = "include_base_44_serbian_gen_0shot"
+        raw = fixture_results()
+        task_names = [group, subgroup, leaf_one, leaf_two, "aime24"]
+        raw["results"] = {name: {"acc,none": 0.5} for name in task_names}
+        raw["configs"] = {
+            name: {
+                "task": name,
+                "dataset_path": f"internal/{name}",
+                "test_split": "test",
+                "output_type": "multiple_choice",
+            }
+            for name in task_names
+        }
+        raw["higher_is_better"] = {name: {"acc": True} for name in task_names}
+        raw["n-samples"] = {
+            name: {"original": 10, "effective": 10} for name in task_names
+        }
+        raw["group_subtasks"] = {
+            group: [subgroup, leaf_one],
+            subgroup: [leaf_two],
+        }
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = root / "results_aggregate_only.json"
+            results.write_text(json.dumps(raw), encoding="utf-8")
+            manifest = export_results(
+                results,
+                root / "export",
+                aggregate_only_tasks=[group],
+                exclude_tasks=["aime24"],
+                retrieved_timestamp="1770000000.0",
+            )
+
+            self.assertEqual(manifest["aggregate_only_tasks"], [group])
+            self.assertEqual(
+                manifest["excluded_tasks"],
+                sorted(["aime24", subgroup, leaf_one, leaf_two]),
+            )
+            self.assertEqual(len(manifest["records"]), 1)
+            self.assertEqual(manifest["records"][0]["benchmark"], group)
+            self.assertEqual(validate_export(root / "export"), [])
+
+    def test_aggregate_only_task_requires_group_metadata(self):
+        raw = fixture_results()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = root / "results_no_groups.json"
+            results.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ExportError, "group_subtasks"):
+                export_results(
+                    results,
+                    root / "export",
+                    aggregate_only_tasks=["include_base_44_gen_0shot"],
+                )
+
     def test_export_writes_canonical_records_samples_and_hf_previews(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -245,7 +245,14 @@ def _resolve_task_mapping(
 
 def _internal_task_mapping(raw: dict[str, Any], task_name: str) -> dict[str, Any]:
     """Create a lossless fallback mapping from the lm-eval task identifier."""
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", task_name):
+    if (
+        not task_name
+        or task_name != task_name.strip()
+        or "." in task_name
+        or "/" in task_name
+        or "\\" in task_name
+        or "\0" in task_name
+    ):
         raise ExportError(
             f"Unmapped lm-eval task name {task_name!r} is not a safe internal "
             "benchmark identifier; add a reviewed mapping"
@@ -260,6 +267,26 @@ def _internal_task_mapping(raw: dict[str, Any], task_name: str) -> dict[str, Any
     if isinstance(dataset_id, str) and dataset_id:
         eee["dataset_id"] = dataset_id
     return {"eee": eee}
+
+
+def _group_descendants(raw: dict[str, Any], group_name: str) -> set[str]:
+    groups = raw.get("group_subtasks", {})
+    if not isinstance(groups, dict) or group_name not in groups:
+        raise ExportError(
+            f"Cannot select aggregate-only task {group_name!r}: the lm-eval "
+            "result has no group_subtasks entry for it"
+        )
+    descendants: set[str] = set()
+    pending = list(groups.get(group_name) or [])
+    while pending:
+        child = pending.pop()
+        if not isinstance(child, str) or child in descendants:
+            continue
+        descendants.add(child)
+        nested = groups.get(child)
+        if isinstance(nested, list):
+            pending.extend(nested)
+    return descendants
 
 
 def _metric_candidates(
@@ -931,6 +958,8 @@ def export_results(
     evaluator_relationship: str | None = None,
     include_samples: bool = False,
     strict_mappings: bool = False,
+    exclude_tasks: Iterable[str] = (),
+    aggregate_only_tasks: Iterable[str] = (),
     retrieved_timestamp: str | None = None,
 ) -> dict[str, Any]:
     """Export one completed lm-eval run and return its manifest."""
@@ -954,8 +983,15 @@ def export_results(
     metric_mismatches: dict[str, tuple[list[str], list[str]]] = {}
     resolved_task_aliases: dict[str, str] = {}
     grouped: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
+    excluded_tasks = set(exclude_tasks)
+    aggregate_only = set(aggregate_only_tasks)
+    for task_name in aggregate_only:
+        excluded_tasks.update(_group_descendants(raw, task_name))
+        excluded_tasks.discard(task_name)
 
     for task_name, task_results in raw["results"].items():
+        if task_name in excluded_tasks:
+            continue
         if not isinstance(task_results, dict):
             continue
         available_metrics = [key for key, _ in _numeric_metrics(task_results)]
@@ -1228,6 +1264,8 @@ def export_results(
         "eee_schema_version": mapping["eee_schema_version"],
         "records": records_manifest,
         "internally_named_tasks": sorted(internally_named),
+        "aggregate_only_tasks": sorted(aggregate_only),
+        "excluded_tasks": sorted(excluded_tasks),
         "skipped_unmapped_tasks": [],
         "resolved_task_aliases": dict(sorted(resolved_task_aliases.items())),
         "warnings": sorted(set(warnings)),
@@ -1380,6 +1418,20 @@ def _parser() -> argparse.ArgumentParser:
         help="fail instead of using internal names for unmapped lm-eval tasks",
     )
     export.add_argument(
+        "--exclude-task",
+        action="append",
+        default=[],
+        metavar="TASK",
+        help="exclude an exact lm-eval result task (repeatable)",
+    )
+    export.add_argument(
+        "--aggregate-only-task",
+        action="append",
+        default=[],
+        metavar="GROUP",
+        help="export a group aggregate but exclude all of its subtasks (repeatable)",
+    )
+    export.add_argument(
         "--retrieved-timestamp",
         help="Override record-creation epoch (mainly for reproducible rebuilds)",
     )
@@ -1415,6 +1467,8 @@ def main(argv: list[str] | None = None) -> None:
                 ),
                 include_samples=args.include_samples,
                 strict_mappings=args.strict_mappings,
+                exclude_tasks=args.exclude_task,
+                aggregate_only_tasks=args.aggregate_only_task,
                 retrieved_timestamp=args.retrieved_timestamp,
             )
             print(
@@ -1430,6 +1484,11 @@ def main(argv: list[str] | None = None) -> None:
                 print(
                     "Internally named tasks: "
                     + _format_items(manifest["internally_named_tasks"])
+                )
+            if manifest["excluded_tasks"]:
+                print(
+                    f"Excluded {len(manifest['excluded_tasks'])} task(s): "
+                    + _format_items(manifest["excluded_tasks"])
                 )
             if manifest["resolved_task_aliases"]:
                 print("Resolved self-consistency task aliases:")
