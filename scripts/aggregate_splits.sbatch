@@ -77,7 +77,7 @@ echo "Merge command: $MERGE_CMD"
 srun -ul --mpi=pmix --environment=./containers/env.toml bash -c " \
     pip install --no-cache-dir --upgrade \"git+https://github.com/swiss-ai/lm-evaluation-harness.git\" && \
     pip install --no-cache-dir --upgrade --no-deps \
-        \"huggingface-hub>=1.3.0,<2.0\" \
+        \"huggingface-hub>=1.3.0,<1.16\" \
         \"transformers==5.1.0\" && \
     $MERGE_CMD
 "

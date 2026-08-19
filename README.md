@@ -95,7 +95,7 @@ The launcher selects a benchmark suite from its first positional argument (`<mod
 | `olmo-longcontext` | 1 task | Long-Context: RULER (8192 tokens) |
 | `olmo-complete` | 30 tasks | Union of all above (excludes long-context), deduplicated |
 
-Each mode maps to a task list and a metric config (`*_main_table.txt`) in the same directory. OLMo3 modes log to a per-mode W&B project (the base `WANDB_PROJECT` with a `-olmo-<suite>` suffix, e.g. `swissai-evals-test-olmo-easy`); the `single` mode appends `-single`.
+Each mode maps to a task list and a metric config (`*_main_table.txt`) in the same directory. OLMo3 modes log to a per-mode W&B project (the base `WANDB_PROJECT` with a `-olmo-<suite>` suffix, e.g. `<project>-olmo-easy`); the `single` mode appends `-single`. The launcher defaults `WANDB_PROJECT` to `apertus-1.5-post-training-v0.0` (not `evaluate.sbatch`'s own `swissai-evals-test` default — see [SBATCH Scripts](#sbatch-scripts)); export `WANDB_PROJECT` yourself for test/smoke runs to avoid logging into the production project.
 
 ### Model Selection Modes
 
@@ -785,8 +785,8 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TASKS` | `configs/apertus/tasks_constrained.txt` | Task list file or comma-separated task names |
-| `TABLE_METRICS` | `configs/apertus/tasks_constrained_main_table.txt` | Metrics for W&B summary table |
+| `TASKS` | `configs/apertus/tasks_default.txt` | Task list file or comma-separated task names |
+| `TABLE_METRICS` | `configs/apertus/tasks_default_main_table.txt` | Metrics for W&B summary table |
 | `LM_EVAL_BACKEND` | `hf` | Backend: `hf` (accelerate), `vllm`, `sglang`, `megatron_lm`, `openai` (OpenAI-compatible API) |
 | `API_BASE_URL` | (unset) | `openai` backend only, **required**: the OpenAI-compatible endpoint. Bare host / `/v1` root / full endpoint URL all accepted. |
 | `API_MODEL_NAME` | same as model | `openai` backend only: the `model` field sent in requests, when the server registers the model under a different id |
@@ -809,7 +809,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `NUM_SPLITS` / `SPLIT_INDEX` | `1` / `0` | Task splitting (set automatically by launcher) |
 | `LOGS_ROOT` | `/capstor/.../eval-logs` | Root directory for evaluation logs |
 | `WANDB_ENTITY` | `apertus` | W&B entity |
-| `WANDB_PROJECT` | `swissai-evals-test` | W&B project |
+| `WANDB_PROJECT` | `swissai-evals-test` | W&B project. This is `evaluate.sbatch`'s own default when invoked directly; `launch_evaluations.sh` sets its own default of `apertus-1.5-post-training-v0.0` before the sbatch script ever runs (see [The Launch Script](#the-launch-script)), so export `WANDB_PROJECT` explicitly to keep test/smoke runs out of the production project. |
 | `ENABLE_THINKING` | `false` | Chat-template argument: whether the model reasons. Emitted for `hf` **only when set explicitly**. |
 | `AUTODETECT_THINK_TOKENS` | `false` | Read the reasoning open/close tokens from the chat template |
 | `THINK_START_TOKEN` | (unset) | Force the reasoning open token, e.g. `<think>` |

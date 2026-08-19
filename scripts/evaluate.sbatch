@@ -479,7 +479,7 @@ fi
 
 INSTALL_CMD="pip install --no-cache-dir --upgrade \"$LM_EVAL_HARNESS_PIP_SPEC\" && \
 pip install --no-cache-dir --upgrade \
-    \"huggingface-hub>=1.3.0,<2.0\" \
+    \"huggingface-hub>=1.3.0,<1.16\" \
     \"transformers==5.14.1\" \
     \"accelerate>=1.14.0\" \
     \"antlr4-python3-runtime==4.11\" \
