@@ -243,6 +243,25 @@ def _resolve_task_mapping(
     return None, None
 
 
+def _internal_task_mapping(raw: dict[str, Any], task_name: str) -> dict[str, Any]:
+    """Create a lossless fallback mapping from the lm-eval task identifier."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", task_name):
+        raise ExportError(
+            f"Unmapped lm-eval task name {task_name!r} is not a safe internal "
+            "benchmark identifier; add a reviewed mapping"
+        )
+    eee: dict[str, Any] = {
+        "composite": "",
+        "family": task_name,
+        "benchmark": task_name,
+        "split": "overall",
+    }
+    dataset_id = _task_config(raw, task_name).get("dataset_path")
+    if isinstance(dataset_id, str) and dataset_id:
+        eee["dataset_id"] = dataset_id
+    return {"eee": eee}
+
+
 def _metric_candidates(
     raw: dict[str, Any],
     task_name: str,
@@ -730,7 +749,7 @@ def _selected_metrics(
     if not candidates:
         return list(_numeric_metrics(task_results))
     selected = _hf_metric(task_results, candidates)
-    return [selected] if selected else []
+    return [selected] if selected else list(_numeric_metrics(task_results))
 
 
 def _yaml_string(value: str) -> str:
@@ -930,7 +949,7 @@ def export_results(
     evaluation_timestamp = _epoch_string(raw.get("date"), results_file.stat().st_mtime)
     retrieved = _epoch_string(retrieved_timestamp, time.time())
     warnings: list[str] = []
-    skipped: list[str] = []
+    internally_named: list[str] = []
     numeric_tasks: dict[str, list[str]] = {}
     metric_mismatches: dict[str, tuple[list[str], list[str]]] = {}
     resolved_task_aliases: dict[str, str] = {}
@@ -945,9 +964,9 @@ def export_results(
         numeric_tasks[task_name] = available_metrics
         task_mapping, mapped_task_name = _resolve_task_mapping(mapping, task_name)
         if not task_mapping:
-            skipped.append(task_name)
-            continue
-        if mapped_task_name != task_name:
+            task_mapping = _internal_task_mapping(raw, task_name)
+            internally_named.append(task_name)
+        elif mapped_task_name != task_name:
             resolved_task_aliases[task_name] = str(mapped_task_name)
         candidates = _metric_candidates(raw, task_name, task_mapping["eee"])
         if candidates and _hf_metric(task_results, candidates) is None:
@@ -955,7 +974,6 @@ def export_results(
                 available_metrics,
                 list(candidates),
             )
-            continue
         grouped[task_mapping["eee"]["benchmark"]].append((task_name, task_mapping))
 
     if not numeric_tasks:
@@ -965,48 +983,23 @@ def export_results(
             "Check that the run completed successfully and that its `results` "
             "object contains scored leaf or aggregate tasks."
         )
-    if strict_mappings and (skipped or metric_mismatches):
+    if strict_mappings and (internally_named or metric_mismatches):
         details = []
-        if skipped:
-            details.append("Unmapped lm-eval tasks: " + _format_items(skipped))
+        if internally_named:
+            details.append(
+                "Unmapped lm-eval tasks: " + _format_items(internally_named)
+            )
         if metric_mismatches:
             details.append(
                 "Mapped tasks without a configured metric match: "
                 + _format_items(metric_mismatches)
             )
         raise ExportError("\n".join(details))
-    if not grouped:
-        lines = [
-            "No exportable benchmark results were found.",
-            f"Results file: {results_file}",
-            f"Task mapping: {mapping_file}",
-            (
-                f"Detected {len(numeric_tasks)} task(s) with numeric results: "
-                f"{_format_items(numeric_tasks)}"
-            ),
-        ]
-        if skipped:
-            lines.append(
-                "None of these exact task names are mapped: " + _format_items(skipped)
-            )
-        for task_name, (available, candidates) in sorted(metric_mismatches.items()):
-            lines.append(
-                f"{task_name}: mapped, but available metrics "
-                f"[{_format_items(available)}] do not match configured "
-                f"candidates [{_format_items(candidates)}]"
-            )
-        lines.append(
-            "Add reviewed entries for these exact lm-eval task names to the "
-            "mapping file. Do not map variants such as AIME to an unrelated "
-            "EEE collection merely to make the export pass."
-        )
-        raise ExportError("\n".join(lines))
-
     for task_name, (available, candidates) in sorted(metric_mismatches.items()):
         warnings.append(
             f"{task_name}: mapped, but available metrics "
             f"[{_format_items(available)}] do not match configured candidates "
-            f"[{_format_items(candidates)}]"
+            f"[{_format_items(candidates)}]; exported all numeric metrics"
         )
 
     records_manifest: list[dict[str, Any]] = []
@@ -1234,7 +1227,8 @@ def export_results(
         "mapping_version": mapping["mapping_version"],
         "eee_schema_version": mapping["eee_schema_version"],
         "records": records_manifest,
-        "skipped_unmapped_tasks": sorted(skipped),
+        "internally_named_tasks": sorted(internally_named),
+        "skipped_unmapped_tasks": [],
         "resolved_task_aliases": dict(sorted(resolved_task_aliases.items())),
         "warnings": sorted(set(warnings)),
         "publishing_performed": False,
@@ -1380,7 +1374,11 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     export.add_argument("--include-samples", action="store_true")
-    export.add_argument("--strict-mappings", action="store_true")
+    export.add_argument(
+        "--strict-mappings",
+        action="store_true",
+        help="fail instead of using internal names for unmapped lm-eval tasks",
+    )
     export.add_argument(
         "--retrieved-timestamp",
         help="Override record-creation epoch (mainly for reproducible rebuilds)",
@@ -1424,14 +1422,14 @@ def main(argv: list[str] | None = None) -> None:
                 f"{args.output_dir}"
             )
             print(
-                f"Skipped {len(manifest['skipped_unmapped_tasks'])} "
+                f"Used internal names for {len(manifest['internally_named_tasks'])} "
                 "unmapped task(s); "
                 f"{len(manifest['warnings'])} warning(s)."
             )
-            if manifest["skipped_unmapped_tasks"]:
+            if manifest["internally_named_tasks"]:
                 print(
-                    "Unmapped tasks: "
-                    + _format_items(manifest["skipped_unmapped_tasks"])
+                    "Internally named tasks: "
+                    + _format_items(manifest["internally_named_tasks"])
                 )
             if manifest["resolved_task_aliases"]:
                 print("Resolved self-consistency task aliases:")
