@@ -352,8 +352,13 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     # Rebuilt from scratch: no model is loaded in-job, so dtype etc. do not apply.
     COMMON_MODEL_ARGS="model=$API_MODEL_NAME,base_url=$API_BASE_URL,num_concurrent=$API_NUM_CONCURRENT,max_retries=$API_MAX_RETRIES,max_length=$MAX_LENGTH"
     if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then
-        # Client-side tokenization: loglikelihood scoring needs token-aligned context/continuation.
-        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER"
+        # tokenizer_backend/tokenizer is local bookkeeping only (max context length, decoding,
+        # token counts) -- lm_eval still needs it for loglikelihood scoring. tokenized_requests
+        # is the separate knob that controls what goes over the wire: with it left at the
+        # default (True), lm_eval ships pre-tokenized integer IDs in the prompt field. The CSCS
+        # gateway's /v1/completions only parses a plain string there, so it must be forced False
+        # regardless of the tokenizer setting.
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER,tokenized_requests=False"
         [[ $BOS = true ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
     else
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenized_requests=False"
