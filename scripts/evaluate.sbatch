@@ -256,8 +256,19 @@ if [ ! -z ${REVISION+x} ]; then
     MAYBE_DOWNLOAD_REVISION="--revision=$REVISION"
 fi
 if [ -z ${TOKENIZER+x} ]; then
-    echo "TOKENIZER not set, using TOKENIZER=$MODEL"
-    TOKENIZER=$MODEL
+    # Catalog ids from an inference gateway are prefixed
+    # (<catalog-namespace>/<org>/<repo>, e.g.
+    # CSCS-Inference/swiss-ai/Apertus-v1.5-70B) -- not a valid Hugging Face
+    # repo id (org/repo, exactly one slash), so AutoTokenizer rejects them.
+    # Strip the catalog prefix to recover the real tokenizer repo; a plain
+    # org/repo model id (one slash) is left untouched.
+    if [ "$(grep -o '/' <<< "$MODEL" | wc -l)" -gt 1 ]; then
+        TOKENIZER="${MODEL#*/}"
+        echo "TOKENIZER not set, using TOKENIZER=$TOKENIZER (catalog prefix stripped from MODEL=$MODEL)"
+    else
+        TOKENIZER=$MODEL
+        echo "TOKENIZER not set, using TOKENIZER=$MODEL"
+    fi
 fi
 
 
