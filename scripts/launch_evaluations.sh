@@ -385,7 +385,6 @@ case "$EVAL_MODE" in
     "single")
         export TASKS="$SINGLE_TASK"
         export TABLE_METRICS="$SINGLE_TASK"
-        export WANDB_PROJECT="${WANDB_PROJECT}-single"
         ;;
     "custom")
         ;;
