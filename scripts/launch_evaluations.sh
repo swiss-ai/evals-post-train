@@ -332,7 +332,6 @@ case "$EVAL_MODE" in
     "pretrain")
         export TASKS=./configs/apertus/tasks_pretrain.txt
         export TABLE_METRICS=./configs/apertus/tasks_pretrain_main_table.txt
-        export WANDB_PROJECT="apertus-1.5-pre-training-v0.0"
         ;;
     "posttrain")
         export TASKS=./configs/apertus/tasks_posttrain_final.txt
@@ -341,7 +340,6 @@ case "$EVAL_MODE" in
     "best-of-k")
         export TASKS=./configs/apertus/tasks_best_of_k.txt
         export TABLE_METRICS=./configs/apertus/tasks_best_of_k_main_table.txt
-        export WANDB_PROJECT="${WANDB_PROJECT}-best-of-k"
         ;;
     "gpt")
         export TASKS=./configs/apertus/tasks_gpt.txt
@@ -351,32 +349,26 @@ case "$EVAL_MODE" in
     "olmo-easy")
         export TASKS=./configs/olmo/olmo3_easy.txt
         export TABLE_METRICS=./configs/olmo/olmo3_easy_main_table.txt
-        export WANDB_PROJECT="${WANDB_PROJECT}-olmo-easy"
         ;;
     "olmo-main")
         export TASKS=./configs/olmo/olmo3_main.txt
         export TABLE_METRICS=./configs/olmo/olmo3_main_main_table.txt
-        export WANDB_PROJECT="${WANDB_PROJECT}-olmo-main"
         ;;
     "olmo-heldout")
         export TASKS=./configs/olmo/olmo3_heldout.txt
         export TABLE_METRICS=./configs/olmo/olmo3_heldout_main_table.txt
-        export WANDB_PROJECT="${WANDB_PROJECT}-olmo-heldout"
         ;;
     "olmo-safety")
         export TASKS=./configs/olmo/olmo3_safety.txt
         export TABLE_METRICS=./configs/olmo/olmo3_safety_main_table.txt
-        export WANDB_PROJECT="${WANDB_PROJECT}-olmo-safety"
         ;;
     "olmo-longcontext")
         export TASKS=./configs/olmo/olmo3_longcontext.txt
         export TABLE_METRICS=./configs/olmo/olmo3_longcontext_main_table.txt
-        export WANDB_PROJECT="${WANDB_PROJECT}-olmo-longcontext"
         ;;
     "olmo-complete")
         export TASKS=./configs/olmo/olmo3_complete.txt
         export TABLE_METRICS=./configs/olmo/olmo3_complete_main_table.txt
-        export WANDB_PROJECT="${WANDB_PROJECT}-olmo-complete"
         ;;
     "eval-debug")
         export TASKS=./configs/apertus/eval_debug.txt
