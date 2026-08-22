@@ -637,6 +637,15 @@ when all related children share one unambiguous ID. The manifest lists fallback
 tasks in `internally_named_tasks`; `skipped_unmapped_tasks` remains an empty
 compatibility field.
 
+Mappings are resolvers, not an export allowlist. An exact mapping wins; the
+controlled `_self_consistency` suffix may resolve to its reviewed base mapping.
+Any other scored task is exported under its lm-eval identifier, with that
+identifier used as both family and benchmark and `overall` as the split. For
+example, an unmapped `aime24` result becomes `aime24.aime24.overall`. Its logged
+`dataset_path` is still used as the dataset ID when present. The manifest lists
+these fallbacks in `internally_named_tasks`; `skipped_unmapped_tasks` remains an
+empty compatibility field.
+
 Evaluation names use dot notation:
 `{composite}.{family}.{benchmark}.{split}`. An empty composite is omitted, so a
 standalone benchmark such as GSM8K exports as `gsm8k.gsm8k.overall`, without a

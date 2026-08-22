@@ -129,6 +129,7 @@ class EvalExportTests(unittest.TestCase):
         with self.assertRaisesRegex(ExportError, "safe internal benchmark"):
             _internal_task_mapping({}, "../escape")
 
+<<<<<<< HEAD
     def test_internal_task_name_preserves_spaces(self):
         task_name = "include_base_44_north macedonian_gen_0shot"
         mapping = _internal_task_mapping({}, task_name)
@@ -239,6 +240,8 @@ class EvalExportTests(unittest.TestCase):
                     aggregate_only_tasks=["include_base_44"],
                 )
 
+=======
+>>>>>>> 72409217c6c9eeefc447935edcc42af80fb72712
     def test_export_writes_canonical_records_samples_and_hf_previews(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -277,10 +280,13 @@ class EvalExportTests(unittest.TestCase):
             mmlu = json.loads(
                 (output / mmlu_item["eee_record"]).read_text(encoding="utf-8")
             )
+<<<<<<< HEAD
             self.assertEqual(
                 json.loads(mmlu["eval_library"]["additional_details"]["task_hashes"]),
                 {"mmlu_pro": "hash-mmlu"},
             )
+=======
+>>>>>>> 72409217c6c9eeefc447935edcc42af80fb72712
             result = mmlu["evaluation_results"][0]
             self.assertEqual(
                 mmlu["source_metadata"]["evaluator_relationship"], "first_party"
@@ -309,7 +315,11 @@ class EvalExportTests(unittest.TestCase):
                 mmlu["model_info"]["additional_details"]["model_availability"],
                 "open_weights",
             )
+<<<<<<< HEAD
             self.assertEqual(result["metric_config"]["metric_id"], "mmlu_pro.overall")
+=======
+            self.assertEqual(result["metric_config"]["metric_id"], "mmlu_pro/overall")
+>>>>>>> 72409217c6c9eeefc447935edcc42af80fb72712
             self.assertEqual(
                 result["generation_config"]["generation_args"]["max_tokens"], 1024
             )
@@ -326,9 +336,12 @@ class EvalExportTests(unittest.TestCase):
             internal = json.loads(
                 (output / internal_item["eee_record"]).read_text(encoding="utf-8")
             )
+<<<<<<< HEAD
             self.assertNotIn(
                 "task_hashes", internal["eval_library"]["additional_details"]
             )
+=======
+>>>>>>> 72409217c6c9eeefc447935edcc42af80fb72712
             internal_result = internal["evaluation_results"][0]
             self.assertEqual(
                 internal_result["evaluation_name"],
@@ -360,12 +373,15 @@ class EvalExportTests(unittest.TestCase):
             gsm_record = json.loads(
                 (output / gsm_item["eee_record"]).read_text(encoding="utf-8")
             )
+<<<<<<< HEAD
             self.assertEqual(
                 json.loads(
                     gsm_record["eval_library"]["additional_details"]["task_hashes"]
                 ),
                 {"gsm8k_cot": "hash-gsm"},
             )
+=======
+>>>>>>> 72409217c6c9eeefc447935edcc42af80fb72712
             self.assertEqual(len(gsm_record["evaluation_results"]), 1)
             self.assertTrue(
                 gsm_record["detailed_evaluation_results"]["file_path"].startswith(
@@ -462,6 +478,7 @@ class EvalExportTests(unittest.TestCase):
                 "third_party",
             )
 
+<<<<<<< HEAD
     def test_model_release_name_is_separate_from_hugging_face_id(self):
         raw = fixture_results()
         raw["model_name"] = "swiss-ai/Apertus-8B-Instruct-2509"
@@ -652,6 +669,8 @@ class EvalExportTests(unittest.TestCase):
                         "task_hashes", record["eval_library"]["additional_details"]
                     )
 
+=======
+>>>>>>> 72409217c6c9eeefc447935edcc42af80fb72712
     def test_api_model_does_not_claim_an_unverified_hugging_face_page(self):
         raw = fixture_results()
         raw["model_name"] = "openai/gpt-4o"
@@ -776,11 +795,19 @@ class EvalExportTests(unittest.TestCase):
             self.assertEqual(details["repeats"], "32")
             self.assertEqual(details["evaluation_variant"], "self_consistency")
 
+<<<<<<< HEAD
     def test_reviewed_aime_tasks_use_canonical_names_and_direction(self):
         raw = fixture_results()
         raw["results"] = {
             "aime24": {"exact_match,none": 0.25, "degeneration,none": 0.2},
             "aime25": {"exact_match,none": 0.1, "degeneration,none": 0.3},
+=======
+    def test_all_unmapped_tasks_export_with_internal_names(self):
+        raw = fixture_results()
+        raw["results"] = {
+            "aime24": {"exact_match,none": 0.25},
+            "aime25": {"exact_match,none": 0.1},
+>>>>>>> 72409217c6c9eeefc447935edcc42af80fb72712
         }
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -794,7 +821,11 @@ class EvalExportTests(unittest.TestCase):
             )
 
             self.assertEqual(manifest["skipped_unmapped_tasks"], [])
+<<<<<<< HEAD
             self.assertEqual(manifest["internally_named_tasks"], [])
+=======
+            self.assertEqual(manifest["internally_named_tasks"], ["aime24", "aime25"])
+>>>>>>> 72409217c6c9eeefc447935edcc42af80fb72712
             self.assertEqual(
                 {item["benchmark"] for item in manifest["records"]},
                 {"aime24", "aime25"},
@@ -807,6 +838,7 @@ class EvalExportTests(unittest.TestCase):
                 names.add(record["evaluation_results"][0]["evaluation_name"])
             self.assertEqual(
                 names,
+<<<<<<< HEAD
                 {"aime.aime24.overall", "aime.aime25.overall"},
             )
             for item in manifest["records"]:
@@ -821,6 +853,10 @@ class EvalExportTests(unittest.TestCase):
                     if result["metric_config"]["metric_id"] == "degeneration"
                 )
                 self.assertTrue(degeneration["metric_config"]["lower_is_better"])
+=======
+                {"aime24.aime24.overall", "aime25.aime25.overall"},
+            )
+>>>>>>> 72409217c6c9eeefc447935edcc42af80fb72712
 
     def test_posttrain_final_inventory_is_fully_exported(self):
         task_file = (
@@ -867,9 +903,14 @@ class EvalExportTests(unittest.TestCase):
             }
             self.assertEqual(exported_tasks, set(task_names))
             self.assertEqual(len(manifest["records"]), len(task_names))
+<<<<<<< HEAD
             self.assertNotIn(
                 "gpqa_main_cot_zeroshot", manifest["internally_named_tasks"]
             )
+=======
+            self.assertEqual(len(manifest["internally_named_tasks"]), 41)
+            self.assertIn("gpqa_main_cot_zeroshot", manifest["internally_named_tasks"])
+>>>>>>> 72409217c6c9eeefc447935edcc42af80fb72712
             self.assertIn("bfcl_v3", manifest["internally_named_tasks"])
             self.assertIn(
                 "swiss_ai_charter_alignment", manifest["internally_named_tasks"]
@@ -878,7 +919,11 @@ class EvalExportTests(unittest.TestCase):
             gpqa_item = next(
                 item
                 for item in manifest["records"]
+<<<<<<< HEAD
                 if item["benchmark"] == "gpqa"
+=======
+                if item["benchmark"] == "gpqa_main_cot_zeroshot"
+>>>>>>> 72409217c6c9eeefc447935edcc42af80fb72712
             )
             gpqa = json.loads(
                 (root / "export" / gpqa_item["eee_record"]).read_text(
@@ -887,7 +932,11 @@ class EvalExportTests(unittest.TestCase):
             )
             self.assertEqual(
                 gpqa["evaluation_results"][0]["evaluation_name"],
+<<<<<<< HEAD
                 "gpqa.gpqa.overall",
+=======
+                "gpqa_main_cot_zeroshot.gpqa_main_cot_zeroshot.overall",
+>>>>>>> 72409217c6c9eeefc447935edcc42af80fb72712
             )
 
 
