@@ -185,7 +185,7 @@ class EvalExportTests(unittest.TestCase):
                 sorted(["aime24", subgroup, leaf_one, leaf_two]),
             )
             self.assertEqual(len(manifest["records"]), 1)
-            self.assertEqual(manifest["records"][0]["benchmark"], group)
+            self.assertEqual(manifest["records"][0]["benchmark"], "include_base_44")
             self.assertEqual(validate_export(root / "export"), [])
 
     def test_aggregate_only_task_falls_back_to_generated_suite_prefix(self):
@@ -277,6 +277,10 @@ class EvalExportTests(unittest.TestCase):
             mmlu = json.loads(
                 (output / mmlu_item["eee_record"]).read_text(encoding="utf-8")
             )
+            self.assertEqual(
+                json.loads(mmlu["eval_library"]["additional_details"]["task_hashes"]),
+                {"mmlu_pro": "hash-mmlu"},
+            )
             result = mmlu["evaluation_results"][0]
             self.assertEqual(
                 mmlu["source_metadata"]["evaluator_relationship"], "first_party"
@@ -305,7 +309,7 @@ class EvalExportTests(unittest.TestCase):
                 mmlu["model_info"]["additional_details"]["model_availability"],
                 "open_weights",
             )
-            self.assertEqual(result["metric_config"]["metric_id"], "mmlu_pro/overall")
+            self.assertEqual(result["metric_config"]["metric_id"], "mmlu_pro.overall")
             self.assertEqual(
                 result["generation_config"]["generation_args"]["max_tokens"], 1024
             )
@@ -321,6 +325,9 @@ class EvalExportTests(unittest.TestCase):
             )
             internal = json.loads(
                 (output / internal_item["eee_record"]).read_text(encoding="utf-8")
+            )
+            self.assertNotIn(
+                "task_hashes", internal["eval_library"]["additional_details"]
             )
             internal_result = internal["evaluation_results"][0]
             self.assertEqual(
@@ -352,6 +359,12 @@ class EvalExportTests(unittest.TestCase):
             self.assertTrue(sample["evaluation"]["is_correct"])
             gsm_record = json.loads(
                 (output / gsm_item["eee_record"]).read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                json.loads(
+                    gsm_record["eval_library"]["additional_details"]["task_hashes"]
+                ),
+                {"gsm8k_cot": "hash-gsm"},
             )
             self.assertEqual(len(gsm_record["evaluation_results"]), 1)
             self.assertTrue(
@@ -448,6 +461,196 @@ class EvalExportTests(unittest.TestCase):
                 record["source_metadata"]["evaluator_relationship"],
                 "third_party",
             )
+
+    def test_model_release_name_is_separate_from_hugging_face_id(self):
+        raw = fixture_results()
+        raw["model_name"] = "swiss-ai/Apertus-8B-Instruct-2509"
+        raw["config"]["model_args"] = {
+            "pretrained": "swiss-ai/Apertus-8B-Instruct-2509"
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = root / "results_model_name.json"
+            results.write_text(json.dumps(raw), encoding="utf-8")
+            manifest = export_results(
+                results,
+                root / "export",
+                model_name_override="Apertus-v1-8b",
+                retrieved_timestamp="1770000000.0",
+            )
+            record = json.loads(
+                (root / "export" / manifest["records"][0]["eee_record"]).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(record["model_info"]["name"], "Apertus-v1-8b")
+            self.assertEqual(
+                record["model_info"]["id"], "swiss-ai/Apertus-8B-Instruct-2509"
+            )
+            self.assertEqual(
+                record["model_info"]["additional_details"]["hf_model_url"],
+                "https://huggingface.co/swiss-ai/Apertus-8B-Instruct-2509",
+            )
+
+    def test_reviewer_naming_metric_and_dataset_conventions(self):
+        raw = fixture_results()
+        raw["results"] = {
+            "agieval": {"acc,none": 0.4},
+            "agieval_lsat_lr": {"acc,none": 0.5},
+            "mmlu_flan_cot_zeroshot": {"exact_match,strict-match": 0.6},
+            "mmlu_flan_cot_zeroshot_humanities": {
+                "exact_match,strict-match": 0.55
+            },
+            "mmlu_flan_cot_zeroshot_college_biology": {
+                "exact_match,strict-match": 0.65
+            },
+            "global_mmlu_gen_0shot": {"exact_match,extract-answer": 0.5},
+            "global_mmlu_fr_gen_0shot": {"exact_match,extract-answer": 0.51},
+            "global_mmlu_fr_stem_gen_0shot": {
+                "exact_match,extract-answer": 0.52
+            },
+            "include_base_44_gen_0shot": {"exact_match,extract-answer": 0.53},
+            "include_base_44_french_gen_0shot": {
+                "exact_match,extract-answer": 0.54
+            },
+            "include_base_44_french_gen_0shot_stem": {
+                "exact_match,extract-answer": 0.55
+            },
+            "include_base_44_north macedonian_gen_0shot": {
+                "exact_match,extract-answer": 0.56
+            },
+            "squadv2": {"f1,none": 50.0, "HasAns_exact,none": 40.0},
+            "multijail_ar": {"safe,none": 0.8, "unsafe,none": 0.2},
+            "aime24": {"degeneration,none": 0.1},
+            "bbq": {"amb_bias_score_Age,none": 0.2},
+            "harmbench": {"score,none": 0.3},
+            "realguardrails_tensortrust": {"passed,none": 0.4},
+            "gpqa_main_cot_zeroshot": {
+                "exact_match,strict-match": 0.2,
+                "exact_match,flexible-extract": 0.3,
+                "exact_match,ordered-extract": 0.4,
+            },
+        }
+        raw["configs"] = {
+            "agieval_lsat_lr": {"dataset_path": "hails/agieval-lsat-lr"},
+            "mmlu_flan_cot_zeroshot_college_biology": {
+                "dataset_path": "cais/mmlu"
+            },
+            "global_mmlu_fr_stem_gen_0shot": {
+                "dataset_path": "CohereForAI/Global-MMLU-Lite"
+            },
+            "include_base_44_french_gen_0shot_stem": {
+                "dataset_path": "CohereLabs/include-base-44"
+            },
+        }
+        raw["higher_is_better"] = {
+            "multijail_ar": {"safe": False, "unsafe": True},
+            "harmbench": {"score": False},
+        }
+        raw["task_hashes"] = {
+            "mmlu_flan_cot_zeroshot_college_biology": "biology-hash"
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = root / "results_reviewer_feedback.json"
+            results.write_text(json.dumps(raw), encoding="utf-8")
+            manifest = export_results(
+                results,
+                root / "export",
+                retrieved_timestamp="1770000000.0",
+            )
+
+            records = [
+                json.loads((root / "export" / item["eee_record"]).read_text())
+                for item in manifest["records"]
+            ]
+            by_name = {}
+            for record in records:
+                for result in record["evaluation_results"]:
+                    by_name.setdefault(result["evaluation_name"], []).append(result)
+
+            for evaluation_name in (
+                "agieval.agieval.lsat_lr",
+                "mmlu.mmlu.college_biology",
+                "mmlu.mmlu.humanities_overall",
+                "global_mmlu.global_mmlu.overall",
+                "global_mmlu.global_mmlu.fr_overall",
+                "global_mmlu.global_mmlu.fr_stem",
+                "include_base_44.include_base_44.overall",
+                "include_base_44.include_base_44.french_overall",
+                "include_base_44.include_base_44.french_stem",
+                "include_base_44.include_base_44.north_macedonian_overall",
+            ):
+                self.assertIn(evaluation_name, by_name)
+
+            squad = by_name["squadv2.squadv2.overall"]
+            self.assertTrue(
+                all(item["metric_config"]["metric_unit"] == "percentage" for item in squad)
+            )
+            self.assertTrue(
+                all(item["metric_config"]["max_score"] == 100.0 for item in squad)
+            )
+            self.assertEqual(
+                squad[0]["source_data"]["dataset_name"], "rajpurkar/squad_v2"
+            )
+
+            multijail = {
+                item["metric_config"]["metric_id"]: item["metric_config"]
+                for item in by_name["multijail.multijail.ar"]
+            }
+            self.assertFalse(multijail["multijail.safe_rate"]["lower_is_better"])
+            self.assertTrue(multijail["multijail.unsafe_rate"]["lower_is_better"])
+            self.assertTrue(
+                by_name["aime.aime24.overall"][0]["metric_config"][
+                    "lower_is_better"
+                ]
+            )
+            self.assertEqual(
+                by_name["bbq.bbq.overall"][0]["metric_config"]["metric_id"],
+                "bbq.amb_bias_score.age",
+            )
+            self.assertEqual(
+                by_name["harmbench.harmbench.overall"][0]["metric_config"][
+                    "metric_id"
+                ],
+                "harmbench.attack_success_rate",
+            )
+            self.assertEqual(
+                by_name["realguardrails_tensortrust.realguardrails_tensortrust.overall"][
+                    0
+                ]["metric_config"]["metric_id"],
+                "pass_rate",
+            )
+            self.assertEqual(
+                {
+                    item["metric_config"]["metric_id"]
+                    for item in by_name["gpqa.gpqa.overall"]
+                },
+                {
+                    "gpqa.accuracy.strict",
+                    "gpqa.accuracy.multiple_choice",
+                    "gpqa.accuracy.extractive",
+                },
+            )
+
+            mmlu_record = next(
+                record
+                for record in records
+                if record["evaluation_results"][0]["evaluation_name"].startswith(
+                    "mmlu.mmlu."
+                )
+            )
+            self.assertEqual(
+                json.loads(
+                    mmlu_record["eval_library"]["additional_details"]["task_hashes"]
+                ),
+                {"mmlu_flan_cot_zeroshot_college_biology": "biology-hash"},
+            )
+            for record in records:
+                if record is not mmlu_record:
+                    self.assertNotIn(
+                        "task_hashes", record["eval_library"]["additional_details"]
+                    )
 
     def test_api_model_does_not_claim_an_unverified_hugging_face_page(self):
         raw = fixture_results()
@@ -573,11 +776,11 @@ class EvalExportTests(unittest.TestCase):
             self.assertEqual(details["repeats"], "32")
             self.assertEqual(details["evaluation_variant"], "self_consistency")
 
-    def test_all_unmapped_tasks_export_with_internal_names(self):
+    def test_reviewed_aime_tasks_use_canonical_names_and_direction(self):
         raw = fixture_results()
         raw["results"] = {
-            "aime24": {"exact_match,none": 0.25},
-            "aime25": {"exact_match,none": 0.1},
+            "aime24": {"exact_match,none": 0.25, "degeneration,none": 0.2},
+            "aime25": {"exact_match,none": 0.1, "degeneration,none": 0.3},
         }
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -591,7 +794,7 @@ class EvalExportTests(unittest.TestCase):
             )
 
             self.assertEqual(manifest["skipped_unmapped_tasks"], [])
-            self.assertEqual(manifest["internally_named_tasks"], ["aime24", "aime25"])
+            self.assertEqual(manifest["internally_named_tasks"], [])
             self.assertEqual(
                 {item["benchmark"] for item in manifest["records"]},
                 {"aime24", "aime25"},
@@ -604,8 +807,20 @@ class EvalExportTests(unittest.TestCase):
                 names.add(record["evaluation_results"][0]["evaluation_name"])
             self.assertEqual(
                 names,
-                {"aime24.aime24.overall", "aime25.aime25.overall"},
+                {"aime.aime24.overall", "aime.aime25.overall"},
             )
+            for item in manifest["records"]:
+                record = json.loads(
+                    (root / "export" / item["eee_record"]).read_text(
+                        encoding="utf-8"
+                    )
+                )
+                degeneration = next(
+                    result
+                    for result in record["evaluation_results"]
+                    if result["metric_config"]["metric_id"] == "degeneration"
+                )
+                self.assertTrue(degeneration["metric_config"]["lower_is_better"])
 
     def test_posttrain_final_inventory_is_fully_exported(self):
         task_file = (
@@ -652,8 +867,9 @@ class EvalExportTests(unittest.TestCase):
             }
             self.assertEqual(exported_tasks, set(task_names))
             self.assertEqual(len(manifest["records"]), len(task_names))
-            self.assertEqual(len(manifest["internally_named_tasks"]), 41)
-            self.assertIn("gpqa_main_cot_zeroshot", manifest["internally_named_tasks"])
+            self.assertNotIn(
+                "gpqa_main_cot_zeroshot", manifest["internally_named_tasks"]
+            )
             self.assertIn("bfcl_v3", manifest["internally_named_tasks"])
             self.assertIn(
                 "swiss_ai_charter_alignment", manifest["internally_named_tasks"]
@@ -662,7 +878,7 @@ class EvalExportTests(unittest.TestCase):
             gpqa_item = next(
                 item
                 for item in manifest["records"]
-                if item["benchmark"] == "gpqa_main_cot_zeroshot"
+                if item["benchmark"] == "gpqa"
             )
             gpqa = json.loads(
                 (root / "export" / gpqa_item["eee_record"]).read_text(
@@ -671,7 +887,7 @@ class EvalExportTests(unittest.TestCase):
             )
             self.assertEqual(
                 gpqa["evaluation_results"][0]["evaluation_name"],
-                "gpqa_main_cot_zeroshot.gpqa_main_cot_zeroshot.overall",
+                "gpqa.gpqa.overall",
             )
 
 
