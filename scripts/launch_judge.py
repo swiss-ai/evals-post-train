@@ -83,7 +83,9 @@ JUDGE_PRESETS = {
         ),
     },
     "cais-llama-harmbench": {
-        "served_model_name": "cais/HarmBench-Llama-2-13b-cls ",
+        # No trailing space: check_judge_health() does an exact match against the
+        # gateway's registered model IDs, which don't carry a trailing space.
+        "served_model_name": "cais/HarmBench-Llama-2-13b-cls",
         "framework": "vllm",
         "nodes": 1,
         "time": "04:00:00",
@@ -93,7 +95,9 @@ JUDGE_PRESETS = {
             f"--model {MODEL_REGISTRY / 'cais/HarmBench-Llama-2-13b-cls'} "
             "--host 0.0.0.0 "
             "--served-model-name cais/HarmBench-Llama-2-13b-cls "
-            "--tensor-parallel-size 4 --max-model-len 35000"
+            # This model's config.json caps max_position_embeddings at 2048 (unlike the
+            # other judge presets); vLLM refuses to start above that, so keep it in bounds.
+            "--tensor-parallel-size 4 --max-model-len 2048"
         ),
     },
     "llama-guard": {
