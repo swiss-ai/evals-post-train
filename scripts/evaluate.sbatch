@@ -88,7 +88,7 @@ WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
 LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-true}
 HARNESS_LIMIT=${HARNESS_LIMIT:-""}
-LM_EVAL_HARNESS_BRANCH=${LM_EVAL_HARNESS_BRANCH:-""}
+LM_EVAL_HARNESS_BRANCH=${LM_EVAL_HARNESS_BRANCH:-"fixes_for_eval_pipeline"}
 
 # OpenAI-compatible API backend (LM_EVAL_BACKEND=openai).
 API_BASE_URL=${API_BASE_URL:-""}
@@ -369,7 +369,19 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
         # default (True), lm_eval ships pre-tokenized integer IDs in the prompt field. The CSCS
         # gateway's /v1/completions only parses a plain string there, so it must be forced False
         # regardless of the tokenizer setting.
-        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER,tokenized_requests=False"
+        #
+        # tokenizer_backend=remote asks the serving endpoint's own
+        # /v1/tokenize and /v1/detokenize for tokenization and chat-template
+        # rendering, instead of loading a separate local HF tokenizer. Two
+        # wins over tokenizer_backend=huggingface: no Hugging Face Hub
+        # dependency at eval time (works on gated repos with no HF access
+        # needed), and the template used is guaranteed to be whatever the
+        # server is actually serving with -- not a second, independently
+        # resolved copy that could silently disagree with it. Needs
+        # auth_token for the gateway's own auth check on /v1/tokenize
+        # (confirmed live: 401 without it, same as /v1/completions).
+        _reject_comma OPENAI_API_KEY "$OPENAI_API_KEY"
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=remote,tokenized_requests=False,auth_token=$OPENAI_API_KEY"
         [[ $BOS = true ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
     else
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenized_requests=False"
