@@ -31,10 +31,6 @@
 #                               --script is given, or --backend openai is used with
 #                               --api-model-name (which then also fills --model's slot).
 #   --script <path>           - Run a model-list script (e.g. hf_eval_multiple_other_models.sh)
-#   (neither)                 - Uses the EVALUATION_SCRIPTS array defined below. No longer
-#                               reachable: --model/--script/--api-model-name is now always
-#                               required one way or another, to avoid silently running the
-#                               default suite when --model was simply forgotten.
 #   --megatron-iter <iter>    - For Megatron models, specify the iteration number to evaluate
 #                               (e.g. 8926), defaults to "latest"
 #
@@ -98,9 +94,6 @@
 #
 #   # Run a multi-model script
 #   bash launch_evaluations.sh complete --script runners/hf_eval_multiple_other_models.sh
-#
-#   # Use default EVALUATION_SCRIPTS (edit the array below)
-#   bash launch_evaluations.sh complete --splits 4
 #
 #   # Run a single task
 #   bash launch_evaluations.sh single --task hellaswag --model meta-llama/Llama-3.1-8B-Instruct
@@ -586,8 +579,11 @@ if [[ -n "$MODEL_PATH" ]]; then
     )
     source runners/hf_base_runner.sh "model"
 
-elif [[ -n "$SCRIPT_PATH" ]]; then
+else
     # ===== MODE 2: Run a model-list script =====
+    # SCRIPT_PATH is guaranteed non-empty here: the requiredness check above ensures
+    # --model or --script is always set (or --model is defaulted from --api-model-name),
+    # and --model/--script are mutually exclusive.
     if [[ ! -f "$SCRIPT_PATH" ]]; then
         echo "Error: Script not found: $SCRIPT_PATH"
         exit 1
@@ -604,36 +600,6 @@ elif [[ -n "$SCRIPT_PATH" ]]; then
     echo "======================================"
 
     bash "$SCRIPT_PATH"
-
-else
-    # ===== MODE 3: Default EVALUATION_SCRIPTS array =====
-    [[ -n "$CHAT_TEMPLATE_OVERRIDE" ]] && export APPLY_CHAT_TEMPLATE="$CHAT_TEMPLATE_OVERRIDE"
-    [[ -n "$CUSTOM_TOKENIZER" ]] && export TOKENIZER="$CUSTOM_TOKENIZER"
-    [[ -n "$BOS_FLAG" ]] && export BOS="$BOS_FLAG"
-    [[ -n "$BACKEND_FLAG" ]] && export LM_EVAL_BACKEND="$BACKEND_FLAG"
-
-    # Edit this array to select which model-list scripts to run
-    EVALUATION_SCRIPTS=(
-        "runners/hf_eval_multiple_apertus_base_models.sh"
-        # "runners/hf_eval_multiple_apertus_models.sh"
-        # "runners/hf_eval_multiple_other_base_models.sh"
-        # "runners/hf_eval_multiple_other_models.sh"
-    )
-
-    echo "  Scripts:"
-    for script in "${EVALUATION_SCRIPTS[@]}"; do
-        echo "    - $script"
-    done
-    [[ -n "$HARNESS_BRANCH" ]] && echo "  Harness branch: $HARNESS_BRANCH"
-    echo "  W&B:    $WANDB_ENTITY/$WANDB_PROJECT"
-    echo "======================================"
-
-    for script in "${EVALUATION_SCRIPTS[@]}"; do
-        echo ""
-        echo "Launching: $script"
-        echo "----------------------------------------"
-        bash "$script"
-    done
 fi
 
 # --- Judge cleanup job ---

@@ -111,11 +111,6 @@ bash scripts/launch_evaluations.sh <mode> --script runners/hf_eval_multiple_othe
 ```
 Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `hf_base_runner.sh`.
 
-**Mode 3: Default scripts** (edit the `EVALUATION_SCRIPTS` array inside the launcher)
-```bash
-bash scripts/launch_evaluations.sh <mode>
-```
-
 ### Options / Key Hyperparameters
 
 | Flag | Description |
