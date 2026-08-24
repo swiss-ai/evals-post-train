@@ -27,10 +27,15 @@
 
 #
 # Model selection (pick one):
-#   --model <path>            - Single HF model or local checkpoint path
+#   --model <path>            - Single HF model or local checkpoint path. Required unless
+#                               --script is given, or --backend openai is used with
+#                               --api-model-name (which then also fills --model's slot).
 #   --script <path>           - Run a model-list script (e.g. hf_eval_multiple_other_models.sh)
-#   (neither)                 - Uses the EVALUATION_SCRIPTS array defined below
-#   --megatron-iter <iter>    - For Megatron models, specify the iteration number to evaluate 
+#   (neither)                 - Uses the EVALUATION_SCRIPTS array defined below. No longer
+#                               reachable: --model/--script/--api-model-name is now always
+#                               required one way or another, to avoid silently running the
+#                               default suite when --model was simply forgotten.
+#   --megatron-iter <iter>    - For Megatron models, specify the iteration number to evaluate
 #                               (e.g. 8926), defaults to "latest"
 #
 # Options:
@@ -46,7 +51,10 @@
 #   --backend <backend>  - lm-eval backend: hf, vllm, sglang, megatron_lm, openai (default: from sbatch script)
 #   --api-base-url <url> - OpenAI-compatible endpoint for the 'openai' backend (required with it,
 #                          unless API_BASE_URL is exported). Bare host, /v1 root, or full endpoint URL.
-#   --api-model-name <n> - 'model' field sent in API requests (default: the --model value)
+#   --api-model-name <n> - 'model' field sent in API requests. Required with the 'openai' backend
+#                          (unless API_MODEL_NAME is exported) -- --model's value may be
+#                          catalog-prefixed and not what the gateway expects. If --model is
+#                          omitted, it defaults to this value so single-model dispatch still runs.
 #   --splits K           - Split tasks across K parallel nodes per model
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
@@ -262,12 +270,35 @@ if [[ "$EFFECTIVE_BACKEND" == "openai" && -z "${API_BASE_URL_FLAG:-${API_BASE_UR
     echo "Error: --backend openai requires --api-base-url <url> (or an exported API_BASE_URL)"
     exit 1
 fi
+# --model defaults API_MODEL_NAME (evaluate.sbatch) to its own, possibly catalog-prefixed
+# value, which the gateway may not recognize -- require the caller to say explicitly what
+# the server should see rather than relying on that default.
+if [[ "$EFFECTIVE_BACKEND" == "openai" && -z "${API_MODEL_NAME_FLAG:-${API_MODEL_NAME:-}}" ]]; then
+    echo "Error: --backend openai requires --api-model-name <name> (or an exported API_MODEL_NAME)"
+    exit 1
+fi
 if [[ -n "$API_BASE_URL_FLAG" || -n "$API_MODEL_NAME_FLAG" ]] && [[ "$EFFECTIVE_BACKEND" != "openai" ]]; then
     echo "Error: --api-base-url/--api-model-name only apply with --backend openai"
     exit 1
 fi
+# Non-openai backends load a checkpoint in-job, so a model has to be named one way or
+# another: --model for a single checkpoint, --script for a model-list. Without either, this
+# used to fall through silently to the hardcoded default EVALUATION_SCRIPTS array below --
+# exactly the trap that bit the missing-'--model' openai case. Require it explicitly instead.
+if [[ "$EFFECTIVE_BACKEND" != "openai" && -z "$MODEL_PATH" && -z "$SCRIPT_PATH" ]]; then
+    echo "Error: --model or --script is required (unless --backend openai is used with --api-model-name)"
+    exit 1
+fi
 [[ -n "$API_BASE_URL_FLAG"   ]] && export API_BASE_URL="$API_BASE_URL_FLAG"
 [[ -n "$API_MODEL_NAME_FLAG" ]] && export API_MODEL_NAME="$API_MODEL_NAME_FLAG"
+
+# The openai backend loads no local checkpoint, so --api-model-name (flag or ambient
+# API_MODEL_NAME, same fallback the requiredness check above used) alone identifies the
+# model. Default --model from it so single-model dispatch (MODE 1 below) still triggers
+# when the caller only passed --api-model-name.
+if [[ -z "$MODEL_PATH" && -z "$SCRIPT_PATH" && "$EFFECTIVE_BACKEND" == "openai" ]]; then
+    MODEL_PATH="${API_MODEL_NAME_FLAG:-$API_MODEL_NAME}"
+fi
 
 if [[ "$THINKING_METRICS_ASKED" == "true" ]]; then
     # The reasoning tokens live in the chat template, so it has to be rendered.
