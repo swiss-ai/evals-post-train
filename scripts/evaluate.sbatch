@@ -50,6 +50,7 @@ usage() {
     echo "  OPENAI_API_KEY: Bearer token for the endpoint (default: CSCS_SERVING_API)."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from the task-selected harness repository (default: repository default branch)."
+    echo " SKIP_INSTALL: '1' to skip the runtime pip install entirely (environment already provisioned, e.g. a baked image)."
     echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
     echo "  ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: false)."
     echo "  AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
@@ -525,6 +526,14 @@ fi
 # lm-eval's API models (local-completions / local-chat-completions) need the [api] extras.
 if [[ $LM_EVAL_BACKEND == "openai" ]]; then
   INSTALL_CMD="$INSTALL_CMD && pip install --no-cache-dir tenacity aiohttp"
+fi
+
+# SKIP_INSTALL=1: the environment already has the harness and its
+# dependencies baked in (e.g. the evals-svc runner image). Skipping the
+# runtime pip install makes the run deterministic -- the image digest fully
+# determines the harness and dependency versions -- and minutes faster.
+if [[ "${SKIP_INSTALL:-0}" == "1" ]]; then
+  INSTALL_CMD="echo 'SKIP_INSTALL=1: using the preinstalled environment (no pip install)'"
 fi
 
 # $CMD is re-parsed by the inner `bash -lc`, so --model_args is single-quoted (a token like
