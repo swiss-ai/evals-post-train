@@ -23,6 +23,10 @@
         "benchmark": "big_bench_hard",
         "split": "overall",
         "dataset_id": "lukaemon/bbh"
+      },
+      "subtasks": {
+        "pattern": "^bbh_cot_fewshot_(?P<split>.+)$",
+        "split": "{split}"
       }
     },
     "commonsense_qa": {
@@ -185,7 +189,7 @@
         ],
         "metric_overrides": {
           "exact_match": {
-            "metric_id": "mmlu_pro/overall",
+            "metric_id": "mmlu_pro.{split}",
             "metric_name": "MMLU-Pro overall accuracy",
             "metric_kind": "accuracy",
             "metric_unit": "proportion",
@@ -193,7 +197,7 @@
             "max_score": 1.0
           },
           "acc": {
-            "metric_id": "mmlu_pro/overall",
+            "metric_id": "mmlu_pro.{split}",
             "metric_name": "MMLU-Pro overall accuracy",
             "metric_kind": "accuracy",
             "metric_unit": "proportion",
@@ -212,6 +216,336 @@
           "acc,none",
           "acc"
         ]
+      },
+      "subtasks": {
+        "pattern": "^mmlu_pro_(?P<split>.+)$",
+        "split": "{split}"
+      }
+    },
+    "agieval": {
+      "eee": {
+        "composite": "",
+        "family": "agieval",
+        "benchmark": "agieval",
+        "split": "overall"
+      },
+      "subtasks": {
+        "pattern": "^agieval_(?P<split>.+)$",
+        "split": "{split}"
+      }
+    },
+    "acp_bench": {
+      "eee": {
+        "composite": "",
+        "family": "acp_bench",
+        "benchmark": "acp_bench",
+        "split": "overall",
+        "dataset_id": "ibm-research/acp_bench"
+      },
+      "subtasks": {
+        "pattern": "^acp_(?:bench_)?(?P<split>.+)$",
+        "split": "{split}"
+      }
+    },
+    "arc_challenge_chat": {
+      "eee": {
+        "composite": "",
+        "family": "arc",
+        "benchmark": "arc_challenge",
+        "split": "overall",
+        "dataset_id": "allenai/ai2_arc"
+      }
+    },
+    "arc_multilingual": {
+      "eee": {
+        "composite": "",
+        "family": "arc",
+        "benchmark": "arc_multilingual",
+        "split": "overall",
+        "dataset_id": "alexandrainst/m_arc"
+      },
+      "subtasks": {
+        "pattern": "^arc_(?P<split>[a-z]{2})$",
+        "split": "{split}"
+      }
+    },
+    "aime24": {
+      "eee": {
+        "composite": "",
+        "family": "aime",
+        "benchmark": "aime24",
+        "split": "overall",
+        "dataset_id": "Maxwell-Jia/AIME_2024"
+      }
+    },
+    "aime25": {
+      "eee": {
+        "composite": "",
+        "family": "aime",
+        "benchmark": "aime25",
+        "split": "overall",
+        "dataset_id": "math-ai/aime25"
+      }
+    },
+    "bbq": {
+      "eee": {
+        "composite": "",
+        "family": "bbq",
+        "benchmark": "bbq",
+        "split": "overall",
+        "dataset_id": "oskarvanderwal/bbq",
+        "metric_namespace": "bbq",
+        "metric_variant_roots": [
+          "accuracy",
+          "amb_bias_score",
+          "disamb_bias_score"
+        ]
+      }
+    },
+    "blend_sample": {
+      "eee": {
+        "composite": "",
+        "family": "blend",
+        "benchmark": "blend",
+        "split": "overall",
+        "dataset_id": "swiss-ai/blend-sample"
+      },
+      "subtasks": {
+        "pattern": "^blend_(?P<split>.+)_sample$",
+        "split": "{split}"
+      }
+    },
+    "global_mmlu_gen_0shot": {
+      "eee": {
+        "composite": "",
+        "family": "global_mmlu",
+        "benchmark": "global_mmlu",
+        "split": "overall",
+        "dataset_id": "CohereForAI/Global-MMLU-Lite"
+      },
+      "subtasks": {
+        "pattern": "^global_mmlu_(?P<split>.+)_gen_0shot$",
+        "split": "{split}",
+        "configless_split_is_overall": true
+      }
+    },
+    "gpqa_main_cot_zeroshot": {
+      "eee": {
+        "composite": "",
+        "family": "gpqa",
+        "benchmark": "gpqa",
+        "split": "overall",
+        "dataset_id": "Idavidrein/gpqa",
+        "metric_overrides": {
+          "exact_match,strict-match": {
+            "metric_id": "gpqa.accuracy.strict"
+          },
+          "exact_match,flexible-extract": {
+            "metric_id": "gpqa.accuracy.multiple_choice"
+          },
+          "exact_match,ordered-extract": {
+            "metric_id": "gpqa.accuracy.extractive"
+          }
+        }
+      }
+    },
+    "harmbench": {
+      "eee": {
+        "composite": "",
+        "family": "harmbench",
+        "benchmark": "harmbench",
+        "split": "overall",
+        "dataset_id": "swiss-ai/harmbench",
+        "metric_defaults": {
+          "metric_kind": "rate",
+          "metric_unit": "proportion",
+          "min_score": 0.0,
+          "max_score": 1.0
+        },
+        "metric_overrides": {
+          "score": {
+            "metric_id": "harmbench.attack_success_rate",
+            "metric_name": "Attack success rate",
+            "lower_is_better": true
+          }
+        }
+      },
+      "subtasks": {
+        "pattern": "^harmbench_(?P<split>.+)$",
+        "split": "{split}"
+      }
+    },
+    "include_base_44_gen_0shot": {
+      "eee": {
+        "composite": "",
+        "family": "include_base_44",
+        "benchmark": "include_base_44",
+        "split": "overall",
+        "dataset_id": "CohereLabs/include-base-44"
+      },
+      "subtasks": {
+        "pattern": "^include_base_44_(?P<language>.+?)_gen_0shot(?:_(?P<subset>.+))?$",
+        "split": "{language}_{subset}",
+        "configless_split_is_overall": true
+      }
+    },
+    "include_base_new_45_gen_0shot": {
+      "eee": {
+        "composite": "",
+        "family": "include_base_new_45",
+        "benchmark": "include_base_new_45",
+        "split": "overall",
+        "dataset_id": "swiss-ai/include-base-new-45"
+      },
+      "subtasks": {
+        "pattern": "^include_base_new_45_(?P<split>.+)_gen_0shot$",
+        "split": "{split}",
+        "configless_split_is_overall": true
+      }
+    },
+    "mmlu_flan_cot_zeroshot": {
+      "eee": {
+        "composite": "",
+        "family": "mmlu",
+        "benchmark": "mmlu",
+        "split": "overall",
+        "dataset_id": "cais/mmlu"
+      },
+      "subtasks": {
+        "pattern": "^mmlu_flan_cot_zeroshot_(?P<split>.+)$",
+        "split": "{split}",
+        "configless_split_is_overall": true
+      }
+    },
+    "mgsm_en_cot": {
+      "eee": {
+        "composite": "",
+        "family": "mgsm",
+        "benchmark": "mgsm",
+        "split": "overall",
+        "dataset_id": "jbross-ibm-research/mgsm"
+      },
+      "subtasks": {
+        "pattern": "^mgsm_en_cot_(?P<split>.+)$",
+        "split": "{split}"
+      }
+    },
+    "mlogiqa_gen": {
+      "eee": {
+        "composite": "",
+        "family": "mlogiqa",
+        "benchmark": "mlogiqa",
+        "split": "overall",
+        "dataset_id": "swiss-ai/mlogiqa"
+      },
+      "subtasks": {
+        "pattern": "^mlogiqa_gen_(?P<split>.+)$",
+        "split": "{split}"
+      }
+    },
+    "multijail": {
+      "eee": {
+        "composite": "",
+        "family": "multijail",
+        "benchmark": "multijail",
+        "split": "overall",
+        "dataset_id": "DAMO-NLP-SG/MultiJail",
+        "metric_defaults": {
+          "metric_kind": "rate",
+          "metric_unit": "proportion",
+          "min_score": 0.0,
+          "max_score": 1.0
+        },
+        "metric_overrides": {
+          "safe": {
+            "metric_id": "multijail.safe_rate",
+            "metric_name": "Safe response rate",
+            "lower_is_better": false
+          },
+          "unsafe": {
+            "metric_id": "multijail.unsafe_rate",
+            "metric_name": "Unsafe response rate",
+            "lower_is_better": true
+          },
+          "invalid": {
+            "metric_id": "multijail.invalid_rate",
+            "metric_name": "Invalid response rate",
+            "lower_is_better": true
+          }
+        }
+      },
+      "subtasks": {
+        "pattern": "^multijail_(?P<split>.+)$",
+        "split": "{split}"
+      }
+    },
+    "squadv2": {
+      "eee": {
+        "composite": "",
+        "family": "squadv2",
+        "benchmark": "squadv2",
+        "split": "overall",
+        "dataset_id": "rajpurkar/squad_v2",
+        "metric_defaults": {
+          "metric_kind": "accuracy",
+          "metric_unit": "percentage",
+          "min_score": 0.0,
+          "max_score": 100.0,
+          "lower_is_better": false
+        },
+        "metric_overrides": {
+          "exact": {
+            "metric_id": "squadv2.exact_match"
+          },
+          "f1": {
+            "metric_id": "squadv2.f1"
+          },
+          "HasAns_exact": {
+            "metric_id": "squadv2.exact_match.has_ans"
+          },
+          "HasAns_f1": {
+            "metric_id": "squadv2.f1.has_ans"
+          },
+          "NoAns_exact": {
+            "metric_id": "squadv2.exact_match.no_ans"
+          },
+          "NoAns_f1": {
+            "metric_id": "squadv2.f1.no_ans"
+          },
+          "best_exact": {
+            "metric_id": "squadv2.exact_match.best"
+          },
+          "best_f1": {
+            "metric_id": "squadv2.f1.best"
+          }
+        }
+      }
+    },
+    "switzerland_qa_0shot": {
+      "eee": {
+        "composite": "",
+        "family": "switzerland_qa",
+        "benchmark": "switzerland_qa",
+        "split": "overall",
+        "dataset_id": "swiss-ai/switzerland_qa"
+      },
+      "subtasks": {
+        "pattern": "^switzerland_qa_(?P<split>.+)_0shot$",
+        "split": "{split}",
+        "configless_split_is_overall": true
+      }
+    },
+    "xnli": {
+      "eee": {
+        "composite": "",
+        "family": "xnli",
+        "benchmark": "xnli",
+        "split": "overall",
+        "dataset_id": "facebook/xnli"
+      },
+      "subtasks": {
+        "pattern": "^xnli_(?P<split>.+)$",
+        "split": "{split}"
       }
     },
     "piqa": {

@@ -509,7 +509,8 @@ produced by `merge_split_results.py`.
 python scripts/export_eval_results.py export \
   /path/to/merged_eval/results_2026-07-27T12-00-00.json \
   --output-dir eval-results/Apertus-release-2026-07 \
-  --model-id swiss-ai/Apertus-8B-Instruct-2607 \
+  --model-id swiss-ai/Apertus-8B-Instruct-2509 \
+  --model-name Apertus-v1-8b \
   --include-samples
 ```
 
@@ -517,7 +518,9 @@ python scripts/export_eval_results.py export \
 it is required when the evaluation used a local checkpoint path.
 EEE `model_info.id` uses this Hub ID, and `model_info.additional_details`
 includes its direct Hugging Face model URL for self-deployed models. API models
-do not receive a guessed Hub URL.
+do not receive a guessed Hub URL. Use `--model-name` when the release/display
+name differs from the repository name; it is written to `model_info.name`
+without changing the ID or URL.
 Evaluator provenance defaults to `first_party` for `swiss-ai/*` models and
 `third_party` for other owners; override it with `--evaluator-relationship`
 when a run was collaborative or has a different relationship.
@@ -571,6 +574,29 @@ Every task with numeric results is exported. Use `--strict-mappings` when every
 numeric task in a run must have a reviewed mapping instead of using the fallback
 described below.
 
+By default, aggregate and non-aggregate rows are all retained. Omit
+`--aggregate-only-task` when preparing a full-data submission. The option below
+is available only for intentionally compact exports.
+
+Use `--exclude-task TASK` to omit an exact result. For benchmark groups with
+many language or subject results, prefer `--aggregate-only-task GROUP`: it keeps
+the group's aggregate score and recursively excludes its subtasks. The exporter
+uses lm-eval's `group_subtasks` metadata when available and falls back to the
+generated suite's task-name prefix when lm-eval omits that metadata. Both
+options are repeatable. Generated suites can be selected by either their base
+group name or their full aggregate result task. For example:
+
+```bash
+python scripts/export_eval_results.py export RESULTS.json \
+  --output-dir eval-results/Apertus-release \
+  --aggregate-only-task include_base_44 \
+  --aggregate-only-task include_base_new_45 \
+  --aggregate-only-task global_mmlu
+```
+
+The manifest records the effective choices in `aggregate_only_tasks` and
+`excluded_tasks`.
+
 ### Task mappings
 
 Mappings live in `configs/eval_export/task_mappings.json`. Each entry maps an
@@ -583,6 +609,19 @@ exact lm-eval task name to:
 - optional ordered EEE metric candidates and canonical metric-ID overrides
 - optionally, a registered Hugging Face benchmark dataset, task ID, and ordered
   metric candidates
+- optionally, a reviewed subtask pattern that places language/subject parts in
+  the split component while removing run setup from the evaluation name
+
+Mappings are resolvers, not an export allowlist. An exact mapping wins; reviewed
+subtask patterns and the controlled `_self_consistency` suffix may resolve to a
+base mapping. For unmapped tasks, the exporter detects a scored configless
+aggregate prefix and uses it as the internal family/benchmark, putting the
+remaining task name in the split. Truly standalone tasks retain their exact
+internal identifier as family and benchmark with `overall` as the split. Logged
+Hugging Face dataset IDs are preserved, including for configless aggregates
+when all related children share one unambiguous ID. The manifest lists fallback
+tasks in `internally_named_tasks`; `skipped_unmapped_tasks` remains an empty
+compatibility field.
 
 Mappings are resolvers, not an export allowlist. An exact mapping wins; the
 controlled `_self_consistency` suffix may resolve to its reviewed base mapping.
@@ -604,6 +643,11 @@ For Hugging Face datasets, both `source_data.dataset_name` and
 `source_data.hf_repo` contain the `owner/dataset` ID. The direct dataset URL is
 recorded in `source_data.additional_details.hf_dataset_url`.
 
+Benchmark-specific metric IDs use dot namespaces (for example,
+`mmlu_pro.overall` and `bbq.amb_bias_score.age`). Task hashes are scoped to the
+record containing the corresponding lm-eval task instead of copying the run's
+entire hash map into every record.
+
 The repository's `_self_consistency` suffix is handled as a controlled task
 variant: the exporter removes only that exact suffix and requires the remaining
 base task to have a reviewed mapping. Its mapping can define
@@ -613,11 +657,10 @@ task config so, for example, `exact_match,mean@{repeats}` selects
 `self_consistency` variant remain recorded in the exported metadata.
 
 Do not otherwise use fuzzy matching for benchmark variants. For example,
-`gpqa_main_cot_zeroshot` is not mapped to the datastore's `gpqa_diamond`
-collection, and `gsm8k_platinum` is not mapped to `gsm8k`. Until a mapping is
-reviewed, those tasks—as well as `bfcl_v3` and `swiss_ai_charter_alignment`—are
-exported under their exact internal names rather than being omitted or assigned
-to a possibly incorrect external benchmark.
+`gsm8k_platinum` is not mapped to `gsm8k`. Until a mapping is reviewed, tasks
+such as `bfcl_v3` and `swiss_ai_charter_alignment` are exported under safe
+internal names rather than being omitted or assigned to a possibly incorrect
+external benchmark.
 
 The exporter preserves scores in their native lm-eval scale. It never
 automatically multiplies proportions by 100.

@@ -106,6 +106,24 @@ KNOWN_METRICS: dict[str, dict[str, Any]] = {
         "max_score": 1.0,
         "metric_parameters": {"k": 1},
     },
+    "passed": {
+        "metric_id": "pass_rate",
+        "metric_name": "Pass rate",
+        "metric_kind": "pass_rate",
+        "metric_unit": "proportion",
+        "min_score": 0.0,
+        "max_score": 1.0,
+        "lower_is_better": False,
+    },
+    "degeneration": {
+        "metric_id": "degeneration",
+        "metric_name": "Degeneration rate",
+        "metric_kind": "rate",
+        "metric_unit": "proportion",
+        "min_score": 0.0,
+        "max_score": 1.0,
+        "lower_is_better": True,
+    },
 }
 
 
@@ -225,13 +243,51 @@ def _load_mapping(path: Path) -> dict[str, Any]:
             raise ExportError(
                 f"Incomplete EEE mapping for {task_name}: {exc}"
             ) from exc
+        subtasks = task_mapping.get("subtasks")
+        if subtasks is not None:
+            if not isinstance(subtasks, dict) or not subtasks.get("pattern"):
+                raise ExportError(
+                    f"Invalid subtask mapping for {task_name}: pattern is required"
+                )
+            try:
+                re.compile(str(subtasks["pattern"]))
+            except re.error as exc:
+                raise ExportError(
+                    f"Invalid subtask pattern for {task_name}: {exc}"
+                ) from exc
     return mapping
 
 
+def _format_subtask_split(
+    raw: dict[str, Any],
+    task_name: str,
+    match: re.Match[str],
+    config: dict[str, Any],
+) -> str:
+    captures = {
+        key: str(item or "") for key, item in match.groupdict().items()
+    }
+    try:
+        split = str(config.get("split", "{split}")).format_map(captures)
+    except KeyError as exc:
+        raise ExportError(
+            f"Subtask mapping for {task_name!r} references missing capture {exc}"
+        ) from exc
+    split = re.sub(r"\s+", "_", split.strip())
+    split = re.sub(r"_+", "_", split).strip("_") or "overall"
+    if (
+        split != "overall"
+        and config.get("configless_split_is_overall")
+        and not _task_config(raw, task_name)
+    ):
+        split += "_overall"
+    return split
+
+
 def _resolve_task_mapping(
-    mapping: dict[str, Any], task_name: str
+    raw: dict[str, Any], mapping: dict[str, Any], task_name: str
 ) -> tuple[dict[str, Any] | None, str | None]:
-    """Resolve exact tasks and the repository's self-consistency task variants."""
+    """Resolve exact, self-consistency, and reviewed benchmark-subtask tasks."""
     task_mapping = mapping["tasks"].get(task_name)
     if task_mapping is not None:
         return task_mapping, task_name
@@ -240,26 +296,152 @@ def _resolve_task_mapping(
         task_mapping = mapping["tasks"].get(base_name)
         if task_mapping is not None:
             return task_mapping, base_name
+    for root_name, root_mapping in mapping["tasks"].items():
+        subtask_config = root_mapping.get("subtasks")
+        if not isinstance(subtask_config, dict):
+            continue
+        match = re.fullmatch(str(subtask_config["pattern"]), task_name)
+        if match is None:
+            continue
+        resolved = dict(root_mapping)
+        resolved["eee"] = dict(root_mapping["eee"])
+        resolved["eee"]["split"] = _format_subtask_split(
+            raw, task_name, match, subtask_config
+        )
+        return resolved, task_name
     return None, None
+
+
+def _internal_task_parent(raw: dict[str, Any], task_name: str) -> str | None:
+    """Find a scored configless aggregate that safely prefixes a task."""
+    results = raw.get("results", {})
+    configs = raw.get("configs", {})
+    groups = raw.get("group_subtasks", {})
+    candidates = [
+        candidate
+        for candidate in results
+        if isinstance(candidate, str)
+        and candidate != task_name
+        and task_name.startswith(f"{candidate}_")
+        and (
+            (isinstance(groups, dict) and candidate in groups)
+            or not isinstance(configs, dict)
+            or candidate not in configs
+        )
+    ]
+    return min(candidates, key=len) if candidates else None
 
 
 def _internal_task_mapping(raw: dict[str, Any], task_name: str) -> dict[str, Any]:
     """Create a lossless fallback mapping from the lm-eval task identifier."""
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", task_name):
+    if (
+        not task_name
+        or task_name != task_name.strip()
+        or "." in task_name
+        or "/" in task_name
+        or "\\" in task_name
+        or "\0" in task_name
+    ):
         raise ExportError(
             f"Unmapped lm-eval task name {task_name!r} is not a safe internal "
             "benchmark identifier; add a reviewed mapping"
         )
+    parent = _internal_task_parent(raw, task_name)
+    benchmark = parent or task_name
+    split = task_name.removeprefix(f"{parent}_") if parent else "overall"
+    results = raw.get("results", {})
+    if parent and any(
+        isinstance(candidate, str) and candidate.startswith(f"{task_name}_")
+        for candidate in results
+    ):
+        split += "_overall"
     eee: dict[str, Any] = {
         "composite": "",
-        "family": task_name,
-        "benchmark": task_name,
-        "split": "overall",
+        "family": benchmark,
+        "benchmark": benchmark,
+        "split": split,
     }
     dataset_id = _task_config(raw, task_name).get("dataset_path")
     if isinstance(dataset_id, str) and dataset_id:
         eee["dataset_id"] = dataset_id
     return {"eee": eee}
+
+
+def _resolve_aggregate_task(raw: dict[str, Any], selector: str) -> str:
+    """Resolve a group selector to the scored aggregate result task."""
+    results = raw.get("results", {})
+    if not isinstance(results, dict):
+        results = {}
+    if selector in results:
+        return selector
+
+    # Some generated multilingual suites are configured by their base group
+    # name while lm-eval writes the aggregate result with this task suffix.
+    generated_candidate = f"{selector}_gen_0shot"
+    if generated_candidate in results:
+        return generated_candidate
+
+    matching_results = [
+        task_name
+        for task_name in results
+        if isinstance(task_name, str) and task_name.startswith(f"{selector}_")
+    ]
+    detail = ""
+    if matching_results:
+        detail = f" Matching result tasks: {_format_items(matching_results)}."
+    raise ExportError(
+        f"Cannot select aggregate-only task {selector!r}: the lm-eval result "
+        f"has no scored aggregate task with that name.{detail}"
+    )
+
+
+def _group_descendants(raw: dict[str, Any], selector: str) -> tuple[str, set[str]]:
+    """Return the scored aggregate task and every result below its group."""
+    aggregate_task = _resolve_aggregate_task(raw, selector)
+    groups = raw.get("group_subtasks", {})
+    group_name = next(
+        (
+            candidate
+            for candidate in (selector, aggregate_task)
+            if isinstance(groups, dict) and candidate in groups
+        ),
+        None,
+    )
+    if group_name is None:
+        results = raw.get("results", {})
+        prefix = f"{aggregate_task}_"
+        if aggregate_task.endswith("_gen_0shot"):
+            # Generated suite tasks insert their language/split between the
+            # suite name and `_gen_0shot`, for example:
+            #   include_base_44_gen_0shot                  (aggregate)
+            #   include_base_44_albanian_gen_0shot        (subtask)
+            prefix = f"{aggregate_task.removesuffix('_gen_0shot')}_"
+        descendants = {
+            task_name
+            for task_name in results
+            if isinstance(task_name, str)
+            and task_name != aggregate_task
+            and task_name.startswith(prefix)
+        }
+        if not descendants:
+            raise ExportError(
+                f"Cannot select aggregate-only task {selector!r}: the lm-eval "
+                "result has neither group_subtasks metadata nor any scored "
+                f"subtasks under the {prefix!r} prefix"
+            )
+        return aggregate_task, descendants
+
+    descendants: set[str] = set()
+    pending = list(groups.get(group_name) or [])
+    while pending:
+        child = pending.pop()
+        if not isinstance(child, str) or child in descendants:
+            continue
+        descendants.add(child)
+        nested = groups.get(child)
+        if isinstance(nested, list):
+            pending.extend(nested)
+    return aggregate_task, descendants
 
 
 def _metric_candidates(
@@ -497,6 +679,20 @@ def _source_data(
     eee = task_mapping["eee"]
     config = _task_config(raw, task_name)
     dataset_id = eee.get("dataset_id") or config.get("dataset_path")
+    if not dataset_id:
+        # lm-eval often omits configs for aggregate rows. Reuse a single
+        # unambiguous Hugging Face dataset ID shared by their scored children.
+        related_paths = {
+            str(candidate_config["dataset_path"])
+            for candidate_name, candidate_config in raw.get("configs", {}).items()
+            if isinstance(candidate_name, str)
+            and isinstance(candidate_config, dict)
+            and candidate_name.startswith(f"{task_name}_")
+            and isinstance(candidate_config.get("dataset_path"), str)
+            and _looks_like_hf_id(candidate_config["dataset_path"])
+        }
+        if len(related_paths) == 1:
+            dataset_id = related_paths.pop()
     dataset_name = str(dataset_id or eee["benchmark"])
     samples = raw.get("n-samples", {}).get(task_name, {})
     count = samples.get("effective") if isinstance(samples, dict) else None
@@ -558,11 +754,46 @@ def _metric_config(
         value.update(known)
         value["score_type"] = "continuous"
     else:
-        value["metric_id"] = metric
+        namespace = str(
+            task_mapping["eee"].get("metric_namespace")
+            or task_mapping["eee"]["benchmark"]
+        )
+        metric_suffix = re.sub(r"[^a-z0-9]+", "_", metric.lower()).strip("_")
+        for root in task_mapping["eee"].get("metric_variant_roots", []):
+            prefix = f"{root}_"
+            if metric.startswith(prefix):
+                variant = re.sub(
+                    r"[^a-z0-9]+", "_", metric.removeprefix(prefix).lower()
+                ).strip("_")
+                metric_suffix = f"{root}.{variant}"
+                break
+        metric_namespace = re.sub(
+            r"[^a-z0-9]+", "_", namespace.lower()
+        ).strip("_")
+        value["metric_id"] = f"{metric_namespace}.{metric_suffix}"
         value["metric_name"] = metric
-    override = task_mapping["eee"].get("metric_overrides", {}).get(metric)
+    metric_defaults = task_mapping["eee"].get("metric_defaults")
+    if isinstance(metric_defaults, dict):
+        value.update(metric_defaults)
+        value["score_type"] = "continuous"
+    overrides = task_mapping["eee"].get("metric_overrides", {})
+    override = overrides.get(f"{metric},{filter_name}") or overrides.get(metric)
     if override:
-        value.update(override)
+        template_values = {
+            "benchmark": str(task_mapping["eee"]["benchmark"]),
+            "split": str(task_mapping["eee"].get("split") or "overall"),
+            "filter": filter_name,
+        }
+        value.update(
+            {
+                key: (
+                    item.format_map(template_values)
+                    if isinstance(item, str)
+                    else item
+                )
+                for key, item in override.items()
+            }
+        )
         value["score_type"] = "continuous"
     return value
 
@@ -875,8 +1106,16 @@ def _validate_record(record: dict[str, Any], path: str) -> list[str]:
             score = result.get("score_details", {}).get("score")
             if not isinstance(score, (int, float)) or isinstance(score, bool):
                 errors.append(f"{label}: score must be numeric")
-            if "lower_is_better" not in result.get("metric_config", {}):
+            metric_config = result.get("metric_config", {})
+            if "lower_is_better" not in metric_config:
                 errors.append(f"{label}: metric_config.lower_is_better is required")
+            if isinstance(score, (int, float)) and not isinstance(score, bool):
+                minimum = metric_config.get("min_score")
+                maximum = metric_config.get("max_score")
+                if isinstance(minimum, (int, float)) and score < minimum:
+                    errors.append(f"{label}: score is below metric_config.min_score")
+                if isinstance(maximum, (int, float)) and score > maximum:
+                    errors.append(f"{label}: score exceeds metric_config.max_score")
     return errors
 
 
@@ -926,11 +1165,14 @@ def export_results(
     mapping_file: Path = DEFAULT_MAPPING_FILE,
     *,
     model_id_override: str | None = None,
+    model_name_override: str | None = None,
     source_organization_name: str = "Swiss AI Initiative",
     source_organization_url: str | None = "https://www.swiss-ai.org/",
     evaluator_relationship: str | None = None,
     include_samples: bool = False,
     strict_mappings: bool = False,
+    exclude_tasks: Iterable[str] = (),
+    aggregate_only_tasks: Iterable[str] = (),
     retrieved_timestamp: str | None = None,
 ) -> dict[str, Any]:
     """Export one completed lm-eval run and return its manifest."""
@@ -940,7 +1182,8 @@ def export_results(
         raise ExportError(f"{results_file} has no lm-eval results object")
     mapping = _load_mapping(mapping_file)
     model_id = _model_id(raw, model_id_override)
-    developer, model_name = model_id.split("/", 1)
+    developer, repo_model_name = model_id.split("/", 1)
+    display_model_name = model_name_override or repo_model_name
     relationship = evaluator_relationship or (
         "first_party" if developer.lower() == "swiss-ai" else "third_party"
     )
@@ -954,15 +1197,26 @@ def export_results(
     metric_mismatches: dict[str, tuple[list[str], list[str]]] = {}
     resolved_task_aliases: dict[str, str] = {}
     grouped: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
+    excluded_tasks = set(exclude_tasks)
+    aggregate_only: set[str] = set()
+    for selector in set(aggregate_only_tasks):
+        aggregate_task, descendants = _group_descendants(raw, selector)
+        aggregate_only.add(aggregate_task)
+        excluded_tasks.update(descendants)
+        excluded_tasks.discard(aggregate_task)
 
     for task_name, task_results in raw["results"].items():
+        if task_name in excluded_tasks:
+            continue
         if not isinstance(task_results, dict):
             continue
         available_metrics = [key for key, _ in _numeric_metrics(task_results)]
         if not available_metrics:
             continue
         numeric_tasks[task_name] = available_metrics
-        task_mapping, mapped_task_name = _resolve_task_mapping(mapping, task_name)
+        task_mapping, mapped_task_name = _resolve_task_mapping(
+            raw, mapping, task_name
+        )
         if not task_mapping:
             task_mapping = _internal_task_mapping(raw, task_name)
             internally_named.append(task_name)
@@ -1104,7 +1358,17 @@ def export_results(
                 library_details[key] = str(value)
         task_hashes = raw.get("task_hashes")
         if isinstance(task_hashes, dict) and task_hashes:
-            library_details["task_hashes"] = json.dumps(task_hashes, sort_keys=True)
+            record_tasks = {name for name, _ in task_entries}
+            scoped_hashes = {
+                task_name: task_hash
+                for task_name, task_hash in task_hashes.items()
+                if task_name in record_tasks
+                or any(name.startswith(f"{task_name}_") for name in record_tasks)
+            }
+            if scoped_hashes:
+                library_details["task_hashes"] = json.dumps(
+                    scoped_hashes, sort_keys=True
+                )
 
         record: dict[str, Any] = {
             "schema_version": mapping["eee_schema_version"],
@@ -1123,7 +1387,7 @@ def export_results(
                 "additional_details": library_details,
             },
             "model_info": {
-                "name": model_id,
+                "name": display_model_name,
                 "id": model_id,
                 "developer": developer,
             },
@@ -1167,7 +1431,9 @@ def export_results(
         if model_details:
             record["model_info"]["additional_details"] = model_details
 
-        record_dir = output_dir / "eee/data" / benchmark / developer / model_name
+        record_dir = (
+            output_dir / "eee/data" / benchmark / developer / repo_model_name
+        )
         record_path = record_dir / f"{record_uuid}.json"
         samples_path: Path | None = None
         if instance_rows:
@@ -1221,6 +1487,7 @@ def export_results(
         "source_results": str(results_file),
         "source_sha256": source_sha,
         "model_id": model_id,
+        "model_name": display_model_name,
         "evaluation_timestamp": evaluation_timestamp,
         "retrieved_timestamp": retrieved,
         "mapping_file": str(mapping_file),
@@ -1228,6 +1495,8 @@ def export_results(
         "eee_schema_version": mapping["eee_schema_version"],
         "records": records_manifest,
         "internally_named_tasks": sorted(internally_named),
+        "aggregate_only_tasks": sorted(aggregate_only),
+        "excluded_tasks": sorted(excluded_tasks),
         "skipped_unmapped_tasks": [],
         "resolved_task_aliases": dict(sorted(resolved_task_aliases.items())),
         "warnings": sorted(set(warnings)),
@@ -1360,6 +1629,10 @@ def _parser() -> argparse.ArgumentParser:
     export.add_argument("--output-dir", type=Path, required=True)
     export.add_argument("--mapping-file", type=Path, default=DEFAULT_MAPPING_FILE)
     export.add_argument("--model-id")
+    export.add_argument(
+        "--model-name",
+        help="Release/display name for model_info.name (defaults to the repo name)",
+    )
     export.add_argument("--source-organization-name", default="Swiss AI Initiative")
     export.add_argument(
         "--source-organization-url", default="https://www.swiss-ai.org/"
@@ -1378,6 +1651,20 @@ def _parser() -> argparse.ArgumentParser:
         "--strict-mappings",
         action="store_true",
         help="fail instead of using internal names for unmapped lm-eval tasks",
+    )
+    export.add_argument(
+        "--exclude-task",
+        action="append",
+        default=[],
+        metavar="TASK",
+        help="exclude an exact lm-eval result task (repeatable)",
+    )
+    export.add_argument(
+        "--aggregate-only-task",
+        action="append",
+        default=[],
+        metavar="GROUP",
+        help="export a group aggregate but exclude all of its subtasks (repeatable)",
     )
     export.add_argument(
         "--retrieved-timestamp",
@@ -1406,6 +1693,7 @@ def main(argv: list[str] | None = None) -> None:
                 args.output_dir,
                 args.mapping_file,
                 model_id_override=args.model_id,
+                model_name_override=args.model_name,
                 source_organization_name=args.source_organization_name,
                 source_organization_url=args.source_organization_url,
                 evaluator_relationship=(
@@ -1415,6 +1703,8 @@ def main(argv: list[str] | None = None) -> None:
                 ),
                 include_samples=args.include_samples,
                 strict_mappings=args.strict_mappings,
+                exclude_tasks=args.exclude_task,
+                aggregate_only_tasks=args.aggregate_only_task,
                 retrieved_timestamp=args.retrieved_timestamp,
             )
             print(
@@ -1430,6 +1720,11 @@ def main(argv: list[str] | None = None) -> None:
                 print(
                     "Internally named tasks: "
                     + _format_items(manifest["internally_named_tasks"])
+                )
+            if manifest["excluded_tasks"]:
+                print(
+                    f"Excluded {len(manifest['excluded_tasks'])} task(s): "
+                    + _format_items(manifest["excluded_tasks"])
                 )
             if manifest["resolved_task_aliases"]:
                 print("Resolved self-consistency task aliases:")
