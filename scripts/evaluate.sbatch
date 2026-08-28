@@ -49,7 +49,10 @@ usage() {
     echo " API_CHAT_ENDPOINT: 'true' to use /v1/chat/completions (server-side chat template; generative tasks ONLY). Default: /v1/completions, which serves mixed suites."
     echo " API_MODEL_NAME: 'model' field sent in requests (default: the <model> positional argument)."
     echo " API_NUM_CONCURRENT: Concurrent requests (default: 8)."
+    echo " API_REQUESTS_PER_MINUTE: Optional endpoint-wide request limit for the benchmarked model."
     echo " API_MAX_RETRIES: Retries per request (default: 3)."
+    echo " JUDGE_REQUESTS_PER_MINUTE: Optional endpoint-wide request limit, applied separately to each judge model."
+    echo " LM_EVAL_RATE_LIMIT_STATE_DIR: Shared coordination directory for rate-limited Slurm workers (set by launcher)."
     echo " OPENAI_API_KEY: Bearer token for the endpoint (default: CSCS_SERVING_API)."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref resolved once by the environment-preparation job."
@@ -182,7 +185,9 @@ export EVAL_HARNESS_REF="$EVAL_RESOLVED_HARNESS_COMMIT"
 API_BASE_URL=${API_BASE_URL:-""}
 API_MODEL_NAME=${API_MODEL_NAME:-""}
 API_NUM_CONCURRENT=${API_NUM_CONCURRENT:-8}
+API_REQUESTS_PER_MINUTE=${API_REQUESTS_PER_MINUTE:-""}
 API_MAX_RETRIES=${API_MAX_RETRIES:-3}
+export JUDGE_REQUESTS_PER_MINUTE=${JUDGE_REQUESTS_PER_MINUTE:-""}
 
 export HF_TOKEN="${HF_TOKEN:-$(tr -d '\r\n' < ./scripts/hf_token.txt)}"
 export WANDB_API_KEY="${WANDB_API_KEY:-$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)}"
@@ -491,6 +496,9 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     fi
     # Rebuilt from scratch: no model is loaded in-job, so dtype etc. do not apply.
     COMMON_MODEL_ARGS="model=$API_MODEL_NAME,base_url=$API_BASE_URL,num_concurrent=$API_NUM_CONCURRENT,max_retries=$API_MAX_RETRIES"
+    if [[ -n "$API_REQUESTS_PER_MINUTE" ]]; then
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,requests_per_minute=$API_REQUESTS_PER_MINUTE"
+    fi
     if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then
         # Client-side tokenization: loglikelihood scoring needs token-aligned context/continuation.
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER"
@@ -504,6 +512,8 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
         echo "openai backend: batch size 'auto' unsupported, using BS=$BS (concurrency: API_NUM_CONCURRENT=$API_NUM_CONCURRENT)"
     fi
     echo "openai backend: $API_LM_EVAL_MODEL against $API_BASE_URL (model=$API_MODEL_NAME)"
+    [[ -z "$API_REQUESTS_PER_MINUTE" ]] \
+        || echo "openai backend rate limit: $API_REQUESTS_PER_MINUTE requests/minute"
 else
     die "Unsupported LM_EVAL_BACKEND: $LM_EVAL_BACKEND"
 fi

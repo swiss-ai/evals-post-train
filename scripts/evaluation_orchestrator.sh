@@ -160,6 +160,11 @@ submit_evaluation() {
     export EVAL_HARNESS_DIR EVAL_LEGACY_HARNESS_DIR
     state_dir="$EVAL_HARNESS_DIR/controller/run_$(date +%Y%m%d_%H%M%S)_$$"
     mkdir -p "$state_dir"
+    # All array elements in this launch coordinate request slots through this
+    # shared directory. An explicit path lets independent launches coordinate too.
+    if [[ -z "${LM_EVAL_RATE_LIMIT_STATE_DIR:-}" ]]; then
+        export LM_EVAL_RATE_LIMIT_STATE_DIR="$state_dir/rate_limits"
+    fi
     python3 -m scripts.eval_state normalize --tasks "$TASKS" \
         --output "$state_dir/expected_tasks.txt"
 

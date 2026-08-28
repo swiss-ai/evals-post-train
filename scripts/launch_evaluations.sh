@@ -48,6 +48,7 @@
 #   --api-base-url <url> - OpenAI-compatible endpoint for the 'openai' backend (required with it,
 #                          unless API_BASE_URL is exported). Bare host, /v1 root, or full endpoint URL.
 #   --api-model-name <n> - 'model' field sent in API requests (default: the --model value)
+#   --api-requests-per-minute N - Endpoint-wide request limit for the benchmarked API model
 #   --chunk-size N       - Tasks per resumable job chunk (default: 8)
 #   --max-parallel N     - Cap concurrent chunks (default: all generated chunks)
 #   --max-retries N      - Retry waves for missing tasks; chunks halve each wave (default: 1)
@@ -65,6 +66,7 @@
 #                          auto: detect judge-dependent tasks and launch needed judges
 #                          <preset>: launch a specific preset (qwen3.5-27b, llama-3.3-70b)
 #   --judge-args <str>   - Extra arguments forwarded to scripts/launch_judge.py
+#   --judge-requests-per-minute N - Per-judge-model endpoint-wide request limit
 #   --keep-judge         - Do not auto-cancel judge model after evaluation finishes
 #
 # Thinking / reasoning metrics (hf and vllm backends only):
@@ -123,6 +125,7 @@ BOS_FLAG=""
 BACKEND_FLAG=""
 API_BASE_URL_FLAG=""
 API_MODEL_NAME_FLAG=""
+API_REQUESTS_PER_MINUTE_FLAG=""
 FEWSHOT_FLAG=""
 # Keep an ambient HARNESS_LIMIT (the graceful launcher has no --limit flag, so callers export
 # it); blanking it here would ship the cleared value into the job. --limit still overrides.
@@ -133,6 +136,7 @@ HARNESS_BRANCH=""
 RESERVATION_FLAG=""
 JUDGE_MODE="none"       # auto, none, or a preset name
 JUDGE_EXTRA_ARGS=""
+JUDGE_REQUESTS_PER_MINUTE_FLAG=""
 KEEP_JUDGE="false"
 THINKING_UMBRELLA=""
 ENABLE_THINKING_OVERRIDE=""   # "", "true", "false"
@@ -169,12 +173,14 @@ while [[ $# -gt 0 ]]; do
         --backend)      BACKEND_FLAG="$2";            shift 2 ;;
         --api-base-url) API_BASE_URL_FLAG="$2";       shift 2 ;;
         --api-model-name) API_MODEL_NAME_FLAG="$2";   shift 2 ;;
+        --api-requests-per-minute) API_REQUESTS_PER_MINUTE_FLAG="$2"; shift 2 ;;
         --megatron-iter) MEGATRON_ITER="$2";            shift 2 ;;
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --harness-branch) HARNESS_BRANCH="$2";        shift 2 ;;
         --reservation)   RESERVATION_FLAG="$2";        shift 2 ;;
         --judge)         JUDGE_MODE="$2";              shift 2 ;;
         --judge-args)    JUDGE_EXTRA_ARGS="$2";        shift 2 ;;
+        --judge-requests-per-minute) JUDGE_REQUESTS_PER_MINUTE_FLAG="$2"; shift 2 ;;
         --keep-judge)    KEEP_JUDGE="true";            shift ;;
         --task-file)     TASK_FILE_OVERRIDE="$2";       shift 2 ;;
         --table-metrics) TABLE_METRICS_OVERRIDE="$2";   shift 2 ;;
@@ -309,8 +315,18 @@ if [[ -n "$API_BASE_URL_FLAG" || -n "$API_MODEL_NAME_FLAG" ]] && [[ "$EFFECTIVE_
     echo "Error: --api-base-url/--api-model-name only apply with --backend openai"
     exit 1
 fi
+if [[ -n "$API_REQUESTS_PER_MINUTE_FLAG" && "$EFFECTIVE_BACKEND" != "openai" ]]; then
+    echo "Error: --api-requests-per-minute only applies with --backend openai"
+    exit 1
+fi
+
+API_REQUESTS_PER_MINUTE="${API_REQUESTS_PER_MINUTE_FLAG:-${API_REQUESTS_PER_MINUTE:-}}"
+JUDGE_REQUESTS_PER_MINUTE="${JUDGE_REQUESTS_PER_MINUTE_FLAG:-${JUDGE_REQUESTS_PER_MINUTE:-}}"
+
 [[ -n "$API_BASE_URL_FLAG"   ]] && export API_BASE_URL="$API_BASE_URL_FLAG"
 [[ -n "$API_MODEL_NAME_FLAG" ]] && export API_MODEL_NAME="$API_MODEL_NAME_FLAG"
+[[ -n "$API_REQUESTS_PER_MINUTE" ]] && export API_REQUESTS_PER_MINUTE
+[[ -n "$JUDGE_REQUESTS_PER_MINUTE" ]] && export JUDGE_REQUESTS_PER_MINUTE
 
 if [[ "$THINKING_METRICS_ASKED" == "true" ]]; then
     # The reasoning tokens live in the chat template, so it has to be rendered.
@@ -512,7 +528,9 @@ if [[ "$THINKING_TOUCHED" == "true" ]]; then
 fi
 if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
     echo "  API:    ${API_BASE_URL} (model=${API_MODEL_NAME:-<from --model>})"
+    echo "  API RPM: ${API_REQUESTS_PER_MINUTE:-unlimited}"
 fi
+echo "  Judge RPM: ${JUDGE_REQUESTS_PER_MINUTE:-unlimited}"
 
 # --- Few-shot override ---
 [[ -n "$FEWSHOT_FLAG" ]] && export NUM_FEWSHOT="$FEWSHOT_FLAG"
