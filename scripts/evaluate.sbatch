@@ -52,6 +52,7 @@ usage() {
     echo " API_REQUESTS_PER_MINUTE: Optional endpoint-wide request limit for the benchmarked model."
     echo " API_MAX_RETRIES: Retries per request (default: 3)."
     echo " JUDGE_REQUESTS_PER_MINUTE: Optional endpoint-wide request limit, applied separately to each judge model."
+    echo " JUDGE_MODEL_PREFIX: Preferred host scope for judge model IDs (default: USER)."
     echo " LM_EVAL_RATE_LIMIT_STATE_DIR: Shared coordination directory for rate-limited Slurm workers (set by launcher)."
     echo " OPENAI_API_KEY: Bearer token for the endpoint (default: CSCS_SERVING_API)."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
@@ -188,6 +189,7 @@ API_NUM_CONCURRENT=${API_NUM_CONCURRENT:-8}
 API_REQUESTS_PER_MINUTE=${API_REQUESTS_PER_MINUTE:-""}
 API_MAX_RETRIES=${API_MAX_RETRIES:-3}
 export JUDGE_REQUESTS_PER_MINUTE=${JUDGE_REQUESTS_PER_MINUTE:-""}
+export JUDGE_MODEL_PREFIX=${JUDGE_MODEL_PREFIX:-${USER:-}}
 
 export HF_TOKEN="${HF_TOKEN:-$(tr -d '\r\n' < ./scripts/hf_token.txt)}"
 export WANDB_API_KEY="${WANDB_API_KEY:-$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)}"

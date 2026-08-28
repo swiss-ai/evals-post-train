@@ -34,12 +34,57 @@ class LaunchArgsTests(unittest.TestCase):
                 self.assertTrue(
                     model_path.startswith(f"{launch_judge.MODEL_REGISTRY}/")
                 )
+                self.assertEqual(
+                    model_path,
+                    str(launch_judge.MODEL_REGISTRY / preset["served_model_name"]),
+                )
                 self.assertEqual(framework_served_name, preset["served_model_name"])
                 self.assertEqual(
                     preset["served_model_name"],
                     preset["served_model_name"].strip(),
                 )
                 self.assertIn("--host", tokens)
+
+
+class HostedModelScopeTests(unittest.TestCase):
+    def test_readiness_prefers_current_user_scope(self) -> None:
+        model = "cais/HarmBench-Llama-2-13b-cls"
+        model_ids = [
+            f"CSCS-Inference/{model}",
+            f"ymetz/{model}",
+        ]
+
+        self.assertEqual(
+            launch_judge._launched_hosted_model_name(
+                model,
+                model_ids,
+                username="ymetz",
+            ),
+            f"ymetz/{model}",
+        )
+
+    def test_readiness_preserves_already_scoped_name(self) -> None:
+        model = "CSCS-Inference/meta-llama/Llama-Guard-4-12B"
+
+        self.assertEqual(
+            launch_judge._launched_hosted_model_name(
+                model,
+                [model],
+                username="ymetz",
+            ),
+            model,
+        )
+
+    def test_readiness_rejects_unscoped_name(self) -> None:
+        model = "Qwen/Qwen3.5-27B"
+
+        self.assertIsNone(
+            launch_judge._launched_hosted_model_name(
+                model,
+                [model],
+                username="ymetz",
+            )
+        )
 
 
 class _FailedLauncher:
@@ -77,7 +122,34 @@ class _UnknownLauncher(_FailedLauncher):
         return JobStatus.UNKNOWN
 
 
+class _HealthyLauncher(_FailedLauncher):
+    async def get_job_status(self, _job_id: int) -> JobStatus:
+        return JobStatus.RUNNING
+
+
 class LaunchFailureTests(unittest.IsolatedAsyncioTestCase):
+    async def test_launch_returns_scoped_hosted_name(self) -> None:
+        args = launch_judge._build_launch_args("qwen3.5-27b", {})
+        hosted_name = "ymetz/Qwen/Qwen3.5-27B"
+
+        with (
+            patch.object(launch_judge, "SlurmLauncher", _HealthyLauncher),
+            patch.object(
+                launch_judge,
+                "check_judge_health",
+                return_value=hosted_name,
+            ),
+        ):
+            job_id, model_name = await launch_judge.launch_judge(
+                args,
+                api_key="unused",
+                health_timeout=900,
+                health_interval=15,
+            )
+
+        self.assertEqual(job_id, 12345)
+        self.assertEqual(model_name, hosted_name)
+
     async def test_terminal_failure_raises_immediately_with_logs(self) -> None:
         args = launch_judge._build_launch_args("qwen3.5-27b", {})
 

@@ -12,6 +12,7 @@ def test_launcher_passes_api_and_judge_rate_limits():
     assert "--judge-requests-per-minute" in launcher
     assert "requests_per_minute=$API_REQUESTS_PER_MINUTE" in evaluate
     assert "export JUDGE_REQUESTS_PER_MINUTE" in evaluate
+    assert "export JUDGE_MODEL_PREFIX" in evaluate
 
 
 def test_orchestrator_assigns_shared_rate_limit_state():

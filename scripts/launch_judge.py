@@ -97,7 +97,7 @@ JUDGE_PRESETS = {
         ),
     },
     "llama-guard": {
-        "served_model_name": "cais/Llama-Guard-13b",
+        "served_model_name": "meta-llama/Llama-Guard-4-12B",
         "framework": "vllm",
         "nodes": 1,
         "time": "04:00:00",
@@ -106,7 +106,7 @@ JUDGE_PRESETS = {
         "framework_args": (
             f"--model {MODEL_REGISTRY / 'meta-llama/Llama-Guard-4-12B'} "
             "--host 0.0.0.0 "
-            "--served-model-name cais/Llama-Guard-13b "
+            "--served-model-name meta-llama/Llama-Guard-4-12B "
             "--tensor-parallel-size 4 --max-model-len 35000"
         ),
     },
@@ -124,8 +124,21 @@ TERMINAL_JOB_STATUSES = {
 UNKNOWN_STATUS_GRACE_POLLS = 3
 
 
-def check_judge_health(model_name: str, api_key: str) -> bool:
-    """Check if model_name is listed on the CSCS serving platform."""
+def _launched_hosted_model_name(
+    model_name: str,
+    model_ids: list[str],
+    username: str | None = None,
+) -> str | None:
+    """Find the launched model under the current CSCS user scope."""
+    model_name = os.path.expandvars(model_name).strip().strip("/")
+    username = (username or getpass.getuser()).strip().strip("/")
+    is_scoped = len(model_name.split("/")) >= 3 or model_name.startswith(f"{username}/")
+    candidates = [model_name] if is_scoped else [f"{username}/{model_name}"]
+    return next((candidate for candidate in candidates if candidate in model_ids), None)
+
+
+def check_judge_health(model_name: str, api_key: str) -> str | None:
+    """Return the hosted model ID once the launched judge is listed."""
     req = urllib.request.Request(
         HEALTH_CHECK_URL,
         headers={"Authorization": f"Bearer {api_key}"},
@@ -135,10 +148,10 @@ def check_judge_health(model_name: str, api_key: str) -> bool:
         with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
             data = json.loads(resp.read().decode())
             model_ids = [m.get("id", "") for m in data.get("data", [])]
-            return model_name in model_ids
+            return _launched_hosted_model_name(model_name, model_ids)
     except Exception as exc:
         _log(f"  Health check failed: {type(exc).__name__}: {exc}")
-        return False
+        return None
 
 
 # ── Core logic ────────────────────────────────────────────────────────
@@ -264,10 +277,11 @@ async def launch_judge(
             )
 
         if status == JobStatus.RUNNING:
-            if check_judge_health(served_name, api_key):
+            hosted_name = check_judge_health(served_name, api_key)
+            if hosted_name:
                 elapsed = int(time.time() - start)
-                _log(f"Judge healthy after {elapsed}s")
-                return job_id, served_name
+                _log(f"Judge healthy after {elapsed}s as {hosted_name}")
+                return job_id, hosted_name
 
         elapsed = int(time.time() - start)
         _log(f"  [{elapsed}s] SLURM status: {status.value}, waiting...")
