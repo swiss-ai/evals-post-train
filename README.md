@@ -131,6 +131,7 @@ bash scripts/launch_evaluations.sh <mode>
 | `--backend <hf\|vllm\|sglang\|megatron_lm\|openai>` | Inference backend (default: from sbatch script). `vllm` recommended for in-job inference; `openai` evaluates against an already-running OpenAI-compatible endpoint instead of loading the model. |
 | `--api-base-url <url>` | Endpoint for the `openai` backend (required with it). Accepts a bare host (`http://host:8000`), a `/v1` root, or a full `/v1/(chat/)completions` URL. |
 | `--api-model-name <name>` | `model` field sent in API requests (default: the `--model` value) |
+| `--api-requests-per-minute N` | Endpoint-wide request limit for the benchmarked model when using `--backend openai` (for example, `30`) |
 | `--chunk-size N` | Maximum tasks per resumable Slurm-array element (default: 8) |
 | `--max-parallel N` | Cap concurrently running chunks; omitted means all generated chunks may run |
 | `--max-retries N` | Retry waves for missing tasks (default: 1); retry chunk size is halved |
@@ -148,6 +149,7 @@ bash scripts/launch_evaluations.sh <mode>
 | `--reservation <name>` | Submit evaluation jobs and any automatically launched judge under this SLURM reservation. |
 | `--judge <none\|auto\|preset>` | Judge-model control for LLM-as-a-judge tasks. `none` (default) disables auto-launch; `auto` scans the task list using the mapping in `scripts/launch_judge.py`; a preset name (e.g. `qwen3.5-27b`, `llama-3.3-70b`) launches that judge. |
 | `--judge-args <str>` | Extra arguments forwarded to `scripts/launch_judge.py` |
+| `--judge-requests-per-minute N` | Endpoint-wide request limit applied separately to each hosted judge model (for example, `30`) |
 | `--keep-judge` | Do not auto-cancel the judge model after evaluation finishes (otherwise a cleanup job cancels it via `afterany` dependency) |
 | `--thinking` | Umbrella flag for reasoning models: make the model think **and** record the thinking metrics. See [Thinking / Reasoning Metrics](#thinking--reasoning-metrics). |
 | `--enable-thinking` / `--no-enable-thinking` | Chat-template argument deciding whether the model reasons. `--enable-thinking` **on its own records nothing** — a reasoning close token must also be known. |
@@ -167,7 +169,8 @@ Some LLM-as-a-judge tasks require a separate model to be available through the C
 ```bash
 bash scripts/launch_evaluations.sh posttrain \
   --model /capstor/store/.../checkpoint \
-  --judge auto
+  --judge auto \
+  --judge-requests-per-minute 30
 ```
 
 The task-to-judge mapping is defined by `TASK_TO_JUDGE` in `scripts/launch_judge.py`:
@@ -187,6 +190,10 @@ python3 -c "import swiss_ai_model_launch"
 ```
 
 `CSCS_SERVING_API` must also be exported or stored in `scripts/cscs_serving_api_key.txt` so the launcher can verify that the judge is healthy.
+
+CSCS exposes hosted models with a host scope, for example `ymetz/cais/HarmBench-Llama-2-13b-cls`. The launcher defaults `JUDGE_MODEL_PREFIX` to `$USER`; the harness prefers `$JUDGE_MODEL_PREFIX/<model>` and checks `/v1/models` for a `CSCS-Inference/<model>` provider name or another unique matching scope. Unscoped hosted IDs are not accepted. Set `JUDGE_MODEL_PREFIX` explicitly when the desired host differs from the submitting user. Fully scoped task-specific judge-model overrides are preserved.
+
+The judge limit is shared by all task threads and Slurm chunks in one launch and is keyed by endpoint/model, so two judge models configured at 30 RPM each do not unnecessarily share one 30 RPM budget. Set `LM_EVAL_RATE_LIMIT_STATE_DIR` to the same shared-filesystem directory for separate launcher invocations that must coordinate a common endpoint limit.
 
 An explicit preset can be launched through the evaluation launcher or directly:
 
@@ -509,7 +516,8 @@ produced by `merge_split_results.py`.
 python scripts/export_eval_results.py export \
   /path/to/merged_eval/results_2026-07-27T12-00-00.json \
   --output-dir eval-results/Apertus-release-2026-07 \
-  --model-id swiss-ai/Apertus-8B-Instruct-2607 \
+  --model-id swiss-ai/Apertus-8B-Instruct-2509 \
+  --model-name Apertus-v1-8b \
   --include-samples
 ```
 
@@ -517,7 +525,9 @@ python scripts/export_eval_results.py export \
 it is required when the evaluation used a local checkpoint path.
 EEE `model_info.id` uses this Hub ID, and `model_info.additional_details`
 includes its direct Hugging Face model URL for self-deployed models. API models
-do not receive a guessed Hub URL.
+do not receive a guessed Hub URL. Use `--model-name` when the release/display
+name differs from the repository name; it is written to `model_info.name`
+without changing the ID or URL.
 Evaluator provenance defaults to `first_party` for `swiss-ai/*` models and
 `third_party` for other owners; override it with `--evaluator-relationship`
 when a run was collaborative or has a different relationship.
@@ -571,17 +581,24 @@ Every task with numeric results is exported. Use `--strict-mappings` when every
 numeric task in a run must have a reviewed mapping instead of using the fallback
 described below.
 
+By default, aggregate and non-aggregate rows are all retained. Omit
+`--aggregate-only-task` when preparing a full-data submission. The option below
+is available only for intentionally compact exports.
+
 Use `--exclude-task TASK` to omit an exact result. For benchmark groups with
 many language or subject results, prefer `--aggregate-only-task GROUP`: it keeps
-the group's aggregate score and recursively excludes its subtasks using the
-lm-eval `group_subtasks` metadata. Both options are repeatable. For example:
+the group's aggregate score and recursively excludes its subtasks. The exporter
+uses lm-eval's `group_subtasks` metadata when available and falls back to the
+generated suite's task-name prefix when lm-eval omits that metadata. Both
+options are repeatable. Generated suites can be selected by either their base
+group name or their full aggregate result task. For example:
 
 ```bash
 python scripts/export_eval_results.py export RESULTS.json \
   --output-dir eval-results/Apertus-release \
-  --aggregate-only-task include_base_44_gen_0shot \
-  --aggregate-only-task include_base_new_45_gen_0shot \
-  --aggregate-only-task global_mmlu_gen_0shot
+  --aggregate-only-task include_base_44 \
+  --aggregate-only-task include_base_new_45 \
+  --aggregate-only-task global_mmlu
 ```
 
 The manifest records the effective choices in `aggregate_only_tasks` and
@@ -599,6 +616,19 @@ exact lm-eval task name to:
 - optional ordered EEE metric candidates and canonical metric-ID overrides
 - optionally, a registered Hugging Face benchmark dataset, task ID, and ordered
   metric candidates
+- optionally, a reviewed subtask pattern that places language/subject parts in
+  the split component while removing run setup from the evaluation name
+
+Mappings are resolvers, not an export allowlist. An exact mapping wins; reviewed
+subtask patterns and the controlled `_self_consistency` suffix may resolve to a
+base mapping. For unmapped tasks, the exporter detects a scored configless
+aggregate prefix and uses it as the internal family/benchmark, putting the
+remaining task name in the split. Truly standalone tasks retain their exact
+internal identifier as family and benchmark with `overall` as the split. Logged
+Hugging Face dataset IDs are preserved, including for configless aggregates
+when all related children share one unambiguous ID. The manifest lists fallback
+tasks in `internally_named_tasks`; `skipped_unmapped_tasks` remains an empty
+compatibility field.
 
 Mappings are resolvers, not an export allowlist. An exact mapping wins; the
 controlled `_self_consistency` suffix may resolve to its reviewed base mapping.
@@ -620,6 +650,11 @@ For Hugging Face datasets, both `source_data.dataset_name` and
 `source_data.hf_repo` contain the `owner/dataset` ID. The direct dataset URL is
 recorded in `source_data.additional_details.hf_dataset_url`.
 
+Benchmark-specific metric IDs use dot namespaces (for example,
+`mmlu_pro.overall` and `bbq.amb_bias_score.age`). Task hashes are scoped to the
+record containing the corresponding lm-eval task instead of copying the run's
+entire hash map into every record.
+
 The repository's `_self_consistency` suffix is handled as a controlled task
 variant: the exporter removes only that exact suffix and requires the remaining
 base task to have a reviewed mapping. Its mapping can define
@@ -629,11 +664,10 @@ task config so, for example, `exact_match,mean@{repeats}` selects
 `self_consistency` variant remain recorded in the exported metadata.
 
 Do not otherwise use fuzzy matching for benchmark variants. For example,
-`gpqa_main_cot_zeroshot` is not mapped to the datastore's `gpqa_diamond`
-collection, and `gsm8k_platinum` is not mapped to `gsm8k`. Until a mapping is
-reviewed, those tasks—as well as `bfcl_v3` and `swiss_ai_charter_alignment`—are
-exported under their exact internal names rather than being omitted or assigned
-to a possibly incorrect external benchmark.
+`gsm8k_platinum` is not mapped to `gsm8k`. Until a mapping is reviewed, tasks
+such as `bfcl_v3` and `swiss_ai_charter_alignment` are exported under safe
+internal names rather than being omitted or assigned to a possibly incorrect
+external benchmark.
 
 The exporter preserves scores in their native lm-eval scale. It never
 automatically multiplies proportions by 100.
@@ -801,7 +835,13 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `API_BASE_URL` | (unset) | `openai` backend only, **required**: the OpenAI-compatible endpoint. Bare host / `/v1` root / full endpoint URL all accepted. |
 | `API_MODEL_NAME` | same as model | `openai` backend only: the `model` field sent in requests, when the server registers the model under a different id |
 | `API_NUM_CONCURRENT` | `8` | `openai` backend only: concurrent requests (batch size is pinned to 1; this is the throughput knob) |
+| `API_REQUESTS_PER_MINUTE` | (unset) | `openai` backend only: endpoint-wide request limit; set by `--api-requests-per-minute` |
 | `API_MAX_RETRIES` | `3` | `openai` backend only: retries per failed request |
+| `JUDGE_REQUESTS_PER_MINUTE` | (unset) | Endpoint-wide request limit applied separately to every LLM judge model; set by `--judge-requests-per-minute` |
+| `JUDGE_MODEL_PREFIX` | `$USER` | Preferred CSCS host scope prepended to unscoped judge model IDs |
+| `LM_EVAL_JUDGE_MODEL_DISCOVERY` | `1` | Query the judge endpoint's `/models` list and fall back to another matching hosted scope; set to `0` to disable |
+| `LM_EVAL_JUDGE_MODEL_DISCOVERY_TIMEOUT` | `10` | Timeout in seconds for hosted judge-model discovery |
+| `LM_EVAL_RATE_LIMIT_STATE_DIR` | per-launch controller directory | Shared request-slot state used to coordinate threads, processes, and Slurm nodes; point independent launches at the same directory to share budgets |
 | `OPENAI_API_KEY` | `scripts/openai_api_key.txt`, then `CSCS_SERVING_API` | OpenAI GPT judge or `openai` backend bearer token |
 | `LM_EVAL_HARNESS_BRANCH` | repository HEAD | Branch, tag, or commit installed from the task-selected harness repository |
 | `APPLY_CHAT_TEMPLATE` | `true` | Apply chat template for instruct models |
@@ -926,7 +966,7 @@ used entries remain active under age-based scratch retention policies.
 
 > [!NOTE]
 > **vLLM vs HF inference**: Generation task results (gsm8k, squadv2) may differ slightly between backends (for instruction-tuned models). Only compare results across models using the same backend. We recommend performing all evaluations with the `vllm` backend (default) to ensure reproducibility.
-- **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). With the chat template on, the harness renders the model's template client-side via the HF tokenizer — so the tokenizer must be resolvable (use `--tokenizer` when the served model name is not a pullable HF repo). `API_CHAT_ENDPOINT=true` switches to `/v1/chat/completions` (server-side template; generative tasks ONLY). Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Note the job still requests the resources declared in `evaluate.sbatch` even though no GPU is used.
+- **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). With the chat template on, the harness renders the model's template client-side via the HF tokenizer — so the tokenizer must be resolvable (use `--tokenizer` when the served model name is not a pullable HF repo). `API_CHAT_ENDPOINT=true` switches to `/v1/chat/completions` (server-side template; generative tasks ONLY). Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Use `--api-requests-per-minute 30` when the endpoint is rate limited; all chunks in the launch coordinate that budget. Note the job still requests the resources declared in `evaluate.sbatch` even though no GPU is used.
 - **Megatron-LM**: To run Megatron-LM models natively, clone the [NVIDIA Megatron-LM repository](https://github.com/NVIDIA/Megatron-LM) into the evals-post-train directory (or change the location via the launch script).
 - **Time limits**: The default 11h59m SLURM limit applies to each chunk. Adjust `--chunk-size` to keep individual jobs below it and `--max-parallel` to control concurrent nodes.
 - **WANDB_API_KEY**: Must be available either as an environment variable or in `scripts/wandb_api_key.txt`.

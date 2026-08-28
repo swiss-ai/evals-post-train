@@ -9,30 +9,30 @@ arc_challenge_chat/exact_match
 commonsense_qa/acc
 global_mmlu_gen_0shot/exact_match
 hellaswag/acc_norm
-mmlu_flan_cot_fewshot/exact_match,ordered-extract
+mmlu_flan_cot_fewshot/exact_match
 mmlu_pro/exact_match
 piqa/acc_norm
 squadv2/f1
 truthfulqa_mc2/acc
 truthfulqa_multilingual_mc2/acc
 # Math
-gsm8k/exact_match
-gsm8k_platinum/exact_match
-hendrycks_math/exact_match
+gsm8k/exact_match,flexible-extract
+gsm8k_platinum/exact_match,flexible-extract
+hendrycks_math/math_verify
 mathqa/acc
 mgsm_en_cot/exact_match
 minerva_math/math_verify
 # Coding
-humaneval/pass@10
+humaneval/pass@1
 mbpp/pass_at_1
 # Reasoning
-acp_bench/exact_match
+acp_bench/exact_match,mcq-extract
 # Multilingual
 arc_multilingual/acc
 bbh/exact_match
 drop/f1
 hellaswag_multilingual/acc_norm
-lambada/acc
+lambada_openai/acc
 lambada_multilingual/acc
 mlogiqa_gen/exact_match
 xcopa/acc
@@ -42,7 +42,7 @@ bbq/acc
 # Cultural knowledge
 blend_sample/acc_norm
 cultural_bench/acc_norm
-include_base_44_gen_0shot/exact_match
+include_base_44_few_shot_en/acc
 include_base_new_45_gen_0shot/exact_match
 switzerland_qa_0shot/exact_match
 # Safety
@@ -50,4 +50,3 @@ harmbench/score
 # hallulens - TODO: verify
 toxigen/acc
 wmdp/acc
-
