@@ -16,9 +16,10 @@ Evaluation infrastructure for benchmarking Large Language Models on SLURM cluste
 10. [SBATCH Scripts](#sbatch-scripts)
 11. [Multi-Model Scripts](#multi-model-scripts)
 12. [Container Setup](#container-setup)
-13. [Notes](#notes)
-14. [Extending the Pipeline](#extending-the-pipeline)
-15. [Repository Structure](#repository-structure)
+13. [Alternative: Inspect AI evals](#alternative-inspect-ai-evals)
+14. [Notes](#notes)
+15. [Extending the Pipeline](#extending-the-pipeline)
+16. [Repository Structure](#repository-structure)
 
 ---
 
@@ -871,6 +872,69 @@ Dependencies (lm-eval-harness, vLLM, etc.) are installed at runtime inside the c
 
 ---
 
+## Alternative: Inspect AI evals
+
+[Inspect AI](https://inspect.aisi.org.uk/) (UK AISI's eval framework) and its [`inspect_evals`](https://github.com/UKGovernmentBEIS/inspect_evals) collection give access to benchmarks not covered by the lm-evaluation-harness suites above (e.g. tau2-bench, an agentic tool-use benchmark). Inspect's execution and logging model (task registry, model roles, `.eval` log files) differs enough from lm-eval-harness's that these run through their own script, `scripts/run_inspect_eval.sh`, instead of `launch_evaluations.sh`.
+
+Run it directly (e.g. on a login node) or, like the rest of this pipeline, as a SLURM job via `scripts/run_inspect_eval.sbatch`, which forwards all arguments to `run_inspect_eval.sh` inside the same container as the other backends -- but requests CPU-only resources, since these benchmarks evaluate an already-running served endpoint rather than loading a model in-job:
+
+```bash
+# --reservation is a native sbatch flag (run_inspect_eval.sbatch has no --reservation of its
+# own -- everything after the script path is forwarded verbatim to run_inspect_eval.sh)
+sbatch --reservation=my-reservation scripts/run_inspect_eval.sbatch --task tau2_retail \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --model-role user=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-70B \
+  --task-arg message_limit=10 --limit 5
+```
+
+```bash
+# run_inspect_eval.sh installs these itself at runtime (SKIP_INSTALL=1 to skip, same as
+# evaluate.sbatch); to install by hand for local/interactive use:
+pip install "inspect-ai>=0.3.258" inspect-evals openai
+
+# A plain benchmark against a served model (CSCS serving, vllm serve, ...)
+scripts/run_inspect_eval.sh --task gsm8k --model Qwen/Qwen3-8B --api-base-url http://nid001234:8000
+
+# tau2-bench (no single "default" task -- it ships four domains: airline, banking, retail,
+# telecom) needs a second "user"-role model to play the customer, and supports extra task
+# params like message_limit or banking's retrieval_config. The "user" role doesn't need to be
+# a real OpenAI model -- any served model works, so this stays entirely on the CSCS platform
+# (verified working: two always-on models served there, no extra API key needed):
+scripts/run_inspect_eval.sh --task tau2_retail,tau2_banking \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --model-role user=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-70B \
+  --task-arg message_limit=10 --limit 5
+
+# A model reached through Inspect's own provider (no --api-base-url), running two tasks
+# together via `inspect eval-set`, with extra flags forwarded after --
+scripts/run_inspect_eval.sh --task gsm8k,gaia --model anthropic/claude-3-5-sonnet-latest \
+  --eval-set -- --temperature 0.5 --max-connections 10
+```
+
+The model under test is either passed straight through as an Inspect-native model string, or -- when `--api-base-url` is given -- wrapped through Inspect's generic `openai-api` provider (the same OpenAI-compatible endpoints this pipeline already evaluates against with `--backend openai`). Model roles (`--model-role role=model`, repeatable) and extra task parameters (`--task-arg key=value`, repeatable) cover benchmark-specific needs like tau2's user-simulator or an LLM-as-judge grader; each role's own provider credentials (e.g. `OPENAI_API_KEY`) are your responsibility. See `scripts/run_inspect_eval.sh --help` for all options.
+
+Results are **not** viewed at inspect.aisi.org.uk — that's Inspect's documentation site. Logs land as `.eval` files under `logs/inspect/<name>/`; view them with `inspect view --log-dir logs/inspect/<name>`.
+
+#### W&B upload
+
+Unlike `evaluate.sbatch`'s lm-eval-harness pipeline, where every run uploads to W&B automatically, uploading here is **opt-in**: pass both `--wandb-entity`/`--wandb-project` (or set `WANDB_ENTITY`/`WANDB_PROJECT`) to enable it, since this script is also used for one-off/smoke-test runs you may not want landing in a shared W&B project.
+
+```bash
+scripts/run_inspect_eval.sh --task tau2_retail --model Qwen/Qwen3-8B \
+  --api-base-url http://nid001234:8000 --wandb-entity apertus --wandb-project swissai-evals-test
+```
+
+When enabled, the script waits for `inspect eval`/`eval-set` to finish, diffs `--logs-dir` against its contents from before the run to find the `.eval` log(s) this run produced, and uploads them with:
+
+```bash
+python -m scripts.alignment.update_wandb_inspect --entity <entity> --project <project> \
+  --name <name> --eval-log <path-to-run.eval> [--eval-log <path> ...]
+```
+
+`update_wandb_inspect.py` parses the `.eval` log(s) (task scores, metrics, and a bounded per-sample summary) into the same `ModelEvaluation` structure the harness pipeline uses, and uploads through the same shared `upload_multi_model_results` — so Inspect and lm-eval-harness runs show up in W&B the same way. Auth uses `WANDB_API_KEY` (default: `scripts/wandb_api_key.txt`, same fallback as `evaluate.sbatch`).
+
+---
+
 ## Notes
 
 > [!NOTE]
@@ -957,12 +1021,16 @@ evals/
 │   ├── launch_judge.py        # Launches judge models for LLM-as-a-judge tasks
 │   ├── evaluate.sbatch        # SLURM job script for HF/vLLM model evaluation
 │   ├── aggregate_splits.sbatch   # Aggregation job for split evaluations
+│   ├── run_inspect_eval.sh    # Inspect AI / inspect_evals benchmarks (alternative to lm-eval-harness above)
+│   ├── run_inspect_eval.sbatch # SLURM wrapper for run_inspect_eval.sh (CPU-only; no model loaded in-job)
 │   └── alignment/                   # Python package for W&B upload and data handling
 │       ├── wandb_alignment_utils.py # Core upload logic with stratified sample selection
-│       ├── update_wandb_alignment.py       # Per-model W&B upload script
+│       ├── update_wandb_alignment.py       # Per-model W&B upload script (lm-eval-harness results)
 │       ├── update_wandb_all_models.py      # Batch upload for all models
 │       ├── merge_split_results.py          # Merges results from split evaluation jobs
-│       └── data_structures.py              # Sample, Metric, Task, ModelEvaluation classes
+│       ├── data_structures.py              # Sample, Metric, Task, ModelEvaluation classes
+│       ├── inspect_wandb_utils.py          # Builds ModelEvaluation objects from Inspect .eval logs
+│       └── update_wandb_inspect.py         # Per-model W&B upload script (Inspect .eval logs)
 ├── make_html_table.py                # Reporting: interactive HTML results table (reads W&B)
 ├── make_table.py                     # Reporting: hyperparameter-sweep table, PNG + CSV (reads W&B)
 ├── runners/              # Multi-model evaluation scripts
