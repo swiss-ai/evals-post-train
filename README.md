@@ -909,6 +909,16 @@ scripts/run_inspect_eval.sh --task tau2_retail,tau2_banking \
 # together via `inspect eval-set`, with extra flags forwarded after --
 scripts/run_inspect_eval.sh --task gsm8k,gaia --model anthropic/claude-3-5-sonnet-latest \
   --eval-set -- --temperature 0.5 --max-connections 10
+
+# AA-Omniscience (custom_tasks/omniscience.py -- a full path, not an inspect_evals name, so
+# it's used as-is rather than expanded to "inspect_evals/..."; see the module docstring
+# there for why it's a from-scratch task) needs a "grader" role for its judge model, same
+# convention as tau2's "user" role above. Artificial Analysis's own protocol is a fixed
+# external judge (GPT-5.6 Luna) -- the model under test grading itself works too (verified
+# below) but is not AAII-comparable:
+scripts/run_inspect_eval.sh --task custom_tasks/omniscience.py \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 5
 ```
 
 The model under test is either passed straight through as an Inspect-native model string, or -- when `--api-base-url` is given -- wrapped through Inspect's generic `openai-api` provider (the same OpenAI-compatible endpoints this pipeline already evaluates against with `--backend openai`). Model roles (`--model-role role=model`, repeatable) and extra task parameters (`--task-arg key=value`, repeatable) cover benchmark-specific needs like tau2's user-simulator or an LLM-as-judge grader; each role's own provider credentials (e.g. `OPENAI_API_KEY`) are your responsibility. See `scripts/run_inspect_eval.sh --help` for all options.
