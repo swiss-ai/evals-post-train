@@ -919,6 +919,14 @@ scripts/run_inspect_eval.sh --task gsm8k,gaia --model anthropic/claude-3-5-sonne
 scripts/run_inspect_eval.sh --task custom_tasks/omniscience.py \
   --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 5
+
+# AA-LCR (custom_tasks/aa_lcr.py, same "full path" / "grader" role convention as
+# AA-Omniscience above). Unlike every other task in this repo, each sample is a ~100k-token
+# prompt (the full Document Set) -- keep --limit at 1 for a smoke test unless you mean to
+# spend real time/money on a full 100-question run:
+scripts/run_inspect_eval.sh --task custom_tasks/aa_lcr.py \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 1
 ```
 
 The model under test is either passed straight through as an Inspect-native model string, or -- when `--api-base-url` is given -- wrapped through Inspect's generic `openai-api` provider (the same OpenAI-compatible endpoints this pipeline already evaluates against with `--backend openai`). Model roles (`--model-role role=model`, repeatable) and extra task parameters (`--task-arg key=value`, repeatable) cover benchmark-specific needs like tau2's user-simulator or an LLM-as-judge grader; each role's own provider credentials (e.g. `OPENAI_API_KEY`) are your responsibility. See `scripts/run_inspect_eval.sh --help` for all options.
@@ -978,6 +986,14 @@ If the task exists in lm-eval-harness:
 If you need a custom task:
 1. Create a YAML task config in `lm_eval_reference/tasks/your_task/`
 2. Register it following the [lm-eval-harness task guide](https://github.com/EleutherAI/lm-evaluation-harness/blob/main/docs/task_guide.md)
+
+If lm-eval-harness (YAML config) isn't a fit -- e.g. the benchmark needs its own scorer/grading
+model, like an LLM-as-judge, rather than a built-in metric -- write it as an Inspect task instead:
+drop a `@task`-decorated Python file in `custom_tasks/` (see `custom_tasks/omniscience.py` and
+`custom_tasks/aa_lcr.py` for from-scratch examples with a judge-model scorer) and run it with
+`scripts/run_inspect_eval.sh --task custom_tasks/your_task.py ...` -- see
+[Alternative: Inspect AI evals](#alternative-inspect-ai-evals) for the full flag reference and
+runnable examples.
 
 ### Customizing Sample Upload
 
