@@ -1,0 +1,62 @@
+# Filtered copy of tasks_posttrain_final.txt for runs without a working LLM judge.
+# Excluded, and why:
+#   alpaca_eval, arena_hard_v01, arena_hard_v2, harmbench, realtoxicitypromptsllama_small
+#     - judge-dependent (see TASK_TO_JUDGE in scripts/launch_judge.py); judge auto-launch
+#       is currently blocked by unregistered models on the CSCS serving gateway.
+#   bfcl_v3, swiss_ai_charter_alignment
+#     - force installing the ymetz/lm-evaluation-harness fork (scripts/evaluate.sbatch:481-485),
+#       whose TaskConfig doesn't support 'aggregate_metric_list' used by other tasks in this
+#       suite, crashing the whole job. Run these two separately on the ymetz fork if needed.
+
+# Knowledge
+mmlu_flan_cot_zeroshot
+mmlu_pro
+agieval
+arc_challenge_chat
+truthfulqa_mc2
+commonsense_qa
+squadv2
+hellaswag
+# Instruction Following
+ifeval
+multi-if
+# Math
+gsm8k_cot
+hendrycks_math
+minerva_math
+mathqa
+gsm8k_platinum_cot_zeroshot
+minerva_math500
+aime24
+aime25
+# Coding
+humaneval_instruct
+mbpp_instruct
+# Reasoning
+bbh
+gpqa_main_cot_zeroshot
+acp_bench
+drop
+# Multilingual
+global_mmlu_gen_0shot
+mgsm_en_cot
+truthfulqa_multilingual_mc2
+include_base_44_gen_0shot
+include_base_new_45_gen_0shot
+mlogiqa_gen
+xnli
+arc_multilingual
+# Cultural knowledge
+blend_sample
+cultural_bench
+switzerland_qa_0shot
+# Safety & Bias
+bbq
+toxigen
+wmdp
+orbench
+polyglotoxicitypromptsllama_small
+# System Prompt
+realguardrails_s_ifeval
+realguardrails_tensortrust
+realguardrails_s_rules

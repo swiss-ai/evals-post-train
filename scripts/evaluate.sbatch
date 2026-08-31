@@ -50,6 +50,7 @@ usage() {
     echo "  OPENAI_API_KEY: Bearer token for the endpoint (default: CSCS_SERVING_API)."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from the task-selected harness repository (default: repository default branch)."
+    echo " SKIP_INSTALL: '1' to skip the runtime pip install entirely (environment already provisioned, e.g. a baked image)."
     echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
     echo "  ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: false)."
     echo "  AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
@@ -256,8 +257,19 @@ if [ ! -z ${REVISION+x} ]; then
     MAYBE_DOWNLOAD_REVISION="--revision=$REVISION"
 fi
 if [ -z ${TOKENIZER+x} ]; then
-    echo "TOKENIZER not set, using TOKENIZER=$MODEL"
-    TOKENIZER=$MODEL
+    # Catalog ids from an inference gateway are prefixed
+    # (<catalog-namespace>/<org>/<repo>, e.g.
+    # CSCS-Inference/swiss-ai/Apertus-v1.5-70B) -- not a valid Hugging Face
+    # repo id (org/repo, exactly one slash), so AutoTokenizer rejects them.
+    # Strip the catalog prefix to recover the real tokenizer repo; a plain
+    # org/repo model id (one slash) is left untouched.
+    if [ "$(grep -o '/' <<< "$MODEL" | wc -l)" -gt 1 ]; then
+        TOKENIZER="${MODEL#*/}"
+        echo "TOKENIZER not set, using TOKENIZER=$TOKENIZER (catalog prefix stripped from MODEL=$MODEL)"
+    else
+        TOKENIZER=$MODEL
+        echo "TOKENIZER not set, using TOKENIZER=$MODEL"
+    fi
 fi
 
 
@@ -352,8 +364,13 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     # Rebuilt from scratch: no model is loaded in-job, so dtype etc. do not apply.
     COMMON_MODEL_ARGS="model=$API_MODEL_NAME,base_url=$API_BASE_URL,num_concurrent=$API_NUM_CONCURRENT,max_retries=$API_MAX_RETRIES,max_length=$MAX_LENGTH"
     if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then
-        # Client-side tokenization: loglikelihood scoring needs token-aligned context/continuation.
-        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER"
+        # tokenizer_backend/tokenizer is local bookkeeping only (max context length, decoding,
+        # token counts) -- lm_eval still needs it for loglikelihood scoring. tokenized_requests
+        # is the separate knob that controls what goes over the wire: with it left at the
+        # default (True), lm_eval ships pre-tokenized integer IDs in the prompt field. The CSCS
+        # gateway's /v1/completions only parses a plain string there, so it must be forced False
+        # regardless of the tokenizer setting.
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER,tokenized_requests=False"
         [[ $BOS = true ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
     else
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenized_requests=False"
@@ -479,7 +496,7 @@ fi
 
 INSTALL_CMD="pip install --no-cache-dir --upgrade \"$LM_EVAL_HARNESS_PIP_SPEC\" && \
 pip install --no-cache-dir --upgrade \
-    \"huggingface-hub>=1.3.0,<2.0\" \
+    \"huggingface-hub>=1.3.0,<1.16\" \
     \"transformers==5.14.1\" \
     \"accelerate>=1.14.0\" \
     \"antlr4-python3-runtime==4.11\" \
@@ -509,6 +526,14 @@ fi
 # lm-eval's API models (local-completions / local-chat-completions) need the [api] extras.
 if [[ $LM_EVAL_BACKEND == "openai" ]]; then
   INSTALL_CMD="$INSTALL_CMD && pip install --no-cache-dir tenacity aiohttp"
+fi
+
+# SKIP_INSTALL=1: the environment already has the harness and its
+# dependencies baked in (e.g. the evals-svc runner image). Skipping the
+# runtime pip install makes the run deterministic -- the image digest fully
+# determines the harness and dependency versions -- and minutes faster.
+if [[ "${SKIP_INSTALL:-0}" == "1" ]]; then
+  INSTALL_CMD="echo 'SKIP_INSTALL=1: using the preinstalled environment (no pip install)'"
 fi
 
 # $CMD is re-parsed by the inner `bash -lc`, so --model_args is single-quoted (a token like
