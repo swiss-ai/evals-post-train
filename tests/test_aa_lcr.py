@@ -92,7 +92,14 @@ def _run_with_fixed_grade(candidate: str, grade_response: str) -> str:
     """One sample through the real scorer via inspect_ai's own eval(),
     using mockllm for both the target and grader roles. Returns the
     resolved Score.value."""
-    dataset = [Sample(input="question", target="the official answer", id=0)]
+    dataset = [
+        Sample(
+            input="question",
+            target="the official answer",
+            id=0,
+            metadata={"question": "the short original question"},
+        )
+    ]
     target_model = get_model(
         "mockllm/target", custom_outputs=[ModelOutput.from_content("mockllm", candidate)]
     )

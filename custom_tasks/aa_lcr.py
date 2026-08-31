@@ -229,6 +229,12 @@ def _load_dataset() -> MemoryDataset:
                         "document_category": row["document_category"],
                         "document_set_id": row["document_set_id"],
                         "input_tokens_reported": row.get("input_tokens"),
+                        # The short original question, not the ~100k-token
+                        # documents-included prompt (state.input_text) --
+                        # kept separately so the scorer can cite it in the
+                        # grading prompt without re-sending every document
+                        # to the grader too. See aa_lcr_scorer().
+                        "question": row["question"],
                     },
                 )
             )
@@ -242,8 +248,16 @@ def aa_lcr_scorer(model_role: str = "grader") -> Scorer:
         # model under test grading itself -- same reasoning as
         # omniscience.py's scorer.
         grader = get_model(role=model_role, required=True)
+        # The short original question (see _load_dataset), not
+        # state.input_text -- that's the ~100k-token documents-included
+        # prompt, and re-sending every document to the grader too would
+        # roughly double this task's already-substantial cost for no
+        # benefit: the README's own grading prompt calls this "the
+        # question, for reference only," and the grader is checking
+        # candidate-vs-official answer equivalence, not re-deriving the
+        # answer from the source documents itself.
         prompt = _GRADING_TEMPLATE.format(
-            question=state.input_text,
+            question=state.metadata["question"],
             official_answer=target.text,
             candidate_answer=state.output.completion,
         )
