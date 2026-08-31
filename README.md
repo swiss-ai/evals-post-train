@@ -49,7 +49,7 @@ bash scripts/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B
   --backend openai --api-base-url http://nid001234:8000
 
 # Evaluate a base model with 5-shot and easy eval set (matching OLMo3 technical report settings)
-bash scripts/launch_evaluations.sh olmo-easy --model Qwen/Qwen2.5-7B --num-fewshot 5
+bash scripts/launch_evaluations.sh olmo-easy --model Qwen/Qwen2.5-7B --num-fewshot 5 --no-chat-template
 
 # Evaluate a small model on a single task, useful for testing newly implemented tasks
 bash scripts/launch_evaluations.sh single --task multijail --model meta-llama/Llama-3.2-3B --backend vllm
@@ -104,7 +104,7 @@ Each mode maps to a task list and a metric config (`*_main_table.txt`) in the sa
 ```bash
 bash scripts/launch_evaluations.sh <mode> --model <hf_path_or_local_path> [options]
 ```
-Automatically derives the run name and detects whether to apply a chat template based on the model name (patterns: `-Instruct`, `-Chat`, `-SFT`, `-DPO`, `-it`, `-aligned`).
+Automatically derives the run name; the chat template is applied by default for every model (pass `--no-chat-template` to disable it).
 
 **Mode 2: Model-list script** (for batch evaluation of predefined model sets)
 ```bash
@@ -118,7 +118,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 |------|-------------|
 | `--name <name>` | Override the auto-derived evaluation run name |
 | `--task <task>` | Task name(s) for `single` mode (single task or comma-separated list) |
-| `--chat-template` | Force enable chat template (auto-detected for Instruct/Chat/SFT/DPO/-it/-aligned models) |
+| `--chat-template` | Force enable chat template (applied by default for every model) |
 | `--no-chat-template` | Force disable chat template |
 | `--tokenizer <path>` | Custom tokenizer (default: same as model) |
 | `--num-fewshot N` | Override num_fewshot globally. Tasks with explicit `num_fewshot: 0` in their YAML are never overridden. OLMo3 paper uses 5-shot for most MC tasks. |
@@ -213,7 +213,7 @@ continues to use the CSCS judge setup described above.
 
 ```bash
 # OLMo3 paper-faithful 5-shot evaluation
-bash scripts/launch_evaluations.sh olmo-complete --model allenai/OLMo-2-1124-7B --num-fewshot 5
+bash scripts/launch_evaluations.sh olmo-complete --model allenai/OLMo-2-1124-7B --num-fewshot 5 --no-chat-template
 
 # Large model with vLLM and 8-way task splitting
 bash scripts/launch_evaluations.sh default \
@@ -798,7 +798,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `API_MAX_RETRIES` | `3` | `openai` backend only: retries per failed request |
 | `OPENAI_API_KEY` | `scripts/openai_api_key.txt`, then `CSCS_SERVING_API` | OpenAI GPT judge or `openai` backend bearer token |
 | `LM_EVAL_HARNESS_BRANCH` | repository default | Branch/ref installed from the task-selected harness repository |
-| `APPLY_CHAT_TEMPLATE` | `false` | Apply chat template for instruct models |
+| `APPLY_CHAT_TEMPLATE` | `true` | Apply chat template |
 | `TOKENIZER` | same as model | Custom tokenizer path |
 | `BOS` | `false` | Prepend BOS token |
 | `BS` | `auto:20` | Batch size |

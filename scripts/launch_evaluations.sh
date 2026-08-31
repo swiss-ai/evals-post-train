@@ -368,7 +368,6 @@ case "$EVAL_MODE" in
     "gpt")
         export TASKS=./configs/apertus/tasks_gpt.txt
         export TABLE_METRICS=./configs/apertus/tasks_gpt_main_table.txt
-        [[ -z "$CHAT_TEMPLATE_OVERRIDE" ]] && CHAT_TEMPLATE_OVERRIDE="true"
         ;;
     "olmo-easy")
         export TASKS=./configs/olmo/olmo3_easy.txt
