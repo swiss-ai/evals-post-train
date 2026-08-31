@@ -37,7 +37,7 @@
 # Options:
 #   --name <name>        - Override the eval run name (default: auto-derived from model path)
 #   --task <task>         - Task name for 'single' mode (e.g. hellaswag, gsm8k_cot)
-#   --chat-template      - Apply chat template (auto-detected for Instruct/Chat/SFT/DPO models)
+#   --chat-template      - Apply chat template (default for --model mode)
 #   --no-chat-template   - Force disable chat template
 #   --tokenizer <tok>    - Custom tokenizer (default: same as model)
 #   --bos                - Prepend BOS token
@@ -427,22 +427,7 @@ if (( NUM_SPLITS > 1 )); then
     fi
 fi
 
-# --- Auto-derive name and chat template for --model mode ---
-auto_detect_chat_template() {
-    local model="$1"
-    # Check for common instruct/chat model name patterns
-    if [[ "$model" =~ -[Ii]nstruct ]] || \
-       [[ "$model" =~ -[Cc]hat ]] || \
-       [[ "$model" =~ -[Ss][Ff][Tt] ]] || \
-       [[ "$model" =~ -[Dd][Pp][Oo] ]] || \
-       [[ "$model" =~ -[Ii]t$ ]] || \
-       [[ "$model" =~ -aligned ]]; then
-        echo "true"
-    else
-        echo "false"
-    fi
-}
-
+# --- Auto-derive name for --model mode ---
 auto_derive_name() {
     local model="$1"
     # For HF paths like "meta-llama/Llama-3.1-8B-Instruct" -> "Llama-3.1-8B-Instruct"
@@ -552,11 +537,7 @@ if [[ -n "$MODEL_PATH" ]]; then
         MODEL_NAME=$(auto_derive_name "$MODEL_PATH")
     fi
 
-    if [[ -z "$CHAT_TEMPLATE_OVERRIDE" ]]; then
-        export APPLY_CHAT_TEMPLATE=$(auto_detect_chat_template "$MODEL_PATH")
-    else
-        export APPLY_CHAT_TEMPLATE="$CHAT_TEMPLATE_OVERRIDE"
-    fi
+    export APPLY_CHAT_TEMPLATE="${CHAT_TEMPLATE_OVERRIDE:-true}"
 
     [[ -n "$CUSTOM_TOKENIZER" ]] && export TOKENIZER="$CUSTOM_TOKENIZER"
     [[ -n "$BOS_FLAG" ]] && export BOS="$BOS_FLAG"
