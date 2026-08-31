@@ -100,9 +100,19 @@ where <letter> is one of C (correct), P (partial), I (incorrect), or N \
 """
 
 
-@metric
+@metric(scores="unreduced")
 def omniscience_index() -> Metric:
-    """100 * (correct - incorrect) / total -- AA's own bounded (-100..100) index."""
+    """100 * (correct - incorrect) / total -- AA's own bounded (-100..100) index.
+
+    scores="unreduced" is required, not cosmetic: by default (scores="auto")
+    a custom metric receives each Score.value already collapsed through
+    value_to_float() -- C/P/I/N turned into 1.0/0.5/0/0 -- before this
+    function ever sees it, so counts.get(CORRECT, ...) etc. would silently
+    match nothing and this would always compute 0.0 (this happened -- see
+    tests/test_omniscience.py's IntegrationTests). frequency() below
+    declares the same, for the same reason: it is the one built-in metric
+    that also needs the raw categorical labels rather than a float blend.
+    """
 
     def compute(scores: list[SampleScore]) -> float:
         if not scores:
@@ -115,12 +125,13 @@ def omniscience_index() -> Metric:
     return compute
 
 
-@metric
+@metric(scores="unreduced")
 def hallucination_rate() -> Metric:
     """incorrect / (partial + incorrect + not_attempted) -- excludes correct
     answers from the denominator by design: this measures how often the model
     guesses wrong INSTEAD of abstaining, among the answers it didn't get
-    right, not overall error rate."""
+    right, not overall error rate. See omniscience_index() for why
+    scores="unreduced" is required here."""
 
     def compute(scores: list[SampleScore]) -> float:
         counts = Counter(s.score.value for s in scores)
@@ -131,9 +142,11 @@ def hallucination_rate() -> Metric:
     return compute
 
 
-@metric
+@metric(scores="unreduced")
 def non_hallucination_rate() -> Metric:
-    """1 - hallucination_rate -- the actual Intelligence Index component (4% weight)."""
+    """1 - hallucination_rate -- the actual Intelligence Index component
+    (4% weight). See omniscience_index() for why scores="unreduced" is
+    required here."""
 
     def compute(scores: list[SampleScore]) -> float:
         counts = Counter(s.score.value for s in scores)
