@@ -895,6 +895,24 @@ pip install "inspect-ai>=0.3.258" inspect-evals openai
 # A plain benchmark against a served model (CSCS serving, vllm serve, ...)
 scripts/run_inspect_eval.sh --task gsm8k --model Qwen/Qwen3-8B --api-base-url http://nid001234:8000
 
+# GPQA Diamond (inspect_evals/gpqa_diamond -- graduate-level multiple choice, no judge
+# needed). Runs 4 epochs per sample by default (majority vote over repeated attempts); pass
+# `-- --epochs 1` after the task flags to disable that:
+scripts/run_inspect_eval.sh --task gpqa_diamond \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --limit 5
+
+# HLE (Humanity's Last Exam, inspect_evals/hle) is graded by two judges side by side (task
+# arg `graders`, default `[grader, grader_2]`), so it needs both a "grader" and a "grader_2"
+# role bound, same convention as tau2's "user" role / AA-Omniscience's "grader" role above --
+# otherwise it falls back to run_configs/default.yaml's OpenRouter judges and fails without
+# OPENROUTER_API_KEY. The dataset is ~2,500 questions with multi-modal (image) samples
+# included by default; keep --limit small for a smoke test:
+scripts/run_inspect_eval.sh --task hle \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+  --model-role grader_2=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 5
+
 # tau2-bench (no single "default" task -- it ships four domains: airline, banking, retail,
 # telecom) needs a second "user"-role model to play the customer, and supports extra task
 # params like message_limit or banking's retrieval_config. The "user" role doesn't need to be
