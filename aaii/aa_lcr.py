@@ -1,6 +1,7 @@
 """AA-LCR (Artificial Analysis Long Context Reasoning benchmark), run via
-`inspect eval custom_tasks/aa_lcr.py` -- no inspect_evals implementation
-exists to lean on (unlike hle/gpqa_diamond), so this is a from-scratch task.
+`inspect eval aaii/aa_lcr.py` (formerly custom_tasks/aa_lcr.py) -- no
+inspect_evals implementation exists to lean on (unlike hle/gpqa_diamond), so
+this is a from-scratch task.
 
 https://artificialanalysis.ai/methodology/intelligence-benchmarking and the
 dataset's own README (huggingface.co/datasets/ArtificialAnalysis/AA-LCR):

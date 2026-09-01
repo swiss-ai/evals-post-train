@@ -1,4 +1,4 @@
-"""AA-LCR task (custom_tasks/aa_lcr.py): _resolve_directory has to survive
+"""AA-LCR task (aaii/aa_lcr.py): _resolve_directory has to survive
 two different real corruptions in AA's own published zip (see its
 docstring) without ever silently mispairing a name to the wrong file --
 these are exactly the cases that motivated it, not hypothetical ones.
@@ -15,7 +15,7 @@ from inspect_ai.dataset import Sample
 from inspect_ai.model import ModelOutput, get_model
 from inspect_ai.solver import generate
 
-from custom_tasks.aa_lcr import _GRADE_RE, _resolve_directory, aa_lcr_scorer
+from aaii.aa_lcr import _GRADE_RE, _resolve_directory, aa_lcr_scorer
 
 
 class ResolveDirectoryTests(unittest.TestCase):

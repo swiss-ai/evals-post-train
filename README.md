@@ -928,21 +928,21 @@ scripts/run_inspect_eval.sh --task tau2_retail,tau2_banking \
 scripts/run_inspect_eval.sh --task gsm8k,gaia --model anthropic/claude-3-5-sonnet-latest \
   --eval-set -- --temperature 0.5 --max-connections 10
 
-# AA-Omniscience (custom_tasks/omniscience.py -- a full path, not an inspect_evals name, so
-# it's used as-is rather than expanded to "inspect_evals/..."; see the module docstring
-# there for why it's a from-scratch task) needs a "grader" role for its judge model, same
-# convention as tau2's "user" role above. Artificial Analysis's own protocol is a fixed
-# external judge (GPT-5.6 Luna) -- the model under test grading itself works too (verified
-# below) but is not AAII-comparable:
-scripts/run_inspect_eval.sh --task custom_tasks/omniscience.py \
+# AA-Omniscience (aaii/aa_omniscience.py, formerly custom_tasks/omniscience.py -- a full path,
+# not an inspect_evals name, so it's used as-is rather than expanded to "inspect_evals/...";
+# see the module docstring there for why it's a from-scratch task) needs a "grader" role for
+# its judge model, same convention as tau2's "user" role above. Artificial Analysis's own
+# protocol is a fixed external judge (GPT-5.6 Luna) -- the model under test grading itself
+# works too (verified below) but is not AAII-comparable:
+scripts/run_inspect_eval.sh --task aaii/aa_omniscience.py \
   --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 5
 
-# AA-LCR (custom_tasks/aa_lcr.py, same "full path" / "grader" role convention as
-# AA-Omniscience above). Unlike every other task in this repo, each sample is a ~100k-token
-# prompt (the full Document Set) -- keep --limit at 1 for a smoke test unless you mean to
-# spend real time/money on a full 100-question run:
-scripts/run_inspect_eval.sh --task custom_tasks/aa_lcr.py \
+# AA-LCR (aaii/aa_lcr.py, formerly custom_tasks/aa_lcr.py, same "full path" / "grader" role
+# convention as AA-Omniscience above). Unlike every other task in this repo, each sample is a
+# ~100k-token prompt (the full Document Set) -- keep --limit at 1 for a smoke test unless you
+# mean to spend real time/money on a full 100-question run:
+scripts/run_inspect_eval.sh --task aaii/aa_lcr.py \
   --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 1
 ```
@@ -1007,8 +1007,10 @@ If you need a custom task:
 
 If lm-eval-harness (YAML config) isn't a fit -- e.g. the benchmark needs its own scorer/grading
 model, like an LLM-as-judge, rather than a built-in metric -- write it as an Inspect task instead:
-drop a `@task`-decorated Python file in `custom_tasks/` (see `custom_tasks/omniscience.py` and
-`custom_tasks/aa_lcr.py` for from-scratch examples with a judge-model scorer) and run it with
+drop a `@task`-decorated Python file in `custom_tasks/` (see `aaii/aa_omniscience.py` and
+`aaii/aa_lcr.py` for from-scratch examples with a judge-model scorer -- Artificial Analysis's own
+AAII benchmarks live in `aaii/` specifically, not `custom_tasks/`, since they're a fixed,
+AAII-branded protocol rather than an arbitrary one-off task) and run it with
 `scripts/run_inspect_eval.sh --task custom_tasks/your_task.py ...` -- see
 [Alternative: Inspect AI evals](#alternative-inspect-ai-evals) for the full flag reference and
 runnable examples.

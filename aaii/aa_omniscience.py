@@ -1,7 +1,8 @@
 """AA-Omniscience (Artificial Analysis's knowledge/hallucination benchmark),
-run via `inspect eval custom_tasks/omniscience.py` -- there is no
-inspect_evals implementation to lean on (unlike hle/gpqa_diamond), so this is
-a from-scratch Task rather than a thin defaults wrapper.
+run via `inspect eval aaii/aa_omniscience.py` (formerly
+custom_tasks/omniscience.py) -- there is no inspect_evals implementation to
+lean on (unlike hle/gpqa_diamond), so this is a from-scratch Task rather
+than a thin defaults wrapper.
 
 https://artificialanalysis.ai/methodology/intelligence-benchmarking and
 https://artificialanalysis.ai/evaluations/omniscience: 6,000 short, exact-
