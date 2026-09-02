@@ -1,0 +1,24 @@
+# OLMo3 Long-Context Evaluations
+# Reference: OLMo 3 Technical Report
+#
+# Tasks NOT available in lm-eval-harness (omitted):
+#   - HELMET
+#
+# RULER at various context lengths
+# niah_single_1,niah_single_2,niah_single_3
+# niah_multikey_1,niah_multikey_2,niah_multikey_3
+# niah_multivalue,niah_multiquery
+# ruler_vt,ruler_cwe,ruler_fwe,ruler_qa_hotpot,ruler_qa_squad
+niah_single_1
+niah_single_2
+niah_single_3
+niah_multikey_1
+niah_multikey_2
+niah_multikey_3
+niah_multivalue
+niah_multiquery
+ruler_vt
+ruler_cwe
+ruler_fwe
+ruler_qa_hotpot
+ruler_qa_squad

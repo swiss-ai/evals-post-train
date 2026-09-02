@@ -1,0 +1,6 @@
+longbench2_single_doc_qa/acc
+longbench2_multi_doc_qa/acc
+longbench2_long_incontext_learning/acc
+longbench2_long_dialogue/acc
+longbench2_code_repo/acc
+longbench2_long_struct_data/acc

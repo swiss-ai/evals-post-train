@@ -8,6 +8,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
+#SBATCH --reservation=SD-69241-apertus-1-5-0
 #SBATCH --exclusive
 #SBATCH --partition=normal
 #SBATCH --time=11:59:00
@@ -81,7 +82,7 @@ CKPT_ITER=${CKPT_ITER:-"latest"}
 BS=${BS:-"auto:20"}
 SIZE=${SIZE:-1}
 BOS=${BOS:-false}
-LOGS_ROOT=${LOGS_ROOT:-$SCRATCH/eval_logs_start/}
+LOGS_ROOT=${LOGS_ROOT:-/capstor/scratch/cscs/dtamayomela/evaluations/evals-post-train-clean/new_logs}
 TASKS=${TASKS:-./configs/apertus/tasks_default.txt}
 TABLE_METRICS=${TABLE_METRICS:-./configs/apertus/tasks_default_main_table.txt}
 WANDB_ENTITY=${WANDB_ENTITY:-apertus}
@@ -229,6 +230,11 @@ mkdir -p "$HF_DATASETS_CACHE" "$NLTK_DATA" "$TRITON_CACHE_DIR" "$TIKTOKEN_CACHE_
 
 GPUS_PER_NODE=4
 
+if [[ "$TASKS" == *"longbench"* ]]; then
+    BS=1
+    echo "LongBench detected: overriding batch size to BS=$BS"
+fi
+
 # Print configuration.
 echo "Configuration set:"
 # Values go in printf's arguments, not the format string: a '%' would be read as a conversion.
@@ -309,7 +315,13 @@ export VLLM_USE_FLASHINFER_SAMPLER=0
 # export NCCL_NET="Socket"
 # export NCCL_DEBUG=WARN
 # Reduce memory fraction to avoid OOM during initialization
-VLLM_MEMORY_FRACTION=0.75
+if [[ "$MODEL" == *"VL"* ]] || [[ "$MODEL" == *"vl"* ]]; then
+    VLLM_MEMORY_FRACTION=0.90
+elif echo "$TASKS" | grep -q "longbench"; then
+    VLLM_MEMORY_FRACTION=0.80
+else
+    VLLM_MEMORY_FRACTION=0.75
+fi
 # export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export VLLM_DISABLE_CUSTOM_ALL_REDUCE=1
 
@@ -445,38 +457,42 @@ if [[ "$LOG_LENGTH_METRICS" == "True" ]]; then
 fi
 
 # Detect long context length only when 'ruler' is among tasks.
-CONTEXT_LEN=""
-if echo "$TASKS" | grep -q "ruler"; then
+CONTEXT_LEN=${CONTEXT_LEN-"4096,8192,16384,32768,65536"}
+if echo "$TASKS" | grep -qE "(ruler|niah)"; then
     if echo "$TASKS" | grep -qE "/[0-9]+"; then
         CONTEXT_LEN=$(echo "$TASKS" | grep -oE '/[0-9]+' | head -n1 | tr -d '/')
+    elif echo "$TASKS" | grep -qE "ruler[_-][0-9]+"; then
+        CONTEXT_LEN=$(echo "$TASKS" | grep -oE 'ruler[_-][0-9]+' | head -n1 | grep -oE '[0-9]+')
     fi
-    # Fallback: support underscore or dash pattern like ruler_8192 or ruler-8192
-    if [[ -z "$CONTEXT_LEN" ]]; then
-        if echo "$TASKS" | grep -qE "ruler[_-][0-9]+"; then
-            CONTEXT_LEN=$(echo "$TASKS" | grep -oE 'ruler[_-][0-9]+' | head -n1 | grep -oE '[0-9]+')
-        fi
-    fi
-    if [[ -n "$CONTEXT_LEN" ]]; then
-        export MAX_LENGTH="$CONTEXT_LEN"
-        # Only add metadata and model arg if CONTEXT_LEN is numeric
-        if [[ "$CONTEXT_LEN" =~ ^[0-9]+$ ]]; then
-			COMMON_EVAL_ARGS+=( --metadata \'{\"max_seq_lengths\":[${CONTEXT_LEN}]}\' )
 
-            MAX_MODEL_LEN_WITH_MARGIN=$(( CONTEXT_LEN + 600 ))
-            if [[ $LM_EVAL_BACKEND == "openai" ]]; then
-                # No in-job engine to configure; raise the client-side truncation length instead
-                # (duplicate max_length key: lm_eval keeps the last occurrence).
-                COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_length=$MAX_MODEL_LEN_WITH_MARGIN"
-                echo "Detected ruler context length: $CONTEXT_LEN (set MAX_LENGTH, max_length=$MAX_MODEL_LEN_WITH_MARGIN and lm-eval metadata)"
-            else
-                export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
-                COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$MAX_MODEL_LEN_WITH_MARGIN"
-                echo "Detected ruler context length: $CONTEXT_LEN (set MAX_LENGTH, max_model_len=$MAX_MODEL_LEN_WITH_MARGIN and lm-eval metadata)"
-            fi
+    if [[ -n "$CONTEXT_LEN" ]]; then
+        MAX_CONTEXT_LEN=$(echo "$CONTEXT_LEN" | tr ',' '\n' | sort -n | tail -1)
+        export MAX_LENGTH="$MAX_CONTEXT_LEN"
+
+        JSON_ARRAY=$(echo "$CONTEXT_LEN" | tr ',' '\n' | awk 'BEGIN{printf "["} NR>1{printf ","} {printf "%s",$1} END{printf "]"}')
+        # Quoted so the JSON survives the inner `bash -lc` re-parsing.
+        COMMON_EVAL_ARGS+=( --metadata \'{\"max_seq_lengths\":${JSON_ARRAY}}\' )
+
+        MAX_MODEL_LEN_WITH_MARGIN=$(( MAX_CONTEXT_LEN + 600 ))
+        if [[ $LM_EVAL_BACKEND == "openai" ]]; then
+            COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_length=$MAX_MODEL_LEN_WITH_MARGIN"
         else
-            echo "Warning: Ruler detected but no numeric context length found; skipping metadata and max_model_len."
+            export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+            COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$MAX_MODEL_LEN_WITH_MARGIN"
         fi
+        echo "Ruler context lengths: $CONTEXT_LEN (max=$MAX_CONTEXT_LEN, max_model_len=$MAX_MODEL_LEN_WITH_MARGIN)"
     fi
+fi
+
+if echo "$TASKS" | grep -q "longbench"; then
+    MAX_CONTEXT_LEN=$(echo "$CONTEXT_LEN" | tr ',' '\n' | sort -n | tail -1)
+    export MAX_LENGTH="$MAX_CONTEXT_LEN"
+    MAX_MODEL_LEN_WITH_MARGIN=$(( MAX_CONTEXT_LEN + 600 ))
+    export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+    if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$MAX_MODEL_LEN_WITH_MARGIN,max_num_batched_tokens=2048,max_num_seqs=1"
+    fi
+    echo "LongBench detected: MAX_LENGTH=$MAX_CONTEXT_LEN, max_model_len=$MAX_MODEL_LEN_WITH_MARGIN"
 fi
 
 # bfcl_v3 and Swiss AI Charter Alignment are not yet available in the Swiss-AI
@@ -517,7 +533,13 @@ pip install --no-cache-dir --upgrade \
     hf-transfer \
     subset2evaluate \
     \"alpaca-eval>=0.6.2\" \
-    \"peft>=0.19.0\"  "
+    \"peft>=0.19.0\" \
+    timm \
+    qwen-vl-utils \
+    open_clip_torch \
+    jieba \
+    fuzzywuzzy \
+    rouge"
 
 if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
   INSTALL_CMD="$INSTALL_CMD && pip install megatron-core --no-deps && export MEGATRON_PATH=$(pwd)/Megatron-LM"
@@ -566,6 +588,11 @@ echo \"Effective max_gen_toks: \$EFFECTIVE_MAX_GEN_TOKS (floor $MAX_NEW_TOKENS)\
 "
 CMD="$COMPUTE_MAX_GEN_TOKS$CMD"
 
+PATCH_CMD="sed -i 's|http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_distractor_v1.json|https://huggingface.co/datasets/namlh2004/hotpotqa/resolve/7e54db4656209750ff487f6fdf8e39a66dba136b/hotpot_dev_distractor_v1.json|g' /usr/local/lib/python3.12/dist-packages/lm_eval/tasks/ruler/qa_utils.py || true; \
+sed -i 's/if config\.tie_word_embeddings:/if getattr(config, \"tie_word_embeddings\", False):/g' /workspace/vllm/vllm/model_executor/models/qwen3_vl.py || true; \
+sed -i 's/self\.config\.tie_word_embeddings/getattr(self.config, \"tie_word_embeddings\", False)/g' /workspace/vllm/vllm/model_executor/models/qwen3.py || true; \
+([[ -f ${MODEL}/configuration.py ]] && grep -q _attn_implementation ${MODEL}/configuration.py && sed -i 's/\"flash_attention\" in self\._attn_implementation/\"flash_attention\" in (self._attn_implementation or \"\")/g' ${MODEL}/configuration.py) || true"
+
 echo "Installation command: $INSTALL_CMD"
 echo "Final command: $CMD"
 
@@ -595,6 +622,7 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     $CACHE_EXPORTS
 
     $INSTALL_CMD
+    $PATCH_CMD
     # Make torch CUDA libs discoverable for vllm._C import
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
     $CMD
@@ -608,6 +636,7 @@ elif [[ $LM_EVAL_BACKEND == "vllm" ]]; then
     $CACHE_EXPORTS
 
     $INSTALL_CMD
+    $PATCH_CMD
     # Make torch CUDA libs discoverable for vllm._C import
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
     $CMD
@@ -620,6 +649,7 @@ elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     $CACHE_EXPORTS
 
     $INSTALL_CMD
+    $PATCH_CMD
     $CMD
     "
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
@@ -631,6 +661,7 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     $CACHE_EXPORTS
 
     $INSTALL_CMD
+    $PATCH_CMD
 
     $CMD
     "
@@ -643,6 +674,7 @@ else
     $CACHE_EXPORTS
 
     $INSTALL_CMD
+    $PATCH_CMD
 
     # Make torch CUDA libs discoverable for vllm._C import - is just ignored for Huggingface
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
