@@ -12,7 +12,7 @@ export HF_TOKEN=$(tr -d '\r\n' < ./scripts/hf_token.txt)
 for model in ${MODELS[@]}; do
 
     export CONTEXT_LEN=4096,8192,16384,32768,65536
-    CUSTOM_TYPE=olmo3_ruler_large
+    CUSTOM_TYPE=long-context-ruler-large
     bash scripts/launch_evaluations.sh $CUSTOM_TYPE --model $model --backend vllm --chat-template --splits 13
 
     export CONTEXT_LEN=128000

@@ -173,7 +173,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Validate mode ---
-VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "posttrain" "best-of-k" "gpt" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-longbench" "olmo-longbenchv2" "olmo3_ruler_large" "olmo-complete" "eval-debug" "single" "custom")
+VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "posttrain" "best-of-k" "gpt" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "long-context-ruler" "long-context-ruler-large" "long-context-longbench" "long-context-longbenchv2" "olmo-complete" "eval-debug" "single" "custom")
 if [[ ! " ${VALID_MODES[*]} " =~ " ${EVAL_MODE} " ]]; then
     echo "Error: Invalid mode '$EVAL_MODE'"
     echo "Valid modes: ${VALID_MODES[*]}"
@@ -390,20 +390,25 @@ case "$EVAL_MODE" in
         export TASKS=./configs/olmo/olmo3_longcontext.txt
         export TABLE_METRICS=./configs/olmo/olmo3_longcontext_main_table.txt
         ;;
-    "olmo3_ruler_large")
-        export TASKS=./configs/olmo/olmo3_ruler_large.txt
-        export TABLE_METRICS=./configs/olmo/olmo3_ruler_large_main_table.txt
-        export WANDB_PROJECT="${WANDB_PROJECT}-olmo-ruler-large"
+    "long-context-ruler")
+        export TASKS=./configs/long_context/ruler.txt
+        export TABLE_METRICS=./configs/long_context/ruler_main_table.txt
+        export WANDB_PROJECT="${WANDB_PROJECT}-long-context-ruler"
         ;;
-    "olmo-longbench")
-        export TASKS=./configs/olmo/olmo3_longbench.txt
-        export TABLE_METRICS=./configs/olmo/olmo3_longbench_main_table.txt
-        export WANDB_PROJECT="${WANDB_PROJECT}-olmo-longbench"
+    "long-context-ruler-large")
+        export TASKS=./configs/long_context/ruler_large.txt
+        export TABLE_METRICS=./configs/long_context/ruler_large_main_table.txt
+        export WANDB_PROJECT="${WANDB_PROJECT}-long-context-ruler-large"
         ;;
-    "olmo-longbenchv2")
-        export TASKS=./configs/olmo/olmo3_longbenchv2.txt
-        export TABLE_METRICS=./configs/olmo/olmo3_longbenchv2_main_table.txt
-        export WANDB_PROJECT="${WANDB_PROJECT}-olmo-longbench"
+    "long-context-longbench")
+        export TASKS=./configs/long_context/longbench.txt
+        export TABLE_METRICS=./configs/long_context/longbench_main_table.txt
+        export WANDB_PROJECT="${WANDB_PROJECT}-long-context-longbench"
+        ;;
+    "long-context-longbenchv2")
+        export TASKS=./configs/long_context/longbenchv2.txt
+        export TABLE_METRICS=./configs/long_context/longbenchv2_main_table.txt
+        export WANDB_PROJECT="${WANDB_PROJECT}-long-context-longbenchv2"
         ;;
     "olmo-complete")
         export TASKS=./configs/olmo/olmo3_complete.txt

@@ -1,0 +1,6 @@
+ruler/4096
+ruler/8192
+ruler/16384
+ruler/32768
+ruler/65536
+ruler/131072
