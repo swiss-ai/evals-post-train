@@ -235,6 +235,24 @@ if [[ "$TASKS" == *"longbench"* ]]; then
     echo "LongBench detected: overriding batch size to BS=$BS"
 fi
 
+# The +600 margin must not exceed the model's position ceiling: vLLM does not reject an
+# oversized max_model_len cleanly, it dies with a device-side assert. Clamp when we can read
+# max_position_embeddings (local config.json, else the Hub); models with headroom are untouched.
+clamp_to_position_ceiling() {
+    local requested="$1" cfg ceiling=""
+    if [[ -f "$MODEL/config.json" ]]; then
+        cfg=$(cat "$MODEL/config.json")
+    else
+        cfg=$(curl -sf "https://huggingface.co/$MODEL/raw/main/config.json" 2>/dev/null || true)
+    fi
+    ceiling=$(grep -o '"max_position_embeddings"[[:space:]]*:[[:space:]]*[0-9]*' <<< "$cfg" | grep -o '[0-9]*$' | head -1)
+    if [[ -n "$ceiling" ]] && (( requested > ceiling )); then
+        echo "$ceiling"
+    else
+        echo "$requested"
+    fi
+}
+
 # Print configuration.
 echo "Configuration set:"
 # Values go in printf's arguments, not the format string: a '%' would be read as a conversion.
@@ -476,6 +494,7 @@ if echo "$TASKS" | grep -qE "(ruler|niah)"; then
         COMMON_EVAL_ARGS+=( --metadata \'{\"max_seq_lengths\":${JSON_ARRAY}}\' )
 
         MAX_MODEL_LEN_WITH_MARGIN=$(( MAX_CONTEXT_LEN + 600 ))
+        MAX_MODEL_LEN_WITH_MARGIN=$(clamp_to_position_ceiling "$MAX_MODEL_LEN_WITH_MARGIN")
         if [[ $LM_EVAL_BACKEND == "openai" ]]; then
             COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_length=$MAX_MODEL_LEN_WITH_MARGIN"
         else
@@ -490,6 +509,7 @@ if echo "$TASKS" | grep -q "longbench"; then
     MAX_CONTEXT_LEN=$(echo "$CONTEXT_LEN" | tr ',' '\n' | sort -n | tail -1)
     export MAX_LENGTH="$MAX_CONTEXT_LEN"
     MAX_MODEL_LEN_WITH_MARGIN=$(( MAX_CONTEXT_LEN + 600 ))
+    MAX_MODEL_LEN_WITH_MARGIN=$(clamp_to_position_ceiling "$MAX_MODEL_LEN_WITH_MARGIN")
     export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
     if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$MAX_MODEL_LEN_WITH_MARGIN,max_num_batched_tokens=2048,max_num_seqs=1"
