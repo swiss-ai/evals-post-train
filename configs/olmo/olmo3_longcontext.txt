@@ -5,4 +5,4 @@
 #   - HELMET
 #
 # RULER at various context lengths
-ruler
+ruler_8192
