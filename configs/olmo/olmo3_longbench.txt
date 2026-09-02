@@ -1,0 +1,24 @@
+# Reference: https://arxiv.org/abs/2308.14508
+#
+# Single-document QA
+longbench_narrativeqa
+longbench_qasper
+longbench_multifieldqa_en
+# Multi-document QA
+longbench_hotpotqa
+longbench_2wikimqa
+longbench_musique
+# Summarization
+longbench_gov_report
+longbench_qmsum
+longbench_multi_news
+# Few-shot learning
+longbench_trec
+longbench_triviaqa
+longbench_samsum
+# Synthetic / retrieval
+longbench_passage_count
+longbench_passage_retrieval_en
+# Code
+longbench_lcc
+longbench_repobench-p

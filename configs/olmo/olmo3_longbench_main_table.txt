@@ -1,0 +1,16 @@
+longbench_narrativeqa/score
+longbench_qasper/score
+longbench_multifieldqa_en/score
+longbench_hotpotqa/score
+longbench_2wikimqa/score
+longbench_musique/score
+longbench_gov_report/score
+longbench_qmsum/score
+longbench_multi_news/score
+longbench_trec/score
+longbench_triviaqa/score
+longbench_samsum/score
+longbench_passage_count/score
+longbench_passage_retrieval_en/score
+longbench_lcc/score
+longbench_repobench-p/score

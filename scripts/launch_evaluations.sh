@@ -173,7 +173,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Validate mode ---
-VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "posttrain" "best-of-k" "gpt" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "single" "custom")
+VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "posttrain" "best-of-k" "gpt" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-longbench" "olmo-longbenchv2" "olmo3_ruler_large" "olmo-complete" "eval-debug" "single" "custom")
 if [[ ! " ${VALID_MODES[*]} " =~ " ${EVAL_MODE} " ]]; then
     echo "Error: Invalid mode '$EVAL_MODE'"
     echo "Valid modes: ${VALID_MODES[*]}"
@@ -390,6 +390,21 @@ case "$EVAL_MODE" in
         export TASKS=./configs/olmo/olmo3_longcontext.txt
         export TABLE_METRICS=./configs/olmo/olmo3_longcontext_main_table.txt
         ;;
+    "olmo3_ruler_large")
+        export TASKS=./configs/olmo/olmo3_ruler_large.txt
+        export TABLE_METRICS=./configs/olmo/olmo3_ruler_large_main_table.txt
+        export WANDB_PROJECT="${WANDB_PROJECT}-olmo-ruler-large"
+        ;;
+    "olmo-longbench")
+        export TASKS=./configs/olmo/olmo3_longbench.txt
+        export TABLE_METRICS=./configs/olmo/olmo3_longbench_main_table.txt
+        export WANDB_PROJECT="${WANDB_PROJECT}-olmo-longbench"
+        ;;
+    "olmo-longbenchv2")
+        export TASKS=./configs/olmo/olmo3_longbenchv2.txt
+        export TABLE_METRICS=./configs/olmo/olmo3_longbenchv2_main_table.txt
+        export WANDB_PROJECT="${WANDB_PROJECT}-olmo-longbench"
+        ;;
     "olmo-complete")
         export TASKS=./configs/olmo/olmo3_complete.txt
         export TABLE_METRICS=./configs/olmo/olmo3_complete_main_table.txt
@@ -419,7 +434,7 @@ fi
 
 # --- Validate split count vs task count ---
 if (( NUM_SPLITS > 1 )); then
-    TASK_COUNT=$(grep -v '^\s*#' "$TASKS" | grep -v '^\s*$' | wc -l | tr -d ' ')
+    TASK_COUNT=$(grep -v '^\s*#' "$TASKS" | grep -v '^\s*$' | tr ',' '\n' | grep -v '^\s*$' | wc -l | tr -d ' ')
     if (( TASK_COUNT < NUM_SPLITS )); then
         echo "WARNING: Only $TASK_COUNT tasks but $NUM_SPLITS splits requested. Reducing."
         NUM_SPLITS=$TASK_COUNT
