@@ -269,7 +269,9 @@ if [ -z ${TOKENIZER+x} ]; then
     # repo id (org/repo, exactly one slash), so AutoTokenizer rejects them.
     # Strip the catalog prefix to recover the real tokenizer repo; a plain
     # org/repo model id (one slash) is left untouched.
-    if [ "$(grep -o '/' <<< "$MODEL" | wc -l)" -gt 1 ]; then
+    # Local checkpoint paths are absolute and also contain several slashes, so the strip
+    # must skip them or it would eat the leading '/' and break the tokenizer path.
+    if [[ "$MODEL" != /* ]] && [ ! -d "$MODEL" ] && [ "$(grep -o '/' <<< "$MODEL" | wc -l)" -gt 1 ]; then
         TOKENIZER="${MODEL#*/}"
         echo "TOKENIZER not set, using TOKENIZER=$TOKENIZER (catalog prefix stripped from MODEL=$MODEL)"
     else
