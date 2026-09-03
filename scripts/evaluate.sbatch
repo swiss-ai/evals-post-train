@@ -56,15 +56,11 @@ usage() {
     echo " LM_EVAL_RATE_LIMIT_STATE_DIR: Shared coordination directory for rate-limited Slurm workers (set by launcher)."
     echo " OPENAI_API_KEY: Bearer token for the endpoint (default: CSCS_SERVING_API)."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
-<<<<<<< HEAD
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref resolved once by the environment-preparation job."
     echo " EVAL_ENV_MANIFEST: Prepared base environment and harness overlay (required; set by launcher)."
     echo " EVAL_VERIFY_ENV_IMPORTS: 'true' to repeat the preparation job's deep Python import checks inside the evaluation job (default: false)."
     echo " EVAL_CHUNKS_FILE: Resumable array chunk manifest (set automatically by launcher)."
-=======
-    echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from the task-selected harness repository (default: repository default branch)."
     echo " SKIP_INSTALL: '1' to skip the runtime pip install entirely (environment already provisioned, e.g. a baked image)."
->>>>>>> b322d4dbd4b8c7121443bf75e4a7d31f548cdce8
     echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
     echo " ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: false)."
     echo " AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
@@ -681,40 +677,9 @@ if ! eval_env_is_ready; then
     bash '$EVAL_REPO_ROOT/scripts/build_eval_env.sh'
     source '$EVAL_ENV_MANIFEST'
 fi
-<<<<<<< HEAD
 if ! eval_env_is_ready; then
     echo 'Evaluation environment repair did not pass its in-container preflight.' >&2
     exit 1
-=======
-
-INSTALL_CMD="pip install --no-cache-dir --upgrade \"$LM_EVAL_HARNESS_PIP_SPEC\" && \
-pip install --no-cache-dir --upgrade \
-    \"huggingface-hub>=1.3.0,<1.16\" \
-    \"transformers==5.14.1\" \
-    \"accelerate>=1.14.0\" \
-    \"antlr4-python3-runtime==4.11\" \
-    \"datasketch<2.0\" \
-    segtok \
-    \"tokenizers>=0.22.0,<0.23.0\" \
-    mistral-common \
-    \"humming-kernels[cu13]==0.1.2\" \
-    tenacity \
-    sympy \
-    spacy \
-    math_verify \
-    latex2sympy2_extended \
-    wonderwords \
-    nltk \
-    immutabledict \
-    langdetect \
-    hf-transfer \
-    subset2evaluate \
-    \"alpaca-eval>=0.6.2\" \
-    \"peft>=0.19.0\"  "
-
-if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
-  INSTALL_CMD="$INSTALL_CMD && pip install megatron-core --no-deps && export MEGATRON_PATH=$(pwd)/Megatron-LM"
->>>>>>> b322d4dbd4b8c7121443bf75e4a7d31f548cdce8
 fi
 source '$EVAL_BASE_ENV/bin/activate'
 EVAL_RUNTIME_HARNESS_OVERLAY='$EVAL_HARNESS_OVERLAY'

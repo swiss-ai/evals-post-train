@@ -83,11 +83,6 @@ JUDGE_PRESETS = {
         ),
     },
     "cais-llama-harmbench": {
-<<<<<<< HEAD
-=======
-        # No trailing space: check_judge_health() does an exact match against the
-        # gateway's registered model IDs, which don't carry a trailing space.
->>>>>>> b322d4dbd4b8c7121443bf75e4a7d31f548cdce8
         "served_model_name": "cais/HarmBench-Llama-2-13b-cls",
         "framework": "vllm",
         "nodes": 1,

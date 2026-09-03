@@ -48,7 +48,6 @@
 #   --backend <backend>  - lm-eval backend: hf, vllm, sglang, megatron_lm, openai (default: from sbatch script)
 #   --api-base-url <url> - OpenAI-compatible endpoint for the 'openai' backend (required with it,
 #                          unless API_BASE_URL is exported). Bare host, /v1 root, or full endpoint URL.
-<<<<<<< HEAD
 #   --api-model-name <n> - 'model' field sent in API requests (default: the --model value)
 #   --api-requests-per-minute N - Endpoint-wide request limit for the benchmarked API model
 #   --chunk-size N       - Tasks per resumable job chunk (default: 8)
@@ -58,13 +57,6 @@
 #   --task-file <path>   - Task list for custom mode
 #   --table-metrics <p>  - Main-metrics list for custom mode
 #   --force-tasks <csv>  - Re-run completed tasks matching these substrings
-=======
-#   --api-model-name <n> - 'model' field sent in API requests. Required with the 'openai' backend
-#                          (unless API_MODEL_NAME is exported) -- --model's value may be
-#                          catalog-prefixed and not what the gateway expects. If --model is
-#                          omitted, it defaults to this value so single-model dispatch still runs.
-#   --splits K           - Split tasks across K parallel nodes per model
->>>>>>> b322d4dbd4b8c7121443bf75e4a7d31f548cdce8
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
 #   --reservation <name> - Submit jobs under a SLURM reservation, including an auto-launched judge
@@ -109,12 +101,9 @@
 #   # Run a multi-model script
 #   bash launch_evaluations.sh complete --script runners/hf_eval_multiple_other_models.sh
 #
-<<<<<<< HEAD
 #   # Use default EVALUATION_SCRIPTS (edit the array below)
 #   bash launch_evaluations.sh complete --chunk-size 8
 #
-=======
->>>>>>> b322d4dbd4b8c7121443bf75e4a7d31f548cdce8
 #   # Run a single task
 #   bash launch_evaluations.sh single --task hellaswag --model meta-llama/Llama-3.1-8B-Instruct
 
@@ -334,7 +323,6 @@ if [[ -n "$API_BASE_URL_FLAG" || -n "$API_MODEL_NAME_FLAG" ]] && [[ "$EFFECTIVE_
     echo "Error: --api-base-url/--api-model-name only apply with --backend openai"
     exit 1
 fi
-<<<<<<< HEAD
 if [[ -n "$API_REQUESTS_PER_MINUTE_FLAG" && "$EFFECTIVE_BACKEND" != "openai" ]]; then
     echo "Error: --api-requests-per-minute only applies with --backend openai"
     exit 1
@@ -344,7 +332,6 @@ API_REQUESTS_PER_MINUTE="${API_REQUESTS_PER_MINUTE_FLAG:-${API_REQUESTS_PER_MINU
 JUDGE_REQUESTS_PER_MINUTE="${JUDGE_REQUESTS_PER_MINUTE_FLAG:-${JUDGE_REQUESTS_PER_MINUTE:-}}"
 JUDGE_MODEL_PREFIX="${JUDGE_MODEL_PREFIX:-${USER:-}}"
 
-=======
 # Non-openai backends load a checkpoint in-job, so a model has to be named one way or
 # another: --model for a single checkpoint, --script for a model-list. Without either, this
 # used to fall through silently to the hardcoded default EVALUATION_SCRIPTS array below --
@@ -353,7 +340,6 @@ if [[ "$EFFECTIVE_BACKEND" != "openai" && -z "$MODEL_PATH" && -z "$SCRIPT_PATH" 
     echo "Error: --model or --script is required (unless --backend openai is used with --api-model-name)"
     exit 1
 fi
->>>>>>> b322d4dbd4b8c7121443bf75e4a7d31f548cdce8
 [[ -n "$API_BASE_URL_FLAG"   ]] && export API_BASE_URL="$API_BASE_URL_FLAG"
 [[ -n "$API_MODEL_NAME_FLAG" ]] && export API_MODEL_NAME="$API_MODEL_NAME_FLAG"
 [[ -n "$API_REQUESTS_PER_MINUTE" ]] && export API_REQUESTS_PER_MINUTE
@@ -407,7 +393,6 @@ fi
 # sbatch reads SBATCH_RESERVATION natively (CLI > env > script directives).
 [[ -n "$RESERVATION_FLAG" ]] && export SBATCH_RESERVATION="$RESERVATION_FLAG"
 export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
-<<<<<<< HEAD
 export WANDB_PROJECT=${WANDB_PROJECT:-apertus-1.5-post-training-v0.1}
 export LOGS_ROOT=${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}
 [[ -n "$WANDB_ENTITY_FLAG" ]] && export WANDB_ENTITY="$WANDB_ENTITY_FLAG"
@@ -416,10 +401,6 @@ export LOGS_ROOT=${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}
 [[ -n "$SBATCH_ACCOUNT_FLAG" ]] && export SBATCH_ACCOUNT="$SBATCH_ACCOUNT_FLAG"
 export EVAL_CHUNK_SIZE EVAL_MAX_PARALLEL EVAL_MAX_RETRIES EVAL_FAILURE_POLICY
 export EVAL_FORCE_TASKS="$FORCE_TASKS" EVAL_MERGE_ONLY EVAL_DRY_RUN KEEP_JUDGE
-=======
-export WANDB_PROJECT=${WANDB_PROJECT:-test-new-evals-pipeline}
-export NUM_SPLITS
->>>>>>> b322d4dbd4b8c7121443bf75e4a7d31f548cdce8
 export SBATCH_SCRIPT=${SBATCH_SCRIPT:-scripts/evaluate.sbatch}
 # Global checkpoint iteration override for Megatron checkpoints.
 # Consumed by the runner and forwarded to evaluate.sbatch as CKPT_ITER.
