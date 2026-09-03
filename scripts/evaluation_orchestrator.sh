@@ -33,6 +33,89 @@ _eval_submit_aggregator() {
     fi
 }
 
+_eval_create_run_config() {
+    local model="$1" repo="$2" state_dir="$3"
+    local -a fields=(
+        --field "model=$model"
+        --field "backend=${LM_EVAL_BACKEND:-vllm}"
+        --field "checkpoint_iteration=${CKPT_ITER:-latest}"
+        --field "revision=${REVISION:-}"
+        --field "tokenizer=${TOKENIZER:-}"
+        --field "harness_repo=$repo"
+        --field "harness_ref=${LM_EVAL_HARNESS_BRANCH:-HEAD}"
+        --field "apply_chat_template=${APPLY_CHAT_TEMPLATE:-true}"
+        --field "bos=${BOS:-false}"
+        --field "limit=${HARNESS_LIMIT:-}"
+        --field "num_fewshot=${NUM_FEWSHOT:-}"
+        --field "batch_size=${BS:-auto:20}"
+        --field "max_batch_size=${MAX_BATCH_SIZE:-}"
+        --field "max_length=${MAX_LENGTH:-}"
+        --field "max_new_tokens=${MAX_NEW_TOKENS:-}"
+        --field "enable_thinking=${ENABLE_THINKING:-}"
+        --field "autodetect_think_tokens=${AUTODETECT_THINK_TOKENS:-false}"
+        --field "think_start_token=${THINK_START_TOKEN:-}"
+        --field "think_end_token=${THINK_END_TOKEN:-}"
+        --field "track_thinking_metrics=${TRACK_THINKING_METRICS:-}"
+        --field "log_length_metrics=${LOG_LENGTH_METRICS:-false}"
+        --field "think_temperature=${THINK_TEMPERATURE:-}"
+        --field "think_top_p=${THINK_TOP_P:-}"
+        --field "think_repetition_penalty=${THINK_REPETITION_PENALTY:-}"
+        --field "nothink_temperature=${NOTHINK_TEMPERATURE:-}"
+        --field "nothink_top_p=${NOTHINK_TOP_P:-}"
+        --field "vllm_tp_size=${VLLM_TP_SIZE:-}"
+        --field "vllm_dp_size=${VLLM_DP_SIZE:-}"
+        --field "megatron_micro_batch_size=${MEGATRON_MICRO_BATCH_SIZE:-}"
+        --field "api_base_url=${API_BASE_URL:-}"
+        --field "api_model_name=${API_MODEL_NAME:-}"
+        --field "api_chat_endpoint=${API_CHAT_ENDPOINT:-false}"
+        --field "judge_mode=${JUDGE_MODE:-none}"
+        --field "judge_args=${JUDGE_EXTRA_ARGS:-}"
+        --field "judge_model_prefix=${JUDGE_MODEL_PREFIX:-}"
+    )
+
+    EVAL_RUN_CONFIG="$state_dir/run_config.json"
+    export EVAL_RUN_CONFIG
+    EVAL_RUN_SIGNATURE=$(python3 -m scripts.eval_state config \
+        "${fields[@]}" --output "$EVAL_RUN_CONFIG")
+    export EVAL_RUN_SIGNATURE
+    echo "Run configuration: $EVAL_RUN_SIGNATURE"
+}
+
+_eval_launch_judge() {
+    local missing_tasks_file="$1"
+    [[ "${JUDGE_MODE:-none}" != "none" ]] || return 0
+    [[ -z "${JUDGE_JOB_IDS:-}" ]] || return 0
+
+    local judge_stdout
+    local -a launch_args=()
+    if [[ "$JUDGE_MODE" == "auto" ]]; then
+        launch_args+=(--detect-from-tasks "$missing_tasks_file")
+    else
+        launch_args+=(--preset "$JUDGE_MODE")
+    fi
+    [[ -z "${SBATCH_RESERVATION:-}" ]] \
+        || launch_args+=(--reservation "$SBATCH_RESERVATION")
+    [[ "${EVAL_DRY_RUN:-false}" != "true" ]] || launch_args+=(--dry-run)
+
+    echo ""
+    echo "--- Judge Model Launch ---"
+    # JUDGE_EXTRA_ARGS retains the launcher's historical shell-word semantics.
+    if ! judge_stdout=$(python3 scripts/launch_judge.py \
+        "${launch_args[@]}" ${JUDGE_EXTRA_ARGS:-}); then
+        echo "ERROR: Judge model launch failed" >&2
+        return 1
+    fi
+    JUDGE_JOB_IDS=$(echo "$judge_stdout" | grep '^JUDGE_JOB_ID=' | cut -d= -f2 | tr '\n' ' ' || true)
+    JUDGE_MODELS=$(echo "$judge_stdout" | grep '^JUDGE_MODEL_NAME=' | cut -d= -f2 | tr '\n' ', ' || true)
+    export JUDGE_JOB_IDS JUDGE_MODELS
+    if [[ -n "$JUDGE_JOB_IDS" ]]; then
+        echo "  Judge jobs: $JUDGE_JOB_IDS"
+        echo "  Judge models: $JUDGE_MODELS"
+    fi
+    echo "--------------------------"
+    echo ""
+}
+
 _eval_schedule_judge_cleanup() {
     local dependency_job="${1:-}"
     [[ -n "${JUDGE_JOB_IDS:-}" && "${KEEP_JUDGE:-false}" != "true" ]] || return 0
@@ -69,6 +152,7 @@ _eval_scan() {
     python3 -m scripts.eval_state scan \
         --tasks-file "$state_dir/expected_tasks.txt" \
         "${harness_args[@]}" \
+        --run-config "$state_dir/run_config.json" \
         --missing-output "$state_dir/missing_${suffix}.txt" \
         --eval-dirs-output "$state_dir/eval_dirs_${suffix}.txt" \
         --completed-output "$state_dir/completed_${suffix}.tsv" "$@"
@@ -168,6 +252,14 @@ submit_evaluation() {
     python3 -m scripts.eval_state normalize --tasks "$TASKS" \
         --output "$state_dir/expected_tasks.txt"
 
+    if grep -Eq '^(bfcl_v3|swiss_ai_charter_alignment)([/:_-]|$)' \
+        "$state_dir/expected_tasks.txt"; then
+        repo="ymetz/lm-evaluation-harness"
+    else
+        repo="swiss-ai/lm-evaluation-harness"
+    fi
+    _eval_create_run_config "$model" "$repo" "$state_dir"
+
     if [[ -n "${EVAL_FORCE_TASKS:-}" ]]; then
         IFS=',' read -ra force_patterns <<< "$EVAL_FORCE_TASKS"
         for pattern in "${force_patterns[@]}"; do
@@ -193,12 +285,9 @@ submit_evaluation() {
         return
     fi
 
-    if grep -Eq '^(bfcl_v3|swiss_ai_charter_alignment)([/:_-]|$)' \
-        "$state_dir/expected_tasks.txt"; then
-        repo="ymetz/lm-evaluation-harness"
-    else
-        repo="swiss-ai/lm-evaluation-harness"
-    fi
+    # Do not allocate a judge for a merge-only or already-complete run. In auto
+    # mode, inspect only the tasks that this launch will actually execute.
+    _eval_launch_judge "$state_dir/missing_0.txt"
     _eval_prepare_environment "$state_dir" "$repo"
 
     if [[ "${EVAL_FAILURE_POLICY:-resume}" == "fail-fast" ]]; then
@@ -231,6 +320,7 @@ evaluation_controller() {
     [[ "$legacy_project" == *-single ]] || legacy_project="${legacy_project}-single"
     EVAL_LEGACY_HARNESS_DIR="${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}/${WANDB_ENTITY:-apertus}/$legacy_project/$name/harness"
     export EVAL_HARNESS_DIR EVAL_LEGACY_HARNESS_DIR EVAL_ENV_MANIFEST="$state_dir/environment.sh"
+    export EVAL_RUN_CONFIG="$state_dir/run_config.json"
 
     _eval_scan "$state_dir" "$((attempt + 1))"
     missing_count=$(wc -l < "$state_dir/missing_$((attempt + 1)).txt" | tr -d ' ')

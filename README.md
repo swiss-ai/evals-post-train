@@ -70,7 +70,7 @@ python make_html_table.py --thinking --metrics-file configs/apertus/tasks_posttr
 
 ### Benchmark Suites
 
-The launcher selects a benchmark suite from its first positional argument (`<mode>`). Apertus suites are defined in `configs/apertus/`, OLMo3 suites in `configs/olmo/`.
+The launcher selects a benchmark suite from its optional first positional argument (`<mode>`); omitting it defaults to `posttrain`. Apertus suites are defined in `configs/apertus/`, OLMo3 suites in `configs/olmo/`.
 
 **Apertus suites** (`configs/apertus/`)
 
@@ -107,6 +107,11 @@ Each mode maps to a task list and a metric config (`*_main_table.txt`) in the sa
 bash scripts/launch_evaluations.sh <mode> --model <hf_path_or_local_path> [options]
 ```
 Automatically derives the run name and detects whether to apply a chat template based on the model name (patterns: `-Instruct`, `-Chat`, `-SFT`, `-DPO`, `-it`, `-aligned`).
+
+The mode may be omitted for the default post-training suite:
+```bash
+bash scripts/launch_evaluations.sh --model <hf_path_or_local_path> [options]
+```
 
 **Mode 2: Model-list script** (for batch evaluation of predefined model sets)
 ```bash
@@ -160,7 +165,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 
 ### Judge Model Launching
 
-Some LLM-as-a-judge tasks require a separate model to be available through the CSCS serving API. Pass `--judge auto` to scan the selected task list and launch the required judge models before submitting the evaluations:
+Some LLM-as-a-judge tasks require a separate model to be available through the CSCS serving API. Pass `--judge auto` to launch the required judge models after the resume scan, and only when judge-dependent tasks are still missing:
 
 ```bash
 bash scripts/launch_evaluations.sh posttrain \
@@ -263,7 +268,7 @@ bash scripts/launch_evaluations.sh custom \
 
 ### How it works
 
-1. The task list is normalized and existing `eval_*` result directories are scanned.
+1. The task list and a normalized run configuration are recorded, then existing `eval_*` result directories are scanned. Only outputs with the same model/checkpoint, backend, harness ref, limit, few-shot, tokenizer/chat, and generation settings are eligible for resume; legacy or differently configured outputs are rerun.
 2. Missing tasks are grouped into `--chunk-size N` chunks and submitted as one Slurm array. `--max-parallel` adds the array `%N` concurrency limit; by default every chunk may run.
 3. A CPU controller runs with an `afterany` dependency, so it runs even when an array element fails.
 4. The controller rescans results. If tasks remain and retry budget is available, it submits only those tasks again with the chunk size halved.
@@ -678,7 +683,7 @@ Results are automatically uploaded to W&B after evaluation completes (or after a
 
 - **`main_results`** table: summary metrics specified in the `*_main_table.txt` config
 - **Flat metrics**: all task metrics logged as `task_name/metric_name`
-- **`eval_duration`**: wall-clock time for a direct/fail-fast evaluation; chunk aggregation uses `EVAL_DURATION` when supplied and otherwise records `0`
+- **`eval_duration`**: evaluation-only runtime for a direct/fail-fast evaluation; chunk aggregation sums the runtimes recorded by completed chunks (an explicit `EVAL_DURATION` overrides this for legacy recovery)
 
 Because *every* flat metric is uploaded — not just the `*_main_table.txt` subset — the
 [thinking metrics](#thinking--reasoning-metrics) reach W&B as `task_name/thinking_format_correct`
@@ -817,7 +822,7 @@ python make_table.py \
 
 Primary SLURM job script for HuggingFace-compatible model evaluation.
 
-**Resources**: 1 node, 4 GPUs, 200 CPUs, 460GB memory, 11h59m time limit.
+**Resources**: local-model backends use `evaluate.sbatch` with 1 node, 4 GPUs, 200 CPUs, 460GB memory, and an 11h59m limit. The `openai` backend is selected automatically through the CPU-only `evaluate_api.sbatch` wrapper with 16 CPUs and 64GB memory.
 
 **Positional arguments**: `<model_path> <name>`
 
@@ -857,6 +862,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `HARNESS_LIMIT` | (unset) | Limit number of samples per task (set by launcher flag `--limit`) |
 | `NUM_FEWSHOT` | (unset) | Global few-shot override |
 | `EVAL_ENV_MANIFEST` | required | Immutable base-environment and harness-overlay paths produced by `prepare_eval_env.sbatch` |
+| `EVAL_RUN_CONFIG` | required | Launcher-generated normalized provenance used to exclude incompatible results during resume |
 | `EVAL_CHUNKS_FILE` | (unset) | One comma-separated task chunk per line; indexed by `SLURM_ARRAY_TASK_ID` |
 | `LOGS_ROOT` | `$SCRATCH/eval_logs_start/` | Root directory for evaluation logs |
 | `WANDB_ENTITY` | `apertus` | W&B entity |
@@ -974,8 +980,8 @@ sbatch --reservation=my-reservation scripts/run_inspect_eval.sbatch --task tau2_
 ```
 
 ```bash
-# run_inspect_eval.sh installs these itself at runtime (SKIP_INSTALL=1 to skip, same as
-# evaluate.sbatch); to install by hand for local/interactive use:
+# run_inspect_eval.sh installs these itself at runtime (SKIP_INSTALL=1 to skip);
+# to install by hand for local/interactive use:
 pip install "inspect-ai>=0.3.258" inspect-evals openai
 
 # A plain benchmark against a served model (CSCS serving, vllm serve, ...)
@@ -1035,7 +1041,7 @@ python -m scripts.alignment.update_wandb_inspect --entity <entity> --project <pr
 
 > [!NOTE]
 > **vLLM vs HF inference**: Generation task results (gsm8k, squadv2) may differ slightly between backends (for instruction-tuned models). Only compare results across models using the same backend. We recommend performing all evaluations with the `vllm` backend (default) to ensure reproducibility.
-- **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). With the chat template on, the harness renders the model's template client-side via the HF tokenizer — so the tokenizer must be resolvable (use `--tokenizer` when the served model name is not a pullable HF repo). `API_CHAT_ENDPOINT=true` switches to `/v1/chat/completions` (server-side template; generative tasks ONLY). Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Use `--api-requests-per-minute 30` when the endpoint is rate limited; all chunks in the launch coordinate that budget. Note the job still requests the resources declared in `evaluate.sbatch` even though no GPU is used.
+- **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). With the chat template on, the harness renders the model's template client-side via the HF tokenizer — so the tokenizer must be resolvable (use `--tokenizer` when the served model name is not a pullable HF repo). `API_CHAT_ENDPOINT=true` switches to `/v1/chat/completions` (server-side template; generative tasks ONLY). Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Use `--api-requests-per-minute 30` when the endpoint is rate limited; all chunks in the launch coordinate that budget. The launcher automatically submits this backend through the CPU-only `evaluate_api.sbatch` wrapper.
 - **Megatron-LM**: To run Megatron-LM models natively, clone the [NVIDIA Megatron-LM repository](https://github.com/NVIDIA/Megatron-LM) into the evals-post-train directory (or change the location via the launch script).
 - **Time limits**: The default 11h59m SLURM limit applies to each chunk. Adjust `--chunk-size` to keep individual jobs below it and `--max-parallel` to control concurrent nodes.
 - **WANDB_API_KEY**: Must be available either as an environment variable or in `scripts/wandb_api_key.txt`.
@@ -1102,26 +1108,18 @@ evals/
 │   ├── eval_state.py          # Task normalization, result scanning, and chunking
 │   ├── launch_judge.py        # Launches judge models for LLM-as-a-judge tasks
 │   ├── evaluate.sbatch        # SLURM job script for HF/vLLM model evaluation
-<<<<<<< HEAD
+│   ├── evaluate_api.sbatch    # CPU-only wrapper for OpenAI-compatible API evaluation
 │   ├── aggregate_chunks.sbatch # Aggregation job for chunked evaluations
-=======
-│   ├── aggregate_splits.sbatch   # Aggregation job for split evaluations
 │   ├── run_inspect_eval.sh    # Inspect AI / inspect_evals benchmarks (alternative to lm-eval-harness above)
 │   ├── run_inspect_eval.sbatch # SLURM wrapper for run_inspect_eval.sh (CPU-only; no model loaded in-job)
->>>>>>> b322d4dbd4b8c7121443bf75e4a7d31f548cdce8
 │   └── alignment/                   # Python package for W&B upload and data handling
 │       ├── wandb_alignment_utils.py # Core upload logic with stratified sample selection
 │       ├── update_wandb_alignment.py       # Per-model W&B upload script (lm-eval-harness results)
 │       ├── update_wandb_all_models.py      # Batch upload for all models
-<<<<<<< HEAD
 │       ├── merge_split_results.py          # Merges results from chunk jobs
-│       └── data_structures.py              # Sample, Metric, Task, ModelEvaluation classes
-=======
-│       ├── merge_split_results.py          # Merges results from split evaluation jobs
 │       ├── data_structures.py              # Sample, Metric, Task, ModelEvaluation classes
 │       ├── inspect_wandb_utils.py          # Builds ModelEvaluation objects from Inspect .eval logs
 │       └── update_wandb_inspect.py         # Per-model W&B upload script (Inspect .eval logs)
->>>>>>> b322d4dbd4b8c7121443bf75e4a7d31f548cdce8
 ├── make_html_table.py                # Reporting: interactive HTML results table (reads W&B)
 ├── make_table.py                     # Reporting: hyperparameter-sweep table, PNG + CSV (reads W&B)
 ├── runners/              # Multi-model evaluation scripts

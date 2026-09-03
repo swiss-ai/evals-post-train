@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
+
+
+RUN_CONFIG_FILENAME = ".eval-run-config.json"
+RUN_CONFIG_SCHEMA_VERSION = 1
 
 
 def read_tasks(value: str) -> list[str]:
@@ -37,11 +42,42 @@ def _contains_key(value: object, key: str) -> bool:
     return False
 
 
+def make_run_config(fields: list[str]) -> dict[str, object]:
+    """Create a canonical, signed description of result-affecting settings."""
+    configuration: dict[str, str] = {}
+    for field in fields:
+        key, separator, value = field.partition("=")
+        if not separator or not key:
+            raise ValueError(f"invalid run-config field {field!r}; expected key=value")
+        if key in configuration:
+            raise ValueError(f"duplicate run-config field: {key}")
+        configuration[key] = value
+
+    unsigned: dict[str, object] = {
+        "schema_version": RUN_CONFIG_SCHEMA_VERSION,
+        "configuration": dict(sorted(configuration.items())),
+    }
+    canonical = json.dumps(unsigned, sort_keys=True, separators=(",", ":"))
+    return unsigned | {"signature": hashlib.sha256(canonical.encode()).hexdigest()}
+
+
+def run_config_matches(eval_dir: Path, expected: dict[str, object]) -> bool:
+    """Return whether an evaluation directory belongs to the requested run config."""
+    try:
+        actual = json.loads(
+            (eval_dir / RUN_CONFIG_FILENAME).read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError):
+        return False
+    return actual == expected
+
+
 def scan_results(
     tasks: list[str],
     harness_dirs: Path | list[Path],
     force_patterns: list[str],
     force_after: str | None = None,
+    run_config: dict[str, object] | None = None,
 ) -> tuple[dict[str, Path], list[str], list[Path]]:
     """Find completed tasks, missing tasks, and unique result directories."""
     completed: dict[str, Path] = {}
@@ -56,6 +92,12 @@ def scan_results(
             if path.is_dir() and not path.name.startswith("eval_merged")
         )
         for eval_dir in eval_dirs:
+            # Legacy and differently configured outputs are intentionally ignored
+            # when the orchestrator supplies a config. This prevents a limited
+            # smoke run, another checkpoint, or another backend from satisfying a
+            # full evaluation merely because the task names match.
+            if run_config is not None and not run_config_matches(eval_dir, run_config):
+                continue
             for result_file in sorted(eval_dir.rglob("results_*.json")):
                 try:
                     payload = json.loads(result_file.read_text(encoding="utf-8"))
@@ -101,13 +143,31 @@ def command_chunk(args: argparse.Namespace) -> None:
     write_lines(args.output, chunks)
 
 
+def command_config(args: argparse.Namespace) -> None:
+    config = make_run_config(args.field)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(
+        json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    print(config["signature"])
+
+
 def command_scan(args: argparse.Namespace) -> None:
     tasks = read_tasks(str(args.tasks_file))
+    run_config = None
+    if args.run_config:
+        try:
+            run_config = json.loads(args.run_config.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise SystemExit(
+                f"invalid run config {args.run_config}: {error}"
+            ) from error
     completed, missing, result_dirs = scan_results(
         tasks=tasks,
         harness_dirs=args.harness_dir,
         force_patterns=args.force_pattern,
         force_after=args.force_after,
+        run_config=run_config,
     )
     write_lines(args.missing_output, missing)
     write_lines(args.eval_dirs_output, [str(path) for path in result_dirs])
@@ -133,6 +193,11 @@ def make_parser() -> argparse.ArgumentParser:
     chunk.add_argument("--output", type=Path, required=True)
     chunk.set_defaults(func=command_chunk)
 
+    config = subparsers.add_parser("config")
+    config.add_argument("--field", action="append", default=[])
+    config.add_argument("--output", type=Path, required=True)
+    config.set_defaults(func=command_config)
+
     scan = subparsers.add_parser("scan")
     scan.add_argument("--tasks-file", type=Path, required=True)
     scan.add_argument("--harness-dir", type=Path, action="append", required=True)
@@ -141,6 +206,7 @@ def make_parser() -> argparse.ArgumentParser:
     scan.add_argument("--completed-output", type=Path)
     scan.add_argument("--force-pattern", action="append", default=[])
     scan.add_argument("--force-after")
+    scan.add_argument("--run-config", type=Path)
     scan.set_defaults(func=command_scan)
     return parser
 

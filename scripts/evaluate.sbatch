@@ -58,9 +58,9 @@ usage() {
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref resolved once by the environment-preparation job."
     echo " EVAL_ENV_MANIFEST: Prepared base environment and harness overlay (required; set by launcher)."
+    echo " EVAL_RUN_CONFIG: Normalized result provenance file used for safe resume (required; set by launcher)."
     echo " EVAL_VERIFY_ENV_IMPORTS: 'true' to repeat the preparation job's deep Python import checks inside the evaluation job (default: false)."
     echo " EVAL_CHUNKS_FILE: Resumable array chunk manifest (set automatically by launcher)."
-    echo " SKIP_INSTALL: '1' to skip the runtime pip install entirely (environment already provisioned, e.g. a baked image)."
     echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
     echo " ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: false)."
     echo " AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
@@ -104,6 +104,7 @@ EVAL_ENV_MANIFEST=${EVAL_ENV_MANIFEST:-""}
 EVAL_CHUNKS_FILE=${EVAL_CHUNKS_FILE:-""}
 EVAL_CHUNKED=${EVAL_CHUNKED:-false}
 EVAL_VERIFY_ENV_IMPORTS=${EVAL_VERIFY_ENV_IMPORTS:-false}
+EVAL_RUN_CONFIG=${EVAL_RUN_CONFIG:-""}
 
 case "${EVAL_VERIFY_ENV_IMPORTS,,}" in
     true|1|yes) EVAL_VERIFY_ENV_IMPORTS=true ;;
@@ -120,6 +121,7 @@ if [[ -n "$EVAL_CHUNKS_FILE" ]]; then
 fi
 
 [[ -n "$EVAL_ENV_MANIFEST" ]] || die "EVAL_ENV_MANIFEST is required; launch through scripts/launch_evaluations.sh"
+[[ -f "$EVAL_RUN_CONFIG" ]] || die "EVAL_RUN_CONFIG is required and must be a readable file"
 
 load_prepared_eval_env() {
     EVAL_ENV_CHECK_ERROR=""
@@ -538,6 +540,8 @@ else
 fi
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
+mkdir -p "$HARNESS_EVAL_DIR"
+cp "$EVAL_RUN_CONFIG" "$HARNESS_EVAL_DIR/.eval-run-config.json"
 
 # Generation kwargs supplied through the CLI update every task's YAML. Deliberately
 # omit max_gen_toks here so task-local budgets retain priority. Thinking's longer
@@ -707,14 +711,6 @@ export MEGATRON_PATH='$PWD/Megatron-LM'
 "
 fi
 
-# SKIP_INSTALL=1: the environment already has the harness and its
-# dependencies baked in (e.g. the evals-svc runner image). Skipping the
-# runtime pip install makes the run deterministic -- the image digest fully
-# determines the harness and dependency versions -- and minutes faster.
-if [[ "${SKIP_INSTALL:-0}" == "1" ]]; then
-  INSTALL_CMD="echo 'SKIP_INSTALL=1: using the preinstalled environment (no pip install)'"
-fi
-
 # $CMD is re-parsed by the inner `bash -lc`, so --model_args is single-quoted (a token like
 # think_end_token=</think> would otherwise redirect, and $(...) in a path would execute).
 # A single quote in the value can't be nested safely, so refuse it.
@@ -826,6 +822,7 @@ fi
 # End timing and calculate duration
 END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))
+printf '%s\n' "$DURATION" > "$HARNESS_EVAL_DIR/eval_duration_seconds.txt"
 echo "Evaluation time: ${DURATION} seconds ($(($DURATION / 60)) minutes and $(($DURATION % 60)) seconds)"
 
 # Goodbye.

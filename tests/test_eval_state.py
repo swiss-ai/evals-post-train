@@ -6,7 +6,12 @@ import unittest
 from pathlib import Path
 
 from scripts.alignment.merge_split_results import merge_split_results
-from scripts.eval_state import read_tasks, scan_results
+from scripts.eval_state import (
+    RUN_CONFIG_FILENAME,
+    make_run_config,
+    read_tasks,
+    scan_results,
+)
 
 
 class EvalStateTests(unittest.TestCase):
@@ -61,6 +66,47 @@ class EvalStateTests(unittest.TestCase):
             )
             self.assertEqual(set(completed), {"beta"})
             self.assertEqual(missing, ["alpha"])
+
+    def test_scan_rejects_legacy_and_differently_configured_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            harness = Path(tmp) / "harness"
+            legacy = harness / "eval_001"
+            limited = harness / "eval_002"
+            full = harness / "eval_003"
+            for result_dir in (legacy, limited, full):
+                result_dir.mkdir(parents=True)
+                (result_dir / "results_test.json").write_text(
+                    json.dumps({"results": {"alpha": {}}}), encoding="utf-8"
+                )
+
+            limited_config = make_run_config(["model=test/model", "limit=5"])
+            full_config = make_run_config(["limit=", "model=test/model"])
+            self.assertEqual(
+                full_config,
+                make_run_config(["model=test/model", "limit="]),
+            )
+            (limited / RUN_CONFIG_FILENAME).write_text(
+                json.dumps(limited_config), encoding="utf-8"
+            )
+            (full / RUN_CONFIG_FILENAME).write_text(
+                json.dumps(full_config), encoding="utf-8"
+            )
+
+            completed, missing, result_dirs = scan_results(
+                ["alpha"], harness, [], run_config=full_config
+            )
+
+            self.assertEqual(completed, {"alpha": full})
+            self.assertEqual(missing, [])
+            self.assertEqual(result_dirs, [full])
+
+            another_limit = make_run_config(["model=test/model", "limit=10"])
+            completed, missing, result_dirs = scan_results(
+                ["alpha"], harness, [], run_config=another_limit
+            )
+            self.assertEqual(completed, {})
+            self.assertEqual(missing, ["alpha"])
+            self.assertEqual(result_dirs, [])
 
     def test_forced_task_requires_a_result_from_the_current_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
