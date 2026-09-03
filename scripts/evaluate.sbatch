@@ -56,10 +56,15 @@ usage() {
     echo " LM_EVAL_RATE_LIMIT_STATE_DIR: Shared coordination directory for rate-limited Slurm workers (set by launcher)."
     echo " OPENAI_API_KEY: Bearer token for the endpoint (default: CSCS_SERVING_API)."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
+<<<<<<< HEAD
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref resolved once by the environment-preparation job."
     echo " EVAL_ENV_MANIFEST: Prepared base environment and harness overlay (required; set by launcher)."
     echo " EVAL_VERIFY_ENV_IMPORTS: 'true' to repeat the preparation job's deep Python import checks inside the evaluation job (default: false)."
     echo " EVAL_CHUNKS_FILE: Resumable array chunk manifest (set automatically by launcher)."
+=======
+    echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from the task-selected harness repository (default: repository default branch)."
+    echo " SKIP_INSTALL: '1' to skip the runtime pip install entirely (environment already provisioned, e.g. a baked image)."
+>>>>>>> b322d4dbd4b8c7121443bf75e4a7d31f548cdce8
     echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
     echo " ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: false)."
     echo " AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
@@ -333,8 +338,19 @@ if [ ! -z ${REVISION+x} ]; then
     MAYBE_DOWNLOAD_REVISION="--revision=$REVISION"
 fi
 if [ -z ${TOKENIZER+x} ]; then
-    echo "TOKENIZER not set, using TOKENIZER=$MODEL"
-    TOKENIZER=$MODEL
+    # Catalog ids from an inference gateway are prefixed
+    # (<catalog-namespace>/<org>/<repo>, e.g.
+    # CSCS-Inference/swiss-ai/Apertus-v1.5-70B) -- not a valid Hugging Face
+    # repo id (org/repo, exactly one slash), so AutoTokenizer rejects them.
+    # Strip the catalog prefix to recover the real tokenizer repo; a plain
+    # org/repo model id (one slash) is left untouched.
+    if [ "$(grep -o '/' <<< "$MODEL" | wc -l)" -gt 1 ]; then
+        TOKENIZER="${MODEL#*/}"
+        echo "TOKENIZER not set, using TOKENIZER=$TOKENIZER (catalog prefix stripped from MODEL=$MODEL)"
+    else
+        TOKENIZER=$MODEL
+        echo "TOKENIZER not set, using TOKENIZER=$MODEL"
+    fi
 fi
 
 
@@ -502,8 +518,13 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,requests_per_minute=$API_REQUESTS_PER_MINUTE"
     fi
     if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then
-        # Client-side tokenization: loglikelihood scoring needs token-aligned context/continuation.
-        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER"
+        # tokenizer_backend/tokenizer is local bookkeeping only (max context length, decoding,
+        # token counts) -- lm_eval still needs it for loglikelihood scoring. tokenized_requests
+        # is the separate knob that controls what goes over the wire: with it left at the
+        # default (True), lm_eval ships pre-tokenized integer IDs in the prompt field. The CSCS
+        # gateway's /v1/completions only parses a plain string there, so it must be forced False
+        # regardless of the tokenizer setting.
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER,tokenized_requests=False"
         [[ $BOS = true ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
     else
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenized_requests=False"
@@ -660,9 +681,40 @@ if ! eval_env_is_ready; then
     bash '$EVAL_REPO_ROOT/scripts/build_eval_env.sh'
     source '$EVAL_ENV_MANIFEST'
 fi
+<<<<<<< HEAD
 if ! eval_env_is_ready; then
     echo 'Evaluation environment repair did not pass its in-container preflight.' >&2
     exit 1
+=======
+
+INSTALL_CMD="pip install --no-cache-dir --upgrade \"$LM_EVAL_HARNESS_PIP_SPEC\" && \
+pip install --no-cache-dir --upgrade \
+    \"huggingface-hub>=1.3.0,<1.16\" \
+    \"transformers==5.14.1\" \
+    \"accelerate>=1.14.0\" \
+    \"antlr4-python3-runtime==4.11\" \
+    \"datasketch<2.0\" \
+    segtok \
+    \"tokenizers>=0.22.0,<0.23.0\" \
+    mistral-common \
+    \"humming-kernels[cu13]==0.1.2\" \
+    tenacity \
+    sympy \
+    spacy \
+    math_verify \
+    latex2sympy2_extended \
+    wonderwords \
+    nltk \
+    immutabledict \
+    langdetect \
+    hf-transfer \
+    subset2evaluate \
+    \"alpaca-eval>=0.6.2\" \
+    \"peft>=0.19.0\"  "
+
+if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
+  INSTALL_CMD="$INSTALL_CMD && pip install megatron-core --no-deps && export MEGATRON_PATH=$(pwd)/Megatron-LM"
+>>>>>>> b322d4dbd4b8c7121443bf75e4a7d31f548cdce8
 fi
 source '$EVAL_BASE_ENV/bin/activate'
 EVAL_RUNTIME_HARNESS_OVERLAY='$EVAL_HARNESS_OVERLAY'
@@ -688,6 +740,14 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" && -d "$PWD/Megatron-LM" ]]; then
     LOAD_ENV_CMD="$LOAD_ENV_CMD
 export MEGATRON_PATH='$PWD/Megatron-LM'
 "
+fi
+
+# SKIP_INSTALL=1: the environment already has the harness and its
+# dependencies baked in (e.g. the evals-svc runner image). Skipping the
+# runtime pip install makes the run deterministic -- the image digest fully
+# determines the harness and dependency versions -- and minutes faster.
+if [[ "${SKIP_INSTALL:-0}" == "1" ]]; then
+  INSTALL_CMD="echo 'SKIP_INSTALL=1: using the preinstalled environment (no pip install)'"
 fi
 
 # $CMD is re-parsed by the inner `bash -lc`, so --model_args is single-quoted (a token like

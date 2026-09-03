@@ -66,7 +66,17 @@ if [[ -n "$EVAL_INCOMPLETE_TASKS_FILE" && -s "$EVAL_INCOMPLETE_TASKS_FILE" ]]; t
 fi
 echo "Merge command: $MERGE_CMD"
 
+<<<<<<< HEAD:scripts/aggregate_chunks.sbatch
 srun -ul --mpi=pmix --environment=./containers/env.toml bash -c "$MERGE_CMD"
+=======
+srun -ul --mpi=pmix --environment=./containers/env.toml bash -c " \
+    pip install --no-cache-dir --upgrade \"git+https://github.com/swiss-ai/lm-evaluation-harness.git\" && \
+    pip install --no-cache-dir --upgrade --no-deps \
+        \"huggingface-hub>=1.3.0,<1.16\" \
+        \"transformers==5.1.0\" && \
+    $MERGE_CMD
+"
+>>>>>>> b322d4dbd4b8c7121443bf75e4a7d31f548cdce8:scripts/aggregate_splits.sbatch
 
 # Compute total duration from all chunks (placeholder for future log parsing)
 TOTAL_DURATION=0

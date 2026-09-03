@@ -9,6 +9,7 @@ description = "Swissai evaluation scripts"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "inspect-ai>=0.3.258",
     "pandas>=2.3.0",
     "wandb>=0.26.1",
 ]
