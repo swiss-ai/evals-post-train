@@ -907,11 +907,23 @@ scripts/run_inspect_eval.sh --task gpqa_diamond \
 # role bound, same convention as tau2's "user" role / AA-Omniscience's "grader" role above --
 # otherwise it falls back to run_configs/default.yaml's OpenRouter judges and fails without
 # OPENROUTER_API_KEY. The dataset is ~2,500 questions with multi-modal (image) samples
-# included by default; keep --limit small for a smoke test:
+# included by default; keep --limit small for a smoke test.
+#
+# IMPORTANT if the grader role is a CSCS-served/vLLM model (as below): the default judge_prompt
+# ("original") requires the grader to return OpenAI-style strict JSON-schema structured output
+# (ResponseSchema(strict=True)). Verified against this exact command: the CSCS-served
+# Apertus-v1.5-8B backend accepts that request but never returns a response -- the run hangs
+# indefinitely (no error, no progress) rather than failing fast; killing and retrying with
+# `--task-arg judge_prompt=grade_c_i` (the legacy plain-text GRADE:C/I judge, no structured
+# output) completed the same run in ~1s. A real OpenAI grader (e.g. --model-role
+# grader=openai/gpt-5.6-luna, per Artificial Analysis's own protocol) does not have this
+# problem -- this only bites when grading with a served vLLM model that doesn't support
+# structured outputs:
 scripts/run_inspect_eval.sh --task hle \
   --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
-  --model-role grader_2=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 5
+  --model-role grader_2=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+  --task-arg judge_prompt=grade_c_i --limit 5
 
 # tau2-bench (no single "default" task -- it ships four domains: airline, banking, retail,
 # telecom) needs a second "user"-role model to play the customer, and supports extra task
@@ -955,6 +967,20 @@ scripts/run_inspect_eval.sh --task aaii/aa_omniscience.py \
 scripts/run_inspect_eval.sh --task aaii/aa_lcr.py \
   --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 1
+
+# CritPt (aaii/aa_critpt.py, a research-level physics reasoning benchmark -- see the module
+# docstring for the two-step reasoning-then-parse protocol, and why grading happens in an
+# Inspect Hook rather than inline). No --model-role grader needed, unlike AA-Omniscience/AA-LCR
+# above: grading is a fixed external HTTP server (Artificial Analysis's own
+# /api/v2/critpt/evaluate), not an LLM judge. Set CRITPT_API_KEY (access is granted case by
+# case -- email critpt@artificialanalysis.ai) to actually submit for grading; without it the
+# run still completes normally and just writes each epoch's 70-submission batch to a local
+# JSON file instead (under <logs-dir>/critpt_submissions/). --epochs is a NATIVE `inspect eval`
+# flag (not run_inspect_eval.sh's own), so it goes behind a literal `--`, same as GPQA Diamond
+# above; the real protocol runs 5, but pass `-- --epochs 1` for a smoke test:
+scripts/run_inspect_eval.sh --task aaii/aa_critpt.py \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --limit 2 -- --epochs 1
 ```
 
 The model under test is either passed straight through as an Inspect-native model string, or -- when `--api-base-url` is given -- wrapped through Inspect's generic `openai-api` provider (the same OpenAI-compatible endpoints this pipeline already evaluates against with `--backend openai`). Model roles (`--model-role role=model`, repeatable) and extra task parameters (`--task-arg key=value`, repeatable) cover benchmark-specific needs like tau2's user-simulator or an LLM-as-judge grader; each role's own provider credentials (e.g. `OPENAI_API_KEY`) are your responsibility. See `scripts/run_inspect_eval.sh --help` for all options.
@@ -988,10 +1014,23 @@ python -m scripts.alignment.update_wandb_inspect --entity <entity> --project <pr
 - **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). With the chat template on, the harness renders the model's template client-side via the HF tokenizer — so the tokenizer must be resolvable (use `--tokenizer` when the served model name is not a pullable HF repo). `API_CHAT_ENDPOINT=true` switches to `/v1/chat/completions` (server-side template; generative tasks ONLY). Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Note the job still requests the resources declared in `evaluate.sbatch` even though no GPU is used.
 - **Megatron-LM**: To run Megatron-LM models natively, clone the [NVIDIA Megatron-LM repository](https://github.com/NVIDIA/Megatron-LM) into the evals-post-train directory (or change the location via the launch script).
 - **Time limits**: The default 12h SLURM limit works for most evaluations. For large suites on large models, use `--splits` to parallelize.
-- **WANDB_API_KEY**: Must be available either as an environment variable or in `scripts/wandb_api_key.txt`.
-- **HF_TOKEN**: Must be available either as an environment variable or in  `scripts/hf_token.txt`.
-- **OPENAI_API_KEY**: Required for the optional `gpt` suite, either as an environment variable or in `scripts/openai_api_key.txt`.
-- **CSCS_SERVING_API**: Must be available either as an environment variable or in `scripts/cscs_serving_api_key.txt` to run LLM-as-a-judge evals (e.g. AlpacaEval). Key can be optained [here](https://serving.swissai.cscs.ch).
+
+### Credentials
+
+Every credential below can be set either as an environment variable, or by creating a **plain-text file at the given path** (relative to the repo root, i.e. next to this README) **containing just the key/token itself** — no quotes, no `export`, no trailing newline needed (a trailing newline is stripped automatically if present). The env var, when set, always takes priority over the file. All of these paths are already listed in `.gitignore`, so a file placed there will never be committed.
+
+```bash
+# Example: save your W&B key so every run picks it up automatically, no export needed.
+echo -n "wandb_v1_abc123..." > scripts/wandb_api_key.txt
+```
+
+| Env var | File (relative to repo root) | Required for |
+|---|---|---|
+| `HF_TOKEN` | `scripts/hf_token.txt` | Gated/rate-limited Hugging Face datasets and models (most task suites). |
+| `CSCS_SERVING_API` | `scripts/cscs_serving_api_key.txt` | LLM-as-a-judge evals (e.g. AlpacaEval) and any `--api-base-url`/`openai` backend run against CSCS serving. Key can be obtained [here](https://serving.swissai.cscs.ch). |
+| `OPENAI_API_KEY` | `scripts/openai_api_key.txt` | The optional `gpt` suite; falls back to `CSCS_SERVING_API` if unset. |
+| `WANDB_API_KEY` | `scripts/wandb_api_key.txt` | Uploading results to Weights & Biases. |
+| `CRITPT_API_KEY` | `scripts/critpt_api_key.txt` | Optional: the CritPt task's (`aaii/aa_critpt.py`) grading server. Access is granted case by case by the CritPt team (email critpt@artificialanalysis.ai); without it, a run still completes and just writes its submission batch to a local file instead of posting it for grading. |
 
 ---
 

@@ -75,6 +75,10 @@
 #   WANDB_ENTITY, WANDB_PROJECT -- see --wandb-entity/--wandb-project above.
 #   WANDB_API_KEY -- required if uploading to W&B (default: scripts/wandb_api_key.txt, same
 #   fallback as evaluate.sbatch).
+#   CRITPT_API_KEY -- grading-server credential for the CritPt task (aaii/aa_critpt.py); default:
+#   scripts/critpt_api_key.txt. Optional -- unset is the expected state until Artificial Analysis
+#   grants access (email critpt@artificialanalysis.ai); the run still completes and writes its
+#   submission batch to a local file instead of posting it.
 #   SKIP_INSTALL=1 to skip the runtime pip install of inspect-ai/inspect-evals.
 #
 # Results are NOT viewed at https://inspect.aisi.org.uk/ -- that site is Inspect's
@@ -168,6 +172,16 @@ if (( ${#MODEL_ROLES[@]} > 0 )); then
         "(e.g. OPENAI_API_KEY for an openai/... role) -- that's on you to set." >&2
 fi
 
+# CritPt's grading-server credential (aaii/aa_critpt.py's own on_task_end Hook reads this
+# directly from the environment) -- unconditional, like CSCS_SERVING_API above, since it's
+# harmless to export for tasks that never look at it. Optional: unset just means that Hook
+# writes its submission batch to a local file instead of posting it.
+CRITPT_API_KEY="${CRITPT_API_KEY:-}"
+if [[ -z "$CRITPT_API_KEY" && -f ./scripts/critpt_api_key.txt ]]; then
+    CRITPT_API_KEY="$(tr -d '\r\n' < ./scripts/critpt_api_key.txt)"
+fi
+[[ -n "$CRITPT_API_KEY" ]] && export CRITPT_API_KEY
+
 mkdir -p "$LOGS_DIR"
 
 # Snapshot existing .eval logs so the W&B upload below (if requested) only picks up logs this
@@ -207,8 +221,8 @@ for task in "${TASK_ARRAY[@]}"; do
 done
 
 COMMON_ARGS=(--model "$TASK_MODEL" --log-dir "$LOGS_DIR")
-for role in "${MODEL_ROLES[@]}"; do COMMON_ARGS+=(--model-role "$role"); done
-for arg in "${TASK_ARGS[@]}"; do COMMON_ARGS+=(-T "$arg"); done
+for role in ${MODEL_ROLES[@]+"${MODEL_ROLES[@]}"}; do COMMON_ARGS+=(--model-role "$role"); done
+for arg in ${TASK_ARGS[@]+"${TASK_ARGS[@]}"}; do COMMON_ARGS+=(-T "$arg"); done
 [[ -n "$LIMIT" ]] && COMMON_ARGS+=(--limit "$LIMIT")
 
 # Default to a plain-text display when not attached to a terminal (see --eval-set note above) --
@@ -216,7 +230,7 @@ for arg in "${TASK_ARGS[@]}"; do COMMON_ARGS+=(-T "$arg"); done
 # occurrence of a repeated option).
 [[ -t 1 ]] || COMMON_ARGS+=(--display plain)
 
-COMMON_ARGS+=("${EXTRA_ARGS[@]}")
+COMMON_ARGS+=(${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"})
 
 echo "Configuration set:"
 printf '%s\n' "TASKS=${RESOLVED_TASKS[*]}" "MODEL=$MODEL" "TASK_MODEL=$TASK_MODEL" "NAME=$NAME" \
