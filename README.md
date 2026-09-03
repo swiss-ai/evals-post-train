@@ -50,7 +50,7 @@ bash scripts/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B
   --backend openai --api-base-url http://nid001234:8000
 
 # Evaluate a base model with 5-shot and easy eval set (matching OLMo3 technical report settings)
-bash scripts/launch_evaluations.sh olmo-easy --model Qwen/Qwen2.5-7B --num-fewshot 5
+bash scripts/launch_evaluations.sh olmo-easy --model Qwen/Qwen2.5-7B --num-fewshot 5 --no-chat-template
 
 # Evaluate a small model on a single task, useful for testing newly implemented tasks
 bash scripts/launch_evaluations.sh single --task multijail --model meta-llama/Llama-3.2-3B --backend vllm
@@ -106,7 +106,7 @@ Each mode maps to a task list and a metric config (`*_main_table.txt`) in the sa
 ```bash
 bash scripts/launch_evaluations.sh <mode> --model <hf_path_or_local_path> [options]
 ```
-Automatically derives the run name and detects whether to apply a chat template based on the model name (patterns: `-Instruct`, `-Chat`, `-SFT`, `-DPO`, `-it`, `-aligned`).
+Automatically derives the run name; the chat template is applied by default for every model (pass `--no-chat-template` to disable it).
 
 The mode may be omitted for the default post-training suite:
 ```bash
@@ -125,7 +125,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 |------|-------------|
 | `--name <name>` | Override the auto-derived evaluation run name |
 | `--task <task>` | Task name(s) for `single` mode (single task or comma-separated list) |
-| `--chat-template` | Force enable chat template (auto-detected for Instruct/Chat/SFT/DPO/-it/-aligned models) |
+| `--chat-template` | Force enable chat template (applied by default for every model) |
 | `--no-chat-template` | Force disable chat template |
 | `--tokenizer <path>` | Custom tokenizer (default: same as model) |
 | `--num-fewshot N` | Override num_fewshot globally. Tasks with explicit `num_fewshot: 0` in their YAML are never overridden. OLMo3 paper uses 5-shot for most MC tasks. |
@@ -237,7 +237,7 @@ continues to use the CSCS judge setup described above.
 
 ```bash
 # OLMo3 paper-faithful 5-shot evaluation
-bash scripts/launch_evaluations.sh olmo-complete --model allenai/OLMo-2-1124-7B --num-fewshot 5
+bash scripts/launch_evaluations.sh olmo-complete --model allenai/OLMo-2-1124-7B --num-fewshot 5 --no-chat-template
 
 # Large model with vLLM, eight tasks per chunk and four concurrent chunks
 bash scripts/launch_evaluations.sh default \
@@ -987,6 +987,24 @@ pip install "inspect-ai>=0.3.258" inspect-evals openai
 # A plain benchmark against a served model (CSCS serving, vllm serve, ...)
 scripts/run_inspect_eval.sh --task gsm8k --model Qwen/Qwen3-8B --api-base-url http://nid001234:8000
 
+# GPQA Diamond (inspect_evals/gpqa_diamond -- graduate-level multiple choice, no judge
+# needed). Runs 4 epochs per sample by default (majority vote over repeated attempts); pass
+# `-- --epochs 1` after the task flags to disable that:
+scripts/run_inspect_eval.sh --task gpqa_diamond \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --limit 5
+
+# HLE (Humanity's Last Exam, inspect_evals/hle) is graded by two judges side by side (task
+# arg `graders`, default `[grader, grader_2]`), so it needs both a "grader" and a "grader_2"
+# role bound, same convention as tau2's "user" role / AA-Omniscience's "grader" role above --
+# otherwise it falls back to run_configs/default.yaml's OpenRouter judges and fails without
+# OPENROUTER_API_KEY. The dataset is ~2,500 questions with multi-modal (image) samples
+# included by default; keep --limit small for a smoke test:
+scripts/run_inspect_eval.sh --task hle \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+  --model-role grader_2=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 5
+
 # tau2-bench (no single "default" task -- it ships four domains: airline, banking, retail,
 # telecom) needs a second "user"-role model to play the customer, and supports extra task
 # params like message_limit or banking's retrieval_config. The "user" role doesn't need to be
@@ -1002,15 +1020,23 @@ scripts/run_inspect_eval.sh --task tau2_retail,tau2_banking \
 scripts/run_inspect_eval.sh --task gsm8k,gaia --model anthropic/claude-3-5-sonnet-latest \
   --eval-set -- --temperature 0.5 --max-connections 10
 
-# AA-Omniscience (custom_tasks/omniscience.py -- a full path, not an inspect_evals name, so
-# it's used as-is rather than expanded to "inspect_evals/..."; see the module docstring
-# there for why it's a from-scratch task) needs a "grader" role for its judge model, same
-# convention as tau2's "user" role above. Artificial Analysis's own protocol is a fixed
-# external judge (GPT-5.6 Luna) -- the model under test grading itself works too (verified
-# below) but is not AAII-comparable:
-scripts/run_inspect_eval.sh --task custom_tasks/omniscience.py \
+# AA-Omniscience (aaii/aa_omniscience.py, formerly custom_tasks/omniscience.py -- a full path,
+# not an inspect_evals name, so it's used as-is rather than expanded to "inspect_evals/...";
+# see the module docstring there for why it's a from-scratch task) needs a "grader" role for
+# its judge model, same convention as tau2's "user" role above. Artificial Analysis's own
+# protocol is a fixed external judge (GPT-5.6 Luna) -- the model under test grading itself
+# works too (verified below) but is not AAII-comparable:
+scripts/run_inspect_eval.sh --task aaii/aa_omniscience.py \
   --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 5
+
+# AA-LCR (aaii/aa_lcr.py, formerly custom_tasks/aa_lcr.py, same "full path" / "grader" role
+# convention as AA-Omniscience above). Unlike every other task in this repo, each sample is a
+# ~100k-token prompt (the full Document Set) -- keep --limit at 1 for a smoke test unless you
+# mean to spend real time/money on a full 100-question run:
+scripts/run_inspect_eval.sh --task aaii/aa_lcr.py \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 1
 ```
 
 The model under test is either passed straight through as an Inspect-native model string, or -- when `--api-base-url` is given -- wrapped through Inspect's generic `openai-api` provider (the same OpenAI-compatible endpoints this pipeline already evaluates against with `--backend openai`). Model roles (`--model-role role=model`, repeatable) and extra task parameters (`--task-arg key=value`, repeatable) cover benchmark-specific needs like tau2's user-simulator or an LLM-as-judge grader; each role's own provider credentials (e.g. `OPENAI_API_KEY`) are your responsibility. See `scripts/run_inspect_eval.sh --help` for all options.
@@ -1071,6 +1097,16 @@ If the task exists in lm-eval-harness:
 If you need a custom task:
 1. Create a YAML task config in `lm_eval/tasks/your_task/` in the selected harness repository
 2. Register it following the [lm-eval-harness task guide](https://github.com/EleutherAI/lm-evaluation-harness/blob/main/docs/task_guide.md)
+
+If lm-eval-harness (YAML config) isn't a fit -- e.g. the benchmark needs its own scorer/grading
+model, like an LLM-as-judge, rather than a built-in metric -- write it as an Inspect task instead:
+drop a `@task`-decorated Python file in `custom_tasks/` (see `aaii/aa_omniscience.py` and
+`aaii/aa_lcr.py` for from-scratch examples with a judge-model scorer -- Artificial Analysis's own
+AAII benchmarks live in `aaii/` specifically, not `custom_tasks/`, since they're a fixed,
+AAII-branded protocol rather than an arbitrary one-off task) and run it with
+`scripts/run_inspect_eval.sh --task custom_tasks/your_task.py ...` -- see
+[Alternative: Inspect AI evals](#alternative-inspect-ai-evals) for the full flag reference and
+runnable examples.
 
 ### Customizing Sample Upload
 

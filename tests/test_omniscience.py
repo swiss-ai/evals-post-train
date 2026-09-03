@@ -1,4 +1,4 @@
-"""AA-Omniscience task (custom_tasks/omniscience.py): the two custom metrics
+"""AA-Omniscience task (aaii/aa_omniscience.py): the two custom metrics
 (omniscience_index, hallucination_rate/non_hallucination_rate) implement AA's
 own formulas from raw C/P/I/N counts, and the grade-parsing regex has to
 survive an early, off-menu mention of a grade letter inside the judge's own
@@ -30,7 +30,7 @@ from inspect_ai.model import ModelOutput, get_model
 from inspect_ai.scorer import CORRECT, INCORRECT, NOANSWER, PARTIAL, SampleScore, Score
 from inspect_ai.solver import generate
 
-from custom_tasks.omniscience import (
+from aaii.aa_omniscience import (
     _GRADE_RE,
     hallucination_rate,
     non_hallucination_rate,

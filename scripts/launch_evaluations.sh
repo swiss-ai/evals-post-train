@@ -444,7 +444,6 @@ case "$EVAL_MODE" in
     "gpt")
         export TASKS=./configs/apertus/tasks_gpt.txt
         export TABLE_METRICS=./configs/apertus/tasks_gpt_main_table.txt
-        [[ -z "$CHAT_TEMPLATE_OVERRIDE" ]] && CHAT_TEMPLATE_OVERRIDE="true"
         ;;
     "olmo-easy")
         export TASKS=./configs/olmo/olmo3_easy.txt
@@ -593,11 +592,7 @@ if [[ -n "$MODEL_PATH" ]]; then
         fi
     fi
 
-    if [[ -z "$CHAT_TEMPLATE_OVERRIDE" ]]; then
-        export APPLY_CHAT_TEMPLATE=$(auto_detect_chat_template "$MODEL_PATH")
-    else
-        export APPLY_CHAT_TEMPLATE="$CHAT_TEMPLATE_OVERRIDE"
-    fi
+    export APPLY_CHAT_TEMPLATE="${CHAT_TEMPLATE_OVERRIDE:-true}"
 
     [[ -n "$CUSTOM_TOKENIZER" ]] && export TOKENIZER="$CUSTOM_TOKENIZER"
     [[ -n "$BOS_FLAG" ]] && export BOS="$BOS_FLAG"
