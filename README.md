@@ -928,6 +928,16 @@ scripts/run_inspect_eval.sh --task tau2_retail,tau2_banking \
 scripts/run_inspect_eval.sh --task gsm8k,gaia --model anthropic/claude-3-5-sonnet-latest \
   --eval-set -- --temperature 0.5 --max-connections 10
 
+# GDPval (inspect_evals/gdpval -- 220 economically-valuable, real-world
+# deliverable tasks across 44 occupations). Runs inside a Docker sandbox whose
+# image build can take up to 10 minutes on first use (see the task's own
+# README for details); scoring needs a separate submission to OpenAI's
+# grading form, so this is mainly useful as a smoke test that generation
+# completes -- keep --limit small:
+scripts/run_inspect_eval.sh --task gdpval \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --limit 1
+
 # AA-Omniscience (aaii/aa_omniscience.py, formerly custom_tasks/omniscience.py -- a full path,
 # not an inspect_evals name, so it's used as-is rather than expanded to "inspect_evals/...";
 # see the module docstring there for why it's a from-scratch task) needs a "grader" role for

@@ -175,11 +175,26 @@ mkdir -p "$LOGS_DIR"
 PRE_RUN_LOGS=$(find "$LOGS_DIR" -name '*.eval' 2>/dev/null | sort)
 
 if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
+    # Unlike evaluate.sbatch (which always runs inside a container image with `pip` on PATH),
+    # this script is also run directly on login/compute nodes (e.g. Clariden) where a bare `pip`
+    # command may not exist even inside an active conda/venv env -- fall back to `python -m pip`.
+    if command -v pip >/dev/null 2>&1; then
+        PIP=(pip)
+    elif command -v python3 >/dev/null 2>&1 && python3 -m pip --version >/dev/null 2>&1; then
+        PIP=(python3 -m pip)
+    elif command -v python >/dev/null 2>&1 && python -m pip --version >/dev/null 2>&1; then
+        PIP=(python -m pip)
+    else
+        die "No working pip found (bare 'pip' not on PATH, and neither 'python3 -m pip' nor" \
+            "'python -m pip' work). Activate an environment with pip, or set SKIP_INSTALL=1" \
+            "if inspect-ai/inspect-evals/openai are already installed."
+    fi
+
     # The `openai` package is required by Inspect's openai-api provider (used whenever
     # --api-base-url is given) even for non-OpenAI-hosted endpoints -- confirmed by a bare
     # `inspect-ai` install failing with "OpenAI Compatible API requires optional dependencies"
     # against a served model. It's not an inspect-ai extra, just a separate package.
-    pip install --no-cache-dir --upgrade "inspect-ai>=0.3.258" "inspect-evals" openai \
+    "${PIP[@]}" install --no-cache-dir --upgrade "inspect-ai>=0.3.258" "inspect-evals" openai \
         || die "pip install of inspect-ai/inspect-evals failed. Set SKIP_INSTALL=1 if the environment already has them."
 else
     echo "SKIP_INSTALL=1: using the preinstalled environment (no pip install)"
