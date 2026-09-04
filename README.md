@@ -945,7 +945,14 @@ scripts/run_inspect_eval.sh --task gsm8k,gaia --model anthropic/claude-3-5-sonne
 # image build can take up to 10 minutes on first use (see the task's own
 # README for details); scoring needs a separate submission to OpenAI's
 # grading form, so this is mainly useful as a smoke test that generation
-# completes -- keep --limit small:
+# completes -- keep --limit small. Expect a harmless "Exception calling hook
+# 'ConsolidateDeliverables': cannot import name 'HfFolder' from
+# 'huggingface_hub'" warning on every run: inspect_evals' own gdpval/util.py
+# still calls the HfFolder API huggingface_hub removed in 1.0 (confirmed live
+# on their main branch, and already flagged by the maintainers themselves in
+# github.com/UKGovernmentBEIS/inspect_evals/pull/1211 as unaddressed) -- the
+# eval still completes and the deliverable folder is still written locally,
+# only that hook's own HF-auth check fails:
 scripts/run_inspect_eval.sh --task gdpval \
   --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --limit 1
