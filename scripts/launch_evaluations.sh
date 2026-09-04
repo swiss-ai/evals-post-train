@@ -3,7 +3,7 @@
 # launch_evaluations.sh - Launch Apertus benchmark suite evaluations
 #
 # Usage:
-#   bash launch_evaluations.sh <mode> [options]
+#   bash scripts/launch_evaluations.sh [mode] [options]
 #
 # Modes:
 
@@ -11,6 +11,8 @@
 #   default          - Apertus multilingual suite
 #   multi-lingual    - Multi-lingual suite (taken from 1.0)
 #   apertus-previous - Apertus previous benchmark suite (from 1.0)
+#   pretrain         - Apertus pre-training suite
+#   posttrain        - Apertus post-training suite (default)
 #   best-of-k        - Multi-repeat/self-consistency suite
 #   gpt              - Experimental OpenAI GPT-judge chat suite (future harness support)
 #   eval-debug       - Small set of loglikelihood and generative benchmarks to test eval script
@@ -23,7 +25,7 @@
 #   olmo-heldout     - Held-out Suite (mmlu_pro, bbh)
 #   olmo-safety      - Safety (harmbench, toxigen, wmdp, bbq)
 #   olmo-longcontext - Long-Context (RULER)
-#   olmo-complete    - All suites combined (default, excludes long-context)
+#   olmo-complete    - All OLMo suites combined (excludes long-context)
 
 #
 # Model selection (pick one):
@@ -37,6 +39,7 @@
 # Options:
 #   --name <name>        - Override the eval run name (default: auto-derived from model path)
 #   --task <task>         - Task name for 'single' mode (e.g. hellaswag, gsm8k_cot)
+#   --wandb-project <name> - Override the W&B project name (default: apertus-1.5-post-training-v0.1)
 #   --chat-template      - Apply chat template (auto-detected for Instruct/Chat/SFT/DPO models)
 #   --no-chat-template   - Force disable chat template
 #   --tokenizer <tok>    - Custom tokenizer (default: same as model)
@@ -47,11 +50,15 @@
 #   --backend <backend>  - lm-eval backend: hf, vllm, sglang, megatron_lm, openai (default: from sbatch script)
 #   --api-base-url <url> - OpenAI-compatible endpoint for the 'openai' backend (required with it,
 #                          unless API_BASE_URL is exported). Bare host, /v1 root, or full endpoint URL.
-#   --api-model-name <n> - 'model' field sent in API requests. Required with the 'openai' backend
-#                          (unless API_MODEL_NAME is exported) -- --model's value may be
-#                          catalog-prefixed and not what the gateway expects. If --model is
-#                          omitted, it defaults to this value so single-model dispatch still runs.
-#   --splits K           - Split tasks across K parallel nodes per model
+#   --api-model-name <n> - 'model' field sent in API requests (default: the --model value)
+#   --api-requests-per-minute N - Endpoint-wide request limit for the benchmarked API model
+#   --chunk-size N       - Tasks per resumable job chunk (default: 8)
+#   --max-parallel N     - Cap concurrent chunks (default: all generated chunks)
+#   --max-retries N      - Retry waves for missing tasks; chunks halve each wave (default: 1)
+#   --failure-policy P   - resume (default) or fail-fast
+#   --task-file <path>   - Task list for custom mode
+#   --table-metrics <p>  - Main-metrics list for custom mode
+#   --force-tasks <csv>  - Re-run completed tasks matching these substrings
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
 #   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
 #   --reservation <name> - Submit jobs under a SLURM reservation, including an auto-launched judge
@@ -62,6 +69,7 @@
 #                          auto: detect judge-dependent tasks and launch needed judges
 #                          <preset>: launch a specific preset (qwen3.5-27b, llama-3.3-70b)
 #   --judge-args <str>   - Extra arguments forwarded to scripts/launch_judge.py
+#   --judge-requests-per-minute N - Per-judge-model endpoint-wide request limit
 #   --keep-judge         - Do not auto-cancel judge model after evaluation finishes
 #
 # Thinking / reasoning metrics (hf and vllm backends only):
@@ -84,27 +92,34 @@
 #
 # Examples:
 #   # Single HF model, auto-detect everything
-#   bash launch_evaluations.sh complete --model meta-llama/Llama-3.1-8B-Instruct
+#   bash scripts/launch_evaluations.sh posttrain --model meta-llama/Llama-3.1-8B-Instruct
 #
-#   # Single model with splits
-#   bash launch_evaluations.sh main --model allenai/OLMo-2-1124-7B --splits 4
+#   # Single model in resumable chunks
+#   bash scripts/launch_evaluations.sh olmo-main --model allenai/OLMo-2-1124-7B --chunk-size 8
 #
 #   # Base model, explicit no chat template
-#   bash launch_evaluations.sh easy --model Qwen/Qwen2.5-7B --no-chat-template
+#   bash scripts/launch_evaluations.sh olmo-easy --model Qwen/Qwen2.5-7B --no-chat-template
 #
 #   # Run a multi-model script
-#   bash launch_evaluations.sh complete --script runners/hf_eval_multiple_other_models.sh
+#   bash scripts/launch_evaluations.sh posttrain --script runners/hf_eval_multiple_other_models.sh
 #
 #   # Run a single task
-#   bash launch_evaluations.sh single --task hellaswag --model meta-llama/Llama-3.1-8B-Instruct
+#   bash scripts/launch_evaluations.sh single --task hellaswag --model meta-llama/Llama-3.1-8B-Instruct
 
 set -euo pipefail
+mkdir -p logs
 
 # --- Argument parsing ---
-EVAL_MODE=${1:-complete}
-shift || true
+EVAL_MODE=posttrain
+if (( $# > 0 )) && [[ "$1" != --* ]]; then
+    EVAL_MODE=$1
+    shift
+fi
 
-NUM_SPLITS=1
+EVAL_CHUNK_SIZE=8
+EVAL_MAX_PARALLEL=""
+EVAL_MAX_RETRIES=1
+EVAL_FAILURE_POLICY="resume"
 MODEL_PATH=""
 MODEL_NAME=""
 SCRIPT_PATH=""
@@ -114,6 +129,7 @@ BOS_FLAG=""
 BACKEND_FLAG=""
 API_BASE_URL_FLAG=""
 API_MODEL_NAME_FLAG=""
+API_REQUESTS_PER_MINUTE_FLAG=""
 FEWSHOT_FLAG=""
 # Keep an ambient HARNESS_LIMIT (the graceful launcher has no --limit flag, so callers export
 # it); blanking it here would ship the cleared value into the job. --limit still overrides.
@@ -124,6 +140,7 @@ HARNESS_BRANCH=""
 RESERVATION_FLAG=""
 JUDGE_MODE="none"       # auto, none, or a preset name
 JUDGE_EXTRA_ARGS=""
+JUDGE_REQUESTS_PER_MINUTE_FLAG=""
 KEEP_JUDGE="false"
 THINKING_UMBRELLA=""
 ENABLE_THINKING_OVERRIDE=""   # "", "true", "false"
@@ -132,13 +149,25 @@ THINK_START_TOKEN=""
 AUTODETECT_THINK_TOKENS=""
 TRACK_THINKING_METRICS=""     # "", "true", "false"
 LOG_LENGTH_METRICS=""
+TASK_FILE_OVERRIDE=""
+TABLE_METRICS_OVERRIDE=""
+LOGS_ROOT_FLAG=""
+WANDB_ENTITY_FLAG=""
+WANDB_PROJECT_FLAG=""
+SBATCH_ACCOUNT_FLAG=""
+FORCE_TASKS=""
+EVAL_MERGE_ONLY="false"
+EVAL_DRY_RUN="false"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --model)        MODEL_PATH="$2";              shift 2 ;;
         --name)         MODEL_NAME="$2";              shift 2 ;;
         --script)       SCRIPT_PATH="$2";             shift 2 ;;
-        --splits)       NUM_SPLITS="$2";              shift 2 ;;
+        --chunk-size)   EVAL_CHUNK_SIZE="$2";         shift 2 ;;
+        --max-parallel) EVAL_MAX_PARALLEL="$2";       shift 2 ;;
+        --max-retries)  EVAL_MAX_RETRIES="$2";        shift 2 ;;
+        --failure-policy) EVAL_FAILURE_POLICY="$2";   shift 2 ;;
         --num-fewshot)  FEWSHOT_FLAG="$2";            shift 2 ;;
         --task)         SINGLE_TASK="$2";             shift 2 ;;
         --chat-template)    CHAT_TEMPLATE_OVERRIDE="true";  shift ;;
@@ -148,13 +177,24 @@ while [[ $# -gt 0 ]]; do
         --backend)      BACKEND_FLAG="$2";            shift 2 ;;
         --api-base-url) API_BASE_URL_FLAG="$2";       shift 2 ;;
         --api-model-name) API_MODEL_NAME_FLAG="$2";   shift 2 ;;
+        --api-requests-per-minute) API_REQUESTS_PER_MINUTE_FLAG="$2"; shift 2 ;;
         --megatron-iter) MEGATRON_ITER="$2";            shift 2 ;;
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --harness-branch) HARNESS_BRANCH="$2";        shift 2 ;;
         --reservation)   RESERVATION_FLAG="$2";        shift 2 ;;
         --judge)         JUDGE_MODE="$2";              shift 2 ;;
         --judge-args)    JUDGE_EXTRA_ARGS="$2";        shift 2 ;;
+        --judge-requests-per-minute) JUDGE_REQUESTS_PER_MINUTE_FLAG="$2"; shift 2 ;;
         --keep-judge)    KEEP_JUDGE="true";            shift ;;
+        --task-file)     TASK_FILE_OVERRIDE="$2";       shift 2 ;;
+        --table-metrics) TABLE_METRICS_OVERRIDE="$2";   shift 2 ;;
+        --logs-root)     LOGS_ROOT_FLAG="$2";           shift 2 ;;
+        --wandb-entity)  WANDB_ENTITY_FLAG="$2";        shift 2 ;;
+        --wandb-project) WANDB_PROJECT_FLAG="$2";       shift 2 ;;
+        --account)       SBATCH_ACCOUNT_FLAG="$2";      shift 2 ;;
+        --force-tasks)   FORCE_TASKS="$2";              shift 2 ;;
+        --merge-only)    EVAL_MERGE_ONLY="true";        shift ;;
+        --debug)         EVAL_DRY_RUN="true";           shift ;;
         --thinking)                  THINKING_UMBRELLA="true";          shift ;;
         --enable-thinking)           ENABLE_THINKING_OVERRIDE="true";   shift ;;
         --no-enable-thinking)        ENABLE_THINKING_OVERRIDE="false";  shift ;;
@@ -192,8 +232,20 @@ elif [[ -n "$SINGLE_TASK" ]]; then
     exit 1
 fi
 
-if (( NUM_SPLITS < 1 )); then
-    echo "Error: --splits must be >= 1"
+if [[ ! "$EVAL_CHUNK_SIZE" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: --chunk-size must be >= 1"
+    exit 1
+fi
+if [[ -n "$EVAL_MAX_PARALLEL" && ! "$EVAL_MAX_PARALLEL" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: --max-parallel must be >= 1"
+    exit 1
+fi
+if [[ ! "$EVAL_MAX_RETRIES" =~ ^[0-9]+$ ]]; then
+    echo "Error: --max-retries must be >= 0"
+    exit 1
+fi
+if [[ "$EVAL_FAILURE_POLICY" != "resume" && "$EVAL_FAILURE_POLICY" != "fail-fast" ]]; then
+    echo "Error: --failure-policy must be 'resume' or 'fail-fast'"
     exit 1
 fi
 
@@ -274,16 +326,26 @@ if [[ -n "$API_BASE_URL_FLAG" || -n "$API_MODEL_NAME_FLAG" ]] && [[ "$EFFECTIVE_
     echo "Error: --api-base-url/--api-model-name only apply with --backend openai"
     exit 1
 fi
-# Non-openai backends load a checkpoint in-job, so a model has to be named one way or
-# another: --model for a single checkpoint, --script for a model-list. Without either, this
-# used to fall through silently to the hardcoded default EVALUATION_SCRIPTS array below --
-# exactly the trap that bit the missing-'--model' openai case. Require it explicitly instead.
+if [[ -n "$API_REQUESTS_PER_MINUTE_FLAG" && "$EFFECTIVE_BACKEND" != "openai" ]]; then
+    echo "Error: --api-requests-per-minute only applies with --backend openai"
+    exit 1
+fi
+
+API_REQUESTS_PER_MINUTE="${API_REQUESTS_PER_MINUTE_FLAG:-${API_REQUESTS_PER_MINUTE:-}}"
+JUDGE_REQUESTS_PER_MINUTE="${JUDGE_REQUESTS_PER_MINUTE_FLAG:-${JUDGE_REQUESTS_PER_MINUTE:-}}"
+JUDGE_MODEL_PREFIX="${JUDGE_MODEL_PREFIX:-${USER:-}}"
+
+# Non-openai backends load a checkpoint in-job, so identify it with either --model for a
+# single checkpoint or --script for a model list.
 if [[ "$EFFECTIVE_BACKEND" != "openai" && -z "$MODEL_PATH" && -z "$SCRIPT_PATH" ]]; then
     echo "Error: --model or --script is required (unless --backend openai is used with --api-model-name)"
     exit 1
 fi
 [[ -n "$API_BASE_URL_FLAG"   ]] && export API_BASE_URL="$API_BASE_URL_FLAG"
 [[ -n "$API_MODEL_NAME_FLAG" ]] && export API_MODEL_NAME="$API_MODEL_NAME_FLAG"
+[[ -n "$API_REQUESTS_PER_MINUTE" ]] && export API_REQUESTS_PER_MINUTE
+[[ -n "$JUDGE_REQUESTS_PER_MINUTE" ]] && export JUDGE_REQUESTS_PER_MINUTE
+[[ -n "$JUDGE_MODEL_PREFIX" ]] && export JUDGE_MODEL_PREFIX
 
 # The openai backend loads no local checkpoint, so --api-model-name (flag or ambient
 # API_MODEL_NAME, same fallback the requiredness check above used) alone identifies the
@@ -332,9 +394,23 @@ fi
 # sbatch reads SBATCH_RESERVATION natively (CLI > env > script directives).
 [[ -n "$RESERVATION_FLAG" ]] && export SBATCH_RESERVATION="$RESERVATION_FLAG"
 export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
-export WANDB_PROJECT=${WANDB_PROJECT:-test-new-evals-pipeline}
-export NUM_SPLITS
-export SBATCH_SCRIPT=${SBATCH_SCRIPT:-scripts/evaluate.sbatch}
+export WANDB_PROJECT=${WANDB_PROJECT:-apertus-1.5-post-training-v0.1}
+export LOGS_ROOT=${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}
+[[ -n "$WANDB_ENTITY_FLAG" ]] && export WANDB_ENTITY="$WANDB_ENTITY_FLAG"
+[[ -n "$WANDB_PROJECT_FLAG" ]] && export WANDB_PROJECT="$WANDB_PROJECT_FLAG"
+[[ -n "$LOGS_ROOT_FLAG" ]] && export LOGS_ROOT="$LOGS_ROOT_FLAG"
+[[ -n "$SBATCH_ACCOUNT_FLAG" ]] && export SBATCH_ACCOUNT="$SBATCH_ACCOUNT_FLAG"
+export EVAL_CHUNK_SIZE EVAL_MAX_PARALLEL EVAL_MAX_RETRIES EVAL_FAILURE_POLICY
+export EVAL_FORCE_TASKS="$FORCE_TASKS" EVAL_MERGE_ONLY EVAL_DRY_RUN KEEP_JUDGE
+export JUDGE_MODE JUDGE_EXTRA_ARGS
+if [[ -z "${SBATCH_SCRIPT:-}" ]]; then
+    if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
+        SBATCH_SCRIPT=scripts/evaluate_api.sbatch
+    else
+        SBATCH_SCRIPT=scripts/evaluate.sbatch
+    fi
+fi
+export SBATCH_SCRIPT
 # Global checkpoint iteration override for Megatron checkpoints.
 # Consumed by the runner and forwarded to evaluate.sbatch as CKPT_ITER.
 [[ -n "$MEGATRON_ITER" ]] && export CKPT_ITERATION="$MEGATRON_ITER"
@@ -368,7 +444,6 @@ case "$EVAL_MODE" in
     "gpt")
         export TASKS=./configs/apertus/tasks_gpt.txt
         export TABLE_METRICS=./configs/apertus/tasks_gpt_main_table.txt
-        [[ -z "$CHAT_TEMPLATE_OVERRIDE" ]] && CHAT_TEMPLATE_OVERRIDE="true"
         ;;
     "olmo-easy")
         export TASKS=./configs/olmo/olmo3_easy.txt
@@ -403,6 +478,13 @@ case "$EVAL_MODE" in
         export TABLE_METRICS="$SINGLE_TASK"
         ;;
     "custom")
+        [[ -n "$TASK_FILE_OVERRIDE" ]] && export TASKS="$TASK_FILE_OVERRIDE"
+        [[ -n "$TABLE_METRICS_OVERRIDE" ]] && export TABLE_METRICS="$TABLE_METRICS_OVERRIDE"
+        if [[ -z "${TASKS:-}" ]]; then
+            echo "Error: custom mode requires --task-file <path> (or exported TASKS)"
+            exit 1
+        fi
+        export TABLE_METRICS=${TABLE_METRICS:-$TASKS}
         ;;
 esac
 
@@ -414,16 +496,6 @@ if [[ "$EVAL_MODE" == "gpt" ]]; then
     echo "         It requires the corresponding GPT-judge support to exist in the Swiss-AI harness." >&2
     if [[ -z "${OPENAI_API_KEY:-}" && ! -f ./scripts/openai_api_key.txt ]]; then
         echo "WARNING: neither OPENAI_API_KEY nor scripts/openai_api_key.txt is available." >&2
-    fi
-fi
-
-# --- Validate split count vs task count ---
-if (( NUM_SPLITS > 1 )); then
-    TASK_COUNT=$(grep -v '^\s*#' "$TASKS" | grep -v '^\s*$' | wc -l | tr -d ' ')
-    if (( TASK_COUNT < NUM_SPLITS )); then
-        echo "WARNING: Only $TASK_COUNT tasks but $NUM_SPLITS splits requested. Reducing."
-        NUM_SPLITS=$TASK_COUNT
-        export NUM_SPLITS
     fi
 fi
 
@@ -468,7 +540,12 @@ echo "======================================"
 echo "Apertus Evaluation Launcher"
 echo "  Mode:   $EVAL_MODE"
 [[ "$EVAL_MODE" == "single" ]] && echo "  Task:   $SINGLE_TASK"
-echo "  Splits: $NUM_SPLITS"
+echo "  Failure policy: $EVAL_FAILURE_POLICY"
+if [[ "$EVAL_FAILURE_POLICY" == "resume" ]]; then
+    echo "  Chunk size: $EVAL_CHUNK_SIZE"
+    echo "  Max parallel: ${EVAL_MAX_PARALLEL:-all chunks}"
+    echo "  Retry waves: $EVAL_MAX_RETRIES"
+fi
 echo "  Harness: auto (Swiss-AI; ymetz only for BFCL/Charter)${HARNESS_BRANCH:+@$HARNESS_BRANCH}"
 if [[ "$THINKING_TOUCHED" == "true" ]]; then
     echo "  Thinking: enable=${ENABLE_THINKING_OVERRIDE:-<unset>} autodetect=${AUTODETECT_THINK_TOKENS:-false} track=${TRACK_THINKING_METRICS:-<derive>} lengths=${LOG_LENGTH_METRICS:-false}"
@@ -476,7 +553,10 @@ if [[ "$THINKING_TOUCHED" == "true" ]]; then
 fi
 if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
     echo "  API:    ${API_BASE_URL} (model=${API_MODEL_NAME:-<from --model>})"
+    echo "  API RPM: ${API_REQUESTS_PER_MINUTE:-unlimited}"
 fi
+echo "  Judge RPM: ${JUDGE_REQUESTS_PER_MINUTE:-unlimited}"
+echo "  Judge model prefix: ${JUDGE_MODEL_PREFIX:-<none>}"
 
 # --- Few-shot override ---
 [[ -n "$FEWSHOT_FLAG" ]] && export NUM_FEWSHOT="$FEWSHOT_FLAG"
@@ -485,54 +565,10 @@ fi
 [[ -n "$HARNESS_LIMIT" ]] && export HARNESS_LIMIT="$HARNESS_LIMIT"
 [[ -n "$HARNESS_BRANCH" ]] && export LM_EVAL_HARNESS_BRANCH="$HARNESS_BRANCH"
 
-# --- Judge model launch - if none is set, rely on already hosted judge or manual launch ---
-JUDGE_JOB_IDS=""
+# Judge allocation is deferred to submit_evaluation(), after its result scan.
+# If none is set, rely on an already hosted judge or a manual launch.
+export JUDGE_JOB_IDS=""
 JUDGE_TASKS_PATTERN="alpaca_eval|multijail|aya_redteaming|arena_hard_v01|arena_hard_v2|harmbench|hallulens|realtoxicitypromptsllama"
-
-if [[ "$JUDGE_MODE" != "none" ]]; then
-
-    NEEDS_JUDGE=false
-    JUDGE_LAUNCH_ARGS=""
-
-    if [[ "$JUDGE_MODE" == "auto" ]]; then
-        # Delegate detection to launch_judge.py so TASK_TO_JUDGE remains the
-        # single source of truth for automatic judge selection.
-        NEEDS_JUDGE=true
-        JUDGE_LAUNCH_ARGS="--detect-from-tasks $TASKS"
-    else
-        # Explicit preset
-        NEEDS_JUDGE=true
-        JUDGE_LAUNCH_ARGS="--preset $JUDGE_MODE"
-    fi
-
-    if [[ "$NEEDS_JUDGE" == "true" ]]; then
-        echo ""
-        echo "--- Judge Model Launch ---"
-        if [[ -n "$RESERVATION_FLAG" ]]; then
-            JUDGE_LAUNCH_ARGS="$JUDGE_LAUNCH_ARGS --reservation $RESERVATION_FLAG"
-        fi
-        # Capture machine-readable output (JUDGE_JOB_ID=...) from stdout,
-        # while letting human-readable logs flow to stderr (visible to user).
-        JUDGE_STDOUT=$(python3 scripts/launch_judge.py $JUDGE_LAUNCH_ARGS $JUDGE_EXTRA_ARGS)
-        JUDGE_EXIT=$?
-
-        if [[ $JUDGE_EXIT -ne 0 ]]; then
-            echo "ERROR: Judge model launch failed (exit code $JUDGE_EXIT)"
-            exit 1
-        fi
-
-        JUDGE_JOB_IDS=$(echo "$JUDGE_STDOUT" | grep "^JUDGE_JOB_ID=" | cut -d= -f2 | tr '\n' ' ')
-        JUDGE_MODELS=$(echo "$JUDGE_STDOUT" | grep "^JUDGE_MODEL_NAME=" | cut -d= -f2 | tr '\n' ', ')
-
-        if [[ -n "$JUDGE_JOB_IDS" ]]; then
-            echo "  Judge jobs: $JUDGE_JOB_IDS"
-            echo "  Judge models: $JUDGE_MODELS"
-            export JUDGE_JOB_IDS
-        fi
-        echo "--------------------------"
-        echo ""
-    fi
-fi
 
 # warn if tasks are detected but judge is explicitly disabled (mode=none)
 if [[ "$JUDGE_MODE" == "none" && "$EVAL_MODE" != "gpt" ]]; then
@@ -545,18 +581,18 @@ if [[ "$JUDGE_MODE" == "none" && "$EVAL_MODE" != "gpt" ]]; then
 fi
 
 # --- Dispatch based on model selection mode ---
+EVAL_JOB_IDS=()
 
 if [[ -n "$MODEL_PATH" ]]; then
     # ===== MODE 1: Single model =====
     if [[ -z "$MODEL_NAME" ]]; then
         MODEL_NAME=$(auto_derive_name "$MODEL_PATH")
+        if [[ "$THINKING_UMBRELLA" == "true" || "$ENABLE_THINKING_OVERRIDE" == "true" ]]; then
+            MODEL_NAME="${MODEL_NAME}-think"
+        fi
     fi
 
-    if [[ -z "$CHAT_TEMPLATE_OVERRIDE" ]]; then
-        export APPLY_CHAT_TEMPLATE=$(auto_detect_chat_template "$MODEL_PATH")
-    else
-        export APPLY_CHAT_TEMPLATE="$CHAT_TEMPLATE_OVERRIDE"
-    fi
+    export APPLY_CHAT_TEMPLATE="${CHAT_TEMPLATE_OVERRIDE:-true}"
 
     [[ -n "$CUSTOM_TOKENIZER" ]] && export TOKENIZER="$CUSTOM_TOKENIZER"
     [[ -n "$BOS_FLAG" ]] && export BOS="$BOS_FLAG"
@@ -573,11 +609,12 @@ if [[ -n "$MODEL_PATH" ]]; then
     echo "  W&B:    $WANDB_ENTITY/$WANDB_PROJECT"
     echo "======================================"
 
-    # Build a single-model checkpoint array and source the runner
-    declare -A MODEL_CHECKPOINTS=(
-        ["$MODEL_NAME"]="$MODEL_PATH"
-    )
-    source runners/hf_base_runner.sh "model"
+    # A single model does not need the associative-array runner (and remains
+    # usable with the older Bash shipped by macOS for local --debug checks).
+    source scripts/evaluation_orchestrator.sh
+    export CKPT_ITER="${CKPT_ITERATION:-latest}"
+    submit_evaluation "$MODEL_PATH" "$MODEL_NAME"
+    EVAL_JOB_IDS+=("$ORCHESTRATION_FINAL_JOB_ID")
 
 else
     # ===== MODE 2: Run a model-list script =====
@@ -605,7 +642,8 @@ fi
 # --- Judge cleanup job ---
 # After all eval jobs are submitted, schedule a cleanup job that cancels judge
 # SLURM jobs once all evaluations finish.
-if [[ -n "$JUDGE_JOB_IDS" && "$KEEP_JUDGE" != "true" && ${#EVAL_JOB_IDS[@]} -gt 0 ]]; then
+if [[ "$EVAL_FAILURE_POLICY" == "fail-fast" && -n "$JUDGE_JOB_IDS" \
+      && "$KEEP_JUDGE" != "true" && ${#EVAL_JOB_IDS[@]} -gt 0 ]]; then
     DEP_STRING=$(IFS=':'; echo "${EVAL_JOB_IDS[*]}")
     SCANCEL_CMD="scancel $JUDGE_JOB_IDS"
     CLEANUP_JOB=$(sbatch --parsable \
