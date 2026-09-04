@@ -179,7 +179,12 @@ if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
     # --api-base-url is given) even for non-OpenAI-hosted endpoints -- confirmed by a bare
     # `inspect-ai` install failing with "OpenAI Compatible API requires optional dependencies"
     # against a served model. It's not an inspect-ai extra, just a separate package.
-    pip install --no-cache-dir --upgrade "inspect-ai>=0.3.258" "inspect-evals" openai \
+    #
+    # gdown is likewise required by inspect_evals/scicode's dataset loader (a Google Drive
+    # download) but not declared as an inspect-evals dependency -- confirmed by a real run
+    # (--task scicode, plain and aaii/-wrapped alike) failing with "Google Drive download
+    # requires optional dependencies. Install with: pip install gdown" otherwise.
+    pip install --no-cache-dir --upgrade "inspect-ai>=0.3.258" "inspect-evals" openai gdown \
         || die "pip install of inspect-ai/inspect-evals failed. Set SKIP_INSTALL=1 if the environment already has them."
 else
     echo "SKIP_INSTALL=1: using the preinstalled environment (no pip install)"
