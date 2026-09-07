@@ -18,6 +18,7 @@ dependencies = [
 ci = [
     "shellcheck-py>=0.10.0.1",
     "swiss-ai-model-launch @ git+https://github.com/swiss-ai/model-launch.git@fa000afd670f3ae95b2748b58113297279e86dc9",
+    "huggingface_hub>=1.16.0"
 ]
 
 [tool.setuptools.packages.find]
