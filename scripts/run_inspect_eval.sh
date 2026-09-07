@@ -184,8 +184,32 @@ if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
     # download) but not declared as an inspect-evals dependency -- confirmed by a real run
     # (--task scicode, plain and aaii/-wrapped alike) failing with "Google Drive download
     # requires optional dependencies. Install with: pip install gdown" otherwise.
-    pip install --no-cache-dir --upgrade "inspect-ai>=0.3.258" "inspect-evals" openai gdown \
+    #
+    # numpy/scipy/sympy/h5py are inspect_evals/scicode's own scorer runtime deps (its
+    # docker-requirements.txt, baked into the Docker image its Task declares by default) --
+    # needed here too for evals-svc's --sandbox local override (see that PR's own reasoning:
+    # CSCS refuses privileged containers, so the k8s/FirecREST backends run scicode's
+    # generated code as a plain subprocess in this job instead of a nested sandbox).
+    pip install --no-cache-dir --upgrade \
+        "inspect-ai>=0.3.258" "inspect-evals" openai gdown numpy scipy sympy h5py \
         || die "pip install of inspect-ai/inspect-evals failed. Set SKIP_INSTALL=1 if the environment already has them."
+
+    # A --sandbox local run has no Docker image to COPY these into, unlike inspect_evals/
+    # scicode's own default -- its scorer imports them as bare top-level modules
+    # ("from test_util import ...", "from process_data import ..."), so they need to already
+    # be importable from wherever `inspect eval` itself runs (this directory, since nothing
+    # below `cd`s elsewhere). Copied unconditionally, alongside the SciCode-specific installs
+    # above: two small files, harmless for any other task.
+    python3 -c "
+import pathlib
+import shutil
+
+import inspect_evals.scicode
+
+src = pathlib.Path(inspect_evals.scicode.__file__).parent
+for name in ('test_util.py', 'process_data.py'):
+    shutil.copy(src / name, name)
+" || die "failed to copy inspect_evals/scicode's helper modules (test_util.py, process_data.py) into the working directory"
 else
     echo "SKIP_INSTALL=1: using the preinstalled environment (no pip install)"
 fi
