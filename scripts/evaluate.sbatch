@@ -53,6 +53,7 @@ usage() {
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from the task-selected harness repository (default: repository default branch)."
     echo " SKIP_INSTALL: '1' to skip the runtime pip install entirely (environment already provisioned, e.g. a baked image)."
     echo " TRANSFORMERS_VERSION: transformers version to install (default: 5.14.1)."
+    echo " SKIP_POSITION_CLAMP: '1' to allow max_model_len beyond the model position ceiling."
     echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
     echo "  ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: false)."
     echo "  AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
@@ -241,6 +242,8 @@ fi
 # max_position_embeddings (local config.json, else the Hub); models with headroom are untouched.
 clamp_to_position_ceiling() {
     local requested="$1" cfg ceiling=""
+    # Opt out to probe how far a model extrapolates past its trained window.
+    if [[ "${SKIP_POSITION_CLAMP:-0}" == "1" ]]; then echo "$requested"; return; fi
     if [[ -f "$MODEL/config.json" ]]; then
         cfg=$(cat "$MODEL/config.json")
     else
