@@ -31,33 +31,43 @@ usage() {
 	echo " TOKENIZER: A huggingface tokenizer path/name. Needed if 'model' is a megatron checkpoint, otherwise the default will be set as the same value as 'model'."
 	echo " BS: Batch size."
 	echo " REVISION: Only used in huggingface models. If set, this revision of the model will be evaluated."
-	echo " SIZE: The (approximate) size of the model in billions of parameters. Used to set model parallelism (needs to be set in larger models)."
-	echo " MAX_LENGTH: The maximum length of the input sequence to the model. By default, it is unset."
-	echo " MAX_NEW_TOKENS: The maximum number of new tokens to generate. By default, it is unset."
+	echo " SIZE: Legacy/informational approximate model size in billions."
+	echo " MAX_LENGTH: Optional backend context limit (vLLM max_model_len; Megatron seq_length)."
+	echo " MAX_NEW_TOKENS: Thinking-run default for tasks without a task-local max_gen_toks (default: 8192 when thinking)."
+	echo " VLLM_TP_SIZE / VLLM_DP_SIZE: Explicit vLLM topology. Defaults to TP=4/DP=1, or TP=1/DP=4 when a model name unambiguously indicates <30B."
+	echo " VLLM_MEMORY_FRACTION: vLLM/SGLang GPU memory fraction (default: 0.8)."
+	echo " MEGATRON_MICRO_BATCH_SIZE: Megatron micro-batch override; otherwise uses numeric BS or 1 when BS=auto."
 	echo " BOS: Set this to 'true' if you wish to prepend the BOS token when evaluating models."
 	echo " LOGS_ROOT: Where are your evaluation wandb&harness logs going to."
 	echo " TASKS: Tasks to run with lm eval harness."
 	echo " WANDB_ENTITY: WandB entity name for uploading results (default: apertus)."
-	echo " WANDB_PROJECT: WandB project name for uploading results (default: swissai-evals)."
-	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: hf). - options are: hf, vllm, sglang, megatron_lm, openai"
+	echo " WANDB_PROJECT: WandB project name for uploading results (default: swissai-evals-test)."
+	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: vllm). - options are: hf, vllm, sglang, megatron_lm, openai"
     echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
     echo " OpenAI-compatible API backend (LM_EVAL_BACKEND=openai; no model is loaded in the job):"
-    echo "  API_BASE_URL: Endpoint to evaluate against. Required. Accepts a bare host (http://host:8000), a /v1 root, or a full /v1/(chat/)completions URL."
-    echo "  API_CHAT_ENDPOINT: 'true' to use /v1/chat/completions (server-side chat template; generative tasks ONLY). Default: /v1/completions, which serves mixed suites."
-    echo "  API_MODEL_NAME: 'model' field sent in requests (default: the <model> positional argument)."
-    echo "  API_NUM_CONCURRENT: Concurrent requests (default: 8)."
-    echo "  API_MAX_RETRIES: Retries per request (default: 3)."
-    echo "  OPENAI_API_KEY: Bearer token for the endpoint (default: CSCS_SERVING_API)."
+    echo " API_BASE_URL: Endpoint to evaluate against. Required. Accepts a bare host (http://host:8000), a /v1 root, or a full /v1/(chat/)completions URL."
+    echo " API_CHAT_ENDPOINT: 'true' to use /v1/chat/completions (server-side chat template; generative tasks ONLY). Default: /v1/completions, which serves mixed suites."
+    echo " API_MODEL_NAME: 'model' field sent in requests (default: the <model> positional argument)."
+    echo " API_NUM_CONCURRENT: Concurrent requests (default: 8)."
+    echo " API_REQUESTS_PER_MINUTE: Optional endpoint-wide request limit for the benchmarked model."
+    echo " API_MAX_RETRIES: Retries per request (default: 3)."
+    echo " JUDGE_REQUESTS_PER_MINUTE: Optional endpoint-wide request limit, applied separately to each judge model."
+    echo " JUDGE_MODEL_PREFIX: Preferred host scope for judge model IDs (default: USER)."
+    echo " LM_EVAL_RATE_LIMIT_STATE_DIR: Shared coordination directory for rate-limited Slurm workers (set by launcher)."
+    echo " OPENAI_API_KEY: Bearer token for the endpoint (default: CSCS_SERVING_API)."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
-    echo " LM_EVAL_HARNESS_BRANCH: Branch/ref to install from the task-selected harness repository (default: repository default branch)."
-    echo " SKIP_INSTALL: '1' to skip the runtime pip install entirely (environment already provisioned, e.g. a baked image)."
+    echo " LM_EVAL_HARNESS_BRANCH: Branch/ref resolved once by the environment-preparation job."
+    echo " EVAL_ENV_MANIFEST: Prepared base environment and harness overlay (required; set by launcher)."
+    echo " EVAL_RUN_CONFIG: Normalized result provenance file used for safe resume (required; set by launcher)."
+    echo " EVAL_VERIFY_ENV_IMPORTS: 'true' to repeat the preparation job's deep Python import checks inside the evaluation job (default: false)."
+    echo " EVAL_CHUNKS_FILE: Resumable array chunk manifest (set automatically by launcher)."
     echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
-    echo "  ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: false)."
-    echo "  AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
-    echo "  THINK_END_TOKEN: Force the reasoning close token, e.g. '</think>'. A known close token arms the strip AND the metrics."
-    echo "  THINK_START_TOKEN: Force the reasoning open token, e.g. '<think>'. Needed for thinking_format_has_open."
-    echo "  TRACK_THINKING_METRICS: 'true'/'false' to force the thinking metrics on/off (default: on iff a close token is known)."
-    echo "  LOG_LENGTH_METRICS: 'true' to aggregate response_length_*/thinking_length_* (thinking_format_* is always aggregated)."
+    echo " ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: false)."
+    echo " AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
+    echo " THINK_END_TOKEN: Force the reasoning close token, e.g. '</think>'. A known close token arms the strip AND the metrics."
+    echo " THINK_START_TOKEN: Force the reasoning open token, e.g. '<think>'. Needed for thinking_format_has_open."
+    echo " TRACK_THINKING_METRICS: 'true'/'false' to force the thinking metrics on/off (default: on iff a close token is known)."
+    echo " LOG_LENGTH_METRICS: 'true' to aggregate response_length_*/thinking_length_* (thinking_format_* is always aggregated)."
 	echo "For more information see the README: https://github.com/swiss-ai/evals?tab=readme-ov-file."
 }
 die() {
@@ -90,12 +100,99 @@ LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-true}
 HARNESS_LIMIT=${HARNESS_LIMIT:-""}
 LM_EVAL_HARNESS_BRANCH=${LM_EVAL_HARNESS_BRANCH:-""}
+EVAL_ENV_MANIFEST=${EVAL_ENV_MANIFEST:-""}
+EVAL_CHUNKS_FILE=${EVAL_CHUNKS_FILE:-""}
+EVAL_CHUNKED=${EVAL_CHUNKED:-false}
+EVAL_VERIFY_ENV_IMPORTS=${EVAL_VERIFY_ENV_IMPORTS:-false}
+EVAL_RUN_CONFIG=${EVAL_RUN_CONFIG:-""}
+
+case "${EVAL_VERIFY_ENV_IMPORTS,,}" in
+    true|1|yes) EVAL_VERIFY_ENV_IMPORTS=true ;;
+    false|0|no|"") EVAL_VERIFY_ENV_IMPORTS=false ;;
+    *) die "EVAL_VERIFY_ENV_IMPORTS must be true or false, got: $EVAL_VERIFY_ENV_IMPORTS" ;;
+esac
+
+if [[ -n "$EVAL_CHUNKS_FILE" ]]; then
+    [[ -n "${SLURM_ARRAY_TASK_ID:-}" ]] || die "EVAL_CHUNKS_FILE requires a Slurm array task"
+    [[ -f "$EVAL_CHUNKS_FILE" ]] || die "Chunk file not found: $EVAL_CHUNKS_FILE"
+    TASKS=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "$EVAL_CHUNKS_FILE")
+    [[ -n "$TASKS" ]] || die "No task chunk at array index $SLURM_ARRAY_TASK_ID"
+    echo "Array chunk $SLURM_ARRAY_TASK_ID: $TASKS"
+fi
+
+[[ -n "$EVAL_ENV_MANIFEST" ]] || die "EVAL_ENV_MANIFEST is required; launch through scripts/launch_evaluations.sh"
+[[ -f "$EVAL_RUN_CONFIG" ]] || die "EVAL_RUN_CONFIG is required and must be a readable file"
+
+load_prepared_eval_env() {
+    EVAL_ENV_CHECK_ERROR=""
+    unset EVAL_BASE_ENV EVAL_HARNESS_OVERLAY EVAL_HARNESS_ARCHIVE EVAL_RESOLVED_HARNESS_REPO \
+        EVAL_RESOLVED_HARNESS_COMMIT EVAL_RESOLVED_BASE_KEY
+    if [[ ! -f "$EVAL_ENV_MANIFEST" ]]; then
+        EVAL_ENV_CHECK_ERROR="manifest is missing: $EVAL_ENV_MANIFEST"
+        return 1
+    fi
+    # The manifest is generated by scripts/build_eval_env.sh and contains only
+    # shell-escaped paths plus the resolved repository and commit.
+    if ! source "$EVAL_ENV_MANIFEST"; then
+        EVAL_ENV_CHECK_ERROR="manifest could not be sourced: $EVAL_ENV_MANIFEST"
+        return 1
+    fi
+    # Do not test EVAL_BASE_ENV/bin/python with -x here. This shell runs outside
+    # the container, while venv's python may be an absolute symlink to a path
+    # that exists only inside it (for example /usr/local/bin/python). The
+    # in-container preflight below performs the executable check.
+    [[ -n "${EVAL_BASE_ENV:-}" ]] \
+        || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_BASE_ENV"; return 1; }
+    [[ -n "${EVAL_HARNESS_OVERLAY:-}" ]] \
+        || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_HARNESS_OVERLAY"; return 1; }
+    [[ -n "${EVAL_HARNESS_ARCHIVE:-}" ]] \
+        || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_HARNESS_ARCHIVE"; return 1; }
+    [[ -n "${EVAL_RESOLVED_HARNESS_REPO:-}" ]] \
+        || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_RESOLVED_HARNESS_REPO"; return 1; }
+    [[ -n "${EVAL_RESOLVED_HARNESS_COMMIT:-}" ]] \
+        || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_RESOLVED_HARNESS_COMMIT"; return 1; }
+    [[ -d "$EVAL_BASE_ENV" ]] \
+        || { EVAL_ENV_CHECK_ERROR="base environment directory is missing: $EVAL_BASE_ENV"; return 1; }
+    [[ -f "$EVAL_BASE_ENV/.complete" ]] \
+        || { EVAL_ENV_CHECK_ERROR="base completion marker is missing: $EVAL_BASE_ENV/.complete"; return 1; }
+    [[ -d "$EVAL_HARNESS_OVERLAY" ]] \
+        || { EVAL_ENV_CHECK_ERROR="harness overlay directory is missing: $EVAL_HARNESS_OVERLAY"; return 1; }
+    [[ -f "$EVAL_HARNESS_OVERLAY/.complete" ]] \
+        || { EVAL_ENV_CHECK_ERROR="harness completion marker is missing: $EVAL_HARNESS_OVERLAY/.complete"; return 1; }
+    [[ -f "$EVAL_HARNESS_ARCHIVE" ]] \
+        || { EVAL_ENV_CHECK_ERROR="harness archive is missing: $EVAL_HARNESS_ARCHIVE"; return 1; }
+}
+
+if ! load_prepared_eval_env; then
+    echo "Prepared evaluation environment is missing or incomplete ($EVAL_ENV_CHECK_ERROR); rebuilding it now."
+    : "${EVAL_CONTAINER_CONFIG:?EVAL_CONTAINER_CONFIG is required for environment repair}"
+    : "${EVAL_REPO_ROOT:?EVAL_REPO_ROOT is required for environment repair}"
+    : "${EVAL_HARNESS_REPO:?EVAL_HARNESS_REPO is required for environment repair}"
+    # If the manifest was readable, keep this run pinned to its already-resolved
+    # harness commit. Otherwise two simultaneous repairs of a moving branch
+    # could observe different commits.
+    if [[ "${EVAL_RESOLVED_HARNESS_COMMIT:-}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+        export EVAL_HARNESS_REF="$EVAL_RESOLVED_HARNESS_COMMIT"
+        echo "Repairing the environment at pinned harness commit $EVAL_HARNESS_REF"
+    fi
+    srun -n 1 --mpi=pmix -ul --environment="$EVAL_CONTAINER_CONFIG" \
+        --export=ALL bash "$EVAL_REPO_ROOT/scripts/build_eval_env.sh"
+fi
+if ! load_prepared_eval_env; then
+    die "Evaluation environment repair did not produce a complete environment: $EVAL_ENV_CHECK_ERROR"
+fi
+# If a moving branch has advanced since preparation, a last-resort repair must
+# still recreate this run's exact environment rather than silently changing it.
+export EVAL_HARNESS_REF="$EVAL_RESOLVED_HARNESS_COMMIT"
 
 # OpenAI-compatible API backend (LM_EVAL_BACKEND=openai).
 API_BASE_URL=${API_BASE_URL:-""}
 API_MODEL_NAME=${API_MODEL_NAME:-""}
 API_NUM_CONCURRENT=${API_NUM_CONCURRENT:-8}
+API_REQUESTS_PER_MINUTE=${API_REQUESTS_PER_MINUTE:-""}
 API_MAX_RETRIES=${API_MAX_RETRIES:-3}
+export JUDGE_REQUESTS_PER_MINUTE=${JUDGE_REQUESTS_PER_MINUTE:-""}
+export JUDGE_MODEL_PREFIX=${JUDGE_MODEL_PREFIX:-${USER:-}}
 
 export HF_TOKEN="${HF_TOKEN:-$(tr -d '\r\n' < ./scripts/hf_token.txt)}"
 export WANDB_API_KEY="${WANDB_API_KEY:-$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)}"
@@ -123,8 +220,11 @@ warn_if_empty WANDB_API_KEY \
 warn_if_empty CSCS_SERVING_API \
   "Optional key missing. LLM-as-a-judge benchmarks via CSCS serving API will fail."
 
-# optional eval arguments
-MAX_LENGTH=${MAX_LENGTH:-4096}
+# Optional eval arguments. An unset MAX_LENGTH leaves the backend/model default intact.
+MAX_LENGTH=${MAX_LENGTH:-""}
+if [[ -n "$MAX_LENGTH" && ! "$MAX_LENGTH" =~ ^[1-9][0-9]*$ ]]; then
+    die "MAX_LENGTH must be a positive integer when set (got '$MAX_LENGTH')."
+fi
 # Capture explicitness before defaulting: thinking raises the default, but a caller value wins.
 if [[ -n "${MAX_NEW_TOKENS:+x}" ]]; then MAX_NEW_TOKENS_EXPLICIT=1; else MAX_NEW_TOKENS_EXPLICIT=0; fi
 MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
@@ -181,30 +281,10 @@ THINK_ARGS=""
 [[ "$AUTODETECT_THINK_TOKENS" == "True" ]] && THINK_ARGS="${THINK_ARGS},autodetect_think_tokens=True"
 [[ -n "$TRACK_THINKING_METRICS" ]] && THINK_ARGS="${THINK_ARGS},track_thinking_metrics=${TRACK_THINKING_METRICS}"
 
-# Task splitting support: set NUM_SPLITS and SPLIT_INDEX to distribute tasks across jobs
-NUM_SPLITS=${NUM_SPLITS:-1}
-SPLIT_INDEX=${SPLIT_INDEX:-0}
-
 if [ -f "$TASKS" ]; then
     echo "Reading task list from file: $TASKS"
     # Filter out comments and blank lines, then join with commas
     TASKS=$(grep -v '^\s*#' "$TASKS" | grep -v '^\s*$' | paste -sd, -)
-
-    # Split tasks across jobs if NUM_SPLITS > 1
-    if (( NUM_SPLITS > 1 )); then
-        IFS=',' read -ra TASK_ARRAY <<< "$TASKS"
-        TOTAL_TASKS=${#TASK_ARRAY[@]}
-        CHUNK_SIZE=$(( (TOTAL_TASKS + NUM_SPLITS - 1) / NUM_SPLITS ))
-        START=$(( SPLIT_INDEX * CHUNK_SIZE ))
-        END=$(( START + CHUNK_SIZE ))
-        if (( END > TOTAL_TASKS )); then END=$TOTAL_TASKS; fi
-        SPLIT_TASKS=()
-        for (( i=START; i<END; i++ )); do
-            SPLIT_TASKS+=("${TASK_ARRAY[$i]}")
-        done
-        TASKS=$(IFS=','; echo "${SPLIT_TASKS[*]}")
-        echo "Split $((SPLIT_INDEX+1))/$NUM_SPLITS: running ${#SPLIT_TASKS[@]}/$TOTAL_TASKS tasks (indices $START-$((END-1)))"
-    fi
 fi
 
 if [ -f "$TABLE_METRICS" ]; then
@@ -244,7 +324,6 @@ printf '%s\n' "ENABLE_THINKING=$ENABLE_THINKING (explicit=$ENABLE_THINKING_EXPLI
 # Generic envs.
 export MASTER_ADDR=$(hostname)
 export MASTER_PORT=25678
-export CUDA_DEVICE_MAX_CONNECTIONS=1
 
 export WORLD_SIZE=$GPUS_PER_NODE
 
@@ -273,9 +352,54 @@ if [ -z ${TOKENIZER+x} ]; then
 fi
 
 
-# Use only model parallel because of vLLM
+# Preserve the historically compatible TP=4/DP=1 default. For an unambiguous
+# sub-30B model name, prefer four independent replicas for throughput. Explicit
+# VLLM_TP_SIZE/VLLM_DP_SIZE values always win; either side may be omitted and is
+# derived from the four allocated GPUs.
 MP=$GPUS_PER_NODE
-echo "Using model size ~${SIZE}B, model parallel size of $MP"
+DP=1
+DETECTED_MODEL_SIZE_B=""
+if [[ "$LM_EVAL_BACKEND" == "vllm" ]]; then
+    VLLM_TP_SIZE=${VLLM_TP_SIZE:-""}
+    VLLM_DP_SIZE=${VLLM_DP_SIZE:-""}
+    VLLM_AUTO_PARALLELISM=${VLLM_AUTO_PARALLELISM:-true}
+    VLLM_AUTO_PARALLELISM=$(_norm_bool VLLM_AUTO_PARALLELISM "$VLLM_AUTO_PARALLELISM")
+
+    if [[ -n "$VLLM_TP_SIZE" || -n "$VLLM_DP_SIZE" ]]; then
+        [[ -z "$VLLM_TP_SIZE" || "$VLLM_TP_SIZE" =~ ^[1-9][0-9]*$ ]] \
+            || die "VLLM_TP_SIZE must be a positive integer (got '$VLLM_TP_SIZE')."
+        [[ -z "$VLLM_DP_SIZE" || "$VLLM_DP_SIZE" =~ ^[1-9][0-9]*$ ]] \
+            || die "VLLM_DP_SIZE must be a positive integer (got '$VLLM_DP_SIZE')."
+        if [[ -z "$VLLM_TP_SIZE" ]]; then
+            (( GPUS_PER_NODE % VLLM_DP_SIZE == 0 )) \
+                || die "VLLM_DP_SIZE=$VLLM_DP_SIZE does not divide $GPUS_PER_NODE GPUs."
+            VLLM_TP_SIZE=$(( GPUS_PER_NODE / VLLM_DP_SIZE ))
+        elif [[ -z "$VLLM_DP_SIZE" ]]; then
+            (( GPUS_PER_NODE % VLLM_TP_SIZE == 0 )) \
+                || die "VLLM_TP_SIZE=$VLLM_TP_SIZE does not divide $GPUS_PER_NODE GPUs."
+            VLLM_DP_SIZE=$(( GPUS_PER_NODE / VLLM_TP_SIZE ))
+        fi
+        (( VLLM_TP_SIZE * VLLM_DP_SIZE == GPUS_PER_NODE )) \
+            || die "VLLM_TP_SIZE * VLLM_DP_SIZE must equal $GPUS_PER_NODE GPUs."
+        MP=$VLLM_TP_SIZE
+        DP=$VLLM_DP_SIZE
+        echo "Using explicit vLLM topology: TP=$MP DP=$DP"
+    elif [[ "$VLLM_AUTO_PARALLELISM" == "True" ]]; then
+        DETECTED_MODEL_SIZE_B=$(python3 -m scripts.infer_model_size "$MODEL" 2>/dev/null || true)
+        if [[ -n "$DETECTED_MODEL_SIZE_B" ]] \
+            && awk -v size="$DETECTED_MODEL_SIZE_B" 'BEGIN { exit !(size < 30) }'; then
+            MP=1
+            DP=$GPUS_PER_NODE
+            echo "Detected ${DETECTED_MODEL_SIZE_B}B model from path; using faster vLLM topology TP=$MP DP=$DP"
+        else
+            echo "No unambiguous <30B model size detected; using compatible vLLM topology TP=$MP DP=$DP"
+        fi
+    else
+        echo "vLLM topology auto-detection disabled; using TP=$MP DP=$DP"
+    fi
+else
+    echo "Using backend topology TP=$MP DP=$DP"
+fi
 
 # Prepare logs root.
 RUN_ROOT=$LOGS_ROOT/$WANDB_ENTITY/$WANDB_PROJECT/$NAME
@@ -289,7 +413,6 @@ export HF_ALLOW_CODE_EVAL=1
 
 # Finally, run the actual evaluations.
 HF_CHECKPOINT_PATH=$MODEL
-DP=$(( GPUS_PER_NODE / MP ))
 COMMON_MODEL_ARGS="dtype=bfloat16"
 if [[ $BOS = true ]]; then
 	echo "Adding BOS token."
@@ -308,8 +431,11 @@ export VLLM_USE_FLASHINFER_SAMPLER=0
 # export NCCL_IB_DISABLE=1
 # export NCCL_NET="Socket"
 # export NCCL_DEBUG=WARN
-# Reduce memory fraction to avoid OOM during initialization
-VLLM_MEMORY_FRACTION=0.75
+# Keep headroom for node-to-node variation while exposing more KV-cache space.
+VLLM_MEMORY_FRACTION=${VLLM_MEMORY_FRACTION:-0.8}
+awk -v fraction="$VLLM_MEMORY_FRACTION" \
+    'BEGIN { exit !(fraction > 0 && fraction <= 1) }' \
+    || die "VLLM_MEMORY_FRACTION must be in (0, 1] (got '$VLLM_MEMORY_FRACTION')."
 # export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export VLLM_DISABLE_CUSTOM_ALL_REDUCE=1
 
@@ -320,12 +446,32 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" || $LM_EVAL_BACKEND == "openai" ]]; then
     fi
 fi
 
+THINKING_DEFAULT_MODEL_ARG=""
+if [[ "$ENABLE_THINKING" == "True" ]]; then
+    # This is a backend default, not a CLI --gen_kwargs override: task-local
+    # generation_kwargs therefore retain priority.
+    THINKING_DEFAULT_MODEL_ARG=",max_gen_toks=$MAX_NEW_TOKENS"
+fi
+
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,language_model_only=True,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS}"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,language_model_only=True,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS}${THINKING_DEFAULT_MODEL_ARG},disable_flashinfer_allreduce_fusion=True"
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer_path=$TOKENIZER$MAYBE_REVISION,dp_size=$DP,tp_size=$MP,mem_fraction_static=$VLLM_MEMORY_FRACTION,dtype=auto"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer_path=$TOKENIZER$MAYBE_REVISION,dp_size=$DP,tp_size=$MP,mem_fraction_static=$VLLM_MEMORY_FRACTION,dtype=auto${THINKING_DEFAULT_MODEL_ARG}"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,load=$MODEL,tokenizer_type=HuggingFaceTokenizer,tokenizer_model=$TOKENIZER$MAYBE_REVISION,devices=4"
+    MEGATRON_MICRO_BATCH_SIZE=${MEGATRON_MICRO_BATCH_SIZE:-""}
+    if [[ -z "$MEGATRON_MICRO_BATCH_SIZE" ]]; then
+        if [[ "$BS" =~ ^[1-9][0-9]*$ ]]; then
+            MEGATRON_MICRO_BATCH_SIZE=$BS
+        else
+            MEGATRON_MICRO_BATCH_SIZE=1
+            echo "Megatron does not support BS=$BS auto-detection; using micro_batch_size=1 (override with MEGATRON_MICRO_BATCH_SIZE or numeric BS)."
+        fi
+    fi
+    [[ "$MEGATRON_MICRO_BATCH_SIZE" =~ ^[1-9][0-9]*$ ]] \
+        || die "MEGATRON_MICRO_BATCH_SIZE must be a positive integer (got '$MEGATRON_MICRO_BATCH_SIZE')."
+    BS=$MEGATRON_MICRO_BATCH_SIZE
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,load=$MODEL,tokenizer_type=HuggingFaceTokenizer,tokenizer_model=$TOKENIZER$MAYBE_REVISION,devices=4,micro_batch_size=$MEGATRON_MICRO_BATCH_SIZE${THINKING_DEFAULT_MODEL_ARG}"
+    echo "Megatron effective batch size: $BS"
     if [[ "$CKPT_ITER" =~ ^[0-9]+$ ]]; then
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,ckpt_step=$CKPT_ITER"
     elif [[ "$CKPT_ITER" == "latest" ]]; then
@@ -338,6 +484,9 @@ elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
     # Forward enable_thinking only when explicitly set; unset lets the template default apply.
     (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS${THINK_ARGS}"
+    if [[ "$ENABLE_THINKING" == "True" ]]; then
+        echo "HF backend: preserving task-local max_gen_toks; no model-level thinking default is available."
+    fi
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     [[ -n "$API_BASE_URL" ]] || die "API_BASE_URL must be set when LM_EVAL_BACKEND=openai (e.g. http://<host>:8000/v1)."
     API_MODEL_NAME=${API_MODEL_NAME:-$MODEL}
@@ -362,7 +511,10 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
         API_BASE_URL="$API_BASE_URL/$API_ENDPOINT_SUFFIX"
     fi
     # Rebuilt from scratch: no model is loaded in-job, so dtype etc. do not apply.
-    COMMON_MODEL_ARGS="model=$API_MODEL_NAME,base_url=$API_BASE_URL,num_concurrent=$API_NUM_CONCURRENT,max_retries=$API_MAX_RETRIES,max_length=$MAX_LENGTH"
+    COMMON_MODEL_ARGS="model=$API_MODEL_NAME,base_url=$API_BASE_URL,num_concurrent=$API_NUM_CONCURRENT,max_retries=$API_MAX_RETRIES"
+    if [[ -n "$API_REQUESTS_PER_MINUTE" ]]; then
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,requests_per_minute=$API_REQUESTS_PER_MINUTE"
+    fi
     if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then
         # tokenizer_backend/tokenizer is local bookkeeping only (max context length, decoding,
         # token counts) -- lm_eval still needs it for loglikelihood scoring. tokenized_requests
@@ -381,29 +533,34 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
         echo "openai backend: batch size 'auto' unsupported, using BS=$BS (concurrency: API_NUM_CONCURRENT=$API_NUM_CONCURRENT)"
     fi
     echo "openai backend: $API_LM_EVAL_MODEL against $API_BASE_URL (model=$API_MODEL_NAME)"
+    [[ -z "$API_REQUESTS_PER_MINUTE" ]] \
+        || echo "openai backend rate limit: $API_REQUESTS_PER_MINUTE requests/minute"
 else
     die "Unsupported LM_EVAL_BACKEND: $LM_EVAL_BACKEND"
 fi
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
+mkdir -p "$HARNESS_EVAL_DIR"
+cp "$EVAL_RUN_CONFIG" "$HARNESS_EVAL_DIR/.eval-run-config.json"
 
-# Generation kwargs (CLI): lm-eval dict-updates each task's YAML generation_kwargs with these.
-# max_gen_toks is the EFFECTIVE_MAX_GEN_TOKS floor (see below). Thinking also forces sampling
-# (do_sample=true is needed or normalize_gen_kwargs pins temperature=0 for do_sample=False tasks).
-GEN_KWARGS="max_gen_toks=\$EFFECTIVE_MAX_GEN_TOKS"
+# Generation kwargs supplied through the CLI update every task's YAML. Deliberately
+# omit max_gen_toks here so task-local budgets retain priority. Thinking's longer
+# fallback is passed as a model default above and is used only when a task has no
+# local max_gen_toks.
+GEN_KWARGS=""
 if [[ "$ENABLE_THINKING" == "True" ]]; then
     THINK_TEMPERATURE=${THINK_TEMPERATURE:-0.6}
     THINK_TOP_P=${THINK_TOP_P:-0.95}
-    GEN_KWARGS="${GEN_KWARGS},do_sample=true,temperature=${THINK_TEMPERATURE},top_p=${THINK_TOP_P}"
+    GEN_KWARGS="do_sample=true,temperature=${THINK_TEMPERATURE},top_p=${THINK_TOP_P}"
     # Optional knob for degenerate looping (e.g. 1.05); unset leaves vLLM's default (1.0).
     if [[ -n "${THINK_REPETITION_PENALTY:-}" ]]; then
         GEN_KWARGS="${GEN_KWARGS},repetition_penalty=${THINK_REPETITION_PENALTY}"
     fi
-    echo "Thinking sampling: do_sample=true temperature=$THINK_TEMPERATURE top_p=$THINK_TOP_P repetition_penalty=${THINK_REPETITION_PENALTY:-<unset>} (max_gen_toks via floor)"
+    echo "Thinking sampling: do_sample=true temperature=$THINK_TEMPERATURE top_p=$THINK_TOP_P repetition_penalty=${THINK_REPETITION_PENALTY:-<unset>} (task-local max_gen_toks takes priority; backend default=$MAX_NEW_TOKENS)"
 elif [[ -n "${NOTHINK_TEMPERATURE:-}" ]]; then
     # Optional no-think sampling (inert unless NOTHINK_TEMPERATURE is set): greedy-vs-sampling ablation.
     NOTHINK_TOP_P=${NOTHINK_TOP_P:-0.95}
-    GEN_KWARGS="${GEN_KWARGS},do_sample=true,temperature=${NOTHINK_TEMPERATURE},top_p=${NOTHINK_TOP_P}"
+    GEN_KWARGS="do_sample=true,temperature=${NOTHINK_TEMPERATURE},top_p=${NOTHINK_TOP_P}"
     echo "No-think sampling: do_sample=true temperature=$NOTHINK_TEMPERATURE top_p=$NOTHINK_TOP_P"
 fi
 
@@ -417,9 +574,12 @@ COMMON_EVAL_ARGS=(
 	--log_samples
 	--write_out
 	--confirm_run_unsafe_code
-    --cache_requests true # was disabled until recently, but we can enable it because the upstream file length problem was patched
-    --gen_kwargs "$GEN_KWARGS"
+	--cache_requests true # was disabled until recently, but we can enable it because the upstream file length problem was patched
 )
+
+if [[ -n "$GEN_KWARGS" ]]; then
+    COMMON_EVAL_ARGS+=(--gen_kwargs "$GEN_KWARGS")
+fi
 
 if [[ -n "$MAX_BATCH_SIZE" ]]; then
     COMMON_EVAL_ARGS+=(--max_batch_size "$MAX_BATCH_SIZE")
@@ -444,8 +604,10 @@ if [[ "$LOG_LENGTH_METRICS" == "True" ]]; then
 	COMMON_EVAL_ARGS+=(--log_length_metrics)
 fi
 
-# Detect long context length only when 'ruler' is among tasks.
+# Detect long context length only when 'ruler' is among tasks. RULER needs a
+# little engine headroom beyond the requested sequence length.
 CONTEXT_LEN=""
+BACKEND_MAX_LENGTH="$MAX_LENGTH"
 if echo "$TASKS" | grep -q "ruler"; then
     if echo "$TASKS" | grep -qE "/[0-9]+"; then
         CONTEXT_LEN=$(echo "$TASKS" | grep -oE '/[0-9]+' | head -n1 | tr -d '/')
@@ -457,83 +619,96 @@ if echo "$TASKS" | grep -q "ruler"; then
         fi
     fi
     if [[ -n "$CONTEXT_LEN" ]]; then
-        export MAX_LENGTH="$CONTEXT_LEN"
         # Only add metadata and model arg if CONTEXT_LEN is numeric
         if [[ "$CONTEXT_LEN" =~ ^[0-9]+$ ]]; then
 			COMMON_EVAL_ARGS+=( --metadata \'{\"max_seq_lengths\":[${CONTEXT_LEN}]}\' )
 
-            MAX_MODEL_LEN_WITH_MARGIN=$(( CONTEXT_LEN + 600 ))
-            if [[ $LM_EVAL_BACKEND == "openai" ]]; then
-                # No in-job engine to configure; raise the client-side truncation length instead
-                # (duplicate max_length key: lm_eval keeps the last occurrence).
-                COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_length=$MAX_MODEL_LEN_WITH_MARGIN"
-                echo "Detected ruler context length: $CONTEXT_LEN (set MAX_LENGTH, max_length=$MAX_MODEL_LEN_WITH_MARGIN and lm-eval metadata)"
-            else
-                export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
-                COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$MAX_MODEL_LEN_WITH_MARGIN"
-                echo "Detected ruler context length: $CONTEXT_LEN (set MAX_LENGTH, max_model_len=$MAX_MODEL_LEN_WITH_MARGIN and lm-eval metadata)"
-            fi
+            BACKEND_MAX_LENGTH=$(( CONTEXT_LEN + 600 ))
+            echo "Detected ruler context length: $CONTEXT_LEN (backend context limit=$BACKEND_MAX_LENGTH and lm-eval metadata)"
         else
-            echo "Warning: Ruler detected but no numeric context length found; skipping metadata and max_model_len."
+            echo "Warning: Ruler detected but no numeric context length found; skipping metadata and automatic context limit."
         fi
     fi
+fi
+
+# MAX_LENGTH is a backend context limit, not a generation override. Keep each
+# adapter's native argument name and omit it entirely when no value was set.
+if [[ -n "$BACKEND_MAX_LENGTH" ]]; then
+    case "$LM_EVAL_BACKEND" in
+        vllm)
+            COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$BACKEND_MAX_LENGTH"
+            [[ -n "$CONTEXT_LEN" ]] && export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+            ;;
+        sglang)
+            COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$BACKEND_MAX_LENGTH"
+            ;;
+        megatron_lm)
+            COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,seq_length=$BACKEND_MAX_LENGTH"
+            ;;
+        hf|openai)
+            COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_length=$BACKEND_MAX_LENGTH"
+            ;;
+    esac
+    echo "Using $LM_EVAL_BACKEND backend context limit: $BACKEND_MAX_LENGTH"
 fi
 
 # bfcl_v3 and Swiss AI Charter Alignment are not yet available in the Swiss-AI
 # fork. Use ymetz only for jobs containing those tasks; everything else,
 # including the experimental GPT suite, stays on Swiss-AI.
 if echo "$TASKS" | grep -qE '(^|,)(bfcl_v3([^,]*)?|swiss_ai_charter_alignment([^,]*)?)(,|$)'; then
-    LM_EVAL_HARNESS_REPO="ymetz/lm-evaluation-harness"
-else
-    LM_EVAL_HARNESS_REPO="swiss-ai/lm-evaluation-harness"
+    if [[ "$EVAL_RESOLVED_HARNESS_REPO" != "ymetz/lm-evaluation-harness" ]]; then
+        die "BFCL/Charter tasks require ymetz/lm-evaluation-harness, got $EVAL_RESOLVED_HARNESS_REPO"
+    fi
 fi
-echo "Selected lm-evaluation-harness repository: $LM_EVAL_HARNESS_REPO"
+echo "Using lm-evaluation-harness: $EVAL_RESOLVED_HARNESS_REPO@$EVAL_RESOLVED_HARNESS_COMMIT"
 
-LM_EVAL_HARNESS_PIP_SPEC="git+https://github.com/${LM_EVAL_HARNESS_REPO}.git"
-if [[ -n "$LM_EVAL_HARNESS_BRANCH" ]]; then
-    LM_EVAL_HARNESS_PIP_SPEC="${LM_EVAL_HARNESS_PIP_SPEC}@${LM_EVAL_HARNESS_BRANCH}"
+LOAD_ENV_CMD="
+echo Container entered: \$(date -Is)
+eval_env_is_ready() {
+    [[ -f '$EVAL_BASE_ENV/.complete' ]] \
+        && [[ -x '$EVAL_BASE_ENV/bin/python' ]] \
+        && [[ -f '$EVAL_HARNESS_OVERLAY/.complete' ]] \
+        && [[ -d '$EVAL_HARNESS_OVERLAY/lm_eval' ]] \
+        || return 1
+    if [[ '$EVAL_VERIFY_ENV_IMPORTS' == 'true' ]]; then
+        '$EVAL_BASE_ENV/bin/python' -c 'import accelerate, datasets, transformers, wandb' >/dev/null 2>&1 \
+            && PYTHONPATH='$EVAL_HARNESS_OVERLAY' '$EVAL_BASE_ENV/bin/python' -c 'import lm_eval' >/dev/null 2>&1 \
+            || return 1
+    fi
+}
+if ! eval_env_is_ready; then
+    echo 'Cached evaluation environment failed its in-container preflight; rebuilding it now.'
+    bash '$EVAL_REPO_ROOT/scripts/build_eval_env.sh'
+    source '$EVAL_ENV_MANIFEST'
 fi
-
-INSTALL_CMD="pip install --no-cache-dir --upgrade \"$LM_EVAL_HARNESS_PIP_SPEC\" && \
-pip install --no-cache-dir --upgrade \
-    \"huggingface-hub>=1.3.0,<1.16\" \
-    \"transformers==5.14.1\" \
-    \"accelerate>=1.14.0\" \
-    \"antlr4-python3-runtime==4.11\" \
-    \"datasketch<2.0\" \
-    segtok \
-    \"tokenizers>=0.22.0,<0.23.0\" \
-    mistral-common \
-    \"humming-kernels[cu13]==0.1.2\" \
-    tenacity \
-    sympy \
-    spacy \
-    math_verify \
-    latex2sympy2_extended \
-    wonderwords \
-    nltk \
-    immutabledict \
-    langdetect \
-    hf-transfer \
-    subset2evaluate \
-    \"alpaca-eval>=0.6.2\" \
-    \"peft>=0.19.0\"  "
-
-if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
-  INSTALL_CMD="$INSTALL_CMD && pip install megatron-core --no-deps && export MEGATRON_PATH=$(pwd)/Megatron-LM"
+if ! eval_env_is_ready; then
+    echo 'Evaluation environment repair did not pass its in-container preflight.' >&2
+    exit 1
 fi
-
-# lm-eval's API models (local-completions / local-chat-completions) need the [api] extras.
-if [[ $LM_EVAL_BACKEND == "openai" ]]; then
-  INSTALL_CMD="$INSTALL_CMD && pip install --no-cache-dir tenacity aiohttp"
+source '$EVAL_BASE_ENV/bin/activate'
+EVAL_RUNTIME_HARNESS_OVERLAY='$EVAL_HARNESS_OVERLAY'
+runtime_root=\${SLURM_TMPDIR:-/tmp}
+if [[ ! -d \"\$runtime_root\" || ! -w \"\$runtime_root\" ]]; then
+    runtime_root=/tmp
 fi
-
-# SKIP_INSTALL=1: the environment already has the harness and its
-# dependencies baked in (e.g. the evals-svc runner image). Skipping the
-# runtime pip install makes the run deterministic -- the image digest fully
-# determines the harness and dependency versions -- and minutes faster.
-if [[ "${SKIP_INSTALL:-0}" == "1" ]]; then
-  INSTALL_CMD="echo 'SKIP_INSTALL=1: using the preinstalled environment (no pip install)'"
+if [[ -r '$EVAL_HARNESS_ARCHIVE' ]]; then
+    runtime_overlay=\$(mktemp -d \"\$runtime_root/lm-eval-${EVAL_RESOLVED_HARNESS_COMMIT:0:12}.XXXXXX\")
+    echo Staging harness overlay locally: \$(date -Is) archive='$EVAL_HARNESS_ARCHIVE' destination=\$runtime_overlay
+    if tar -xf '$EVAL_HARNESS_ARCHIVE' -C \"\$runtime_overlay\"; then
+        EVAL_RUNTIME_HARNESS_OVERLAY=\$runtime_overlay
+        echo Harness overlay staged locally: \$(date -Is)
+    else
+        echo 'WARNING: local harness staging failed; using the shared overlay.' >&2
+        rm -rf \"\$runtime_overlay\"
+    fi
+fi
+export PYTHONPATH=\$EVAL_RUNTIME_HARNESS_OVERLAY\${PYTHONPATH:+:\$PYTHONPATH}
+echo Evaluation environment activated: \$(date -Is) deep_import_check=$EVAL_VERIFY_ENV_IMPORTS harness_path=\$EVAL_RUNTIME_HARNESS_OVERLAY
+"
+if [[ $LM_EVAL_BACKEND == "megatron_lm" && -d "$PWD/Megatron-LM" ]]; then
+    LOAD_ENV_CMD="$LOAD_ENV_CMD
+export MEGATRON_PATH='$PWD/Megatron-LM'
+"
 fi
 
 # $CMD is re-parsed by the inner `bash -lc`, so --model_args is single-quoted (a token like
@@ -544,34 +719,26 @@ if [[ "$COMMON_MODEL_ARGS" == *\'* ]]; then
 fi
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    CMD="lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
+    CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
-    CMD="lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
+    CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
-    CMD="lm_eval --model $API_LM_EVAL_MODEL --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
+    CMD="python -m lm_eval --model $API_LM_EVAL_MODEL --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
     CMD="accelerate launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 fi
+TIMED_CMD="echo Evaluation process starting: \$(date -Is)
+$CMD"
 
-# Resolve the generation budget in-container, after the harness install (task YAMLs present):
-# a MAX_NEW_TOKENS floor, never lowered below a task's own larger max_gen_toks (AIME's 32768).
-# Fail-safe: falls back to MAX_NEW_TOKENS on any error. Prepended so it runs before lm_eval.
-COMPUTE_MAX_GEN_TOKS="
-EFFECTIVE_MAX_GEN_TOKS=\$(cd $PWD && python -m scripts.get_max_gen_toks --tasks '$TASKS' --floor $MAX_NEW_TOKENS 2>/dev/null || echo $MAX_NEW_TOKENS)
-# Guard against stray stdout corrupting the value.
-[[ \"\$EFFECTIVE_MAX_GEN_TOKS\" =~ ^[0-9]+\$ ]] || EFFECTIVE_MAX_GEN_TOKS=$MAX_NEW_TOKENS
-echo \"Effective max_gen_toks: \$EFFECTIVE_MAX_GEN_TOKS (floor $MAX_NEW_TOKENS)\"
-"
-CMD="$COMPUTE_MAX_GEN_TOKS$CMD"
-
-echo "Installation command: $INSTALL_CMD"
+echo "Environment manifest: $EVAL_ENV_MANIFEST"
 echo "Final command: $CMD"
 
-# Start timing for lines 182-189
-echo "Starting timing for installation and evaluation..."
+# Environment preparation happens once in a dependency job. This duration is
+# therefore evaluation-only and remains meaningful when results are aggregated.
 START_TIME=$(date +%s)
+echo "Starting evaluation timing: $(date -Is)"
 
 # Cache redirection exports to pass into the container
 CACHE_EXPORTS="
@@ -592,25 +759,26 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     set -euo pipefail
     unset SSL_CERT_FILE
     export HF_DATASETS_TRUST_REMOTE_CODE=1
+    export CUDA_DEVICE_MAX_CONNECTIONS=1
     $CACHE_EXPORTS
 
-    $INSTALL_CMD
+    $LOAD_ENV_CMD
     # Make torch CUDA libs discoverable for vllm._C import
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
-    $CMD
+    $TIMED_CMD
     "
 elif [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-  # vLLM needs to run with a single process that manages all GPUs, so we run the install and eval in the same command to avoid issues with environment persistence across srun calls
+  # vLLM runs as one process which manages all GPUs.
   srun -n 1 --mpi=pmix -ul --environment=./containers/env_vllm.toml bash -lc "
     set -euo pipefail
     unset SSL_CERT_FILE
     export HF_DATASETS_TRUST_REMOTE_CODE=1
     $CACHE_EXPORTS
 
-    $INSTALL_CMD
+    $LOAD_ENV_CMD
     # Make torch CUDA libs discoverable for vllm._C import
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
-    $CMD
+    $TIMED_CMD
     "
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
   srun -n 1 --mpi=pmix -ul --environment=./containers/env_sglang.toml bash -lc "
@@ -619,8 +787,8 @@ elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     export HF_DATASETS_TRUST_REMOTE_CODE=1
     $CACHE_EXPORTS
 
-    $INSTALL_CMD
-    $CMD
+    $LOAD_ENV_CMD
+    $TIMED_CMD
     "
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
   # No model is loaded in-job; the harness only makes HTTP calls against API_BASE_URL.
@@ -630,9 +798,9 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     export HF_DATASETS_TRUST_REMOTE_CODE=1
     $CACHE_EXPORTS
 
-    $INSTALL_CMD
+    $LOAD_ENV_CMD
 
-    $CMD
+    $TIMED_CMD
     "
 else
   # hf (via accelerate)
@@ -642,38 +810,27 @@ else
     export HF_DATASETS_TRUST_REMOTE_CODE=1
     $CACHE_EXPORTS
 
-    $INSTALL_CMD
+    $LOAD_ENV_CMD
 
     # Make torch CUDA libs discoverable for vllm._C import - is just ignored for Huggingface
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
 
-    $CMD
+    $TIMED_CMD
     "
 fi
 
 # End timing and calculate duration
 END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))
-echo "Time taken for installation and evaluation: ${DURATION} seconds ($(($DURATION / 60)) minutes and $(($DURATION % 60)) seconds)"
+printf '%s\n' "$DURATION" > "$HARNESS_EVAL_DIR/eval_duration_seconds.txt"
+echo "Evaluation time: ${DURATION} seconds ($(($DURATION / 60)) minutes and $(($DURATION % 60)) seconds)"
 
 # Goodbye.
 echo "Evaluation finished"
 
-# Record the requested tasks so the launcher can tell what ran without inferring it from the
-# results JSON. Tag tasks (e.g. lambada) never emit their own key there, so name-matching alone
-# can never see them. Written only on success -- else an entry left by a crashed run would be read
-# as "done" and the task would never be retried.
-printf '%s\n' "${TASKS//,/$'\n'}" > "$HARNESS_EVAL_DIR/requested_tasks.txt"
-
-if (( NUM_SPLITS > 1 )); then
-    # When running as a split job, write a marker file with the eval dir path
-    # so the aggregation job can find all split results
-    SPLIT_MARKER_DIR=$HARNESS_DIR/split_markers
-    mkdir -p $SPLIT_MARKER_DIR
-    echo "$HARNESS_EVAL_DIR" > "$SPLIT_MARKER_DIR/split_${SPLIT_INDEX}.txt"
-    echo "Split job $((SPLIT_INDEX+1))/$NUM_SPLITS done. Skipping W&B upload (aggregation job will handle it)."
+if [[ "$EVAL_CHUNKED" == "true" ]]; then
+    echo "Chunk job done. Skipping W&B upload; the controller will aggregate completed chunks."
     echo "Results in: $HARNESS_EVAL_DIR"
-    echo "Marker written to: $SPLIT_MARKER_DIR/split_${SPLIT_INDEX}.txt"
 else
     echo "Uploading results to wandb"
     WANDB_CMD="cd $PWD && python -m scripts.alignment.update_wandb_alignment --entity $WANDB_ENTITY --project $WANDB_PROJECT --logs_root $HARNESS_EVAL_DIR --name $NAME --main_metrics $TABLE_METRICS --eval_duration $DURATION"
