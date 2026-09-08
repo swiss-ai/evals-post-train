@@ -726,7 +726,9 @@ printf '%s\n' "${TASKS//,/$'\n'}" > "$HARNESS_EVAL_DIR/requested_tasks.txt"
 if (( NUM_SPLITS > 1 )); then
     # When running as a split job, write a marker file with the eval dir path
     # so the aggregation job can find all split results
-    SPLIT_MARKER_DIR=$HARNESS_DIR/split_markers
+    # Namespace per context-length group: the aggregator deletes this dir when done, so
+    # concurrent groups for one model would otherwise delete each other's markers.
+    SPLIT_MARKER_DIR=$HARNESS_DIR/split_markers${CONTEXT_LEN:+_${CONTEXT_LEN//,/-}}
     mkdir -p $SPLIT_MARKER_DIR
     echo "$HARNESS_EVAL_DIR" > "$SPLIT_MARKER_DIR/split_${SPLIT_INDEX}.txt"
     echo "Split job $((SPLIT_INDEX+1))/$NUM_SPLITS done. Skipping W&B upload (aggregation job will handle it)."
