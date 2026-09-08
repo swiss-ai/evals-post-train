@@ -42,7 +42,7 @@ fi
 
 RUN_ROOT=$LOGS_ROOT/$WANDB_ENTITY/$WANDB_PROJECT/$NAME
 HARNESS_DIR=$RUN_ROOT/harness
-SPLIT_MARKER_DIR=$HARNESS_DIR/split_markers
+SPLIT_MARKER_DIR=$HARNESS_DIR/split_markers${CONTEXT_LEN:+_${CONTEXT_LEN//,/-}}
 
 echo "Aggregating $NUM_SPLITS split results for $NAME"
 echo "Looking for markers in: $SPLIT_MARKER_DIR"
