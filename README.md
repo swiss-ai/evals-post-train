@@ -1017,6 +1017,35 @@ scripts/run_inspect_eval.sh --task hle \
   --model-role grader_2=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
   --task-arg judge_prompt=grade_c_i --limit 5
 
+# AAII-wrapped GPQA Diamond (aaii/gpqa_diamond.py -- a full path, not an inspect_evals name, so
+# it's used as-is rather than expanded to "inspect_evals/..."), pinning Artificial Analysis's
+# Intelligence Index protocol default of --epochs 5 (plain "gpqa_diamond" above keeps
+# inspect_evals' own default of 4) directly in the task, not via a CLI flag -- no --model-role
+# needed, same as plain gpqa_diamond:
+scripts/run_inspect_eval.sh --task aaii/gpqa_diamond.py \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --limit 5
+
+# AAII-wrapped HLE (aaii/hle.py, same "full path" convention as aaii/gpqa_diamond.py above),
+# pinning the text-only subset, the official judge prompt, and a single "grader" role (AA's
+# protocol) directly in the task -- unlike plain hle above, no grader_2 role is needed. Still
+# needs its own "grader" role bound (same judge_prompt=original caveat re: structured-output
+# support applies -- see the plain hle example above for why a served vLLM model may hang):
+scripts/run_inspect_eval.sh --task aaii/hle.py \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --model-role grader=openai/gpt-5.6-luna --limit 5
+
+# AAII-wrapped SciCode (aaii/scicode.py, same "full path" convention), pinning
+# provide_scientific_background=True and --epochs 3 (AA's protocol; plain scicode below keeps
+# inspect_evals' own background-free, --epochs 1 defaults) directly in the task. Needs a real
+# Docker daemon for its sandboxed code execution (true on a login node or inside the sbatch
+# container) -- unlike evals-svc's own AAII-wrapped scicode, which additionally pins
+# --sandbox local as a deployment-specific workaround for launchers with no Docker daemon; that
+# pin is NOT part of the AA protocol, so it is deliberately not baked in here:
+scripts/run_inspect_eval.sh --task aaii/scicode.py \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --limit 2
+
 # tau2-bench (no single "default" task -- it ships four domains: airline, banking, retail,
 # telecom) needs a second "user"-role model to play the customer, and supports extra task
 # params like message_limit or banking's retrieval_config. The "user" role doesn't need to be
@@ -1103,6 +1132,36 @@ python -m scripts.alignment.update_wandb_inspect --entity <entity> --project <pr
 ```
 
 `update_wandb_inspect.py` parses the `.eval` log(s) (task scores, metrics, and a bounded per-sample summary) into the same `ModelEvaluation` structure the harness pipeline uses, and uploads through the same shared `upload_multi_model_results` — so Inspect and lm-eval-harness runs show up in W&B the same way. Auth uses `WANDB_API_KEY` (default: `scripts/wandb_api_key.txt`, same fallback as `evaluate.sbatch`).
+
+---
+
+## Alternative: tau-bench / terminal-bench / GDPval-AA v2 (standalone AA-protocol runners)
+
+Three more Artificial-Analysis-aligned benchmarks, each its own standalone script rather than an Inspect AI task — none of these three go through `run_inspect_eval.sh` or `inspect_evals` at all. This repo already documents *different*, narrower `inspect_evals` ports of tau2-bench and GDPval above (in the Inspect AI section) — those are independent implementations, not the same code as the scripts below, and don't necessarily match Artificial Analysis's real protocol values. There is no `inspect_evals` port of Terminal-Bench at all.
+
+Each script installs its own dependencies at runtime (tau2-bench/Harbor/Stirrup), takes `--model`/`--api-base-url` the same way `run_inspect_eval.sh` does (falling back to `scripts/cscs_serving_api_key.txt` for the serving key), bakes in Artificial Analysis's protocol defaults, and writes results to a local scratch dir instead of posting to a callback (unlike evals-svc's own copies of this same logic, which these scripts were extracted from). See each script's own `--help` for full options.
+
+```bash
+# tau-bench (tau2-bench v1.0.1, banking_knowledge domain, bm25_grep retrieval, 5 trials, 200
+# max steps -- AA's tau^3-Banking protocol). Needs a "user simulator" model too (default
+# openai/gpt-5.4-mini, needs OPENAI_API_KEY) -- smoke test with a couple of tasks/one trial:
+scripts/run_tau_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+  --api-base-url https://api.swissai.svc.cscs.ch/v1 --num-tasks 2 --num-trials 1
+
+# terminal-bench (Harbor, Terminus 2 agent, terminal-bench-2-1 dataset, 3 trials). Needs a real
+# Docker daemon or podman (the script falls back to podman through a docker-compatible shim,
+# same as evals-svc's own runner does on Clariden) -- smoke test with one task/one trial:
+scripts/run_terminal_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+  --api-base-url https://api.swissai.svc.cscs.ch/v1 --num-tasks 1 --num-trials 1
+
+# GDPval-AA v2 (Stirrup, the full 220-task openai/gdpval gold set, up to 250 turns, E2B sandbox
+# by default -- needs E2B_API_KEY; pass --sandbox-backend local for the free, non-isolated
+# subprocess backend instead). Grading needs at least one of
+# GDPVAL_JUDGE_{OPENAI,GOOGLE,ANTHROPIC}_API_KEY set -- ungraded deliverables are still
+# written. Smoke test, free sandbox, no grading:
+scripts/run_gdpval.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+  --api-base-url https://api.swissai.svc.cscs.ch/v1 --sandbox-backend local --num-tasks 1
+```
 
 ---
 
