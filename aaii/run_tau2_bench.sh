@@ -63,11 +63,13 @@
 #   --max-concurrency <n>      Parallel trials (default: 4).
 #   --git-ref <ref>            tau2-bench ref to clone (default: v1.0.1, AA's protocol).
 #   --repo <url>                tau2-bench repo to clone (default: the upstream GitHub repo).
+#   --save-to <name>           tau2's own run-name, used as the results subdirectory (default:
+#                               evalspt).
 #   --workdir <path>           Scratch dir for the tau2-bench checkout + its own data dir
 #                               (default: a temp dir under /tmp).
 #   -- <extra args>             Forwarded verbatim to `tau2 run`.
 #
-# Results: tau2 writes <data dir>/simulations/evalspt/results.json (every simulation, its
+# Results: tau2 writes <data dir>/simulations/<--save-to>/results.json (every simulation, its
 # reward and messages) -- this script also prints a pass^k summary computed from it, same
 # metric evals-svc's own results-parsing computes.
 #
@@ -97,6 +99,7 @@ SEED=300
 MAX_CONCURRENCY=4
 TAU_GIT_REF="v1.0.1"
 TAU_REPO="https://github.com/sierra-research/tau2-bench.git"
+SAVE_TO="evalspt"
 WORKDIR=""
 EXTRA_ARGS=()
 
@@ -115,6 +118,7 @@ while (( $# > 0 )); do
         --max-concurrency) MAX_CONCURRENCY=$2; shift 2 ;;
         --git-ref) TAU_GIT_REF=$2; shift 2 ;;
         --repo) TAU_REPO=$2; shift 2 ;;
+        --save-to) SAVE_TO=$2; shift 2 ;;
         --workdir) WORKDIR=$2; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         --) shift; EXTRA_ARGS+=("$@"); break ;;
@@ -161,7 +165,6 @@ else
     export TAU2_DATA_DIR="$WORKDIR/tau2-bench/data"
 fi
 
-SAVE_TO="evalspt"
 ARGS=(run --domain "$DOMAIN"
       --agent-llm "$AGENT_LLM" --agent-llm-args "$AGENT_LLM_ARGS"
       --user-llm "$USER_LLM" --user-llm-args "$USER_LLM_ARGS"

@@ -44,13 +44,15 @@
 #   --max-concurrency <n>       Parallel trials (default: 4).
 #   --harbor-version <v>        Harbor version to install if not already provisioned (default:
 #                               the version this repo pins, $TB_HARBOR_VERSION_DEFAULT below).
+#   --job-name <name>           Harbor's own job-name, used as the results subdirectory
+#                               (default: evalspt).
 #   --workdir <path>            Scratch dir for the Harbor job output (default: a temp dir under
 #                               /tmp).
 #   -- <extra args>              Forwarded verbatim to `harbor run`.
 #
-# Results: Harbor writes <workdir>/jobs/evalspt/result.json (job stats) and one result.json per
-# trial under the same dir -- this script prints an accuracy/pass@k summary computed from them,
-# same metrics evals-svc's own results-parsing computes.
+# Results: Harbor writes <workdir>/jobs/<--job-name>/result.json (job stats) and one result.json
+# per trial under the same dir -- this script prints an accuracy/pass@k summary computed from
+# them, same metrics evals-svc's own results-parsing computes.
 #
 # Example (smoke test against a CSCS-served model):
 #   aaii/run_terminal_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
@@ -77,6 +79,7 @@ TASK_NAMES=""
 TIMEOUT_MULTIPLIER="1.0"
 MAX_CONCURRENCY=4
 HARBOR_VERSION="$TB_HARBOR_VERSION_DEFAULT"
+JOB_NAME="evalspt"
 WORKDIR=""
 EXTRA_ARGS=()
 
@@ -92,6 +95,7 @@ while (( $# > 0 )); do
         --timeout-multiplier) TIMEOUT_MULTIPLIER=$2; shift 2 ;;
         --max-concurrency) MAX_CONCURRENCY=$2; shift 2 ;;
         --harbor-version) HARBOR_VERSION=$2; shift 2 ;;
+        --job-name) JOB_NAME=$2; shift 2 ;;
         --workdir) WORKDIR=$2; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         --) shift; EXTRA_ARGS+=("$@"); break ;;
@@ -179,7 +183,7 @@ fi
 
 ARGS=(run -a "$AGENT" -m "$AGENT_MODEL"
       -k "$NUM_TRIALS" -n "$MAX_CONCURRENCY" --timeout-multiplier "$TIMEOUT_MULTIPLIER"
-      -o "$WORKDIR/jobs" --job-name evalspt -y -q)
+      -o "$WORKDIR/jobs" --job-name "$JOB_NAME" -y -q)
 if [[ -n "$TASK_NAMES" ]]; then
     IFS=',' read -ra NAMES <<< "$TASK_NAMES"
     for t in "${NAMES[@]}"; do ARGS+=(-t "$t"); done
@@ -196,8 +200,8 @@ if [[ "$STATUS_OK" = 1 ]]; then
 fi
 [[ -n "${PODMAN_SERVICE_PID:-}" ]] && kill "$PODMAN_SERVICE_PID" 2>/dev/null
 
-RESULTS_FILE="$WORKDIR/jobs/evalspt/result.json"
-TRIALS_DIR="$WORKDIR/jobs/evalspt"
+RESULTS_FILE="$WORKDIR/jobs/$JOB_NAME/result.json"
+TRIALS_DIR="$WORKDIR/jobs/$JOB_NAME"
 if [[ ! -f "$RESULTS_FILE" ]]; then
     RESULTS_FILE=$(find "$WORKDIR/jobs" -maxdepth 2 -name result.json 2>/dev/null | head -1)
     [[ -n "$RESULTS_FILE" ]] && TRIALS_DIR=$(dirname "$RESULTS_FILE")

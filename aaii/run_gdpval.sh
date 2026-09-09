@@ -55,8 +55,9 @@
 #                               grade at all; ungraded deliverables are still written).
 #
 # Results: one directory per task under <workdir>/gdpval_runs/<task_id>/ (every deliverable
-# file the agent produced), plus a printed win/tie/loss summary once grading completes (or a
-# note that no judge credentials were configured).
+# file the agent produced), a printed win/tie/loss summary once grading completes (or a note
+# that no judge credentials were configured), and a structured <workdir>/gdpval_result.json
+# (status/results/samples/error, same shape evals-svc's own callback payload uses).
 #
 # Example (smoke test, free local sandbox, no grading credentials):
 #   aaii/run_gdpval.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
@@ -332,27 +333,66 @@ async def main():
     grades = await asyncio.gather(*[grade_one_task(r, pool) for r in results])
 
     generation_errors = [r["row"]["task_id"] for r in results if r["error"]]
-    print(f"generated: {len(rows) - len(generation_errors)}/{len(rows)} deliverables")
-    if generation_errors:
-        print(f"generation errors: {', '.join(generation_errors[:20])}")
-
-    if not pool:
-        print("no judge credentials configured (GDPVAL_JUDGE_*_MODEL/_API_KEY) -- deliverables written, not graded")
-        return
-
     graded = [g for g in grades if g and "outcome" in g]
-    if not graded:
-        print("no comparisons could be graded")
-        return
     wins = sum(1 for g in graded if g["outcome"] == "win")
     ties = sum(1 for g in graded if g["outcome"] == "tie")
     losses = sum(1 for g in graded if g["outcome"] == "loss")
-    print(json.dumps({
-        "n_graded": len(graded),
-        "win_rate": wins / len(graded),
-        "win_or_tie_rate": (wins + ties) / len(graded),
-        "wins": wins, "ties": ties, "losses": losses,
-    }, indent=2))
+    unparsed = sum(1 for g in graded if g["outcome"] == "unparsed")
+    n_graded = len(graded)
+
+    metrics = {"n_tasks": len(rows), "n_generation_errors": len(generation_errors), "n_graded": n_graded}
+    if n_graded:
+        metrics["win_rate"] = wins / n_graded
+        metrics["win_or_tie_rate"] = (wins + ties) / n_graded
+        metrics["ties"] = ties
+        metrics["losses"] = losses
+        metrics["unparsed"] = unparsed
+    results_payload = {"gdpval-aa-v2": metrics} if pool else None
+
+    grade_by_task = {g["task_id"]: g for g in grades if g}
+    samples = [
+        {
+            "task": "gdpval-aa-v2",
+            "doc_id": i,
+            "sample": {
+                "task_id": r["row"]["task_id"],
+                "occupation": r["row"].get("occupation"),
+                "sector": r["row"].get("sector"),
+                "generation_error": r["error"],
+                "n_deliverable_files": len(r["deliverable_files"]),
+                "grade": grade_by_task.get(r["row"]["task_id"]),
+            },
+        }
+        for i, r in enumerate(results)
+    ]
+
+    # Same "succeeded whenever there is anything to show" rule as evals-svc's own results
+    # parsing: real graded results, or at least one deliverable generated even if ungraded.
+    any_deliverable = len(generation_errors) < len(rows)
+    status = "succeeded" if results_payload is not None or any_deliverable else "failed"
+    payload = {"status": status, "results": results_payload, "samples": samples}
+    if status == "failed":
+        payload["error"] = f"every one of {len(rows)} tasks failed to generate: " + ", ".join(
+            generation_errors[:20]
+        )
+    elif not pool:
+        payload["error"] = (
+            "no judge credentials configured -- deliverables were generated "
+            f"({len(rows) - len(generation_errors)}/{len(rows)} succeeded) but never graded"
+        )
+    elif generation_errors:
+        payload["error"] = f"{len(generation_errors)}/{len(rows)} tasks failed to generate (results kept): " + ", ".join(
+            generation_errors[:20]
+        )
+
+    result_path = WORKDIR / "gdpval_result.json"
+    result_path.write_text(json.dumps(payload, indent=2))
+    print(f"result: {result_path}")
+    print(f"generated: {len(rows) - len(generation_errors)}/{len(rows)} deliverables")
+    if pool and n_graded:
+        print(json.dumps(metrics, indent=2))
+    elif not pool:
+        print("no judge credentials configured (GDPVAL_JUDGE_*_MODEL/_API_KEY) -- deliverables written, not graded")
 
 
 asyncio.run(main())
