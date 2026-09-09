@@ -140,11 +140,17 @@ else
     AGENT_LLM="$MODEL"
 fi
 
-USER_LLM_ARGS='{}'
-if [[ "$USER_LLM" == openai/* && -n "$API_BASE_URL" ]]; then
+if [[ -n "$USER_LLM_ARGS_OVERRIDE" ]]; then
+    USER_LLM_ARGS="$USER_LLM_ARGS_OVERRIDE"
+elif [[ "$USER_LLM" == openai/* && -n "$API_BASE_URL" ]]; then
     # A gateway user-llm (same convention as run_inspect_eval.sh's tau2 "user" role): route it
     # through the same endpoint/key as the agent, not a real OpenAI credential.
     USER_LLM_ARGS="$AGENT_LLM_ARGS"
+else
+    # A bare model name (default: gpt-5.4-mini) is a real OpenAI model -- litellm resolves it
+    # via OPENAI_API_KEY directly, no api_base/api_key override here. AA's own protocol default
+    # (reasoning_effort=medium) still applies unless --user-llm-args overrode it above.
+    USER_LLM_ARGS='{"reasoning_effort": "medium"}'
 fi
 
 if python3 -c "import tau2" >/dev/null 2>&1 && [[ -n "${TAU2_DATA_DIR:-}" && -d "$TAU2_DATA_DIR" ]]; then

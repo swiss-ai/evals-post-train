@@ -1143,10 +1143,13 @@ Each script installs its own dependencies at runtime (tau2-bench/Harbor/Stirrup)
 
 ```bash
 # tau2-bench (tau2-bench v1.0.1, banking_knowledge domain, bm25_grep retrieval, 5 trials, 200
-# max steps -- AA's tau^3-Banking protocol). Needs a "user simulator" model too (default
-# openai/gpt-5.4-mini, needs OPENAI_API_KEY) -- smoke test with a couple of tasks/one trial:
+# max steps -- AA's tau^3-Banking protocol). Needs a "user simulator" model too (default:
+# gpt-5.4-mini, a real OpenAI model, needs OPENAI_API_KEY of your own); pass --user-llm
+# openai/<served-id> instead to route it through the same gateway/key as --model, no separate
+# credential needed -- smoke test with a couple of tasks/one trial:
 aaii/run_tau2_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
-  --api-base-url https://api.swissai.svc.cscs.ch/v1 --num-tasks 2 --num-trials 1
+  --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --user-llm openai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --num-tasks 2 --num-trials 1
 
 # terminal-bench (Harbor, Terminus 2 agent, terminal-bench-2-1 dataset, 3 trials). Needs a real
 # Docker daemon or podman (the script falls back to podman through a docker-compatible shim,
