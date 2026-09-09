@@ -33,7 +33,9 @@
 #                               TARGET_API_KEY (default: scripts/cscs_serving_api_key.txt, same
 #                               fallback run_inspect_eval.sh uses).
 #   --num-tasks <n>              Restrict to the first n tasks (default: 220, AA's full set;
-#                               smoke-test with a small number).
+#                               smoke-test with a small number). Ignored when --task-ids is given.
+#   --task-ids <id1 id2 ...>    Exactly these space-separated openai/gdpval task_ids, instead of
+#                               --num-tasks.
 #   --max-turns <n>              Max agent turns per task (default: 250, AA's protocol).
 #   --max-concurrency <n>        Parallel tasks (default: 4).
 #   --sandbox-backend <name>    "e2b" (default here -- AA's real protocol; isolated, real
@@ -75,6 +77,7 @@ usage() {
 MODEL=""
 API_BASE_URL=${API_BASE_URL:-""}
 NUM_TASKS=220
+TASK_IDS=""
 MAX_TURNS=250
 MAX_CONCURRENCY=4
 SANDBOX_BACKEND="e2b"
@@ -87,6 +90,7 @@ while (( $# > 0 )); do
         --model) MODEL=$2; shift 2 ;;
         --api-base-url) API_BASE_URL=$2; shift 2 ;;
         --num-tasks) NUM_TASKS=$2; shift 2 ;;
+        --task-ids) TASK_IDS=$2; shift 2 ;;
         --max-turns) MAX_TURNS=$2; shift 2 ;;
         --max-concurrency) MAX_CONCURRENCY=$2; shift 2 ;;
         --sandbox-backend) SANDBOX_BACKEND=$2; shift 2 ;;
@@ -125,7 +129,7 @@ python3 -c "import stirrup.tools.code_backends.e2b" >/dev/null 2>&1 || \
     pip install --no-cache-dir -q "stirrup[e2b]" datasets huggingface_hub openai anthropic "google-genai" 1>&2
 
 EVAL_MODEL="$MODEL" EVAL_API_BASE_URL="$API_BASE_URL" EVAL_WORKDIR="$WORKDIR" \
-GDPVAL_NUM_TASKS="$NUM_TASKS" GDPVAL_MAX_TURNS="$MAX_TURNS" \
+GDPVAL_NUM_TASKS="$NUM_TASKS" GDPVAL_TASK_IDS="$TASK_IDS" GDPVAL_MAX_TURNS="$MAX_TURNS" \
 GDPVAL_MAX_CONCURRENCY="$MAX_CONCURRENCY" GDPVAL_SANDBOX_BACKEND="$SANDBOX_BACKEND" \
 GDPVAL_E2B_TEMPLATE="$E2B_TEMPLATE" \
 python3 - <<'PY'
@@ -154,6 +158,10 @@ MAX_JUDGE_TEXT_CHARS = 20_000
 
 def load_tasks():
     dataset = load_dataset("openai/gdpval", split="train")
+    task_ids = (os.environ.get("GDPVAL_TASK_IDS") or "").split()
+    if task_ids:
+        wanted = set(task_ids)
+        return [row for row in dataset if row["task_id"] in wanted]
     num_tasks = int(os.environ.get("GDPVAL_NUM_TASKS", "220"))
     return list(dataset)[:num_tasks]
 
