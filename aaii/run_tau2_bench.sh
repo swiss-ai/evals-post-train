@@ -43,6 +43,8 @@
 #                               this endpoint, reading the key from TARGET_API_KEY (default:
 #                               scripts/cscs_serving_api_key.txt, same fallback
 #                               run_inspect_eval.sh uses).
+#   --agent-llm-args <json>    Override the agent's own litellm kwargs entirely (default: the
+#                               api_base/api_key pair built from --api-base-url/TARGET_API_KEY).
 #   --domain <name>            tau2-bench domain: airline, banking_knowledge (default, AA's
 #                               protocol), retail, telecom.
 #   --retrieval-config <name>  Only meaningful for banking_knowledge. Default: bm25_grep (AA's
@@ -92,6 +94,7 @@ DOMAIN="banking_knowledge"
 RETRIEVAL_CONFIG="bm25_grep"
 USER_LLM="gpt-5.4-mini"
 USER_LLM_ARGS_OVERRIDE=""
+AGENT_LLM_ARGS_OVERRIDE=""
 NUM_TRIALS=5
 MAX_STEPS=200
 NUM_TASKS=""
@@ -111,6 +114,7 @@ while (( $# > 0 )); do
         --retrieval-config) RETRIEVAL_CONFIG=$2; shift 2 ;;
         --user-llm) USER_LLM=$2; shift 2 ;;
         --user-llm-args) USER_LLM_ARGS_OVERRIDE=$2; shift 2 ;;
+        --agent-llm-args) AGENT_LLM_ARGS_OVERRIDE=$2; shift 2 ;;
         --num-trials) NUM_TRIALS=$2; shift 2 ;;
         --max-steps) MAX_STEPS=$2; shift 2 ;;
         --num-tasks) NUM_TASKS=$2; shift 2 ;;
@@ -142,6 +146,9 @@ if [[ -n "$API_BASE_URL" ]]; then
     AGENT_LLM="openai/$MODEL"
 else
     AGENT_LLM="$MODEL"
+fi
+if [[ -n "$AGENT_LLM_ARGS_OVERRIDE" ]]; then
+    AGENT_LLM_ARGS="$AGENT_LLM_ARGS_OVERRIDE"
 fi
 
 if [[ -n "$USER_LLM_ARGS_OVERRIDE" ]]; then
