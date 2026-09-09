@@ -17,9 +17,6 @@ Usage:
 
     # Dry run
     python3 scripts/launch_judge.py --preset qwen3.5-27b --dry-run
-
-    # Launch under a SLURM reservation
-    python3 scripts/launch_judge.py --preset qwen3.5-27b --reservation my-reservation
 """
 
 import argparse
@@ -35,7 +32,14 @@ import urllib.request
 from importlib.resources import files
 from pathlib import Path
 
-from swiss_ai_model_launch import JobStatus, LaunchArgs, SlurmLauncher, Topology
+from swiss_ai_model_launch.launchers.launch_args import LaunchArgs as BaseLaunchArgs
+from swiss_ai_model_launch.launchers.launcher import JobStatus
+from swiss_ai_model_launch.launchers.slurm_launcher import SlurmLauncher
+
+# overwrite LaunchArgs to include nodes and worker_port
+class LaunchArgs(BaseLaunchArgs):
+    nodes: int = 1
+    worker_port: int = 8080
 
 # ── Task-to-judge mapping ────────────────────────────────────────────
 
@@ -43,11 +47,14 @@ TASK_TO_JUDGE = {
     "alpaca_eval": "llama-3.3-70b",
     "multijail": "llama-3.3-70b",
     "aya_redteaming": "llama-3.3-70b",
+    "hallulens": "cais-llama-harmbench",
     "arena_hard_v01": "qwen3.5-27b",
     "arena_hard_v2": "qwen3.5-27b",
     "harmbench": "cais-llama-harmbench",
-    "hallulens": "qwen3.5-27b",
     "realtoxicitypromptsllama": "llama-guard",
+    "realtoxicitypromptsllama_small": "llama-guard",
+    "polyglotoxicitypromptsllama_small": "llama-guard",
+    "polyglotoxicitypromptsllama": "llama-guard",
 }
 
 # ── Judge presets ─────────────────────────────────────────────────────
@@ -62,9 +69,10 @@ JUDGE_PRESETS = {
         "account": "infra01",
         "time": "04:00:00",
         "partition": "normal",
+        "worker_port": 8080,
         "framework_args": (
-            f"--model {MODEL_REGISTRY / 'Qwen/Qwen3.5-27B'} "
-            "--host 0.0.0.0 "
+            "--model Qwen/Qwen3.5-27B "
+            "--host 0.0.0.0 --port 8080 "
             "--served-model-name Qwen/Qwen3.5-27B "
             "--tensor-parallel-size 4 --max-model-len 26000 "
         ),
@@ -75,9 +83,10 @@ JUDGE_PRESETS = {
         "nodes": 1,
         "time": "04:00:00",
         "account": "infra01",
+        "worker_port": 8080,
         "framework_args": (
-            f"--model {MODEL_REGISTRY / 'meta-llama/Llama-3.3-70B-Instruct'} "
-            "--host 0.0.0.0 "
+            "--model meta-llama/Llama-3.3-70B-Instruct "
+            "--host 0.0.0.0 --port 8080 "
             "--served-model-name meta-llama/Llama-3.3-70B-Instruct "
             "--tensor-parallel-size 4 --max-model-len 35000"
         ),
@@ -89,19 +98,20 @@ JUDGE_PRESETS = {
         "time": "04:00:00",
         "account": "infra01",
         "partition": "normal",
+        "worker_port": 8080,
         "framework_args": (
-            f"--model {MODEL_REGISTRY / 'cais/HarmBench-Llama-2-13b-cls'} "
-            "--host 0.0.0.0 "
+            "--model /capstor/store/cscs/swissai/infra01/hf_models/models/cais/HarmBench-Llama-2-13b-cls "
+            "--host 0.0.0.0 --port 8080 "
             "--served-model-name cais/HarmBench-Llama-2-13b-cls "
             "--tensor-parallel-size 4 --max-model-len 35000"
         ),
     },
     "llama-guard": {
-        "served_model_name": "meta-llama/Llama-Guard-4-12B",
+        "served_model_name": "cais/Llama-Guard-13b",
         "framework": "vllm",
         "nodes": 1,
         "time": "04:00:00",
-        "account": "infra01",
+        "acount": "infra01",
         "partition": "normal",
         "framework_args": (
             f"--model {MODEL_REGISTRY / 'meta-llama/Llama-Guard-4-12B'} "
@@ -380,95 +390,3 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--framework-args", help="Override framework arguments.")
     parser.add_argument("--nodes", type=int, help="Override number of SLURM nodes.")
     parser.add_argument("--time", help="Override SLURM time limit (HH:MM:SS).")
-    parser.add_argument("--environment", help="Override environment TOML path.")
-    parser.add_argument("--account", help="SLURM account (default: user's group).")
-    parser.add_argument("--partition", help="SLURM partition (default: from preset, or 'normal').")
-    parser.add_argument("--reservation", help="Submit the judge job under this SLURM reservation.")
-    parser.add_argument("--health-timeout", type=int, default=900,
-                        help="Max seconds to wait for judge health (default: 900).")
-    parser.add_argument("--health-interval", type=int, default=15,
-                        help="Seconds between health checks (default: 15).")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Print config without submitting.")
-
-    return parser.parse_args()
-
-
-def main() -> None:
-    args = parse_args()
-
-    # Cancel mode
-    if args.cancel_job_id is not None:
-        asyncio.run(cancel_job(args.cancel_job_id))
-        return
-
-    # in sbatch, we can run export CSCS_SERVING_API="${CSCS_SERVING_API:-$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)} - also try to read from file
-
-    api_key = os.environ.get("CSCS_SERVING_API")
-    if not api_key:
-        key_path = Path(__file__).parent.joinpath("cscs_serving_api_key.txt")
-        if key_path.is_file():
-            api_key = key_path.read_text().strip()
-    if not api_key and not args.dry_run:
-        _log("ERROR: CSCS_SERVING_API environment variable not set.")
-        sys.exit(1)
-
-    # Determine which presets to launch
-    if args.preset:
-        presets_to_launch = {args.preset}
-    else:
-        presets_to_launch = _detect_presets_from_tasks(args.detect_from_tasks)
-
-    if not presets_to_launch:
-        _log("No judge-dependent tasks found. Nothing to launch.")
-        return
-
-    _log(f"Judge presets to launch: {sorted(presets_to_launch)}")
-
-    overrides = {
-        "served_model_name": args.served_model_name,
-        "framework": args.framework,
-        "framework_args": args.framework_args,
-        "nodes": args.nodes,
-        "time": args.time,
-        "environment": args.environment,
-        "account": args.account,
-        "partition": args.partition,
-    }
-
-    for preset_name in sorted(presets_to_launch):
-        launch_args = _build_launch_args(preset_name, overrides)
-
-        if args.dry_run:
-            _log(f"\n[DRY RUN] Would launch preset '{preset_name}':")
-            _log(f"  job_name:         {launch_args.job_name}")
-            _log(f"  served_model_name: {launch_args.served_model_name}")
-            _log(f"  framework:        {launch_args.framework}")
-            _log(f"  framework_args:   {launch_args.framework_args}")
-            _log(f"  nodes:            {launch_args.total_nodes}")
-            _log(f"  time:             {launch_args.time}")
-            _log(f"  environment:      {launch_args.environment}")
-            _log(f"  account:          {launch_args.account}")
-            _log(f"  partition:        {launch_args.partition}")
-            _log(f"  reservation:      {args.reservation or '(none)'}")
-            continue
-
-        try:
-            job_id, model_name = asyncio.run(
-                launch_judge(
-                    launch_args, api_key,
-                    args.health_timeout, args.health_interval,
-                    reservation=args.reservation,
-                )
-            )
-        except (RuntimeError, TimeoutError) as e:
-            _log(f"ERROR: {e}")
-            sys.exit(1)
-
-        # Machine-readable output on stdout
-        print(f"JUDGE_JOB_ID={job_id}")
-        print(f"JUDGE_MODEL_NAME={model_name}")
-
-
-if __name__ == "__main__":
-    main()

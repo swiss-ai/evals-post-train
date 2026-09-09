@@ -197,7 +197,7 @@ submit_evaluation() {
         "$state_dir/expected_tasks.txt"; then
         repo="ymetz/lm-evaluation-harness"
     else
-        repo="swiss-ai/lm-evaluation-harness"
+        repo="ymetz/lm-evaluation-harness"
     fi
     _eval_prepare_environment "$state_dir" "$repo"
 
