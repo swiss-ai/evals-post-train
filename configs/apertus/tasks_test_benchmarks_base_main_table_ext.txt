@@ -1,0 +1,4 @@
+# Test Benchmarks
+agieval/acc
+arc_multilingual/acc
+mmlu_pro/exact_match

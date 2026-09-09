@@ -1,0 +1,8 @@
+# Test Benchmarks (thinking mode)
+arc_challenge_chat/exact_match
+gpqa_main_cot_zeroshot/exact_match,ordered-extract
+gsm8k_platinum_cot_zeroshot/exact_match
+mlogiqa_gen/exact_match
+global_mmlu_gen_0shot/exact_match
+mmlu_flan_cot_zeroshot/exact_match,ordered-extract
+ifeval/prompt_level_loose_acc

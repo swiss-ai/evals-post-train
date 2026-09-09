@@ -1,0 +1,7 @@
+arc_challenge_chat
+gpqa_main_cot_zeroshot
+gsm8k_platinum_cot_zeroshot
+mlogiqa_gen
+mmlu_flan_cot_zeroshot
+global_mmlu_gen_0shot
+ifeval

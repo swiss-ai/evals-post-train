@@ -186,7 +186,12 @@ submit_aggregator() {
     export LOGS_ROOT="$CLEAN_PREFIX"
     
     # Pass positional arguments to aggregate_splits.sbatch
-    local agg_cmd=("sbatch" "--account" "$ACCOUNT")
+    # --time explicit here (matching the script's own directive): SBATCH_TIMELIMIT is an
+    # env var and, if a caller exported one for the eval jobs (e.g. a 12h budget for a slow
+    # generative task), it is still present in this job's own environment and would
+    # otherwise silently inflate this quick merge+upload step to the same 12h. A CLI --time
+    # always wins over the env var, independent of whatever SBATCH_TIMELIMIT happens to be.
+    local agg_cmd=("sbatch" "--account" "$ACCOUNT" "--time" "00:30:00")
     if [[ -n "$RESERVATION" ]]; then agg_cmd+=("--reservation" "$RESERVATION"); fi
     agg_cmd+=("scripts/aggregate_splits.sbatch" "$MODEL" "$RUN_BASENAME")
     

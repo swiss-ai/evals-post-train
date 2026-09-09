@@ -120,7 +120,14 @@ def create_model_evaluation_from_results(
         task_metrics = []
         task_metric_map = defaultdict(list)
         for metric, value in metrics.items():
-            if metric == "alias" or value in ["N/A", " ", None]:
+            # lm-eval carries bookkeeping entries alongside the scores: "alias" and,
+            # since 0.4.13, "name" (the task name again) and "sample_len" (a count).
+            # They are not metrics - float("arc_ar") raised
+            # "ValueError: could not convert string to float: 'arc_ar'".
+            # The isinstance guard covers whatever bookkeeping gets added next.
+            if metric in ("alias", "name", "sample_len"):
+                continue
+            if value in ["N/A", " ", None] or not isinstance(value, (int, float)):
                 continue
 
             metric_parts = metric.split(",")

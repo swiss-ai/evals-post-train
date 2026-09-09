@@ -1,0 +1,3 @@
+agieval
+arc_multilingual
+mmlu_pro

@@ -503,17 +503,71 @@ if [[ -n "$LM_EVAL_HARNESS_BRANCH" ]]; then
     LM_EVAL_HARNESS_PIP_SPEC="${LM_EVAL_HARNESS_PIP_SPEC}@${LM_EVAL_HARNESS_BRANCH}"
 fi
 
+# Compute nodes cannot always reach github.com, which kills the job before lm_eval is installed. Point
+# LM_EVAL_HARNESS_LOCAL at a shared-filesystem source to install from instead; if the env variable is unset,
+# behaviour is unchanged.
+#
+# Prefer a prebuilt wheel: installing from a source directory makes every concurrent job
+# build in the same in-tree build/ directory, and they delete each other's files.
+if [[ -n "${LM_EVAL_HARNESS_LOCAL:-}" ]]; then
+    if [[ -f "$LM_EVAL_HARNESS_LOCAL" || -d "$LM_EVAL_HARNESS_LOCAL" ]]; then
+        LM_EVAL_HARNESS_PIP_SPEC="$LM_EVAL_HARNESS_LOCAL"
+        echo "Using local lm-evaluation-harness: $LM_EVAL_HARNESS_LOCAL"
+        [[ -d "$LM_EVAL_HARNESS_LOCAL" ]] && \
+            echo "WARNING: installing from a source dir; concurrent jobs may collide. Prefer a wheel." >&2
+    else
+        echo "LM_EVAL_HARNESS_LOCAL='$LM_EVAL_HARNESS_LOCAL' not found; falling back to git" >&2
+    fi
+fi
+
+# Apertus-v1.5 is served from an image built for it, and the install list below is
+# written for the general-purpose one. Two things have to change for it:
+#   - transformers must not be re-pinned. The image's 5.14.0.dev0 is the only build that
+#     registers apertus1p5, and vLLM resolves config.json through AutoConfig, so replacing it makes the model unloadable.
+#   - ray must be installed. lm-eval's vLLM backend imports it at module scope and that
+#     image does not ship it, unlike the general-purpose one.
+SERVE_APERTUS1P5=0
+if [[ -f "$HF_CHECKPOINT_PATH/config.json" ]] && \
+   grep -q '"model_type"[[:space:]]*:[[:space:]]*"apertus1p5"' "$HF_CHECKPOINT_PATH/config.json"; then
+    SERVE_APERTUS1P5=1
+fi 
+echo "Serving apertus1p5: $SERVE_APERTUS1P5"
+
+if (( SERVE_APERTUS1P5 )); then
+    TRANSFORMERS_SPEC=""
+    # This image's vLLM is a .precompiled build whose kernels come from
+    # humming-kernels and it requires ==0.1.10, so it is not forced to 0.1.2 here.
+    HUMMING_SPEC=""
+    EXTRA_PKGS="ray"
+
+    # Machete (the W8A16/W4A16 GEMM these compressed-tensors checkpoints select) dies
+    # with "Machete kernel failed to initialize workspace" on the very first matmul, but
+    # only when tensor parallelism and torch.compile/CUDA graphs are combined. Measured
+    # on the 8B INT8 checkpoint:
+    #     TP=1 eager    OK        TP=1 compiled   OK
+    #     TP=4 eager    OK        TP=4 compiled   FAILS
+    # enforce_eager keeps TP working at the cost of CUDA graphs (slower decode).
+    if [[ "$COMMON_MODEL_ARGS" != *enforce_eager* ]]; then
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enforce_eager=True"
+        echo "apertus1p5: added enforce_eager=True (Machete + TP + cudagraphs crash)"
+    fi
+else
+    TRANSFORMERS_SPEC="\"transformers==5.12.1\""
+    HUMMING_SPEC="\"humming-kernels[cu13]==0.1.2\""
+    EXTRA_PKGS=""
+fi
+
 INSTALL_CMD="pip install --no-cache-dir --upgrade \"$LM_EVAL_HARNESS_PIP_SPEC\" && \
 pip install --no-cache-dir --upgrade \
     \"huggingface-hub>=1.3.0,<2.0\" \
-    \"transformers==5.12.1\" \
+    $TRANSFORMERS_SPEC \
     \"accelerate>=1.1.0\" \
     \"antlr4-python3-runtime==4.11\" \
     \"datasketch<2.0\" \
     segtok \
     \"tokenizers>=0.22.0,<0.23.0\" \
     mistral-common \
-    \"humming-kernels[cu13]==0.1.2\" \
+    $HUMMING_SPEC \
     tenacity \
     sympy \
     spacy \
@@ -526,7 +580,8 @@ pip install --no-cache-dir --upgrade \
     hf-transfer \
     subset2evaluate \
     \"alpaca-eval>=0.6.2\" \
-    \"peft>=0.19.0\"  "
+    \"peft>=0.19.0\" \
+    $EXTRA_PKGS "
 
 # qwen 3.5
 # Patch hallulens judge model to a self-launched judge (JUDGE_MODEL set at submit time)   #################################################
@@ -573,6 +628,10 @@ elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 fi
 
+LM_EVAL_TIMEOUT="${LM_EVAL_TIMEOUT:-11.5h}"
+CMD="timeout --kill-after=1m $LM_EVAL_TIMEOUT $CMD"
+echo "lm_eval wall-clock cap: $LM_EVAL_TIMEOUT (SIGTERM, then SIGKILL after 1m)"
+
 # Resolve the generation budget in-container, after the harness install (task YAMLs present):
 # a MAX_NEW_TOKENS floor, never lowered below a task's own larger max_gen_toks (AIME's 32768).
 # Fail-safe: falls back to MAX_NEW_TOKENS on any error. Prepended so it runs before lm_eval.
@@ -606,8 +665,19 @@ export FLASHINFER_WORKSPACE_BASE=$FLASHINFER_WORKSPACE_BASE
 mkdir -p $HF_DATASETS_CACHE $NLTK_DATA $TRITON_CACHE_DIR $TIKTOKEN_CACHE_DIR $PYTHONUSERBASE $MPLCONFIGDIR $SPACY_DATA $FLASHINFER_WORKSPACE_BASE
 "
 
+# Serving container, chosen from the same architecture detection as the installs above:
+# apertus1p5 has a vLLM registry entry only in the Apertus-1.5 image. An explicit
+# VLLM_ENV_FILE from the caller still wins.
+if (( SERVE_APERTUS1P5 )); then
+    VLLM_ENV_FILE="${VLLM_ENV_FILE:-./containers/env_vllm_apertus1p5.toml}"
+else
+    VLLM_ENV_FILE="${VLLM_ENV_FILE:-./containers/env_vllm.toml}"
+fi
+echo "vLLM serving environment: $VLLM_ENV_FILE"
+
+
 if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
-  srun -n 1 --mpi=pmix -ul --environment=./containers/env_vllm.toml bash -lc "
+  srun -n 1 --mpi=pmix -ul --environment="$VLLM_ENV_FILE" bash -lc "
     set -euo pipefail
     unset SSL_CERT_FILE
     export HF_DATASETS_TRUST_REMOTE_CODE=1
@@ -620,7 +690,7 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     "
 elif [[ $LM_EVAL_BACKEND == "vllm" ]]; then
   # vLLM needs to run with a single process that manages all GPUs, so we run the install and eval in the same command to avoid issues with environment persistence across srun calls
-  srun -n 1 --mpi=pmix -ul --environment=./containers/env_vllm.toml bash -lc "
+  srun -n 1 --mpi=pmix -ul --environment="$VLLM_ENV_FILE" bash -lc "
     set -euo pipefail
     unset SSL_CERT_FILE
     export HF_DATASETS_TRUST_REMOTE_CODE=1

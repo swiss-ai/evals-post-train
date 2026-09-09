@@ -25,7 +25,10 @@ def get_log(infos: List[dict], tasks_cfg: dict) -> Dict[str, float]:
     log = collections.defaultdict(dict)
     for dataname, details in results.items():
         for metricname, val in details.items():
-            if metricname == "alias" or val in ["N/A", " "]:
+            # lm-eval carries bookkeeping entries alongside the scores: "alias" and,
+            # since 0.4.13, "name" (the task name again) and "sample_len" (a count).
+            # Neither is a metric, and "name" is a str, so it would trip the assert.
+            if metricname in ("alias", "name", "sample_len") or val in ["N/A", " "]:
                 continue
             assert isinstance(val, float), val
             metricname, _ = metricname.split(",")  # for some reason it is always acc,none so we remove the none.
