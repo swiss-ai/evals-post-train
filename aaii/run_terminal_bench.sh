@@ -46,6 +46,14 @@
 #                               the version this repo pins, $TB_HARBOR_VERSION_DEFAULT below).
 #   --job-name <name>           Harbor's own job-name, used as the results subdirectory
 #                               (default: evalspt).
+#   --ak <key=value>            Harbor's own repeatable --ak flag: an arbitrary agent kwarg,
+#                               e.g. --ak model_info='{"max_input_tokens": 32000, ...}' -- needed
+#                               for a gateway model litellm knows nothing about, or Terminus 2
+#                               assumes a 1M-token context and never summarises.
+#   --env <value>               Harbor's own --env: an environment provider other than the
+#                               default Docker one (e.g. a pod-per-trial Kubernetes provider).
+#                               Skips all Docker/podman detection here entirely -- that provider
+#                               needs no local container runtime.
 #   --workdir <path>            Scratch dir for the Harbor job output (default: a temp dir under
 #                               /tmp).
 #   -- <extra args>              Forwarded verbatim to `harbor run`.
@@ -80,7 +88,9 @@ TIMEOUT_MULTIPLIER="1.0"
 MAX_CONCURRENCY=4
 HARBOR_VERSION="$TB_HARBOR_VERSION_DEFAULT"
 JOB_NAME="evalspt"
+HARBOR_ENV=""
 WORKDIR=""
+AGENT_KWARGS=()
 EXTRA_ARGS=()
 
 while (( $# > 0 )); do
@@ -96,6 +106,8 @@ while (( $# > 0 )); do
         --max-concurrency) MAX_CONCURRENCY=$2; shift 2 ;;
         --harbor-version) HARBOR_VERSION=$2; shift 2 ;;
         --job-name) JOB_NAME=$2; shift 2 ;;
+        --env) HARBOR_ENV=$2; shift 2 ;;
+        --ak) AGENT_KWARGS+=("$2"); shift 2 ;;
         --workdir) WORKDIR=$2; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         --) shift; EXTRA_ARGS+=("$@"); break ;;
@@ -131,19 +143,35 @@ else
     export PATH="$WORKDIR/venv/bin:$PATH"
 fi
 
+# A Harbor environment other than docker (--env, e.g. a pod-per-trial Kubernetes provider) needs
+# no container runtime here at all -- skip straight to invoking harbor with --env below. A
+# docker:dind sidecar (k8s, when --env isn't used) takes a moment to come up: wait for the
+# daemon DOCKER_HOST points at before deciding which runtime we have.
+if [[ -n "$HARBOR_ENV" ]]; then
+    echo "harbor environment: $HARBOR_ENV"
+elif [[ -n "${DOCKER_HOST:-}" ]]; then
+    for _ in $(seq 1 45); do
+        docker info >/dev/null 2>&1 && break
+        sleep 2
+    done
+fi
+
 # Container runtime for the task environments: a real Docker daemon if there is one, else
 # rootless podman through a docker-compatible shim (same fallback evals-svc's own runner uses;
-# see the module docstring for why this is needed on Clariden).
+# see the module docstring for why this is needed on Clariden). Skipped entirely when --env is
+# given -- that Harbor environment provider needs no local container runtime.
 STATUS_OK=1
 DOCKER_IS_PODMAN=0
-if command -v podman >/dev/null 2>&1; then
+if [[ -z "$HARBOR_ENV" ]] && command -v podman >/dev/null 2>&1; then
     if ! command -v docker >/dev/null 2>&1; then
         DOCKER_IS_PODMAN=1
     elif [[ "$(docker --version 2>&1 || true)" == *odman* ]]; then
         DOCKER_IS_PODMAN=1
     fi
 fi
-if [[ "$DOCKER_IS_PODMAN" = 1 ]]; then
+if [[ -n "$HARBOR_ENV" ]]; then
+    :
+elif [[ "$DOCKER_IS_PODMAN" = 1 ]]; then
     STORAGE_ROOT="${TMPDIR:-/tmp}/terminal-bench-$(id -u)/podman"
     mkdir -p "$STORAGE_ROOT/run" "$WORKDIR/bin"
     cat > "$WORKDIR/storage.conf" <<CONF
@@ -184,6 +212,8 @@ fi
 ARGS=(run -a "$AGENT" -m "$AGENT_MODEL"
       -k "$NUM_TRIALS" -n "$MAX_CONCURRENCY" --timeout-multiplier "$TIMEOUT_MULTIPLIER"
       -o "$WORKDIR/jobs" --job-name "$JOB_NAME" -y -q)
+[[ -n "$HARBOR_ENV" ]] && ARGS+=(--env "$HARBOR_ENV")
+for kv in "${AGENT_KWARGS[@]}"; do ARGS+=(--ak "$kv"); done
 if [[ -n "$TASK_NAMES" ]]; then
     IFS=',' read -ra NAMES <<< "$TASK_NAMES"
     for t in "${NAMES[@]}"; do ARGS+=(-t "$t"); done
