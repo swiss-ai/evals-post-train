@@ -1135,23 +1135,23 @@ python -m scripts.alignment.update_wandb_inspect --entity <entity> --project <pr
 
 ---
 
-## Alternative: tau-bench / terminal-bench / GDPval-AA v2 (standalone AA-protocol runners)
+## Alternative: tau2-bench / terminal-bench / GDPval-AA v2 (standalone AA-protocol runners)
 
 Three more Artificial-Analysis-aligned benchmarks, each its own standalone script rather than an Inspect AI task — none of these three go through `run_inspect_eval.sh` or `inspect_evals` at all. This repo already documents *different*, narrower `inspect_evals` ports of tau2-bench and GDPval above (in the Inspect AI section) — those are independent implementations, not the same code as the scripts below, and don't necessarily match Artificial Analysis's real protocol values. There is no `inspect_evals` port of Terminal-Bench at all.
 
 Each script installs its own dependencies at runtime (tau2-bench/Harbor/Stirrup), takes `--model`/`--api-base-url` the same way `run_inspect_eval.sh` does (falling back to `scripts/cscs_serving_api_key.txt` for the serving key), bakes in Artificial Analysis's protocol defaults, and writes results to a local scratch dir instead of posting to a callback (unlike evals-svc's own copies of this same logic, which these scripts were extracted from). See each script's own `--help` for full options.
 
 ```bash
-# tau-bench (tau2-bench v1.0.1, banking_knowledge domain, bm25_grep retrieval, 5 trials, 200
+# tau2-bench (tau2-bench v1.0.1, banking_knowledge domain, bm25_grep retrieval, 5 trials, 200
 # max steps -- AA's tau^3-Banking protocol). Needs a "user simulator" model too (default
 # openai/gpt-5.4-mini, needs OPENAI_API_KEY) -- smoke test with a couple of tasks/one trial:
-scripts/run_tau_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+aaii/run_tau2_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
   --api-base-url https://api.swissai.svc.cscs.ch/v1 --num-tasks 2 --num-trials 1
 
 # terminal-bench (Harbor, Terminus 2 agent, terminal-bench-2-1 dataset, 3 trials). Needs a real
 # Docker daemon or podman (the script falls back to podman through a docker-compatible shim,
 # same as evals-svc's own runner does on Clariden) -- smoke test with one task/one trial:
-scripts/run_terminal_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+aaii/run_terminal_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
   --api-base-url https://api.swissai.svc.cscs.ch/v1 --num-tasks 1 --num-trials 1
 
 # GDPval-AA v2 (Stirrup, the full 220-task openai/gdpval gold set, up to 250 turns, E2B sandbox
@@ -1159,7 +1159,7 @@ scripts/run_terminal_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
 # subprocess backend instead). Grading needs at least one of
 # GDPVAL_JUDGE_{OPENAI,GOOGLE,ANTHROPIC}_API_KEY set -- ungraded deliverables are still
 # written. Smoke test, free sandbox, no grading:
-scripts/run_gdpval.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+aaii/run_gdpval.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
   --api-base-url https://api.swissai.svc.cscs.ch/v1 --sandbox-backend local --num-tasks 1
 ```
 

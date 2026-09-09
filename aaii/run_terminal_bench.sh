@@ -24,7 +24,7 @@
 # --model is passed straight through (needs its own OPENAI_API_KEY).
 #
 # Usage:
-#   scripts/run_terminal_bench.sh --model <model> [--api-base-url <url>] [options]
+#   aaii/run_terminal_bench.sh --model <model> [--api-base-url <url>] [options]
 #
 # Required:
 #   --model <model>            Model under test. With --api-base-url, the served model name;
@@ -53,7 +53,7 @@
 # same metrics evals-svc's own results-parsing computes.
 #
 # Example (smoke test against a CSCS-served model):
-#   scripts/run_terminal_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+#   aaii/run_terminal_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
 #     --api-base-url https://api.swissai.svc.cscs.ch/v1 --num-tasks 1 --num-trials 1
 
 set -uo pipefail

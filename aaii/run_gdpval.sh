@@ -23,7 +23,7 @@
 # straight through Stirrup's OpenAI-SDK client (needs its own OPENAI_API_KEY).
 #
 # Usage:
-#   scripts/run_gdpval.sh --model <model> [--api-base-url <url>] [options]
+#   aaii/run_gdpval.sh --model <model> [--api-base-url <url>] [options]
 #
 # Required:
 #   --model <model>             Model under test.
@@ -59,7 +59,7 @@
 # note that no judge credentials were configured).
 #
 # Example (smoke test, free local sandbox, no grading credentials):
-#   scripts/run_gdpval.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+#   aaii/run_gdpval.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
 #     --api-base-url https://api.swissai.svc.cscs.ch/v1 --sandbox-backend local --num-tasks 1
 
 set -uo pipefail
