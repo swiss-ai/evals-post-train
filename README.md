@@ -16,9 +16,10 @@ Evaluation infrastructure for benchmarking Large Language Models on SLURM cluste
 10. [SBATCH Scripts](#sbatch-scripts)
 11. [Multi-Model Scripts](#multi-model-scripts)
 12. [Container Setup](#container-setup)
-13. [Notes](#notes)
-14. [Extending the Pipeline](#extending-the-pipeline)
-15. [Repository Structure](#repository-structure)
+13. [Alternative: Inspect AI evals](#alternative-inspect-ai-evals)
+14. [Notes](#notes)
+15. [Extending the Pipeline](#extending-the-pipeline)
+16. [Repository Structure](#repository-structure)
 
 ---
 
@@ -49,7 +50,7 @@ bash scripts/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B
   --backend openai --api-base-url http://nid001234:8000
 
 # Evaluate a base model with 5-shot and easy eval set (matching OLMo3 technical report settings)
-bash scripts/launch_evaluations.sh olmo-easy --model Qwen/Qwen2.5-7B --num-fewshot 5
+bash scripts/launch_evaluations.sh olmo-easy --model Qwen/Qwen2.5-7B --num-fewshot 5 --no-chat-template
 
 # Evaluate a small model on a single task, useful for testing newly implemented tasks
 bash scripts/launch_evaluations.sh single --task multijail --model meta-llama/Llama-3.2-3B --backend vllm
@@ -69,7 +70,7 @@ python make_html_table.py --thinking --metrics-file configs/apertus/tasks_posttr
 
 ### Benchmark Suites
 
-The launcher selects a benchmark suite from its first positional argument (`<mode>`). Apertus suites are defined in `configs/apertus/`, OLMo3 suites in `configs/olmo/`.
+The launcher selects a benchmark suite from its optional first positional argument (`<mode>`); omitting it defaults to `posttrain`. Apertus suites are defined in `configs/apertus/`, OLMo3 suites in `configs/olmo/`.
 
 **Apertus suites** (`configs/apertus/`)
 
@@ -97,7 +98,7 @@ The launcher selects a benchmark suite from its first positional argument (`<mod
 | `olmo-longcontext` | 1 task | Long-Context: RULER (8192 tokens) |
 | `olmo-complete` | 24 tasks | Curated combined suite (excludes long-context; see the task file for intentionally omitted tasks) |
 
-Each mode maps to a task list and a metric config (`*_main_table.txt`) in the same directory. OLMo3 modes log to a per-mode W&B project (the base `WANDB_PROJECT` with a `-olmo-<suite>` suffix, e.g. `swissai-evals-test-olmo-easy`); the `single` mode appends `-single`.
+Each mode maps to a task list and a metric config (`*_main_table.txt`) in the same directory. OLMo3 modes log to a per-mode W&B project (the base `WANDB_PROJECT` with a `-olmo-<suite>` suffix, e.g. `<project>-olmo-easy`); the `single` mode appends `-single`. The launcher defaults `WANDB_PROJECT` to `apertus-1.5-post-training-v0.0` (not `evaluate.sbatch`'s own `swissai-evals-test` default — see [SBATCH Scripts](#sbatch-scripts)); export `WANDB_PROJECT` yourself for test/smoke runs to avoid logging into the production project.
 
 ### Model Selection Modes
 
@@ -105,7 +106,12 @@ Each mode maps to a task list and a metric config (`*_main_table.txt`) in the sa
 ```bash
 bash scripts/launch_evaluations.sh <mode> --model <hf_path_or_local_path> [options]
 ```
-Automatically derives the run name and detects whether to apply a chat template based on the model name (patterns: `-Instruct`, `-Chat`, `-SFT`, `-DPO`, `-it`, `-aligned`).
+Automatically derives the run name; the chat template is applied by default for every model (pass `--no-chat-template` to disable it).
+
+The mode may be omitted for the default post-training suite:
+```bash
+bash scripts/launch_evaluations.sh --model <hf_path_or_local_path> [options]
+```
 
 **Mode 2: Model-list script** (for batch evaluation of predefined model sets)
 ```bash
@@ -113,18 +119,13 @@ bash scripts/launch_evaluations.sh <mode> --script runners/hf_eval_multiple_othe
 ```
 Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `hf_base_runner.sh`.
 
-**Mode 3: Default scripts** (edit the `EVALUATION_SCRIPTS` array inside the launcher)
-```bash
-bash scripts/launch_evaluations.sh <mode>
-```
-
 ### Options / Key Hyperparameters
 
 | Flag | Description |
 |------|-------------|
 | `--name <name>` | Override the auto-derived evaluation run name |
 | `--task <task>` | Task name(s) for `single` mode (single task or comma-separated list) |
-| `--chat-template` | Force enable chat template (auto-detected for Instruct/Chat/SFT/DPO/-it/-aligned models) |
+| `--chat-template` | Force enable chat template (applied by default for every model) |
 | `--no-chat-template` | Force disable chat template |
 | `--tokenizer <path>` | Custom tokenizer (default: same as model) |
 | `--num-fewshot N` | Override num_fewshot globally. Tasks with explicit `num_fewshot: 0` in their YAML are never overridden. OLMo3 paper uses 5-shot for most MC tasks. |
@@ -164,7 +165,7 @@ bash scripts/launch_evaluations.sh <mode>
 
 ### Judge Model Launching
 
-Some LLM-as-a-judge tasks require a separate model to be available through the CSCS serving API. Pass `--judge auto` to scan the selected task list and launch the required judge models before submitting the evaluations:
+Some LLM-as-a-judge tasks require a separate model to be available through the CSCS serving API. Pass `--judge auto` to launch the required judge models after the resume scan, and only when judge-dependent tasks are still missing:
 
 ```bash
 bash scripts/launch_evaluations.sh posttrain \
@@ -236,7 +237,7 @@ continues to use the CSCS judge setup described above.
 
 ```bash
 # OLMo3 paper-faithful 5-shot evaluation
-bash scripts/launch_evaluations.sh olmo-complete --model allenai/OLMo-2-1124-7B --num-fewshot 5
+bash scripts/launch_evaluations.sh olmo-complete --model allenai/OLMo-2-1124-7B --num-fewshot 5 --no-chat-template
 
 # Large model with vLLM, eight tasks per chunk and four concurrent chunks
 bash scripts/launch_evaluations.sh default \
@@ -267,7 +268,7 @@ bash scripts/launch_evaluations.sh custom \
 
 ### How it works
 
-1. The task list is normalized and existing `eval_*` result directories are scanned.
+1. The task list and a normalized run configuration are recorded, then existing `eval_*` result directories are scanned. Only outputs with the same model/checkpoint, backend, harness ref, limit, few-shot, tokenizer/chat, and generation settings are eligible for resume; legacy or differently configured outputs are rerun.
 2. Missing tasks are grouped into `--chunk-size N` chunks and submitted as one Slurm array. `--max-parallel` adds the array `%N` concurrency limit; by default every chunk may run.
 3. A CPU controller runs with an `afterany` dependency, so it runs even when an array element fails.
 4. The controller rescans results. If tasks remain and retry budget is available, it submits only those tasks again with the chunk size halved.
@@ -682,7 +683,7 @@ Results are automatically uploaded to W&B after evaluation completes (or after a
 
 - **`main_results`** table: summary metrics specified in the `*_main_table.txt` config
 - **Flat metrics**: all task metrics logged as `task_name/metric_name`
-- **`eval_duration`**: wall-clock time for a direct/fail-fast evaluation; chunk aggregation uses `EVAL_DURATION` when supplied and otherwise records `0`
+- **`eval_duration`**: evaluation-only runtime for a direct/fail-fast evaluation; chunk aggregation sums the runtimes recorded by completed chunks (an explicit `EVAL_DURATION` overrides this for legacy recovery)
 
 Because *every* flat metric is uploaded — not just the `*_main_table.txt` subset — the
 [thinking metrics](#thinking--reasoning-metrics) reach W&B as `task_name/thinking_format_correct`
@@ -821,7 +822,7 @@ python make_table.py \
 
 Primary SLURM job script for HuggingFace-compatible model evaluation.
 
-**Resources**: 1 node, 4 GPUs, 200 CPUs, 460GB memory, 11h59m time limit.
+**Resources**: local-model backends use `evaluate.sbatch` with 1 node, 4 GPUs, 200 CPUs, 460GB memory, and an 11h59m limit. The `openai` backend is selected automatically through the CPU-only `evaluate_api.sbatch` wrapper with 16 CPUs and 64GB memory.
 
 **Positional arguments**: `<model_path> <name>`
 
@@ -861,10 +862,11 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `HARNESS_LIMIT` | (unset) | Limit number of samples per task (set by launcher flag `--limit`) |
 | `NUM_FEWSHOT` | (unset) | Global few-shot override |
 | `EVAL_ENV_MANIFEST` | required | Immutable base-environment and harness-overlay paths produced by `prepare_eval_env.sbatch` |
+| `EVAL_RUN_CONFIG` | required | Launcher-generated normalized provenance used to exclude incompatible results during resume |
 | `EVAL_CHUNKS_FILE` | (unset) | One comma-separated task chunk per line; indexed by `SLURM_ARRAY_TASK_ID` |
 | `LOGS_ROOT` | `$SCRATCH/eval_logs_start/` | Root directory for evaluation logs |
 | `WANDB_ENTITY` | `apertus` | W&B entity |
-| `WANDB_PROJECT` | `swissai-evals-test` | W&B project |
+| `WANDB_PROJECT` | `swissai-evals-test` | W&B project. This is `evaluate.sbatch`'s own default when invoked directly; `launch_evaluations.sh` sets its own default of `apertus-1.5-post-training-v0.0` before the sbatch script ever runs (see [The Launch Script](#the-launch-script)), so export `WANDB_PROJECT` explicitly to keep test/smoke runs out of the production project. |
 | `ENABLE_THINKING` | `false` | Chat-template argument: whether the model reasons. Emitted for `hf` **only when set explicitly**. |
 | `AUTODETECT_THINK_TOKENS` | `false` | Read the reasoning open/close tokens from the chat template |
 | `THINK_START_TOKEN` | (unset) | Force the reasoning open token, e.g. `<think>` |
@@ -962,11 +964,110 @@ used entries remain active under age-based scratch retention policies.
 
 ---
 
+## Alternative: Inspect AI evals
+
+[Inspect AI](https://inspect.aisi.org.uk/) (UK AISI's eval framework) and its [`inspect_evals`](https://github.com/UKGovernmentBEIS/inspect_evals) collection give access to benchmarks not covered by the lm-evaluation-harness suites above (e.g. tau2-bench, an agentic tool-use benchmark). Inspect's execution and logging model (task registry, model roles, `.eval` log files) differs enough from lm-eval-harness's that these run through their own script, `scripts/run_inspect_eval.sh`, instead of `launch_evaluations.sh`.
+
+Run it directly (e.g. on a login node) or, like the rest of this pipeline, as a SLURM job via `scripts/run_inspect_eval.sbatch`, which forwards all arguments to `run_inspect_eval.sh` inside the same container as the other backends -- but requests CPU-only resources, since these benchmarks evaluate an already-running served endpoint rather than loading a model in-job:
+
+```bash
+# --reservation is a native sbatch flag (run_inspect_eval.sbatch has no --reservation of its
+# own -- everything after the script path is forwarded verbatim to run_inspect_eval.sh)
+sbatch --reservation=my-reservation scripts/run_inspect_eval.sbatch --task tau2_retail \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --model-role user=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-70B \
+  --task-arg message_limit=10 --limit 5
+```
+
+```bash
+# run_inspect_eval.sh installs these itself at runtime (SKIP_INSTALL=1 to skip);
+# to install by hand for local/interactive use:
+pip install "inspect-ai>=0.3.258" inspect-evals openai
+
+# A plain benchmark against a served model (CSCS serving, vllm serve, ...)
+scripts/run_inspect_eval.sh --task gsm8k --model Qwen/Qwen3-8B --api-base-url http://nid001234:8000
+
+# GPQA Diamond (inspect_evals/gpqa_diamond -- graduate-level multiple choice, no judge
+# needed). Runs 4 epochs per sample by default (majority vote over repeated attempts); pass
+# `-- --epochs 1` after the task flags to disable that:
+scripts/run_inspect_eval.sh --task gpqa_diamond \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --limit 5
+
+# HLE (Humanity's Last Exam, inspect_evals/hle) is graded by two judges side by side (task
+# arg `graders`, default `[grader, grader_2]`), so it needs both a "grader" and a "grader_2"
+# role bound, same convention as tau2's "user" role / AA-Omniscience's "grader" role above --
+# otherwise it falls back to run_configs/default.yaml's OpenRouter judges and fails without
+# OPENROUTER_API_KEY. The dataset is ~2,500 questions with multi-modal (image) samples
+# included by default; keep --limit small for a smoke test:
+scripts/run_inspect_eval.sh --task hle \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+  --model-role grader_2=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 5
+
+# tau2-bench (no single "default" task -- it ships four domains: airline, banking, retail,
+# telecom) needs a second "user"-role model to play the customer, and supports extra task
+# params like message_limit or banking's retrieval_config. The "user" role doesn't need to be
+# a real OpenAI model -- any served model works, so this stays entirely on the CSCS platform
+# (verified working: two always-on models served there, no extra API key needed):
+scripts/run_inspect_eval.sh --task tau2_retail,tau2_banking \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --model-role user=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-70B \
+  --task-arg message_limit=10 --limit 5
+
+# A model reached through Inspect's own provider (no --api-base-url), running two tasks
+# together via `inspect eval-set`, with extra flags forwarded after --
+scripts/run_inspect_eval.sh --task gsm8k,gaia --model anthropic/claude-3-5-sonnet-latest \
+  --eval-set -- --temperature 0.5 --max-connections 10
+
+# AA-Omniscience (aaii/aa_omniscience.py, formerly custom_tasks/omniscience.py -- a full path,
+# not an inspect_evals name, so it's used as-is rather than expanded to "inspect_evals/...";
+# see the module docstring there for why it's a from-scratch task) needs a "grader" role for
+# its judge model, same convention as tau2's "user" role above. Artificial Analysis's own
+# protocol is a fixed external judge (GPT-5.6 Luna) -- the model under test grading itself
+# works too (verified below) but is not AAII-comparable:
+scripts/run_inspect_eval.sh --task aaii/aa_omniscience.py \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 5
+
+# AA-LCR (aaii/aa_lcr.py, formerly custom_tasks/aa_lcr.py, same "full path" / "grader" role
+# convention as AA-Omniscience above). Unlike every other task in this repo, each sample is a
+# ~100k-token prompt (the full Document Set) -- keep --limit at 1 for a smoke test unless you
+# mean to spend real time/money on a full 100-question run:
+scripts/run_inspect_eval.sh --task aaii/aa_lcr.py \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 1
+```
+
+The model under test is either passed straight through as an Inspect-native model string, or -- when `--api-base-url` is given -- wrapped through Inspect's generic `openai-api` provider (the same OpenAI-compatible endpoints this pipeline already evaluates against with `--backend openai`). Model roles (`--model-role role=model`, repeatable) and extra task parameters (`--task-arg key=value`, repeatable) cover benchmark-specific needs like tau2's user-simulator or an LLM-as-judge grader; each role's own provider credentials (e.g. `OPENAI_API_KEY`) are your responsibility. See `scripts/run_inspect_eval.sh --help` for all options.
+
+Results are **not** viewed at inspect.aisi.org.uk — that's Inspect's documentation site. Logs land as `.eval` files under `logs/inspect/<name>/`; view them with `inspect view --log-dir logs/inspect/<name>`.
+
+#### W&B upload
+
+Unlike `evaluate.sbatch`'s lm-eval-harness pipeline, where every run uploads to W&B automatically, uploading here is **opt-in**: pass both `--wandb-entity`/`--wandb-project` (or set `WANDB_ENTITY`/`WANDB_PROJECT`) to enable it, since this script is also used for one-off/smoke-test runs you may not want landing in a shared W&B project.
+
+```bash
+scripts/run_inspect_eval.sh --task tau2_retail --model Qwen/Qwen3-8B \
+  --api-base-url http://nid001234:8000 --wandb-entity apertus --wandb-project swissai-evals-test
+```
+
+When enabled, the script waits for `inspect eval`/`eval-set` to finish, diffs `--logs-dir` against its contents from before the run to find the `.eval` log(s) this run produced, and uploads them with:
+
+```bash
+python -m scripts.alignment.update_wandb_inspect --entity <entity> --project <project> \
+  --name <name> --eval-log <path-to-run.eval> [--eval-log <path> ...]
+```
+
+`update_wandb_inspect.py` parses the `.eval` log(s) (task scores, metrics, and a bounded per-sample summary) into the same `ModelEvaluation` structure the harness pipeline uses, and uploads through the same shared `upload_multi_model_results` — so Inspect and lm-eval-harness runs show up in W&B the same way. Auth uses `WANDB_API_KEY` (default: `scripts/wandb_api_key.txt`, same fallback as `evaluate.sbatch`).
+
+---
+
 ## Notes
 
 > [!NOTE]
 > **vLLM vs HF inference**: Generation task results (gsm8k, squadv2) may differ slightly between backends (for instruction-tuned models). Only compare results across models using the same backend. We recommend performing all evaluations with the `vllm` backend (default) to ensure reproducibility.
-- **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). With the chat template on, the harness renders the model's template client-side via the HF tokenizer — so the tokenizer must be resolvable (use `--tokenizer` when the served model name is not a pullable HF repo). `API_CHAT_ENDPOINT=true` switches to `/v1/chat/completions` (server-side template; generative tasks ONLY). Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Use `--api-requests-per-minute 30` when the endpoint is rate limited; all chunks in the launch coordinate that budget. Note the job still requests the resources declared in `evaluate.sbatch` even though no GPU is used.
+- **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). With the chat template on, the harness renders the model's template client-side via the HF tokenizer — so the tokenizer must be resolvable (use `--tokenizer` when the served model name is not a pullable HF repo). `API_CHAT_ENDPOINT=true` switches to `/v1/chat/completions` (server-side template; generative tasks ONLY). Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Use `--api-requests-per-minute 30` when the endpoint is rate limited; all chunks in the launch coordinate that budget. The launcher automatically submits this backend through the CPU-only `evaluate_api.sbatch` wrapper.
 - **Megatron-LM**: To run Megatron-LM models natively, clone the [NVIDIA Megatron-LM repository](https://github.com/NVIDIA/Megatron-LM) into the evals-post-train directory (or change the location via the launch script).
 - **Time limits**: The default 11h59m SLURM limit applies to each chunk. Adjust `--chunk-size` to keep individual jobs below it and `--max-parallel` to control concurrent nodes.
 - **WANDB_API_KEY**: Must be available either as an environment variable or in `scripts/wandb_api_key.txt`.
@@ -996,6 +1097,16 @@ If the task exists in lm-eval-harness:
 If you need a custom task:
 1. Create a YAML task config in `lm_eval/tasks/your_task/` in the selected harness repository
 2. Register it following the [lm-eval-harness task guide](https://github.com/EleutherAI/lm-evaluation-harness/blob/main/docs/task_guide.md)
+
+If lm-eval-harness (YAML config) isn't a fit -- e.g. the benchmark needs its own scorer/grading
+model, like an LLM-as-judge, rather than a built-in metric -- write it as an Inspect task instead:
+drop a `@task`-decorated Python file in `custom_tasks/` (see `aaii/aa_omniscience.py` and
+`aaii/aa_lcr.py` for from-scratch examples with a judge-model scorer -- Artificial Analysis's own
+AAII benchmarks live in `aaii/` specifically, not `custom_tasks/`, since they're a fixed,
+AAII-branded protocol rather than an arbitrary one-off task) and run it with
+`scripts/run_inspect_eval.sh --task custom_tasks/your_task.py ...` -- see
+[Alternative: Inspect AI evals](#alternative-inspect-ai-evals) for the full flag reference and
+runnable examples.
 
 ### Customizing Sample Upload
 
@@ -1033,13 +1144,18 @@ evals/
 │   ├── eval_state.py          # Task normalization, result scanning, and chunking
 │   ├── launch_judge.py        # Launches judge models for LLM-as-a-judge tasks
 │   ├── evaluate.sbatch        # SLURM job script for HF/vLLM model evaluation
+│   ├── evaluate_api.sbatch    # CPU-only wrapper for OpenAI-compatible API evaluation
 │   ├── aggregate_chunks.sbatch # Aggregation job for chunked evaluations
+│   ├── run_inspect_eval.sh    # Inspect AI / inspect_evals benchmarks (alternative to lm-eval-harness above)
+│   ├── run_inspect_eval.sbatch # SLURM wrapper for run_inspect_eval.sh (CPU-only; no model loaded in-job)
 │   └── alignment/                   # Python package for W&B upload and data handling
 │       ├── wandb_alignment_utils.py # Core upload logic with stratified sample selection
-│       ├── update_wandb_alignment.py       # Per-model W&B upload script
+│       ├── update_wandb_alignment.py       # Per-model W&B upload script (lm-eval-harness results)
 │       ├── update_wandb_all_models.py      # Batch upload for all models
 │       ├── merge_split_results.py          # Merges results from chunk jobs
-│       └── data_structures.py              # Sample, Metric, Task, ModelEvaluation classes
+│       ├── data_structures.py              # Sample, Metric, Task, ModelEvaluation classes
+│       ├── inspect_wandb_utils.py          # Builds ModelEvaluation objects from Inspect .eval logs
+│       └── update_wandb_inspect.py         # Per-model W&B upload script (Inspect .eval logs)
 ├── make_html_table.py                # Reporting: interactive HTML results table (reads W&B)
 ├── make_table.py                     # Reporting: hyperparameter-sweep table, PNG + CSV (reads W&B)
 ├── runners/              # Multi-model evaluation scripts

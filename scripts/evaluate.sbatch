@@ -41,9 +41,16 @@ usage() {
 	echo " LOGS_ROOT: Where are your evaluation wandb&harness logs going to."
 	echo " TASKS: Tasks to run with lm eval harness."
 	echo " WANDB_ENTITY: WandB entity name for uploading results (default: apertus)."
+<<<<<<< HEAD
+	echo " WANDB_PROJECT: WandB project name for uploading results (default: swissai-evals)."
+	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: hf). - options are: hf, vllm, sglang, megatron_lm, openai"
+    echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
+=======
 	echo " WANDB_PROJECT: WandB project name for uploading results (default: swissai-evals-test)."
 	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: vllm). - options are: hf, vllm, sglang, megatron_lm, openai"
-    echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm."
+    echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm. CKPT_ITERATION is accepted as an alias."
+    echo " MEGATRON_EXTRA_ARGS: Extra MCore CLI args for the megatron_lm backend, e.g. '--distributed-timeout-minutes 120' for long generation phases."
+>>>>>>> b4130e9e917ca2521b3fae812e1974ceb22a8741
     echo " OpenAI-compatible API backend (LM_EVAL_BACKEND=openai; no model is loaded in the job):"
     echo " API_BASE_URL: Endpoint to evaluate against. Required. Accepts a bare host (http://host:8000), a /v1 root, or a full /v1/(chat/)completions URL."
     echo " API_CHAT_ENDPOINT: 'true' to use /v1/chat/completions (server-side chat template; generative tasks ONLY). Default: /v1/completions, which serves mixed suites."
@@ -58,6 +65,7 @@ usage() {
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref resolved once by the environment-preparation job."
     echo " EVAL_ENV_MANIFEST: Prepared base environment and harness overlay (required; set by launcher)."
+    echo " EVAL_RUN_CONFIG: Normalized result provenance file used for safe resume (required; set by launcher)."
     echo " EVAL_VERIFY_ENV_IMPORTS: 'true' to repeat the preparation job's deep Python import checks inside the evaluation job (default: false)."
     echo " EVAL_CHUNKS_FILE: Resumable array chunk manifest (set automatically by launcher)."
     echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
@@ -86,7 +94,10 @@ if (( $# != 2 )); then
 fi
 MODEL=$1
 NAME=$2
-CKPT_ITER=${CKPT_ITER:-"latest"}
+# CKPT_ITERATION is the launcher-side name (launch_evaluations.sh exports it; the
+# runner forwards it as CKPT_ITER). Accept both so direct sbatch submissions that
+# use the launcher's name don't silently evaluate the wrong ("latest") iteration.
+CKPT_ITER=${CKPT_ITER:-${CKPT_ITERATION:-"latest"}}
 BS=${BS:-"auto:20"}
 SIZE=${SIZE:-1}
 BOS=${BOS:-false}
@@ -103,6 +114,7 @@ EVAL_ENV_MANIFEST=${EVAL_ENV_MANIFEST:-""}
 EVAL_CHUNKS_FILE=${EVAL_CHUNKS_FILE:-""}
 EVAL_CHUNKED=${EVAL_CHUNKED:-false}
 EVAL_VERIFY_ENV_IMPORTS=${EVAL_VERIFY_ENV_IMPORTS:-false}
+EVAL_RUN_CONFIG=${EVAL_RUN_CONFIG:-""}
 
 case "${EVAL_VERIFY_ENV_IMPORTS,,}" in
     true|1|yes) EVAL_VERIFY_ENV_IMPORTS=true ;;
@@ -119,6 +131,7 @@ if [[ -n "$EVAL_CHUNKS_FILE" ]]; then
 fi
 
 [[ -n "$EVAL_ENV_MANIFEST" ]] || die "EVAL_ENV_MANIFEST is required; launch through scripts/launch_evaluations.sh"
+[[ -f "$EVAL_RUN_CONFIG" ]] || die "EVAL_RUN_CONFIG is required and must be a readable file"
 
 load_prepared_eval_env() {
     EVAL_ENV_CHECK_ERROR=""
@@ -217,11 +230,16 @@ warn_if_empty WANDB_API_KEY \
 warn_if_empty CSCS_SERVING_API \
   "Optional key missing. LLM-as-a-judge benchmarks via CSCS serving API will fail."
 
+<<<<<<< HEAD
+# optional eval arguments
+MAX_LENGTH=${MAX_LENGTH:-16384}
+=======
 # Optional eval arguments. An unset MAX_LENGTH leaves the backend/model default intact.
 MAX_LENGTH=${MAX_LENGTH:-""}
 if [[ -n "$MAX_LENGTH" && ! "$MAX_LENGTH" =~ ^[1-9][0-9]*$ ]]; then
     die "MAX_LENGTH must be a positive integer when set (got '$MAX_LENGTH')."
 fi
+>>>>>>> b4130e9e917ca2521b3fae812e1974ceb22a8741
 # Capture explicitness before defaulting: thinking raises the default, but a caller value wins.
 if [[ -n "${MAX_NEW_TOKENS:+x}" ]]; then MAX_NEW_TOKENS_EXPLICIT=1; else MAX_NEW_TOKENS_EXPLICIT=0; fi
 MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
@@ -333,8 +351,19 @@ if [ ! -z ${REVISION+x} ]; then
     MAYBE_DOWNLOAD_REVISION="--revision=$REVISION"
 fi
 if [ -z ${TOKENIZER+x} ]; then
-    echo "TOKENIZER not set, using TOKENIZER=$MODEL"
-    TOKENIZER=$MODEL
+    # Catalog ids from an inference gateway are prefixed
+    # (<catalog-namespace>/<org>/<repo>, e.g.
+    # CSCS-Inference/swiss-ai/Apertus-v1.5-70B) -- not a valid Hugging Face
+    # repo id (org/repo, exactly one slash), so AutoTokenizer rejects them.
+    # Strip the catalog prefix to recover the real tokenizer repo; a plain
+    # org/repo model id (one slash) is left untouched.
+    if [ "$(grep -o '/' <<< "$MODEL" | wc -l)" -gt 1 ]; then
+        TOKENIZER="${MODEL#*/}"
+        echo "TOKENIZER not set, using TOKENIZER=$TOKENIZER (catalog prefix stripped from MODEL=$MODEL)"
+    else
+        TOKENIZER=$MODEL
+        echo "TOKENIZER not set, using TOKENIZER=$MODEL"
+    fi
 fi
 
 
@@ -440,9 +469,15 @@ if [[ "$ENABLE_THINKING" == "True" ]]; then
 fi
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
+<<<<<<< HEAD
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,language_model_only=True,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS}"
+elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer_path=$TOKENIZER$MAYBE_REVISION,dp_size=$DP,tp_size=$MP,mem_fraction_static=$VLLM_MEMORY_FRACTION,dtype=auto"
+=======
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,language_model_only=True,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS}${THINKING_DEFAULT_MODEL_ARG},disable_flashinfer_allreduce_fusion=True"
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer_path=$TOKENIZER$MAYBE_REVISION,dp_size=$DP,tp_size=$MP,mem_fraction_static=$VLLM_MEMORY_FRACTION,dtype=auto${THINKING_DEFAULT_MODEL_ARG}"
+>>>>>>> b4130e9e917ca2521b3fae812e1974ceb22a8741
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     MEGATRON_MICRO_BATCH_SIZE=${MEGATRON_MICRO_BATCH_SIZE:-""}
     if [[ -z "$MEGATRON_MICRO_BATCH_SIZE" ]]; then
@@ -458,6 +493,12 @@ elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     BS=$MEGATRON_MICRO_BATCH_SIZE
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,load=$MODEL,tokenizer_type=HuggingFaceTokenizer,tokenizer_model=$TOKENIZER$MAYBE_REVISION,devices=4,micro_batch_size=$MEGATRON_MICRO_BATCH_SIZE${THINKING_DEFAULT_MODEL_ARG}"
     echo "Megatron effective batch size: $BS"
+    # Optional extra MCore CLI args, forwarded via the backend's extra_args passthrough.
+    # E.g. MEGATRON_EXTRA_ARGS="--distributed-timeout-minutes 120": the backend runs DP
+    # over the 4 devices and the shards finish generation at different times; on long
+    # runs the default 10-min NCCL timeout kills the job at the end-of-phase sync. The
+    # value must not contain a comma (model_args is comma-separated); spaces are fine.
+    [[ -n "${MEGATRON_EXTRA_ARGS:-}" ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,extra_args=$MEGATRON_EXTRA_ARGS"
     if [[ "$CKPT_ITER" =~ ^[0-9]+$ ]]; then
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,ckpt_step=$CKPT_ITER"
     elif [[ "$CKPT_ITER" == "latest" ]]; then
@@ -502,8 +543,13 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,requests_per_minute=$API_REQUESTS_PER_MINUTE"
     fi
     if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then
-        # Client-side tokenization: loglikelihood scoring needs token-aligned context/continuation.
-        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER"
+        # tokenizer_backend/tokenizer is local bookkeeping only (max context length, decoding,
+        # token counts) -- lm_eval still needs it for loglikelihood scoring. tokenized_requests
+        # is the separate knob that controls what goes over the wire: with it left at the
+        # default (True), lm_eval ships pre-tokenized integer IDs in the prompt field. The CSCS
+        # gateway's /v1/completions only parses a plain string there, so it must be forced False
+        # regardless of the tokenizer setting.
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER,tokenized_requests=False"
         [[ $BOS = true ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
     else
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenized_requests=False"
@@ -521,6 +567,8 @@ else
 fi
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
+mkdir -p "$HARNESS_EVAL_DIR"
+cp "$EVAL_RUN_CONFIG" "$HARNESS_EVAL_DIR/.eval-run-config.json"
 
 # Generation kwargs supplied through the CLI update every task's YAML. Deliberately
 # omit max_gen_toks here so task-local budgets retain priority. Thinking's longer
@@ -631,14 +679,6 @@ if [[ -n "$BACKEND_MAX_LENGTH" ]]; then
     echo "Using $LM_EVAL_BACKEND backend context limit: $BACKEND_MAX_LENGTH"
 fi
 
-# bfcl_v3 and Swiss AI Charter Alignment are not yet available in the Swiss-AI
-# fork. Use ymetz only for jobs containing those tasks; everything else,
-# including the experimental GPT suite, stays on Swiss-AI.
-if echo "$TASKS" | grep -qE '(^|,)(bfcl_v3([^,]*)?|swiss_ai_charter_alignment([^,]*)?)(,|$)'; then
-    if [[ "$EVAL_RESOLVED_HARNESS_REPO" != "ymetz/lm-evaluation-harness" ]]; then
-        die "BFCL/Charter tasks require ymetz/lm-evaluation-harness, got $EVAL_RESOLVED_HARNESS_REPO"
-    fi
-fi
 echo "Using lm-evaluation-harness: $EVAL_RESOLVED_HARNESS_REPO@$EVAL_RESOLVED_HARNESS_COMMIT"
 
 LOAD_ENV_CMD="
@@ -684,10 +724,22 @@ fi
 export PYTHONPATH=\$EVAL_RUNTIME_HARNESS_OVERLAY\${PYTHONPATH:+:\$PYTHONPATH}
 echo Evaluation environment activated: \$(date -Is) deep_import_check=$EVAL_VERIFY_ENV_IMPORTS harness_path=\$EVAL_RUNTIME_HARNESS_OVERLAY
 "
-if [[ $LM_EVAL_BACKEND == "megatron_lm" && -d "$PWD/Megatron-LM" ]]; then
+if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
+<<<<<<< HEAD
+  INSTALL_CMD="$INSTALL_CMD && pip install megatron-core --no-deps && export MEGATRON_PATH=$(pwd)/Megatron-LM"
+fi
+
+# lm-eval's API models (local-completions / local-chat-completions) need the [api] extras.
+if [[ $LM_EVAL_BACKEND == "openai" ]]; then
+  INSTALL_CMD="$INSTALL_CMD && pip install --no-cache-dir tenacity aiohttp"
+=======
+    # Fail loudly: without the checkout the job would die mid-run with a bare
+    # ModuleNotFoundError after the model-load wait.
+    [[ -d "$PWD/Megatron-LM" ]] || die "LM_EVAL_BACKEND=megatron_lm requires a Megatron-LM checkout or symlink at $PWD/Megatron-LM (e.g. ln -s \$SCRATCH/Megatron-LM $PWD/Megatron-LM)."
     LOAD_ENV_CMD="$LOAD_ENV_CMD
 export MEGATRON_PATH='$PWD/Megatron-LM'
 "
+>>>>>>> b4130e9e917ca2521b3fae812e1974ceb22a8741
 fi
 
 # $CMD is re-parsed by the inner `bash -lc`, so --model_args is single-quoted (a token like
@@ -801,6 +853,7 @@ fi
 # End timing and calculate duration
 END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))
+printf '%s\n' "$DURATION" > "$HARNESS_EVAL_DIR/eval_duration_seconds.txt"
 echo "Evaluation time: ${DURATION} seconds ($(($DURATION / 60)) minutes and $(($DURATION % 60)) seconds)"
 
 # Goodbye.

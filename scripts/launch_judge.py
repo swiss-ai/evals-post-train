@@ -103,7 +103,9 @@ JUDGE_PRESETS = {
             "--model /capstor/store/cscs/swissai/infra01/hf_models/models/cais/HarmBench-Llama-2-13b-cls "
             "--host 0.0.0.0 --port 8080 "
             "--served-model-name cais/HarmBench-Llama-2-13b-cls "
-            "--tensor-parallel-size 4 --max-model-len 35000"
+            # This model's config.json caps max_position_embeddings at 2048 (unlike the
+            # other judge presets); vLLM refuses to start above that, so keep it in bounds.
+            "--tensor-parallel-size 4 --max-model-len 2048"
         ),
     },
     "llama-guard": {
