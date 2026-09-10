@@ -75,6 +75,10 @@
 #   WANDB_ENTITY, WANDB_PROJECT -- see --wandb-entity/--wandb-project above.
 #   WANDB_API_KEY -- required if uploading to W&B (default: scripts/wandb_api_key.txt, same
 #   fallback as evaluate.sbatch).
+#   CRITPT_API_KEY -- grading-server credential for the CritPt task (aaii/aa_critpt.py); default:
+#   scripts/critpt_api_key.txt. Optional -- unset is the expected state until Artificial Analysis
+#   grants access (email critpt@artificialanalysis.ai); the run still completes and writes its
+#   submission batch to a local file instead of posting it.
 #   SKIP_INSTALL=1 to skip the runtime pip install of inspect-ai/inspect-evals.
 #
 # Results are NOT viewed at https://inspect.aisi.org.uk/ -- that site is Inspect's
@@ -168,6 +172,16 @@ if (( ${#MODEL_ROLES[@]} > 0 )); then
         "(e.g. OPENAI_API_KEY for an openai/... role) -- that's on you to set." >&2
 fi
 
+# CritPt's grading-server credential (aaii/aa_critpt.py's own on_task_end Hook reads this
+# directly from the environment) -- unconditional, like CSCS_SERVING_API above, since it's
+# harmless to export for tasks that never look at it. Optional: unset just means that Hook
+# writes its submission batch to a local file instead of posting it.
+CRITPT_API_KEY="${CRITPT_API_KEY:-}"
+if [[ -z "$CRITPT_API_KEY" && -f ./scripts/critpt_api_key.txt ]]; then
+    CRITPT_API_KEY="$(tr -d '\r\n' < ./scripts/critpt_api_key.txt)"
+fi
+[[ -n "$CRITPT_API_KEY" ]] && export CRITPT_API_KEY
+
 mkdir -p "$LOGS_DIR"
 
 # Snapshot existing .eval logs so the W&B upload below (if requested) only picks up logs this
@@ -175,6 +189,21 @@ mkdir -p "$LOGS_DIR"
 PRE_RUN_LOGS=$(find "$LOGS_DIR" -name '*.eval' 2>/dev/null | sort)
 
 if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
+    # Unlike evaluate.sbatch (which always runs inside a container image with `pip` on PATH),
+    # this script is also run directly on login/compute nodes (e.g. Clariden) where a bare `pip`
+    # command may not exist even inside an active conda/venv env -- fall back to `python -m pip`.
+    if command -v pip >/dev/null 2>&1; then
+        PIP=(pip)
+    elif command -v python3 >/dev/null 2>&1 && python3 -m pip --version >/dev/null 2>&1; then
+        PIP=(python3 -m pip)
+    elif command -v python >/dev/null 2>&1 && python -m pip --version >/dev/null 2>&1; then
+        PIP=(python -m pip)
+    else
+        die "No working pip found (bare 'pip' not on PATH, and neither 'python3 -m pip' nor" \
+            "'python -m pip' work). Activate an environment with pip, or set SKIP_INSTALL=1" \
+            "if inspect-ai/inspect-evals/openai are already installed."
+    fi
+
     # The `openai` package is required by Inspect's openai-api provider (used whenever
     # --api-base-url is given) even for non-OpenAI-hosted endpoints -- confirmed by a bare
     # `inspect-ai` install failing with "OpenAI Compatible API requires optional dependencies"
@@ -190,7 +219,7 @@ if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
     # needed here too for evals-svc's --sandbox local override (see that PR's own reasoning:
     # CSCS refuses privileged containers, so the k8s/FirecREST backends run scicode's
     # generated code as a plain subprocess in this job instead of a nested sandbox).
-    pip install --no-cache-dir --upgrade \
+    "${PIP[@]}" install --no-cache-dir --upgrade \
         "inspect-ai>=0.3.258" "inspect-evals" openai gdown numpy scipy sympy h5py \
         || die "pip install of inspect-ai/inspect-evals failed. Set SKIP_INSTALL=1 if the environment already has them."
 
@@ -221,8 +250,8 @@ for task in "${TASK_ARRAY[@]}"; do
 done
 
 COMMON_ARGS=(--model "$TASK_MODEL" --log-dir "$LOGS_DIR")
-for role in "${MODEL_ROLES[@]}"; do COMMON_ARGS+=(--model-role "$role"); done
-for arg in "${TASK_ARGS[@]}"; do COMMON_ARGS+=(-T "$arg"); done
+for role in ${MODEL_ROLES[@]+"${MODEL_ROLES[@]}"}; do COMMON_ARGS+=(--model-role "$role"); done
+for arg in ${TASK_ARGS[@]+"${TASK_ARGS[@]}"}; do COMMON_ARGS+=(-T "$arg"); done
 [[ -n "$LIMIT" ]] && COMMON_ARGS+=(--limit "$LIMIT")
 
 # Default to a plain-text display when not attached to a terminal (see --eval-set note above) --
@@ -230,7 +259,7 @@ for arg in "${TASK_ARGS[@]}"; do COMMON_ARGS+=(-T "$arg"); done
 # occurrence of a repeated option).
 [[ -t 1 ]] || COMMON_ARGS+=(--display plain)
 
-COMMON_ARGS+=("${EXTRA_ARGS[@]}")
+COMMON_ARGS+=(${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"})
 
 echo "Configuration set:"
 printf '%s\n' "TASKS=${RESOLVED_TASKS[*]}" "MODEL=$MODEL" "TASK_MODEL=$TASK_MODEL" "NAME=$NAME" \

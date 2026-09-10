@@ -999,11 +999,52 @@ scripts/run_inspect_eval.sh --task gpqa_diamond \
 # role bound, same convention as tau2's "user" role / AA-Omniscience's "grader" role above --
 # otherwise it falls back to run_configs/default.yaml's OpenRouter judges and fails without
 # OPENROUTER_API_KEY. The dataset is ~2,500 questions with multi-modal (image) samples
-# included by default; keep --limit small for a smoke test:
+# included by default; keep --limit small for a smoke test.
+#
+# IMPORTANT if the grader role is a CSCS-served/vLLM model (as below): the default judge_prompt
+# ("original") requires the grader to return OpenAI-style strict JSON-schema structured output
+# (ResponseSchema(strict=True)). Verified against this exact command: the CSCS-served
+# Apertus-v1.5-8B backend accepts that request but never returns a response -- the run hangs
+# indefinitely (no error, no progress) rather than failing fast; killing and retrying with
+# `--task-arg judge_prompt=grade_c_i` (the legacy plain-text GRADE:C/I judge, no structured
+# output) completed the same run in ~1s. A real OpenAI grader (e.g. --model-role
+# grader=openai/gpt-5.6-luna, per Artificial Analysis's own protocol) does not have this
+# problem -- this only bites when grading with a served vLLM model that doesn't support
+# structured outputs:
 scripts/run_inspect_eval.sh --task hle \
   --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
-  --model-role grader_2=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 5
+  --model-role grader_2=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+  --task-arg judge_prompt=grade_c_i --limit 5
+
+# AAII-wrapped GPQA Diamond (aaii/gpqa_diamond.py -- a full path, not an inspect_evals name, so
+# it's used as-is rather than expanded to "inspect_evals/..."), pinning Artificial Analysis's
+# Intelligence Index protocol default of --epochs 5 (plain "gpqa_diamond" above keeps
+# inspect_evals' own default of 4) directly in the task, not via a CLI flag -- no --model-role
+# needed, same as plain gpqa_diamond:
+scripts/run_inspect_eval.sh --task aaii/gpqa_diamond.py \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --limit 5
+
+# AAII-wrapped HLE (aaii/hle.py, same "full path" convention as aaii/gpqa_diamond.py above),
+# pinning the text-only subset, the official judge prompt, and a single "grader" role (AA's
+# protocol) directly in the task -- unlike plain hle above, no grader_2 role is needed. Still
+# needs its own "grader" role bound (same judge_prompt=original caveat re: structured-output
+# support applies -- see the plain hle example above for why a served vLLM model may hang):
+scripts/run_inspect_eval.sh --task aaii/hle.py \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --model-role grader=openai/gpt-5.6-luna --limit 5
+
+# AAII-wrapped SciCode (aaii/scicode.py, same "full path" convention), pinning
+# provide_scientific_background=True and --epochs 3 (AA's protocol; plain scicode below keeps
+# inspect_evals' own background-free, --epochs 1 defaults) directly in the task. Needs a real
+# Docker daemon for its sandboxed code execution (true on a login node or inside the sbatch
+# container) -- unlike evals-svc's own AAII-wrapped scicode, which additionally pins
+# --sandbox local as a deployment-specific workaround for launchers with no Docker daemon; that
+# pin is NOT part of the AA protocol, so it is deliberately not baked in here:
+scripts/run_inspect_eval.sh --task aaii/scicode.py \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --limit 2
 
 # tau2-bench (no single "default" task -- it ships four domains: airline, banking, retail,
 # telecom) needs a second "user"-role model to play the customer, and supports extra task
@@ -1019,6 +1060,23 @@ scripts/run_inspect_eval.sh --task tau2_retail,tau2_banking \
 # together via `inspect eval-set`, with extra flags forwarded after --
 scripts/run_inspect_eval.sh --task gsm8k,gaia --model anthropic/claude-3-5-sonnet-latest \
   --eval-set -- --temperature 0.5 --max-connections 10
+
+# GDPval (inspect_evals/gdpval -- 220 economically-valuable, real-world
+# deliverable tasks across 44 occupations). Runs inside a Docker sandbox whose
+# image build can take up to 10 minutes on first use (see the task's own
+# README for details); scoring needs a separate submission to OpenAI's
+# grading form, so this is mainly useful as a smoke test that generation
+# completes -- keep --limit small. Expect a harmless "Exception calling hook
+# 'ConsolidateDeliverables': cannot import name 'HfFolder' from
+# 'huggingface_hub'" warning on every run: inspect_evals' own gdpval/util.py
+# still calls the HfFolder API huggingface_hub removed in 1.0 (confirmed live
+# on their main branch, and already flagged by the maintainers themselves in
+# github.com/UKGovernmentBEIS/inspect_evals/pull/1211 as unaddressed) -- the
+# eval still completes and the deliverable folder is still written locally,
+# only that hook's own HF-auth check fails:
+scripts/run_inspect_eval.sh --task gdpval \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --limit 1
 
 # AA-Omniscience (aaii/aa_omniscience.py, formerly custom_tasks/omniscience.py -- a full path,
 # not an inspect_evals name, so it's used as-is rather than expanded to "inspect_evals/...";
@@ -1037,6 +1095,20 @@ scripts/run_inspect_eval.sh --task aaii/aa_omniscience.py \
 scripts/run_inspect_eval.sh --task aaii/aa_lcr.py \
   --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 1
+
+# CritPt (aaii/aa_critpt.py, a research-level physics reasoning benchmark -- see the module
+# docstring for the two-step reasoning-then-parse protocol, and why grading happens in an
+# Inspect Hook rather than inline). No --model-role grader needed, unlike AA-Omniscience/AA-LCR
+# above: grading is a fixed external HTTP server (Artificial Analysis's own
+# /api/v2/critpt/evaluate), not an LLM judge. Set CRITPT_API_KEY (access is granted case by
+# case -- email critpt@artificialanalysis.ai) to actually submit for grading; without it the
+# run still completes normally and just writes each epoch's 70-submission batch to a local
+# JSON file instead (under <logs-dir>/critpt_submissions/). --epochs is a NATIVE `inspect eval`
+# flag (not run_inspect_eval.sh's own), so it goes behind a literal `--`, same as GPQA Diamond
+# above; the real protocol runs 5, but pass `-- --epochs 1` for a smoke test:
+scripts/run_inspect_eval.sh --task aaii/aa_critpt.py \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --limit 2 -- --epochs 1
 ```
 
 The model under test is either passed straight through as an Inspect-native model string, or -- when `--api-base-url` is given -- wrapped through Inspect's generic `openai-api` provider (the same OpenAI-compatible endpoints this pipeline already evaluates against with `--backend openai`). Model roles (`--model-role role=model`, repeatable) and extra task parameters (`--task-arg key=value`, repeatable) cover benchmark-specific needs like tau2's user-simulator or an LLM-as-judge grader; each role's own provider credentials (e.g. `OPENAI_API_KEY`) are your responsibility. See `scripts/run_inspect_eval.sh --help` for all options.
@@ -1063,6 +1135,39 @@ python -m scripts.alignment.update_wandb_inspect --entity <entity> --project <pr
 
 ---
 
+## Alternative: tau2-bench / terminal-bench / GDPval-AA v2 (standalone AA-protocol runners)
+
+Three more Artificial-Analysis-aligned benchmarks, each its own standalone script rather than an Inspect AI task — none of these three go through `run_inspect_eval.sh` or `inspect_evals` at all. This repo already documents *different*, narrower `inspect_evals` ports of tau2-bench and GDPval above (in the Inspect AI section) — those are independent implementations, not the same code as the scripts below, and don't necessarily match Artificial Analysis's real protocol values. There is no `inspect_evals` port of Terminal-Bench at all.
+
+Each script installs its own dependencies at runtime (tau2-bench/Harbor/Stirrup), takes `--model`/`--api-base-url` the same way `run_inspect_eval.sh` does (falling back to `scripts/cscs_serving_api_key.txt` for the serving key), bakes in Artificial Analysis's protocol defaults, and writes results to a local scratch dir instead of posting to a callback (unlike evals-svc's own copies of this same logic, which these scripts were extracted from). See each script's own `--help` for full options.
+
+```bash
+# tau2-bench (tau2-bench v1.0.1, banking_knowledge domain, bm25_grep retrieval, 5 trials, 200
+# max steps -- AA's tau^3-Banking protocol). Needs a "user simulator" model too (default:
+# gpt-5.4-mini, a real OpenAI model, needs OPENAI_API_KEY of your own); pass --user-llm
+# openai/<served-id> instead to route it through the same gateway/key as --model, no separate
+# credential needed -- smoke test with a couple of tasks/one trial:
+aaii/run_tau2_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+  --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --user-llm openai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --num-tasks 2 --num-trials 1
+
+# terminal-bench (Harbor, Terminus 2 agent, terminal-bench-2-1 dataset, 3 trials). Needs a real
+# Docker daemon or podman (the script falls back to podman through a docker-compatible shim,
+# same as evals-svc's own runner does on Clariden) -- smoke test with one task/one trial:
+aaii/run_terminal_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+  --api-base-url https://api.swissai.svc.cscs.ch/v1 --num-tasks 1 --num-trials 1
+
+# GDPval-AA v2 (Stirrup, the full 220-task openai/gdpval gold set, up to 250 turns, E2B sandbox
+# by default -- needs E2B_API_KEY; pass --sandbox-backend local for the free, non-isolated
+# subprocess backend instead). Grading needs at least one of
+# GDPVAL_JUDGE_{OPENAI,GOOGLE,ANTHROPIC}_API_KEY set -- ungraded deliverables are still
+# written. Smoke test, free sandbox, no grading:
+aaii/run_gdpval.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+  --api-base-url https://api.swissai.svc.cscs.ch/v1 --sandbox-backend local --num-tasks 1
+```
+
+---
+
 ## Notes
 
 > [!NOTE]
@@ -1070,10 +1175,23 @@ python -m scripts.alignment.update_wandb_inspect --entity <entity> --project <pr
 - **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). With the chat template on, the harness renders the model's template client-side via the HF tokenizer — so the tokenizer must be resolvable (use `--tokenizer` when the served model name is not a pullable HF repo). `API_CHAT_ENDPOINT=true` switches to `/v1/chat/completions` (server-side template; generative tasks ONLY). Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Use `--api-requests-per-minute 30` when the endpoint is rate limited; all chunks in the launch coordinate that budget. The launcher automatically submits this backend through the CPU-only `evaluate_api.sbatch` wrapper.
 - **Megatron-LM**: To run Megatron-LM models natively, clone the [NVIDIA Megatron-LM repository](https://github.com/NVIDIA/Megatron-LM) into the evals-post-train directory (or change the location via the launch script).
 - **Time limits**: The default 11h59m SLURM limit applies to each chunk. Adjust `--chunk-size` to keep individual jobs below it and `--max-parallel` to control concurrent nodes.
-- **WANDB_API_KEY**: Must be available either as an environment variable or in `scripts/wandb_api_key.txt`.
-- **HF_TOKEN**: Must be available either as an environment variable or in  `scripts/hf_token.txt`.
-- **OPENAI_API_KEY**: Required for the optional `gpt` suite, either as an environment variable or in `scripts/openai_api_key.txt`.
-- **CSCS_SERVING_API**: Must be available either as an environment variable or in `scripts/cscs_serving_api_key.txt` to run LLM-as-a-judge evals (e.g. AlpacaEval). Key can be optained [here](https://serving.swissai.cscs.ch).
+
+### Credentials
+
+Every credential below can be set either as an environment variable, or by creating a **plain-text file at the given path** (relative to the repo root, i.e. next to this README) **containing just the key/token itself** — no quotes, no `export`, no trailing newline needed (a trailing newline is stripped automatically if present). The env var, when set, always takes priority over the file. All of these paths are already listed in `.gitignore`, so a file placed there will never be committed.
+
+```bash
+# Example: save your W&B key so every run picks it up automatically, no export needed.
+echo -n "wandb_v1_abc123..." > scripts/wandb_api_key.txt
+```
+
+| Env var | File (relative to repo root) | Required for |
+|---|---|---|
+| `HF_TOKEN` | `scripts/hf_token.txt` | Gated/rate-limited Hugging Face datasets and models (most task suites). |
+| `CSCS_SERVING_API` | `scripts/cscs_serving_api_key.txt` | LLM-as-a-judge evals (e.g. AlpacaEval) and any `--api-base-url`/`openai` backend run against CSCS serving. Key can be obtained [here](https://serving.swissai.cscs.ch). |
+| `OPENAI_API_KEY` | `scripts/openai_api_key.txt` | The optional `gpt` suite; falls back to `CSCS_SERVING_API` if unset. |
+| `WANDB_API_KEY` | `scripts/wandb_api_key.txt` | Uploading results to Weights & Biases. |
+| `CRITPT_API_KEY` | `scripts/critpt_api_key.txt` | Optional: the CritPt task's (`aaii/aa_critpt.py`) grading server. Access is granted case by case by the CritPt team (email critpt@artificialanalysis.ai); without it, a run still completes and just writes its submission batch to a local file instead of posting it for grading. |
 
 ---
 
