@@ -188,6 +188,14 @@ mkdir -p "$LOGS_DIR"
 # run produces, not ones already sitting in $LOGS_DIR from a previous run against the same name.
 PRE_RUN_LOGS=$(find "$LOGS_DIR" -name '*.eval' 2>/dev/null | sort)
 
+# Auto-imported by Python at interpreter startup for any dir on PYTHONPATH (the standard
+# sitecustomize mechanism) -- patches Inspect's `local` sandbox provider (`--sandbox local`, see
+# evals-svc's services/scicode.py) to avoid "OSError: [Errno 7] Argument list too long" on
+# SciCode's larger multi-subproblem compositions. Unconditional (not gated behind SKIP_INSTALL):
+# a preinstalled environment needs this safety net just as much as a freshly pip-installed one.
+# See the patch's own module docstring for the full failure/fix reasoning.
+export PYTHONPATH="$(pwd)/scripts/sandbox_patches${PYTHONPATH:+:$PYTHONPATH}"
+
 if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
     # Unlike evaluate.sbatch (which always runs inside a container image with `pip` on PATH),
     # this script is also run directly on login/compute nodes (e.g. Clariden) where a bare `pip`
