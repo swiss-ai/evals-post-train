@@ -34,6 +34,17 @@ node / the sbatch container, same as GDPval).
 Plain `inspect_evals/scicode` (bare `--task scicode`) is also selectable and
 runs completely unwrapped -- no background info, inspect_evals' own default
 epochs (1).
+
+Both provide_scientific_background=True and epochs=3 are this wrapper's own
+keyword *defaults*, not values hardcoded into the call -- so
+`--task-arg provide_scientific_background=False --task-arg epochs=1` still
+overrides them (epochs here is this wrapper's own task-arg, not the native
+`inspect eval --epochs` flag gpqa.py's plain-task history needed a `--`
+relocation for -- since Task.epochs is set from this parameter inside the
+function body, `-T epochs=...` reaches it directly). A no-argument wrapper
+that applies these directly, as an earlier version of this file did,
+silently drops such overrides instead (same mistake caught in aaii/hle.py,
+confirmed live against evals-svc's own self-grading path for that one).
 """
 
 from inspect_ai import Task, task
@@ -41,7 +52,7 @@ from inspect_evals.scicode.scicode import scicode as _scicode
 
 
 @task
-def scicode() -> Task:
-    t = _scicode(provide_scientific_background=True)
-    t.epochs = 3
+def scicode(provide_scientific_background: bool = True, epochs: int = 3) -> Task:
+    t = _scicode(provide_scientific_background=provide_scientific_background)
+    t.epochs = epochs
     return t
