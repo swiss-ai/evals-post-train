@@ -295,12 +295,7 @@ submit_evaluation() {
     python3 -m scripts.eval_state normalize --tasks "$TASKS" \
         --output "$state_dir/expected_tasks.txt"
 
-    if grep -Eq '^(bfcl_v3|swiss_ai_charter_alignment)([/:_-]|$)' \
-        "$state_dir/expected_tasks.txt"; then
-        repo="ymetz/lm-evaluation-harness"
-    else
-        repo="swiss-ai/lm-evaluation-harness"
-    fi
+    repo="swiss-ai/lm-evaluation-harness"
     _eval_create_run_config "$model" "$repo" "$state_dir"
 
     if [[ -n "${EVAL_FORCE_TASKS:-}" ]]; then

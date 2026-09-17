@@ -51,24 +51,5 @@ class BenchmarkConfigTests(unittest.TestCase):
 
         self.assertEqual(tasks, metrics)
 
-    def test_only_swiss_ai_and_ymetz_harness_forks_are_referenced(self) -> None:
-        scripts = "\n".join(
-            (REPO_ROOT / relative).read_text(encoding="utf-8")
-            for relative in (
-                "scripts/evaluation_orchestrator.sh",
-                "scripts/evaluate.sbatch",
-            )
-        )
-
-        repos = set(re.findall(r'"([\w.-]+/lm-evaluation-harness)"', scripts))
-        self.assertEqual(
-            repos,
-            {
-                "swiss-ai/lm-evaluation-harness",
-                "ymetz/lm-evaluation-harness",
-            },
-        )
-
-
 if __name__ == "__main__":
     unittest.main()

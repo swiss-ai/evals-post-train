@@ -665,14 +665,6 @@ if [[ -n "$BACKEND_MAX_LENGTH" ]]; then
     echo "Using $LM_EVAL_BACKEND backend context limit: $BACKEND_MAX_LENGTH"
 fi
 
-# bfcl_v3 and Swiss AI Charter Alignment are not yet available in the Swiss-AI
-# fork. Use ymetz only for jobs containing those tasks; everything else,
-# including the experimental GPT suite, stays on Swiss-AI.
-if echo "$TASKS" | grep -qE '(^|,)(bfcl_v3([^,]*)?|swiss_ai_charter_alignment([^,]*)?)(,|$)'; then
-    if [[ "$EVAL_RESOLVED_HARNESS_REPO" != "ymetz/lm-evaluation-harness" ]]; then
-        die "BFCL/Charter tasks require ymetz/lm-evaluation-harness, got $EVAL_RESOLVED_HARNESS_REPO"
-    fi
-fi
 echo "Using lm-evaluation-harness: $EVAL_RESOLVED_HARNESS_REPO@$EVAL_RESOLVED_HARNESS_COMMIT"
 
 LOAD_ENV_CMD="

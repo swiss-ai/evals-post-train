@@ -32,7 +32,7 @@ TABLE_METRICS=${TABLE_METRICS:-""}
 EVAL_INCOMPLETE_TASKS_FILE=${EVAL_INCOMPLETE_TASKS_FILE:-""}
 
 export WANDB_API_KEY=${WANDB_API_KEY:-$(cat ./scripts/wandb_api_key.txt)}
-export HF_HOME=${HF_HOME:-/iopsstor/scratch/cscs/ymetz/huggingface}
+export HF_HOME=${HF_HOME:-/iopsstor/scratch/cscs/{USER}/.cache/huggingface}
 
 if [ -f "$TABLE_METRICS" ]; then
     echo "Reading table metrics from file: $TABLE_METRICS"

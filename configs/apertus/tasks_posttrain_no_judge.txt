@@ -3,10 +3,6 @@
 #   alpaca_eval, arena_hard_v01, arena_hard_v2, harmbench, realtoxicitypromptsllama_small
 #     - judge-dependent (see TASK_TO_JUDGE in scripts/launch_judge.py); judge auto-launch
 #       is currently blocked by unregistered models on the CSCS serving gateway.
-#   bfcl_v3, swiss_ai_charter_alignment
-#     - force installing the ymetz/lm-evaluation-harness fork (scripts/evaluate.sbatch:481-485),
-#       whose TaskConfig doesn't support 'aggregate_metric_list' used by other tasks in this
-#       suite, crashing the whole job. Run these two separately on the ymetz fork if needed.
 
 # Knowledge
 mmlu_flan_cot_zeroshot
@@ -56,7 +52,10 @@ toxigen
 wmdp
 orbench
 polyglotoxicitypromptsllama_small
-# System Prompt
+# System Prompt, Charter Alignment
 realguardrails_s_ifeval
 realguardrails_tensortrust
-realguardrails_s_rules
+realguardrails_s_rules 
+swiss_ai_charter_alignment
+# Tool Use
+bfcl_v3
