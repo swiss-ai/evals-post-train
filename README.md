@@ -903,7 +903,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `LM_EVAL_JUDGE_MODEL_DISCOVERY_TIMEOUT` | `10` | Timeout in seconds for hosted judge-model discovery |
 | `LM_EVAL_RATE_LIMIT_STATE_DIR` | per-launch controller directory | Shared request-slot state used to coordinate threads, processes, and Slurm nodes; point independent launches at the same directory to share budgets |
 | `OPENAI_API_KEY` | `scripts/openai_api_key.txt`, then `CSCS_SERVING_API` | OpenAI GPT judge or `openai` backend bearer token |
-| `LM_EVAL_HARNESS_BRANCH` | repository HEAD | Branch, tag, or commit installed from the task-selected harness repository |
+| `LM_EVAL_HARNESS_BRANCH` | repository HEAD | Branch, tag, or commit installed from the task-selected harness repository (not allowed with `EVAL_PREBUILT_ENV=1`, which uses `requirements/lm-eval-harness.txt`) |
 | `APPLY_CHAT_TEMPLATE` | `true` | Apply chat template for instruct models |
 | `TOKENIZER` | same as model | Custom tokenizer path |
 | `BOS` | `false` | Prepend BOS token |
@@ -921,6 +921,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `HARNESS_LIMIT` | (unset) | Limit number of samples per task (set by launcher flag `--limit`) |
 | `NUM_FEWSHOT` | (unset) | Global few-shot override |
 | `EVAL_ENV_MANIFEST` | required | Immutable base-environment and harness-overlay paths produced by `prepare_eval_env.sbatch` |
+| `EVAL_PREBUILT_ENV` | (unset) | `1` in the prebuilt image: no environment preparation or installs; the launcher writes the manifest (see [Prebuilt evaluation image](#prebuilt-evaluation-image-no-installs-at-run-time)) |
 | `EVAL_RUN_CONFIG` | required | Launcher-generated normalized provenance used to exclude incompatible results during resume |
 | `EVAL_CHUNKS_FILE` | (unset) | One comma-separated task chunk per line; indexed by `SLURM_ARRAY_TASK_ID` |
 | `LOGS_ROOT` | `$SCRATCH/eval_logs_start/` | Root directory for evaluation logs |
@@ -1021,6 +1022,35 @@ environments beyond the cluster's scratch window is preferable. Successful
 cache use refreshes the completion-marker and archive timestamps so recently
 used entries remain active under age-based scratch retention policies.
 
+### Prebuilt evaluation image (no installs at run time)
+
+`containers/Dockerfile.eval` bakes everything an OpenAI-compatible-backend run
+needs into one image: CPU PyTorch, `requirements/eval-runtime.txt`,
+`requirements/inspect-runtime.txt`, and each lm-evaluation-harness fork at the
+commit pinned in `requirements/lm-eval-harness.txt` (as `--no-deps` overlays
+under `/opt/lm-eval-harness/<owner>/<repo>`, the same layout `build_eval_env.sh`
+produces). CI (`.github/workflows/eval-image.yml`) publishes it for every
+pushed commit as `ghcr.io/swiss-ai/evals-post-train-eval:<commit>`.
+
+The image sets `EVAL_PREBUILT_ENV=1`. With it, the launcher submits no
+`prepare_eval_env.sbatch` job and writes the manifest itself;
+`evaluate.sbatch` checks that the container's harness commit matches the pin
+in the checkout and that the packages import, then runs, never installing
+anything. `run_inspect_eval.sh` skips its install the same way. A mismatch
+(the scripts come from a different commit than the image) fails the job with
+a message naming both commits, so run the image with the scripts from the
+commit it was built from. evals-svc's k8s Jobs do exactly that, and fall back
+to the environment-building path when no image exists for a commit yet.
+
+The harness is pinned, not the moving `HEAD` the building path follows: to
+ship a newer harness, bump its commit in `requirements/lm-eval-harness.txt`.
+`--harness-branch`/`LM_EVAL_HARNESS_BRANCH` is refused with
+`EVAL_PREBUILT_ENV=1`.
+
+```bash
+docker build -f containers/Dockerfile.eval -t evals-post-train-eval .
+```
+
 ---
 
 ## Alternative: Inspect AI evals
@@ -1039,7 +1069,7 @@ sbatch --reservation=my-reservation scripts/run_inspect_eval.sbatch --task tau2_
 ```
 
 ```bash
-# run_inspect_eval.sh installs these itself at runtime (SKIP_INSTALL=1 to skip);
+# run_inspect_eval.sh installs these itself at runtime (SKIP_INSTALL=1 or EVAL_PREBUILT_ENV=1 to skip);
 # to install by hand for local/interactive use:
 pip install "inspect-ai>=0.3.258" inspect-evals openai
 

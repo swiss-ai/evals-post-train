@@ -1,0 +1,24 @@
+# Packages run_inspect_eval.sh installs at run time (unless SKIP_INSTALL=1 or
+# EVAL_PREBUILT_ENV=1), and that the prebuilt image (containers/Dockerfile.eval)
+# bakes in.
+inspect-ai>=0.3.258
+inspect-evals
+# Required by Inspect's openai-api provider (used whenever --api-base-url is
+# given) even for non-OpenAI-hosted endpoints -- confirmed by a bare
+# `inspect-ai` install failing with "OpenAI Compatible API requires optional
+# dependencies" against a served model. Not an inspect-ai extra.
+openai
+# Required by inspect_evals/scicode's dataset loader (a Google Drive download)
+# but not declared as an inspect-evals dependency -- confirmed by a real run
+# (--task scicode, plain and aaii/-wrapped alike) failing with "Google Drive
+# download requires optional dependencies. Install with: pip install gdown".
+gdown
+# inspect_evals/scicode's own scorer runtime deps (its docker-requirements.txt,
+# baked into the Docker image its Task declares by default) -- needed here too
+# for evals-svc's --sandbox local override: CSCS refuses privileged containers,
+# so the k8s/FirecREST backends run scicode's generated code as a plain
+# subprocess in this job instead of a nested sandbox.
+numpy
+scipy
+sympy
+h5py

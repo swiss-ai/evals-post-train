@@ -196,7 +196,8 @@ PRE_RUN_LOGS=$(find "$LOGS_DIR" -name '*.eval' 2>/dev/null | sort)
 # See the patch's own module docstring for the full failure/fix reasoning.
 export PYTHONPATH="$(pwd)/scripts/sandbox_patches${PYTHONPATH:+:$PYTHONPATH}"
 
-if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
+# EVAL_PREBUILT_ENV=1 (the prebuilt image, containers/Dockerfile.eval) has these baked in too.
+if [[ "${SKIP_INSTALL:-0}" != "1" && "${EVAL_PREBUILT_ENV:-0}" != "1" ]]; then
     # Unlike evaluate.sbatch (which always runs inside a container image with `pip` on PATH),
     # this script is also run directly on login/compute nodes (e.g. Clariden) where a bare `pip`
     # command may not exist even inside an active conda/venv env -- fall back to `python -m pip`.
@@ -212,32 +213,22 @@ if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
             "if inspect-ai/inspect-evals/openai are already installed."
     fi
 
-    # The `openai` package is required by Inspect's openai-api provider (used whenever
-    # --api-base-url is given) even for non-OpenAI-hosted endpoints -- confirmed by a bare
-    # `inspect-ai` install failing with "OpenAI Compatible API requires optional dependencies"
-    # against a served model. It's not an inspect-ai extra, just a separate package.
-    #
-    # gdown is likewise required by inspect_evals/scicode's dataset loader (a Google Drive
-    # download) but not declared as an inspect-evals dependency -- confirmed by a real run
-    # (--task scicode, plain and aaii/-wrapped alike) failing with "Google Drive download
-    # requires optional dependencies. Install with: pip install gdown" otherwise.
-    #
-    # numpy/scipy/sympy/h5py are inspect_evals/scicode's own scorer runtime deps (its
-    # docker-requirements.txt, baked into the Docker image its Task declares by default) --
-    # needed here too for evals-svc's --sandbox local override (see that PR's own reasoning:
-    # CSCS refuses privileged containers, so the k8s/FirecREST backends run scicode's
-    # generated code as a plain subprocess in this job instead of a nested sandbox).
+    # requirements/inspect-runtime.txt explains each package; the prebuilt image installs
+    # the same file.
     "${PIP[@]}" install --no-cache-dir --upgrade \
-        "inspect-ai>=0.3.258" "inspect-evals" openai gdown numpy scipy sympy h5py \
+        -r "$(dirname "${BASH_SOURCE[0]}")/../requirements/inspect-runtime.txt" \
         || die "pip install of inspect-ai/inspect-evals failed. Set SKIP_INSTALL=1 if the environment already has them."
+else
+    echo "SKIP_INSTALL=1 or EVAL_PREBUILT_ENV=1: using the preinstalled environment (no pip install)"
+fi
 
-    # A --sandbox local run has no Docker image to COPY these into, unlike inspect_evals/
-    # scicode's own default -- its scorer imports them as bare top-level modules
-    # ("from test_util import ...", "from process_data import ..."), so they need to already
-    # be importable from wherever `inspect eval` itself runs (this directory, since nothing
-    # below `cd`s elsewhere). Copied unconditionally, alongside the SciCode-specific installs
-    # above: two small files, harmless for any other task.
-    python3 -c "
+# A --sandbox local run has no Docker image to COPY these into, unlike inspect_evals/
+# scicode's own default -- its scorer imports them as bare top-level modules
+# ("from test_util import ...", "from process_data import ..."), so they need to already
+# be importable from wherever `inspect eval` itself runs (this directory, since nothing
+# below `cd`s elsewhere). Copied unconditionally -- also when nothing was installed above
+# (SKIP_INSTALL, prebuilt image): two small files, harmless for any other task.
+python3 -c "
 import pathlib
 import shutil
 
@@ -247,9 +238,6 @@ src = pathlib.Path(inspect_evals.scicode.__file__).parent
 for name in ('test_util.py', 'process_data.py'):
     shutil.copy(src / name, name)
 " || die "failed to copy inspect_evals/scicode's helper modules (test_util.py, process_data.py) into the working directory"
-else
-    echo "SKIP_INSTALL=1: using the preinstalled environment (no pip install)"
-fi
 
 IFS=',' read -ra TASK_ARRAY <<< "$TASKS"
 RESOLVED_TASKS=()

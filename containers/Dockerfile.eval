@@ -1,0 +1,45 @@
+# Prebuilt evaluation image for the OpenAI-compatible backend: every Python
+# package a run needs, and the pinned lm-evaluation-harness, so nothing is
+# installed at run time. The image sets EVAL_PREBUILT_ENV=1, which makes the
+# launcher skip the environment-preparation job and evaluate.sbatch /
+# run_inspect_eval.sh use this environment as is.
+#
+# CI publishes it for every pushed commit as
+# ghcr.io/swiss-ai/evals-post-train-eval:<commit>; run it with the scripts from
+# that same commit (evals-svc's k8s Jobs do). Built from the repository root:
+#   docker build -f containers/Dockerfile.eval .
+
+FROM python:3.12-slim
+
+RUN apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
+# No model is loaded in this image: CPU torch keeps it small, and installing
+# it first stops the requirements below pulling the multi-GB CUDA build.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+COPY requirements/eval-runtime.txt requirements/inspect-runtime.txt /tmp/requirements/
+RUN pip install --no-cache-dir \
+        -r /tmp/requirements/eval-runtime.txt \
+        -r /tmp/requirements/inspect-runtime.txt
+
+# Each pinned harness as its own --no-deps overlay, the same layout
+# build_eval_env.sh produces, so the Swiss-AI and ymetz forks (both the
+# lm_eval package) can live side by side. evaluate.sbatch checks .commit
+# against the pin in the checkout it runs from.
+COPY requirements/lm-eval-harness.txt /tmp/requirements/
+RUN grep -Ev '^[[:space:]]*(#|$)' /tmp/requirements/lm-eval-harness.txt \
+    | while read -r repo commit; do \
+        target="/opt/lm-eval-harness/$repo"; \
+        pip install --no-cache-dir --no-deps --target "$target" \
+            "git+https://github.com/$repo.git@$commit" || exit 1; \
+        PYTHONPATH="$target" python -c "import lm_eval" || exit 1; \
+        printf '%s\n' "$commit" > "$target/.commit"; \
+        touch "$target/.complete"; \
+    done
+
+ENV EVAL_PREBUILT_ENV=1 \
+    EVAL_PREBUILT_HARNESS_ROOT=/opt/lm-eval-harness
+
+WORKDIR /work

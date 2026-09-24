@@ -147,6 +147,8 @@ class EvalStateTests(unittest.TestCase):
                 "EVAL_FORCE_TASKS": "",
                 "SBATCH_SCRIPT": "scripts/evaluate.sbatch",
                 "LM_EVAL_BACKEND": "vllm",
+                # The environment-preparation path, even inside the prebuilt image.
+                "EVAL_PREBUILT_ENV": "0",
             }
             completed = subprocess.run(
                 [

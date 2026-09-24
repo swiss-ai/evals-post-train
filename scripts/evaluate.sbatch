@@ -59,6 +59,7 @@ usage() {
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref resolved once by the environment-preparation job."
     echo " EVAL_ENV_MANIFEST: Prepared base environment and harness overlay (required; set by launcher)."
+    echo " EVAL_PREBUILT_ENV: '1' when running in the prebuilt image (containers/Dockerfile.eval): nothing is installed; the launcher writes the manifest."
     echo " EVAL_RUN_CONFIG: Normalized result provenance file used for safe resume (required; set by launcher)."
     echo " EVAL_VERIFY_ENV_IMPORTS: 'true' to repeat the preparation job's deep Python import checks inside the evaluation job (default: false)."
     echo " EVAL_CHUNKS_FILE: Resumable array chunk manifest (set automatically by launcher)."
@@ -129,8 +130,8 @@ fi
 
 load_prepared_eval_env() {
     EVAL_ENV_CHECK_ERROR=""
-    unset EVAL_BASE_ENV EVAL_HARNESS_OVERLAY EVAL_HARNESS_ARCHIVE EVAL_RESOLVED_HARNESS_REPO \
-        EVAL_RESOLVED_HARNESS_COMMIT EVAL_RESOLVED_BASE_KEY
+    unset EVAL_ENV_KIND EVAL_BASE_ENV EVAL_HARNESS_OVERLAY EVAL_HARNESS_ARCHIVE \
+        EVAL_RESOLVED_HARNESS_REPO EVAL_RESOLVED_HARNESS_COMMIT EVAL_RESOLVED_BASE_KEY
     if [[ ! -f "$EVAL_ENV_MANIFEST" ]]; then
         EVAL_ENV_CHECK_ERROR="manifest is missing: $EVAL_ENV_MANIFEST"
         return 1
@@ -140,6 +141,17 @@ load_prepared_eval_env() {
     if ! source "$EVAL_ENV_MANIFEST"; then
         EVAL_ENV_CHECK_ERROR="manifest could not be sourced: $EVAL_ENV_MANIFEST"
         return 1
+    fi
+    if [[ "${EVAL_ENV_KIND:-}" == "prebuilt" ]]; then
+        # Written by the launcher for EVAL_PREBUILT_ENV=1: the paths exist only
+        # inside the container, which checks them itself (LOAD_ENV_CMD below).
+        [[ -n "${EVAL_HARNESS_OVERLAY:-}" ]] \
+            || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_HARNESS_OVERLAY"; return 1; }
+        [[ -n "${EVAL_RESOLVED_HARNESS_REPO:-}" ]] \
+            || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_RESOLVED_HARNESS_REPO"; return 1; }
+        [[ "${EVAL_RESOLVED_HARNESS_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] \
+            || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_RESOLVED_HARNESS_COMMIT"; return 1; }
+        return 0
     fi
     # Do not test EVAL_BASE_ENV/bin/python with -x here. This shell runs outside
     # the container, while venv's python may be an absolute symlink to a path
@@ -168,6 +180,9 @@ load_prepared_eval_env() {
 }
 
 if ! load_prepared_eval_env; then
+    # A prebuilt environment is never repaired by installing: that is the point of it.
+    [[ "${EVAL_ENV_KIND:-}" != "prebuilt" ]] \
+        || die "Prebuilt evaluation environment manifest is invalid: $EVAL_ENV_CHECK_ERROR"
     echo "Prepared evaluation environment is missing or incomplete ($EVAL_ENV_CHECK_ERROR); rebuilding it now."
     : "${EVAL_CONTAINER_CONFIG:?EVAL_CONTAINER_CONFIG is required for environment repair}"
     : "${EVAL_REPO_ROOT:?EVAL_REPO_ROOT is required for environment repair}"
@@ -675,6 +690,29 @@ if echo "$TASKS" | grep -qE '(^|,)(bfcl_v3([^,]*)?|swiss_ai_charter_alignment([^
 fi
 echo "Using lm-evaluation-harness: $EVAL_RESOLVED_HARNESS_REPO@$EVAL_RESOLVED_HARNESS_COMMIT"
 
+if [[ "${EVAL_ENV_KIND:-}" == "prebuilt" ]]; then
+# EVAL_PREBUILT_ENV=1: the container (containers/Dockerfile.eval) already has
+# every package and the pinned harness. Check it, never install: a mismatch
+# means the job runs in an image built from a different commit.
+LOAD_ENV_CMD="
+echo Container entered: \$(date -Is)
+if [[ ! -f '$EVAL_HARNESS_OVERLAY/.complete' || ! -d '$EVAL_HARNESS_OVERLAY/lm_eval' ]]; then
+    echo 'EVAL_PREBUILT_ENV=1, but this container has no harness at $EVAL_HARNESS_OVERLAY. Use the image built from this commit (containers/Dockerfile.eval).' >&2
+    exit 1
+fi
+container_harness_commit=\$(cat '$EVAL_HARNESS_OVERLAY/.commit' 2>/dev/null || true)
+if [[ \"\$container_harness_commit\" != '$EVAL_RESOLVED_HARNESS_COMMIT' ]]; then
+    echo \"The container's harness is $EVAL_RESOLVED_HARNESS_REPO@\$container_harness_commit, but requirements/lm-eval-harness.txt pins $EVAL_RESOLVED_HARNESS_COMMIT. Use the image built from this commit.\" >&2
+    exit 1
+fi
+export PYTHONPATH='$EVAL_HARNESS_OVERLAY'\${PYTHONPATH:+:\$PYTHONPATH}
+if ! python -c 'import accelerate, datasets, transformers, wandb, lm_eval'; then
+    echo 'EVAL_PREBUILT_ENV=1, but this container is missing evaluation packages (import check above).' >&2
+    exit 1
+fi
+echo Evaluation environment activated: \$(date -Is) prebuilt=true harness_path='$EVAL_HARNESS_OVERLAY'
+"
+else
 LOAD_ENV_CMD="
 echo Container entered: \$(date -Is)
 eval_env_is_ready() {
@@ -718,6 +756,7 @@ fi
 export PYTHONPATH=\$EVAL_RUNTIME_HARNESS_OVERLAY\${PYTHONPATH:+:\$PYTHONPATH}
 echo Evaluation environment activated: \$(date -Is) deep_import_check=$EVAL_VERIFY_ENV_IMPORTS harness_path=\$EVAL_RUNTIME_HARNESS_OVERLAY
 "
+fi
 if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     # Fail loudly: without the checkout the job would die mid-run with a bare
     # ModuleNotFoundError after the model-load wait.
