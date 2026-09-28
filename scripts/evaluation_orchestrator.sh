@@ -251,10 +251,46 @@ _eval_submit_wave() {
     EVAL_SUBMITTED_JOB_ID="$controller_job"
 }
 
+_eval_pinned_harness_commit() {
+    local repo="$1"
+    awk -v repo="$repo" '$1 == repo {print $2; exit}' requirements/lm-eval-harness.txt
+}
+
+_eval_use_prebuilt_environment() {
+    # EVAL_PREBUILT_ENV=1: the container already holds every package and the
+    # pinned harness (containers/Dockerfile.eval), so there is nothing to
+    # prepare. Write the manifest directly; evaluate.sbatch checks it against
+    # the container instead of building anything.
+    local repo="$1" commit
+    if [[ -n "${LM_EVAL_HARNESS_BRANCH:-}" ]]; then
+        echo "Error: --harness-branch/LM_EVAL_HARNESS_BRANCH cannot be used with EVAL_PREBUILT_ENV=1;" \
+            "the image pins the harness in requirements/lm-eval-harness.txt" >&2
+        return 1
+    fi
+    commit=$(_eval_pinned_harness_commit "$repo")
+    if [[ ! "$commit" =~ ^[0-9a-fA-F]{40}$ ]]; then
+        echo "Error: requirements/lm-eval-harness.txt has no commit for $repo" >&2
+        return 1
+    fi
+    {
+        printf 'EVAL_ENV_KIND=prebuilt\n'
+        printf 'EVAL_HARNESS_OVERLAY=%q\n' "${EVAL_PREBUILT_HARNESS_ROOT:-/opt/lm-eval-harness}/$repo"
+        printf 'EVAL_RESOLVED_HARNESS_REPO=%q\n' "$repo"
+        printf 'EVAL_RESOLVED_HARNESS_COMMIT=%q\n' "${commit,,}"
+    } > "$EVAL_ENV_MANIFEST"
+    EVAL_PREP_JOB_ID=""
+    export EVAL_PREP_JOB_ID
+    echo "Prebuilt evaluation environment: $repo@${commit,,} (no preparation job)"
+}
+
 _eval_prepare_environment() {
     local state_dir="$1" repo="$2"
     EVAL_ENV_MANIFEST="$state_dir/environment.sh"
     export EVAL_ENV_MANIFEST EVAL_HARNESS_REPO="$repo"
+    if [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
+        _eval_use_prebuilt_environment "$repo"
+        return
+    fi
     export EVAL_HARNESS_REF="${LM_EVAL_HARNESS_BRANCH:-HEAD}"
     EVAL_CONTAINER_CONFIG=$(_eval_container_for_backend)
     EVAL_CONTAINER_CONFIG=$(realpath "$EVAL_CONTAINER_CONFIG")
@@ -331,17 +367,22 @@ submit_evaluation() {
     # Do not allocate a judge for a merge-only or already-complete run. In auto
     # mode, inspect only the tasks that this launch will actually execute.
     _eval_launch_judge "$state_dir/missing_0.txt"
-    _eval_prepare_environment "$state_dir" "$repo"
+    _eval_prepare_environment "$state_dir" "$repo" || return 1
 
     if [[ "${EVAL_FAILURE_POLICY:-resume}" == "fail-fast" ]]; then
-        local safe_name job_id
+        local safe_name job_id dependency
+        local -a dependency_args=()
         safe_name=${name//[^a-zA-Z0-9_.-]/-}
+        # With a prebuilt environment and no conversion there is nothing to
+        # wait on, and an empty --dependency= is rejected by sbatch.
+        dependency=$(_eval_prestart_dependency)
+        [[ -n "$dependency" ]] && dependency_args=(--dependency="$dependency")
         if [[ "${EVAL_DRY_RUN:-false}" == "true" ]]; then
             echo "[DRY RUN] sbatch evaluate (fail-fast)" >&2
             job_id="dry-evaluation"
         else
             job_id=$(sbatch --parsable --job-name="eval-${safe_name}" \
-                --dependency="$(_eval_prestart_dependency)" \
+                "${dependency_args[@]}" \
                 --export="ALL,EVAL_ENV_MANIFEST=$EVAL_ENV_MANIFEST,EVAL_CHUNKED=false" \
                 "$SBATCH_SCRIPT" "$model" "$name")
         fi
