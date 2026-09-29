@@ -48,6 +48,7 @@ TASK_TO_JUDGE = {
     "harmbench": "cais-llama-harmbench",
     "hallulens": "qwen3.5-27b",
     "realtoxicitypromptsllama": "llama-guard",
+    "polyglotoxicitypromptsllama": "llama-guard",
 }
 
 # ── Judge presets ─────────────────────────────────────────────────────

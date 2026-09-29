@@ -198,7 +198,7 @@ class LaunchFlowTests(unittest.TestCase):
                 sbatch,
             )
 
-    def test_harness_pins_cover_both_forks(self) -> None:
+    def test_harness_pins_only_the_swiss_ai_fork(self) -> None:
         pins = [
             line.split()
             for line in (REPO_ROOT / "requirements/lm-eval-harness.txt").read_text().splitlines()
@@ -206,7 +206,7 @@ class LaunchFlowTests(unittest.TestCase):
         ]
         self.assertEqual(
             sorted(repo for repo, _ in pins),
-            ["swiss-ai/lm-evaluation-harness", "ymetz/lm-evaluation-harness"],
+            ["swiss-ai/lm-evaluation-harness"],
         )
         for _, commit in pins:
             self.assertRegex(commit, r"^[0-9a-f]{40}$")

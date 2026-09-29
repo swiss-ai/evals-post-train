@@ -4,4 +4,3 @@
 # newer harness. Runs that build their own environment (the default) are not
 # affected: they still follow LM_EVAL_HARNESS_BRANCH, or the repo's HEAD.
 swiss-ai/lm-evaluation-harness 51d6f4b62bf20e9a29dffa694b163d4f19889927
-ymetz/lm-evaluation-harness 0b13623782079b4939da56338a45e9c601e67d95

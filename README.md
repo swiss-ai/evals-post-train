@@ -219,7 +219,7 @@ python3 -c "import swiss_ai_model_launch"
 
 `CSCS_SERVING_API` must also be exported or stored in `scripts/cscs_serving_api_key.txt` so the launcher can verify that the judge is healthy.
 
-CSCS exposes hosted models with a host scope, for example `ymetz/cais/HarmBench-Llama-2-13b-cls`. The launcher defaults `JUDGE_MODEL_PREFIX` to `$USER`; the harness prefers `$JUDGE_MODEL_PREFIX/<model>` and checks `/v1/models` for a `CSCS-Inference/<model>` provider name or another unique matching scope. Unscoped hosted IDs are not accepted. Set `JUDGE_MODEL_PREFIX` explicitly when the desired host differs from the submitting user. Fully scoped task-specific judge-model overrides are preserved.
+CSCS exposes hosted models with a host scope, for example `<user>/cais/HarmBench-Llama-2-13b-cls`. The launcher defaults `JUDGE_MODEL_PREFIX` to `$USER`; the harness prefers `$JUDGE_MODEL_PREFIX/<model>` and checks `/v1/models` for a `CSCS-Inference/<model>` provider name or another unique matching scope. Unscoped hosted IDs are not accepted. Set `JUDGE_MODEL_PREFIX` explicitly when the desired host differs from the submitting user. Fully scoped task-specific judge-model overrides are preserved.
 
 The judge limit is shared by all task threads and Slurm chunks in one launch and is keyed by endpoint/model, so two judge models configured at 30 RPM each do not unnecessarily share one 30 RPM budget. Set `LM_EVAL_RATE_LIMIT_STATE_DIR` to the same shared-filesystem directory for separate launcher invocations that must coordinate a common endpoint limit.
 

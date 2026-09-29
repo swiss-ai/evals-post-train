@@ -25,9 +25,9 @@ RUN pip install --no-cache-dir \
         -r /tmp/requirements/inspect-runtime.txt
 
 # Each pinned harness as its own --no-deps overlay, the same layout
-# build_eval_env.sh produces, so the Swiss-AI and ymetz forks (both the
-# lm_eval package) can live side by side. evaluate.sbatch checks .commit
-# against the pin in the checkout it runs from.
+# build_eval_env.sh produces, so several forks (all the lm_eval package)
+# could live side by side. evaluate.sbatch checks .commit against the pin
+# in the checkout it runs from.
 COPY requirements/lm-eval-harness.txt /tmp/requirements/
 RUN grep -Ev '^[[:space:]]*(#|$)' /tmp/requirements/lm-eval-harness.txt \
     | while read -r repo commit; do \

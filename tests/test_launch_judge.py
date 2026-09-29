@@ -49,40 +49,43 @@ class LaunchArgsTests(unittest.TestCase):
 class HostedModelScopeTests(unittest.TestCase):
     def test_readiness_prefers_current_user_scope(self) -> None:
         model = "cais/HarmBench-Llama-2-13b-cls"
+        username = "testuser"
         model_ids = [
             f"CSCS-Inference/{model}",
-            f"ymetz/{model}",
+            f"{username}/{model}",
         ]
 
         self.assertEqual(
             launch_judge._launched_hosted_model_name(
                 model,
                 model_ids,
-                username="ymetz",
+                username=username,
             ),
-            f"ymetz/{model}",
+            f"{username}/{model}",
         )
 
     def test_readiness_preserves_already_scoped_name(self) -> None:
         model = "CSCS-Inference/meta-llama/Llama-Guard-4-12B"
+        username = "testuser"
 
         self.assertEqual(
             launch_judge._launched_hosted_model_name(
                 model,
                 [model],
-                username="ymetz",
+                username=username,
             ),
             model,
         )
 
     def test_readiness_rejects_unscoped_name(self) -> None:
         model = "Qwen/Qwen3.5-27B"
+        username = "testuser"
 
         self.assertIsNone(
             launch_judge._launched_hosted_model_name(
                 model,
                 [model],
-                username="ymetz",
+                username=username,
             )
         )
 
@@ -130,7 +133,8 @@ class _HealthyLauncher(_FailedLauncher):
 class LaunchFailureTests(unittest.IsolatedAsyncioTestCase):
     async def test_launch_returns_scoped_hosted_name(self) -> None:
         args = launch_judge._build_launch_args("qwen3.5-27b", {})
-        hosted_name = "ymetz/Qwen/Qwen3.5-27B"
+        username = "testuser"
+        hosted_name = f"{username}/Qwen/Qwen3.5-27B"
 
         with (
             patch.object(launch_judge, "SlurmLauncher", _HealthyLauncher),
