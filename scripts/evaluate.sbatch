@@ -64,7 +64,7 @@ usage() {
     echo " EVAL_VERIFY_ENV_IMPORTS: 'true' to repeat the preparation job's deep Python import checks inside the evaluation job (default: false)."
     echo " EVAL_CHUNKS_FILE: Resumable array chunk manifest (set automatically by launcher)."
     echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
-    echo " ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: false)."
+    echo " ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: unset, the template's own default)."
     echo " AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
     echo " THINK_END_TOKEN: Force the reasoning close token, e.g. '</think>'. A known close token arms the strip AND the metrics."
     echo " THINK_START_TOKEN: Force the reasoning open token, e.g. '<think>'. Needed for thinking_format_has_open."
@@ -251,8 +251,8 @@ MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
 NUM_FEWSHOT=${NUM_FEWSHOT:-""}
 
 # --- Thinking / reasoning metrics ---
-# Capture explicitness before defaulting: hf forwards enable_thinking only when set (unset lets
-# the template default apply). ':+' treats an exported-but-empty value as unset.
+# Capture explicitness before defaulting: hf, vllm and sglang forward enable_thinking only when
+# set (unset lets the template default apply). ':+' treats an exported-but-empty value as unset.
 if [[ -n "${ENABLE_THINKING:+x}" ]]; then ENABLE_THINKING_EXPLICIT=1; else ENABLE_THINKING_EXPLICIT=0; fi
 ENABLE_THINKING=${ENABLE_THINKING:-false}
 AUTODETECT_THINK_TOKENS=${AUTODETECT_THINK_TOKENS:-false}
@@ -491,9 +491,12 @@ if [[ "$ENABLE_THINKING" == "True" ]]; then
 fi
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,language_model_only=True,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION,enable_thinking=${ENABLE_THINKING}${THINK_ARGS}${THINKING_DEFAULT_MODEL_ARG},disable_flashinfer_allreduce_fusion=True"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,language_model_only=True,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION${THINK_ARGS}${THINKING_DEFAULT_MODEL_ARG},disable_flashinfer_allreduce_fusion=True"
+    # Forward enable_thinking only when explicitly set; unset lets the template default apply.
+    (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer_path=$TOKENIZER$MAYBE_REVISION,dp_size=$DP,tp_size=$MP,mem_fraction_static=$VLLM_MEMORY_FRACTION,dtype=auto${THINKING_DEFAULT_MODEL_ARG}"
+    (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     MEGATRON_MICRO_BATCH_SIZE=${MEGATRON_MICRO_BATCH_SIZE:-""}
     if [[ -z "$MEGATRON_MICRO_BATCH_SIZE" ]]; then

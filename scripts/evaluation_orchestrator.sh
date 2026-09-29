@@ -76,6 +76,10 @@ _eval_submit_aggregator() {
 
 _eval_create_run_config() {
     local model="$1" repo="$2" state_dir="$3"
+    # vllm used to pin an unset enable_thinking to False; it now leaves the template default.
+    # Record that distinctly so an unset vllm run never resumes results rendered under False.
+    local enable_thinking="${ENABLE_THINKING:-}"
+    [[ -z "$enable_thinking" && "${LM_EVAL_BACKEND:-vllm}" == "vllm" ]] && enable_thinking="template-default"
     local -a fields=(
         --field "model=$model"
         --field "backend=${LM_EVAL_BACKEND:-vllm}"
@@ -92,7 +96,7 @@ _eval_create_run_config() {
         --field "max_batch_size=${MAX_BATCH_SIZE:-}"
         --field "max_length=${MAX_LENGTH:-}"
         --field "max_new_tokens=${MAX_NEW_TOKENS:-}"
-        --field "enable_thinking=${ENABLE_THINKING:-}"
+        --field "enable_thinking=$enable_thinking"
         --field "autodetect_think_tokens=${AUTODETECT_THINK_TOKENS:-false}"
         --field "think_start_token=${THINK_START_TOKEN:-}"
         --field "think_end_token=${THINK_END_TOKEN:-}"
