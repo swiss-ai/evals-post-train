@@ -169,6 +169,60 @@ class EvalStateTests(unittest.TestCase):
             self.assertIn("afterany:dry-array-0", output)
             self.assertIn("--job-name=eval-ctrl-test-model-a0", output)
 
+    def test_failed_environment_submission_stops_the_launch(self) -> None:
+        # e.g. an sbatch option it rejects (SBATCH_EXCLUSIVE=1): nothing may be
+        # submitted after it, least of all an eval array without the dependency.
+        repo_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            calls = Path(tmp) / "sbatch_calls.txt"
+            fake_sbatch = bin_dir / "sbatch"
+            fake_sbatch.write_text(
+                "#!/bin/bash\n"
+                f'echo "$*" >> "{calls}"\n'
+                'echo "sbatch: error: Invalid --exclusive specification" >&2\n'
+                "exit 1\n",
+                encoding="utf-8",
+            )
+            fake_sbatch.chmod(0o755)
+            task_file = Path(tmp) / "tasks.txt"
+            task_file.write_text("a\nb\n", encoding="utf-8")
+            env = os.environ | {
+                "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                "TASKS": str(task_file),
+                "TABLE_METRICS": str(task_file),
+                "LOGS_ROOT": str(Path(tmp) / "logs"),
+                "WANDB_ENTITY": "test",
+                "WANDB_PROJECT": "test",
+                "EVAL_FAILURE_POLICY": "resume",
+                "EVAL_CHUNK_SIZE": "2",
+                "EVAL_FORCE_TASKS": "",
+                "SBATCH_SCRIPT": "scripts/evaluate.sbatch",
+                "LM_EVAL_BACKEND": "vllm",
+                "EVAL_PREBUILT_ENV": "0",
+                "JUDGE_MODE": "none",
+            }
+            completed = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    "set -euo pipefail; source scripts/evaluation_orchestrator.sh; "
+                    "submit_evaluation test/model test-model",
+                ],
+                cwd=repo_root,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            output = completed.stdout + completed.stderr
+            self.assertNotEqual(completed.returncode, 0, output)
+            self.assertIn("could not submit the environment preparation job", output)
+            self.assertNotIn("Environment preparation job:", output)
+            submitted = calls.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(submitted), 1, submitted)
+        self.assertIn("prepare_eval_env.sbatch", submitted[0])
+
     def test_merge_prefers_newer_metrics_and_samples(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

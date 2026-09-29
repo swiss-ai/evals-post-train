@@ -304,7 +304,13 @@ _eval_prepare_environment() {
         echo "[DRY RUN] sbatch --parsable scripts/prepare_eval_env.sbatch" >&2
         EVAL_PREP_JOB_ID="dry-environment"
     else
-        EVAL_PREP_JOB_ID=$(sbatch --parsable --export=ALL scripts/prepare_eval_env.sbatch)
+        # The caller runs this under `|| return 1`, which turns set -e off in here: check
+        # by hand. An empty ID would drop the eval array's dependency on this job.
+        if ! EVAL_PREP_JOB_ID=$(sbatch --parsable --export=ALL scripts/prepare_eval_env.sbatch) \
+            || [[ -z "$EVAL_PREP_JOB_ID" ]]; then
+            echo "Error: could not submit the environment preparation job (scripts/prepare_eval_env.sbatch); see the sbatch error above" >&2
+            return 1
+        fi
     fi
     export EVAL_PREP_JOB_ID
     echo "Environment preparation job: $EVAL_PREP_JOB_ID ($repo@${EVAL_HARNESS_REF})"
