@@ -103,7 +103,9 @@
 #   --reasoning-effort <level> - Chat-template argument reasoning_effort (e.g. low, medium, high)
 #                          for models whose template reads it (gpt-oss). hf and vllm backends
 #                          only; forces the chat template on. Letters, digits, '_' and '-'.
-#                          Other templates ignore it. Combine with --thinking for the metrics.
+#                          Other templates ignore it. For gpt-oss, combine with --thinking and
+#                          --think-start-token '<|channel|>analysis<|message|>'
+#                          --think-end-token '<|channel|>final<|message|>' (not auto-detected).
 #
 # Examples:
 #   # Single HF model, auto-detect everything
