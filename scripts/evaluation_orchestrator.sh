@@ -15,18 +15,26 @@ _eval_repo_root() {
 # `srun --environment=...`) -- so they can't rely on one of the env_*.toml
 # containers' Python. Clariden's bare `python3` on both node types resolves
 # to the OS's system Python (confirmed 3.6.15, predating PEP 563 entirely:
-# "SyntaxError: future feature annotations is not defined"), so resolve a
-# real modern interpreter explicitly instead of trusting that alias.
-_eval_python() {
+# "SyntaxError: future feature annotations is not defined").
+#
+# Fixed once, for this script's whole execution, rather than at each call
+# site: symlink the newest real python3.x actually installed (confirmed
+# python3.11 at /usr/bin on both Clariden login and compute nodes) as
+# `python3` in a directory prepended to PATH, so every bare `python3` call
+# below -- and anything this script goes on to source or exec -- picks it up
+# automatically. A no-op (falls back to whatever `python3` already is) if
+# none of these versioned binaries exist, e.g. on a plain dev machine.
+_eval_prepend_modern_python_path() {
+    local cand real dir
     for cand in python3.13 python3.12 python3.11 python3.10 python3.9 python3.8 python3.7; do
-        if command -v "$cand" >/dev/null 2>&1; then
-            echo "$cand"
-            return
-        fi
+        real=$(command -v "$cand" 2>/dev/null) || continue
+        dir=$(mktemp -d "${TMPDIR:-/tmp}/eval-py-shim.XXXXXX") || return
+        ln -sf "$real" "$dir/python3"
+        export PATH="$dir:$PATH"
+        return
     done
-    echo "python3"
 }
-EVAL_PY=$(_eval_python)
+_eval_prepend_modern_python_path
 
 _eval_container_for_backend() {
     case "${LM_EVAL_BACKEND:-vllm}" in
@@ -105,10 +113,13 @@ _eval_create_run_config() {
         --field "judge_args=${JUDGE_EXTRA_ARGS:-}"
         --field "judge_model_prefix=${JUDGE_MODEL_PREFIX:-}"
     )
+    # Only when set: run_config_matches() compares exactly, so an always-present field
+    # would make every earlier result look foreign and rerun it.
+    [[ -n "${REASONING_EFFORT:-}" ]] && fields+=(--field "reasoning_effort=$REASONING_EFFORT")
 
     EVAL_RUN_CONFIG="$state_dir/run_config.json"
     export EVAL_RUN_CONFIG
-    EVAL_RUN_SIGNATURE=$("$EVAL_PY" -m scripts.eval_state config \
+    EVAL_RUN_SIGNATURE=$(python3 -m scripts.eval_state config \
         "${fields[@]}" --output "$EVAL_RUN_CONFIG")
     export EVAL_RUN_SIGNATURE
     echo "Run configuration: $EVAL_RUN_SIGNATURE"
@@ -133,7 +144,7 @@ _eval_launch_judge() {
     echo ""
     echo "--- Judge Model Launch ---"
     # JUDGE_EXTRA_ARGS retains the launcher's historical shell-word semantics.
-    if ! judge_stdout=$("$EVAL_PY" scripts/launch_judge.py \
+    if ! judge_stdout=$(python3 scripts/launch_judge.py \
         "${launch_args[@]}" ${JUDGE_EXTRA_ARGS:-}); then
         echo "ERROR: Judge model launch failed" >&2
         return 1
@@ -182,7 +193,7 @@ _eval_scan() {
         done < "$state_dir/force_patterns.txt"
         harness_args+=(--force-after "$(< "$state_dir/force_after.txt")")
     fi
-    "$EVAL_PY" -m scripts.eval_state scan \
+    python3 -m scripts.eval_state scan \
         --tasks-file "$state_dir/expected_tasks.txt" \
         "${harness_args[@]}" \
         --run-config "$state_dir/run_config.json" \
@@ -197,7 +208,7 @@ _eval_submit_wave() {
     local chunks_file="$state_dir/chunks_${attempt}.txt"
     local chunk_count array_spec array_job controller_job safe_name controller_name
 
-    "$EVAL_PY" -m scripts.eval_state chunk --tasks-file "$missing_file" \
+    python3 -m scripts.eval_state chunk --tasks-file "$missing_file" \
         --chunk-size "$chunk_size" --output "$chunks_file"
     chunk_count=$(wc -l < "$chunks_file" | tr -d ' ')
     (( chunk_count > 0 )) || { echo "No missing tasks to submit"; return 1; }
@@ -243,10 +254,46 @@ _eval_submit_wave() {
     EVAL_SUBMITTED_JOB_ID="$controller_job"
 }
 
+_eval_pinned_harness_commit() {
+    local repo="$1"
+    awk -v repo="$repo" '$1 == repo {print $2; exit}' requirements/lm-eval-harness.txt
+}
+
+_eval_use_prebuilt_environment() {
+    # EVAL_PREBUILT_ENV=1: the container already holds every package and the
+    # pinned harness (containers/Dockerfile.eval), so there is nothing to
+    # prepare. Write the manifest directly; evaluate.sbatch checks it against
+    # the container instead of building anything.
+    local repo="$1" commit
+    if [[ -n "${LM_EVAL_HARNESS_BRANCH:-}" ]]; then
+        echo "Error: --harness-branch/LM_EVAL_HARNESS_BRANCH cannot be used with EVAL_PREBUILT_ENV=1;" \
+            "the image pins the harness in requirements/lm-eval-harness.txt" >&2
+        return 1
+    fi
+    commit=$(_eval_pinned_harness_commit "$repo")
+    if [[ ! "$commit" =~ ^[0-9a-fA-F]{40}$ ]]; then
+        echo "Error: requirements/lm-eval-harness.txt has no commit for $repo" >&2
+        return 1
+    fi
+    {
+        printf 'EVAL_ENV_KIND=prebuilt\n'
+        printf 'EVAL_HARNESS_OVERLAY=%q\n' "${EVAL_PREBUILT_HARNESS_ROOT:-/opt/lm-eval-harness}/$repo"
+        printf 'EVAL_RESOLVED_HARNESS_REPO=%q\n' "$repo"
+        printf 'EVAL_RESOLVED_HARNESS_COMMIT=%q\n' "${commit,,}"
+    } > "$EVAL_ENV_MANIFEST"
+    EVAL_PREP_JOB_ID=""
+    export EVAL_PREP_JOB_ID
+    echo "Prebuilt evaluation environment: $repo@${commit,,} (no preparation job)"
+}
+
 _eval_prepare_environment() {
     local state_dir="$1" repo="$2"
     EVAL_ENV_MANIFEST="$state_dir/environment.sh"
     export EVAL_ENV_MANIFEST EVAL_HARNESS_REPO="$repo"
+    if [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
+        _eval_use_prebuilt_environment "$repo"
+        return
+    fi
     export EVAL_HARNESS_REF="${LM_EVAL_HARNESS_BRANCH:-HEAD}"
     EVAL_CONTAINER_CONFIG=$(_eval_container_for_backend)
     EVAL_CONTAINER_CONFIG=$(realpath "$EVAL_CONTAINER_CONFIG")
@@ -284,7 +331,7 @@ submit_evaluation() {
     if [[ -z "${LM_EVAL_RATE_LIMIT_STATE_DIR:-}" ]]; then
         export LM_EVAL_RATE_LIMIT_STATE_DIR="$state_dir/rate_limits"
     fi
-    "$EVAL_PY" -m scripts.eval_state normalize --tasks "$TASKS" \
+    python3 -m scripts.eval_state normalize --tasks "$TASKS" \
         --output "$state_dir/expected_tasks.txt"
 
     repo="swiss-ai/lm-evaluation-harness"
@@ -318,17 +365,22 @@ submit_evaluation() {
     # Do not allocate a judge for a merge-only or already-complete run. In auto
     # mode, inspect only the tasks that this launch will actually execute.
     _eval_launch_judge "$state_dir/missing_0.txt"
-    _eval_prepare_environment "$state_dir" "$repo"
+    _eval_prepare_environment "$state_dir" "$repo" || return 1
 
     if [[ "${EVAL_FAILURE_POLICY:-resume}" == "fail-fast" ]]; then
-        local safe_name job_id
+        local safe_name job_id dependency
+        local -a dependency_args=()
         safe_name=${name//[^a-zA-Z0-9_.-]/-}
+        # With a prebuilt environment and no conversion there is nothing to
+        # wait on, and an empty --dependency= is rejected by sbatch.
+        dependency=$(_eval_prestart_dependency)
+        [[ -n "$dependency" ]] && dependency_args=(--dependency="$dependency")
         if [[ "${EVAL_DRY_RUN:-false}" == "true" ]]; then
             echo "[DRY RUN] sbatch evaluate (fail-fast)" >&2
             job_id="dry-evaluation"
         else
             job_id=$(sbatch --parsable --job-name="eval-${safe_name}" \
-                --dependency="$(_eval_prestart_dependency)" \
+                "${dependency_args[@]}" \
                 --export="ALL,EVAL_ENV_MANIFEST=$EVAL_ENV_MANIFEST,EVAL_CHUNKED=false" \
                 "$SBATCH_SCRIPT" "$model" "$name")
         fi

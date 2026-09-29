@@ -59,6 +59,7 @@ usage() {
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref resolved once by the environment-preparation job."
     echo " EVAL_ENV_MANIFEST: Prepared base environment and harness overlay (required; set by launcher)."
+    echo " EVAL_PREBUILT_ENV: '1' when running in the prebuilt image (containers/Dockerfile.eval): nothing is installed; the launcher writes the manifest."
     echo " EVAL_RUN_CONFIG: Normalized result provenance file used for safe resume (required; set by launcher)."
     echo " EVAL_VERIFY_ENV_IMPORTS: 'true' to repeat the preparation job's deep Python import checks inside the evaluation job (default: false)."
     echo " EVAL_CHUNKS_FILE: Resumable array chunk manifest (set automatically by launcher)."
@@ -69,6 +70,7 @@ usage() {
     echo " THINK_START_TOKEN: Force the reasoning open token, e.g. '<think>'. Needed for thinking_format_has_open."
     echo " TRACK_THINKING_METRICS: 'true'/'false' to force the thinking metrics on/off (default: on iff a close token is known)."
     echo " LOG_LENGTH_METRICS: 'true' to aggregate response_length_*/thinking_length_* (thinking_format_* is always aggregated)."
+    echo " REASONING_EFFORT: chat-template argument reasoning_effort (e.g. low/medium/high, read by gpt-oss's template); hf and vllm only."
 	echo "For more information see the README: https://github.com/swiss-ai/evals?tab=readme-ov-file."
 }
 die() {
@@ -129,8 +131,8 @@ fi
 
 load_prepared_eval_env() {
     EVAL_ENV_CHECK_ERROR=""
-    unset EVAL_BASE_ENV EVAL_HARNESS_OVERLAY EVAL_HARNESS_ARCHIVE EVAL_RESOLVED_HARNESS_REPO \
-        EVAL_RESOLVED_HARNESS_COMMIT EVAL_RESOLVED_BASE_KEY
+    unset EVAL_ENV_KIND EVAL_BASE_ENV EVAL_HARNESS_OVERLAY EVAL_HARNESS_ARCHIVE \
+        EVAL_RESOLVED_HARNESS_REPO EVAL_RESOLVED_HARNESS_COMMIT EVAL_RESOLVED_BASE_KEY
     if [[ ! -f "$EVAL_ENV_MANIFEST" ]]; then
         EVAL_ENV_CHECK_ERROR="manifest is missing: $EVAL_ENV_MANIFEST"
         return 1
@@ -140,6 +142,17 @@ load_prepared_eval_env() {
     if ! source "$EVAL_ENV_MANIFEST"; then
         EVAL_ENV_CHECK_ERROR="manifest could not be sourced: $EVAL_ENV_MANIFEST"
         return 1
+    fi
+    if [[ "${EVAL_ENV_KIND:-}" == "prebuilt" ]]; then
+        # Written by the launcher for EVAL_PREBUILT_ENV=1: the paths exist only
+        # inside the container, which checks them itself (LOAD_ENV_CMD below).
+        [[ -n "${EVAL_HARNESS_OVERLAY:-}" ]] \
+            || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_HARNESS_OVERLAY"; return 1; }
+        [[ -n "${EVAL_RESOLVED_HARNESS_REPO:-}" ]] \
+            || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_RESOLVED_HARNESS_REPO"; return 1; }
+        [[ "${EVAL_RESOLVED_HARNESS_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] \
+            || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_RESOLVED_HARNESS_COMMIT"; return 1; }
+        return 0
     fi
     # Do not test EVAL_BASE_ENV/bin/python with -x here. This shell runs outside
     # the container, while venv's python may be an absolute symlink to a path
@@ -168,6 +181,9 @@ load_prepared_eval_env() {
 }
 
 if ! load_prepared_eval_env; then
+    # A prebuilt environment is never repaired by installing: that is the point of it.
+    [[ "${EVAL_ENV_KIND:-}" != "prebuilt" ]] \
+        || die "Prebuilt evaluation environment manifest is invalid: $EVAL_ENV_CHECK_ERROR"
     echo "Prepared evaluation environment is missing or incomplete ($EVAL_ENV_CHECK_ERROR); rebuilding it now."
     : "${EVAL_CONTAINER_CONFIG:?EVAL_CONTAINER_CONFIG is required for environment repair}"
     : "${EVAL_REPO_ROOT:?EVAL_REPO_ROOT is required for environment repair}"
@@ -244,6 +260,7 @@ THINK_END_TOKEN=${THINK_END_TOKEN:-""}
 THINK_START_TOKEN=${THINK_START_TOKEN:-""}
 TRACK_THINKING_METRICS=${TRACK_THINKING_METRICS:-""}   # "" | true | false
 LOG_LENGTH_METRICS=${LOG_LENGTH_METRICS:-false}
+REASONING_EFFORT=${REASONING_EFFORT:-""}
 
 # Validate booleans (don't coerce): a typo'd 'ture' read as false would waste a GPU job.
 # Assign directly so a bad value aborts under set -e.
@@ -285,6 +302,19 @@ THINK_ARGS=""
 [[ "$AUTODETECT_THINK_TOKENS" == "True" ]] && THINK_ARGS="${THINK_ARGS},autodetect_think_tokens=True"
 [[ -n "$TRACK_THINKING_METRICS" ]] && THINK_ARGS="${THINK_ARGS},track_thinking_metrics=${TRACK_THINKING_METRICS}"
 
+# Extra chat-template arguments (hf and vllm), as a second --model_args token: the harness
+# refuses a first token containing '{' (it must then be all JSON) but reads each further
+# comma-free key=value token with ast.literal_eval, so this one becomes a dict. Needs the
+# `--model_args 'a' 'b'` form: argparse gives `--model_args='a'` exactly one value.
+CHAT_TEMPLATE_ARGS=""
+if [[ -n "$REASONING_EFFORT" ]]; then
+    [[ "$REASONING_EFFORT" =~ ^[A-Za-z0-9_-]+$ ]] \
+        || die "REASONING_EFFORT must be a level like low, medium or high (got '$REASONING_EFFORT')."
+    [[ "$LM_EVAL_BACKEND" == "vllm" || "$LM_EVAL_BACKEND" == "hf" ]] \
+        || die "REASONING_EFFORT is only supported with the hf and vllm backends (got $LM_EVAL_BACKEND)."
+    CHAT_TEMPLATE_ARGS=" 'chat_template_args={\"reasoning_effort\":\"${REASONING_EFFORT}\"}'"
+fi
+
 if [ -f "$TASKS" ]; then
     echo "Reading task list from file: $TASKS"
     # Filter out comments and blank lines, then join with commas
@@ -323,7 +353,7 @@ printf '%s\n' "MODEL=$MODEL" "NAME=$NAME" "TOKENIZER=$TOKENIZER" "BS=$BS" "REVIS
 printf '%s\n' "ENABLE_THINKING=$ENABLE_THINKING (explicit=$ENABLE_THINKING_EXPLICIT)" \
 	"AUTODETECT_THINK_TOKENS=$AUTODETECT_THINK_TOKENS" "THINK_START_TOKEN=$THINK_START_TOKEN" \
 	"THINK_END_TOKEN=$THINK_END_TOKEN" "TRACK_THINKING_METRICS=$TRACK_THINKING_METRICS" \
-	"LOG_LENGTH_METRICS=$LOG_LENGTH_METRICS" ""
+	"LOG_LENGTH_METRICS=$LOG_LENGTH_METRICS" "REASONING_EFFORT=$REASONING_EFFORT" ""
 
 # Generic envs.
 export MASTER_ADDR=$(hostname)
@@ -667,6 +697,29 @@ fi
 
 echo "Using lm-evaluation-harness: $EVAL_RESOLVED_HARNESS_REPO@$EVAL_RESOLVED_HARNESS_COMMIT"
 
+if [[ "${EVAL_ENV_KIND:-}" == "prebuilt" ]]; then
+# EVAL_PREBUILT_ENV=1: the container (containers/Dockerfile.eval) already has
+# every package and the pinned harness. Check it, never install: a mismatch
+# means the job runs in an image built from a different commit.
+LOAD_ENV_CMD="
+echo Container entered: \$(date -Is)
+if [[ ! -f '$EVAL_HARNESS_OVERLAY/.complete' || ! -d '$EVAL_HARNESS_OVERLAY/lm_eval' ]]; then
+    echo 'EVAL_PREBUILT_ENV=1, but this container has no harness at $EVAL_HARNESS_OVERLAY. Use the image built from this commit (containers/Dockerfile.eval).' >&2
+    exit 1
+fi
+container_harness_commit=\$(cat '$EVAL_HARNESS_OVERLAY/.commit' 2>/dev/null || true)
+if [[ \"\$container_harness_commit\" != '$EVAL_RESOLVED_HARNESS_COMMIT' ]]; then
+    echo \"The container's harness is $EVAL_RESOLVED_HARNESS_REPO@\$container_harness_commit, but requirements/lm-eval-harness.txt pins $EVAL_RESOLVED_HARNESS_COMMIT. Use the image built from this commit.\" >&2
+    exit 1
+fi
+export PYTHONPATH='$EVAL_HARNESS_OVERLAY'\${PYTHONPATH:+:\$PYTHONPATH}
+if ! python -c 'import accelerate, datasets, transformers, wandb, lm_eval'; then
+    echo 'EVAL_PREBUILT_ENV=1, but this container is missing evaluation packages (import check above).' >&2
+    exit 1
+fi
+echo Evaluation environment activated: \$(date -Is) prebuilt=true harness_path='$EVAL_HARNESS_OVERLAY'
+"
+else
 LOAD_ENV_CMD="
 echo Container entered: \$(date -Is)
 eval_env_is_ready() {
@@ -710,6 +763,7 @@ fi
 export PYTHONPATH=\$EVAL_RUNTIME_HARNESS_OVERLAY\${PYTHONPATH:+:\$PYTHONPATH}
 echo Evaluation environment activated: \$(date -Is) deep_import_check=$EVAL_VERIFY_ENV_IMPORTS harness_path=\$EVAL_RUNTIME_HARNESS_OVERLAY
 "
+fi
 if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     # Fail loudly: without the checkout the job would die mid-run with a bare
     # ModuleNotFoundError after the model-load wait.
@@ -727,13 +781,13 @@ if [[ "$COMMON_MODEL_ARGS" == *\'* ]]; then
 fi
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
+    CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     CMD="python -m lm_eval --model $API_LM_EVAL_MODEL --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
-    CMD="accelerate launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
+    CMD="accelerate launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 fi

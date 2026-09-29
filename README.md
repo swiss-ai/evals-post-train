@@ -81,6 +81,11 @@ bash scripts/launch_evaluations.sh posttrain --model Qwen/Qwen3-8B \
   --thinking --name Qwen3-8B-think
 # ...then build the thinking-only table from that run (details: "Building a thinking-only table")
 python make_html_table.py --thinking --metrics-file configs/apertus/tasks_posttrain_final.txt --entity apertus --project <project> --models Qwen3-8B-think --output thinking_table.html
+
+# Reasoning level for models whose chat template reads one (gpt-oss: low/medium/high);
+# the run is named gpt-oss-120b-think-effort-high (details: "Reasoning effort")
+bash scripts/launch_evaluations.sh single --task aime25 --model openai/gpt-oss-120b \
+  --thinking --reasoning-effort high
 ```
 
 ---
@@ -180,6 +185,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--autodetect-think-tokens` | Read the reasoning open/close tokens from the model's chat template. |
 | `--track-thinking-metrics <true\|false>` / `--no-track-thinking-metrics` | Force the thinking metrics on or off (default: on iff a close token is known). |
 | `--log-length-metrics` | Aggregate `response_length_*` / `thinking_length_*` into results and W&B. `thinking_format_*` is aggregated regardless. |
+| `--reasoning-effort <level>` | Chat-template argument `reasoning_effort` (e.g. `low`/`medium`/`high`) for models whose template reads it, such as gpt-oss. hf and vllm backends only. See [Reasoning effort](#reasoning-effort). |
 
 > [!TIP]
 > Inference hyperparameters such as batch size (`BS`), `MAX_LENGTH`, and `MAX_NEW_TOKENS` are not exposed as launcher flags — set them as environment variables consumed by `evaluate.sbatch` (see [SBATCH Scripts](#sbatch-scripts)). `SIZE` is retained as informational/legacy metadata. vLLM keeps the compatible TP=4/DP=1 topology unless the model name unambiguously identifies a model below 30B, in which case it uses TP=1/DP=4; explicit topology variables always win.
@@ -411,6 +417,25 @@ YAML value always takes priority (so AIME keeps its 32768). Override the fallbac
 [SBATCH Scripts](#sbatch-scripts)); `NOTHINK_TEMPERATURE` enables the same sampling for no-think
 ablations.
 
+### Reasoning effort
+
+Some models take a reasoning *level* instead of (or on top of) the on/off switch. gpt-oss's chat
+template reads `reasoning_effort` and writes `Reasoning: <level>` into its system block (default
+`medium`). Pass it with `--reasoning-effort`:
+
+```bash
+bash scripts/launch_evaluations.sh single --task aime25 --model openai/gpt-oss-120b \
+  --thinking --reasoning-effort high
+```
+
+It goes to the harness as `chat_template_args={"reasoning_effort":"<level>"}` (hf and vllm only;
+the launcher refuses other backends), forces the chat template on, is part of the run
+configuration (results of another level are never resumed into this one), and adds
+`-effort-<level>` to an auto-derived run name. A template that doesn't read `reasoning_effort`
+ignores it silently -- check the rendered prompt in the job log. It does not turn reasoning on or
+set the think tokens by itself: combine it with `--thinking` to strip the trace and record the
+metrics.
+
 ### Emitted metrics
 
 Recorded per task, and uploaded to W&B as `<task>/<metric>` alongside a `_stderr` companion:
@@ -543,6 +568,30 @@ python scripts/export_eval_results.py export \
   --include-samples
 ```
 
+For a compact, reproducible datastore submission, use a per-task instance cap
+and one collection directory. This preserves every aggregate score and keeps
+up to 10 scorable examples from each lm-eval task, selected by a stable SHA-256
+priority rather than by file order. The cap does not rescore or recompute
+aggregates. Rows without a numeric per-sample value for an exported metric
+(such as deferred LLM-judge payloads) are omitted instead of being reported as
+zero. The manifest records capped, unscored, and missing-sample tasks; each
+record retains source, scorable, and exported instance-row counts.
+
+```bash
+python scripts/export_eval_results.py export RESULTS.json \
+  --output-dir eval-results/Apertus-release-capped \
+  --model-id swiss-ai/Apertus-v1.5-8B \
+  --include-samples \
+  --max-samples-per-task 10 \
+  --datastore-collection swissai_apertus_evals
+```
+
+The resulting EEE files can be copied directly from
+`eee/data/swissai_apertus_evals/<developer>/<model>/` into the same datastore
+path. Aggregate JSON filenames remain stable; only the record paths and the
+optional instance companions differ from a benchmark-folder export. Use a
+fresh output directory when changing sample-cap settings.
+
 `--model-id` is optional when the result log contains an `owner/model` ID, but
 it is required when the evaluation used a local checkpoint path.
 EEE `model_info.id` uses this Hub ID, and `model_info.additional_details`
@@ -634,8 +683,13 @@ exact lm-eval task name to:
 - the canonical EEE datastore collection directory
 - the optional composite, benchmark family, benchmark, and split used to build
   the EEE `evaluation_name`
+- an optional `collection` when the datastore folder must retain a historical
+  name that differs from the benchmark component in `evaluation_name`
 - the source dataset ID in Hugging Face `owner/dataset` format
 - optional ordered EEE metric candidates and canonical metric-ID overrides
+- optional reusable `llm_scoring` metadata for judge-derived metrics, including
+  judge model IDs, temperatures, exact prompt templates, pairwise baselines,
+  and Arena-Hard style-control state
 - optionally, a registered Hugging Face benchmark dataset, task ID, and ordered
   metric candidates
 - optionally, a reviewed subtask pattern that places language/subject parts in
@@ -693,6 +747,15 @@ external benchmark.
 
 The exporter preserves scores in their native lm-eval scale. It never
 automatically multiplies proportions by 100.
+
+The `polyglotoxicitypromptsllama_small.score` and
+`realtoxicitypromptsllama_small.score` metrics are unsafe-continuation rates,
+not continuous toxicity probabilities. The harness generates one continuation
+per prompt, asks `meta-llama/Llama-Guard-4-12B` to classify the prompt and
+continuation, maps `unsafe` to 1 and `safe` to 0, drops failed or unknown judge
+responses, and averages the remaining labels. The multilingual Polyglot
+Toxicity Prompts aggregate is the sample-size-weighted mean of its seven
+language-task scores.
 
 ---
 
@@ -865,7 +928,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `LM_EVAL_JUDGE_MODEL_DISCOVERY_TIMEOUT` | `10` | Timeout in seconds for hosted judge-model discovery |
 | `LM_EVAL_RATE_LIMIT_STATE_DIR` | per-launch controller directory | Shared request-slot state used to coordinate threads, processes, and Slurm nodes; point independent launches at the same directory to share budgets |
 | `OPENAI_API_KEY` | `scripts/openai_api_key.txt`, then `CSCS_SERVING_API` | OpenAI GPT judge or `openai` backend bearer token |
-| `LM_EVAL_HARNESS_BRANCH` | repository HEAD | Branch, tag, or commit installed from the task-selected harness repository |
+| `LM_EVAL_HARNESS_BRANCH` | repository HEAD | Branch, tag, or commit installed from the task-selected harness repository (not allowed with `EVAL_PREBUILT_ENV=1`, which uses `requirements/lm-eval-harness.txt`) |
 | `APPLY_CHAT_TEMPLATE` | `true` | Apply chat template for instruct models |
 | `TOKENIZER` | same as model | Custom tokenizer path |
 | `BOS` | `false` | Prepend BOS token |
@@ -883,6 +946,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `HARNESS_LIMIT` | (unset) | Limit number of samples per task (set by launcher flag `--limit`) |
 | `NUM_FEWSHOT` | (unset) | Global few-shot override |
 | `EVAL_ENV_MANIFEST` | required | Immutable base-environment and harness-overlay paths produced by `prepare_eval_env.sbatch` |
+| `EVAL_PREBUILT_ENV` | (unset) | `1` in the prebuilt image: no environment preparation or installs; the launcher writes the manifest (see [Prebuilt evaluation image](#prebuilt-evaluation-image-no-installs-at-run-time)) |
 | `EVAL_RUN_CONFIG` | required | Launcher-generated normalized provenance used to exclude incompatible results during resume |
 | `EVAL_CHUNKS_FILE` | (unset) | One comma-separated task chunk per line; indexed by `SLURM_ARRAY_TASK_ID` |
 | `LOGS_ROOT` | `$SCRATCH/eval_logs_start/` | Root directory for evaluation logs |
@@ -983,6 +1047,35 @@ environments beyond the cluster's scratch window is preferable. Successful
 cache use refreshes the completion-marker and archive timestamps so recently
 used entries remain active under age-based scratch retention policies.
 
+### Prebuilt evaluation image (no installs at run time)
+
+`containers/Dockerfile.eval` bakes everything an OpenAI-compatible-backend run
+needs into one image: CPU PyTorch, `requirements/eval-runtime.txt`,
+`requirements/inspect-runtime.txt`, and each lm-evaluation-harness fork at the
+commit pinned in `requirements/lm-eval-harness.txt` (as `--no-deps` overlays
+under `/opt/lm-eval-harness/<owner>/<repo>`, the same layout `build_eval_env.sh`
+produces). CI (`.github/workflows/eval-image.yml`) publishes it for every
+pushed commit as `ghcr.io/swiss-ai/evals-post-train-eval:<commit>`.
+
+The image sets `EVAL_PREBUILT_ENV=1`. With it, the launcher submits no
+`prepare_eval_env.sbatch` job and writes the manifest itself;
+`evaluate.sbatch` checks that the container's harness commit matches the pin
+in the checkout and that the packages import, then runs, never installing
+anything. `run_inspect_eval.sh` skips its install the same way. A mismatch
+(the scripts come from a different commit than the image) fails the job with
+a message naming both commits, so run the image with the scripts from the
+commit it was built from. evals-svc's k8s Jobs do exactly that, and fall back
+to the environment-building path when no image exists for a commit yet.
+
+The harness is pinned, not the moving `HEAD` the building path follows: to
+ship a newer harness, bump its commit in `requirements/lm-eval-harness.txt`.
+`--harness-branch`/`LM_EVAL_HARNESS_BRANCH` is refused with
+`EVAL_PREBUILT_ENV=1`.
+
+```bash
+docker build -f containers/Dockerfile.eval -t evals-post-train-eval .
+```
+
 ---
 
 ## Alternative: Inspect AI evals
@@ -1001,7 +1094,7 @@ sbatch --reservation=my-reservation scripts/run_inspect_eval.sbatch --task tau2_
 ```
 
 ```bash
-# run_inspect_eval.sh installs these itself at runtime (SKIP_INSTALL=1 to skip);
+# run_inspect_eval.sh installs these itself at runtime (SKIP_INSTALL=1 or EVAL_PREBUILT_ENV=1 to skip);
 # to install by hand for local/interactive use:
 pip install "inspect-ai>=0.3.258" inspect-evals openai
 

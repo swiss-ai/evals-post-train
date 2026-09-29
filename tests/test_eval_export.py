@@ -2,11 +2,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts.eval_export.exporter import (
     ExportError,
     _evaluation_name,
     _internal_task_mapping,
+    _load_samples,
+    _sample_file,
     export_results,
     validate_export,
 )
@@ -108,6 +111,141 @@ def fixture_sample() -> dict:
 
 
 class EvalExportTests(unittest.TestCase):
+    def test_sample_file_does_not_match_aggregate_to_subtask(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = root / "results_2026-01-21T03-44-18.json"
+            subtask = root / "samples_group_leaf_2026-01-21T03-44-18.jsonl"
+            subtask.write_text("{}\n", encoding="utf-8")
+            self.assertIsNone(_sample_file(results, "group"))
+            exact = root / "samples_group_2026-01-21T03-44-18.jsonl"
+            exact.write_text("{}\n", encoding="utf-8")
+            self.assertEqual(_sample_file(results, "group"), exact)
+
+    def test_capped_samples_are_deterministic_and_do_not_invent_scores(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "samples.jsonl"
+            samples = []
+            for doc_id in range(30):
+                sample = fixture_sample()
+                sample["doc_id"] = doc_id
+                sample["exact_match"] = float(doc_id % 2)
+                if doc_id == 5:
+                    sample["arguments"]["gen_args_0"]["arg_0"] = "Line\u0085break"
+                samples.append(sample)
+            unscored = fixture_sample()
+            unscored["doc_id"] = 99
+            unscored["exact_match"] = {"deferred_judge": True}
+            samples.append(unscored)
+            path.write_text(
+                "".join(json.dumps(sample) + "\n" for sample in samples),
+                encoding="utf-8",
+            )
+            args = (
+                path,
+                "benchmark/swiss-ai/Model/123",
+                "swiss-ai/Model",
+                "benchmark.benchmark.overall",
+                ["exact_match,strict-match"],
+                5,
+            )
+            first, source, scorable = _load_samples(*args)
+            second, _, _ = _load_samples(*args)
+            self.assertEqual(first, second)
+            self.assertEqual((source, scorable, len(first)), (31, 30, 5))
+            self.assertNotIn("99", {row["sample_id"] for row in first})
+
+    def test_collection_export_caps_each_task_and_preserves_aggregates(self):
+        raw = fixture_results()
+        raw["results"] = {
+            "gsm8k_cot": raw["results"]["gsm8k_cot"],
+            "unmapped_benchmark": raw["results"]["unmapped_benchmark"],
+        }
+        raw["configs"] = {key: raw["configs"][key] for key in raw["results"]}
+        raw["higher_is_better"] = {
+            key: raw["higher_is_better"][key] for key in raw["results"]
+        }
+        raw["n-samples"] = {
+            key: raw["n-samples"][key] for key in raw["results"]
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = root / "results_2026-01-21T03-44-18.json"
+            results.write_text(json.dumps(raw), encoding="utf-8")
+            sample_path = root / "samples_gsm8k_cot_2026-01-21T03-44-18.jsonl"
+            sample_path.write_text(
+                "".join(
+                    json.dumps(
+                        {
+                            **fixture_sample(),
+                            "doc_id": doc_id,
+                            "arguments": {
+                                "gen_args_0": {"arg_0": "What is 2 + 2?\u0085"}
+                            },
+                        }
+                    )
+                    + "\n"
+                    for doc_id in range(25)
+                ),
+                encoding="utf-8",
+            )
+            output = root / "export"
+            manifest = export_results(
+                results,
+                output,
+                include_samples=True,
+                max_samples_per_task=4,
+                datastore_collection="swissai_apertus_evals",
+                retrieved_timestamp="1770000000.0",
+            )
+            self.assertEqual(manifest["max_samples_per_task"], 4)
+            self.assertEqual(manifest["capped_sample_tasks"], ["gsm8k_cot"])
+            self.assertEqual(validate_export(output), [])
+            gsm_item = next(
+                item for item in manifest["records"] if item["benchmark"] == "gsm8k"
+            )
+            self.assertTrue(
+                gsm_item["eee_record"].startswith(
+                    "eee/data/swissai_apertus_evals/swiss-ai/Test-Model/"
+                )
+            )
+            self.assertEqual(
+                len((output / gsm_item["instance_results"]).read_text().splitlines()),
+                4,
+            )
+            self.assertNotIn(
+                "\u0085",
+                (output / gsm_item["instance_results"]).read_text(),
+            )
+            self.assertIn(
+                "\\u0085",
+                (output / gsm_item["instance_results"]).read_text(),
+            )
+            record = json.loads((output / gsm_item["eee_record"]).read_text())
+            details = record["eval_library"]["additional_details"]
+            self.assertEqual(details["instance_sample_source_rows"], "25")
+            self.assertEqual(details["instance_samples_exported"], "4")
+            self.assertEqual(
+                record["evaluation_results"][0]["score_details"]["score"],
+                0.75,
+            )
+            with patch("time.time", return_value=1770000000.0):
+                again = export_results(
+                    results,
+                    root / "again",
+                    include_samples=True,
+                    max_samples_per_task=4,
+                    datastore_collection="swissai_apertus_evals",
+                    retrieved_timestamp="1770000000.0",
+                )
+            again_item = next(
+                item for item in again["records"] if item["benchmark"] == "gsm8k"
+            )
+            self.assertEqual(
+                (output / gsm_item["instance_results"]).read_bytes(),
+                (root / "again" / again_item["instance_results"]).read_bytes(),
+            )
+
     def test_evaluation_name_scheme_handles_optional_composite_and_defaults(self):
         self.assertEqual(
             _evaluation_name({"benchmark": "MATH"}),
@@ -674,6 +812,170 @@ class EvalExportTests(unittest.TestCase):
             self.assertEqual(details["deployment_type"], "externally_managed")
             self.assertEqual(details["model_availability"], "unknown")
             self.assertNotIn("hf_model_url", details)
+
+    def test_judge_metadata_and_toxicity_names_match_reviewer_guidance(self):
+        raw = fixture_results()
+        raw["results"] = {
+            "alpaca_eval": {
+                "length_controlled_winrate,none": 0.47,
+                "avg_word_count,none": 305.0,
+            },
+            "arena_hard_v01": {
+                "arena_hard_score,none": 0.32,
+                "avg_word_count,none": 394.0,
+            },
+            "arena_hard_v2": {
+                "arena_hard_score,none": 0.03,
+                "avg_word_count,none": 334.0,
+            },
+            "harmbench": {"score,none": 0.26},
+            "orbench": {"refusal,none": 0.81},
+            "polyglotoxicitypromptsllama_small": {"score,none": 0.08},
+            "polyglotoxicitypromptsllama_small_english": {
+                "score,none": 0.04
+            },
+            "realtoxicitypromptsllama_small": {"score,none": 0.005},
+        }
+        raw["configs"] = {
+            task_name: {
+                "task": task_name,
+                "dataset_path": dataset_path,
+                "test_split": "test",
+                "output_type": "generate_until",
+                "generation_kwargs": {"do_sample": False},
+            }
+            for task_name, dataset_path in {
+                "alpaca_eval": "tatsu-lab/alpaca_eval",
+                "arena_hard_v01": "lmarena-ai/arena-hard-auto",
+                "arena_hard_v2": "lmarena-ai/arena-hard-auto",
+                "harmbench": "swiss-ai/harmbench",
+                "orbench": "bench-llm/or-bench",
+                "polyglotoxicitypromptsllama_small": (
+                    "swiss-ai/polyglotoxicityprompts"
+                ),
+                "polyglotoxicitypromptsllama_small_english": (
+                    "swiss-ai/polyglotoxicityprompts"
+                ),
+                "realtoxicitypromptsllama_small": (
+                    "swiss-ai/realtoxicityprompts"
+                ),
+            }.items()
+        }
+        raw["higher_is_better"] = {
+            "alpaca_eval": {
+                "length_controlled_winrate": True,
+                "avg_word_count": False,
+            },
+            "arena_hard_v01": {
+                "arena_hard_score": True,
+                "avg_word_count": False,
+            },
+            "arena_hard_v2": {
+                "arena_hard_score": True,
+                "avg_word_count": False,
+            },
+            "harmbench": {"score": False},
+            "orbench": {"refusal": False},
+            "polyglotoxicitypromptsllama_small": {"score": False},
+            "polyglotoxicitypromptsllama_small_english": {"score": False},
+            "realtoxicitypromptsllama_small": {"score": False},
+        }
+        raw["n-samples"] = {
+            task_name: {"original": 10, "effective": 10}
+            for task_name in raw["results"]
+        }
+        raw["task_hashes"] = {}
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results_path = root / "results_judges.json"
+            results_path.write_text(json.dumps(raw), encoding="utf-8")
+            manifest = export_results(
+                results_path,
+                root / "export",
+                retrieved_timestamp="1770000000.0",
+            )
+            records = [
+                json.loads((root / "export" / item["eee_record"]).read_text())
+                for item in manifest["records"]
+            ]
+            by_name = {
+                result["evaluation_name"]: result
+                for record in records
+                for result in record["evaluation_results"]
+                if result["metric_config"]["metric_id"]
+                not in {
+                    "alpaca_eval_v2.avg_word_count",
+                    "arena_hard_v01.avg_word_count",
+                    "arena_hard_v2.avg_word_count",
+                }
+            }
+            all_results = [
+                result
+                for record in records
+                for result in record["evaluation_results"]
+            ]
+
+            self.assertIn(
+                "polyglotoxicityprompts.polyglotoxicityprompts.small_overall",
+                by_name,
+            )
+            self.assertIn(
+                "polyglotoxicityprompts.polyglotoxicityprompts.small_english",
+                by_name,
+            )
+            self.assertIn(
+                "realtoxicityprompts.realtoxicityprompts.small", by_name
+            )
+            toxicity = by_name[
+                "polyglotoxicityprompts.polyglotoxicityprompts.small_english"
+            ]["metric_config"]["llm_scoring"]
+            self.assertEqual(
+                toxicity["judges"][0]["model_info"]["id"],
+                "meta-llama/Llama-Guard-4-12B",
+            )
+            self.assertEqual(toxicity["judges"][0]["temperature"], 0.0)
+
+            alpaca = by_name["alpaca_eval.alpaca_eval_v2.overall"][
+                "metric_config"
+            ]["llm_scoring"]
+            self.assertEqual(
+                alpaca["additional_details"]["baseline_model"],
+                "openai/gpt-4-1106-preview",
+            )
+            arena_v2 = by_name["arena_hard.arena_hard_v2.overall"][
+                "metric_config"
+            ]["llm_scoring"]
+            self.assertEqual(
+                arena_v2["additional_details"],
+                {
+                    "baseline_model": "openai/o3-mini-2025-01-31",
+                    "style_control": "false",
+                },
+            )
+            harmbench = by_name["harmbench.harmbench.overall"]["metric_config"]
+            self.assertEqual(
+                harmbench["llm_scoring"]["judges"][0]["model_info"]["id"],
+                "cais/HarmBench-Llama-2-13b-cls",
+            )
+
+            no_judge_metric_ids = {
+                result["metric_config"]["metric_id"]
+                for result in all_results
+                if "llm_scoring" not in result["metric_config"]
+            }
+            self.assertIn("orbench.refusal", no_judge_metric_ids)
+            self.assertIn("alpaca_eval_v2.avg_word_count", no_judge_metric_ids)
+            self.assertIn("arena_hard_v01.avg_word_count", no_judge_metric_ids)
+            self.assertIn("arena_hard_v2.avg_word_count", no_judge_metric_ids)
+            self.assertIn(
+                "polyglotoxicitypromptsllama_small",
+                {item["benchmark"] for item in manifest["records"]},
+            )
+            self.assertIn(
+                "realtoxicitypromptsllama_small",
+                {item["benchmark"] for item in manifest["records"]},
+            )
 
     def test_strict_mapping_rejects_unmapped_tasks(self):
         with tempfile.TemporaryDirectory() as temporary:
