@@ -81,6 +81,11 @@ bash scripts/launch_evaluations.sh posttrain --model Qwen/Qwen3-8B \
   --thinking --name Qwen3-8B-think
 # ...then build the thinking-only table from that run (details: "Building a thinking-only table")
 python make_html_table.py --thinking --metrics-file configs/apertus/tasks_posttrain_final.txt --entity apertus --project <project> --models Qwen3-8B-think --output thinking_table.html
+
+# Reasoning level for models whose chat template reads one (gpt-oss: low/medium/high);
+# the run is named gpt-oss-120b-think-effort-high (details: "Reasoning effort")
+bash scripts/launch_evaluations.sh single --task aime25 --model openai/gpt-oss-120b \
+  --thinking --reasoning-effort high
 ```
 
 ---
