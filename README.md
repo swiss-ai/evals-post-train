@@ -85,7 +85,8 @@ python make_html_table.py --thinking --metrics-file configs/apertus/tasks_posttr
 # Reasoning level for models whose chat template reads one (gpt-oss: low/medium/high);
 # the run is named gpt-oss-120b-think-effort-high (details: "Reasoning effort")
 bash scripts/launch_evaluations.sh single --task aime25 --model openai/gpt-oss-120b \
-  --thinking --reasoning-effort high
+  --thinking --reasoning-effort high \
+  --think-start-token '<|channel|>analysis<|message|>' --think-end-token '<|channel|>final<|message|>'
 ```
 
 ---
@@ -425,7 +426,8 @@ template reads `reasoning_effort` and writes `Reasoning: <level>` into its syste
 
 ```bash
 bash scripts/launch_evaluations.sh single --task aime25 --model openai/gpt-oss-120b \
-  --thinking --reasoning-effort high
+  --thinking --reasoning-effort high \
+  --think-start-token '<|channel|>analysis<|message|>' --think-end-token '<|channel|>final<|message|>'
 ```
 
 It goes to the harness as `chat_template_args={"reasoning_effort":"<level>"}` (hf and vllm only;
@@ -433,8 +435,10 @@ the launcher refuses other backends), forces the chat template on, is part of th
 configuration (results of another level are never resumed into this one), and adds
 `-effort-<level>` to an auto-derived run name. A template that doesn't read `reasoning_effort`
 ignores it silently -- check the rendered prompt in the job log. It does not turn reasoning on or
-set the think tokens by itself: combine it with `--thinking` to strip the trace and record the
-metrics.
+set the think tokens by itself, and `--thinking` can't auto-detect gpt-oss's: its template has no
+`<think>`-style pair, so without the explicit tokens above the whole `analysis` channel stays in the
+scored response and the thinking metrics stay off (the job log warns `no reasoning close token is
+known`). With them, only the `final` channel is scored.
 
 ### Emitted metrics
 
