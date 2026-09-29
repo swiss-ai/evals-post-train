@@ -63,14 +63,14 @@ usage() {
     echo " EVAL_RUN_CONFIG: Normalized result provenance file used for safe resume (required; set by launcher)."
     echo " EVAL_VERIFY_ENV_IMPORTS: 'true' to repeat the preparation job's deep Python import checks inside the evaluation job (default: false)."
     echo " EVAL_CHUNKS_FILE: Resumable array chunk manifest (set automatically by launcher)."
-    echo " Thinking / reasoning metrics (hf and vllm backends only; megatron_lm is unsupported):"
+    echo " Thinking / reasoning metrics (hf, vllm and sglang backends only; megatron_lm is unsupported):"
     echo " ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: unset, the template's own default)."
     echo " AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
     echo " THINK_END_TOKEN: Force the reasoning close token, e.g. '</think>'. A known close token arms the strip AND the metrics."
     echo " THINK_START_TOKEN: Force the reasoning open token, e.g. '<think>'. Needed for thinking_format_has_open."
     echo " TRACK_THINKING_METRICS: 'true'/'false' to force the thinking metrics on/off (default: on iff a close token is known)."
     echo " LOG_LENGTH_METRICS: 'true' to aggregate response_length_*/thinking_length_* (thinking_format_* is always aggregated)."
-    echo " REASONING_EFFORT: chat-template argument reasoning_effort (e.g. low/medium/high, read by gpt-oss's template); hf and vllm only."
+    echo " REASONING_EFFORT: chat-template argument reasoning_effort (e.g. low/medium/high, read by gpt-oss's template); hf, vllm and sglang only."
 	echo "For more information see the README: https://github.com/swiss-ai/evals?tab=readme-ov-file."
 }
 die() {
@@ -294,7 +294,7 @@ _reject_comma THINK_START_TOKEN "$THINK_START_TOKEN"
 _reject_comma API_BASE_URL "$API_BASE_URL"
 _reject_comma API_MODEL_NAME "$API_MODEL_NAME"
 
-# Reasoning model_args shared by hf and vllm. Only non-defaults are emitted (an unset flag
+# Reasoning model_args shared by hf, vllm and sglang. Only non-defaults are emitted (an unset flag
 # keeps the harness default).
 THINK_ARGS=""
 [[ -n "$THINK_END_TOKEN" ]] && THINK_ARGS="${THINK_ARGS},think_end_token=${THINK_END_TOKEN}"
@@ -302,7 +302,7 @@ THINK_ARGS=""
 [[ "$AUTODETECT_THINK_TOKENS" == "True" ]] && THINK_ARGS="${THINK_ARGS},autodetect_think_tokens=True"
 [[ -n "$TRACK_THINKING_METRICS" ]] && THINK_ARGS="${THINK_ARGS},track_thinking_metrics=${TRACK_THINKING_METRICS}"
 
-# Extra chat-template arguments (hf and vllm), as a second --model_args token: the harness
+# Extra chat-template arguments (hf, vllm and sglang), as a second --model_args token: the harness
 # refuses a first token containing '{' (it must then be all JSON) but reads each further
 # comma-free key=value token with ast.literal_eval, so this one becomes a dict. Needs the
 # `--model_args 'a' 'b'` form: argparse gives `--model_args='a'` exactly one value.
@@ -310,8 +310,8 @@ CHAT_TEMPLATE_ARGS=""
 if [[ -n "$REASONING_EFFORT" ]]; then
     [[ "$REASONING_EFFORT" =~ ^[A-Za-z0-9_-]+$ ]] \
         || die "REASONING_EFFORT must be a level like low, medium or high (got '$REASONING_EFFORT')."
-    [[ "$LM_EVAL_BACKEND" == "vllm" || "$LM_EVAL_BACKEND" == "hf" ]] \
-        || die "REASONING_EFFORT is only supported with the hf and vllm backends (got $LM_EVAL_BACKEND)."
+    [[ "$LM_EVAL_BACKEND" == "vllm" || "$LM_EVAL_BACKEND" == "hf" || "$LM_EVAL_BACKEND" == "sglang" ]] \
+        || die "REASONING_EFFORT is only supported with the hf, vllm and sglang backends (got $LM_EVAL_BACKEND)."
     CHAT_TEMPLATE_ARGS=" 'chat_template_args={\"reasoning_effort\":\"${REASONING_EFFORT}\"}'"
 fi
 
@@ -495,7 +495,7 @@ if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
     # Forward enable_thinking only when explicitly set; unset lets the template default apply.
     (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer_path=$TOKENIZER$MAYBE_REVISION,dp_size=$DP,tp_size=$MP,mem_fraction_static=$VLLM_MEMORY_FRACTION,dtype=auto${THINKING_DEFAULT_MODEL_ARG}"
+    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer_path=$TOKENIZER$MAYBE_REVISION,dp_size=$DP,tp_size=$MP,mem_fraction_static=$VLLM_MEMORY_FRACTION,dtype=auto${THINK_ARGS}${THINKING_DEFAULT_MODEL_ARG}"
     (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     MEGATRON_MICRO_BATCH_SIZE=${MEGATRON_MICRO_BATCH_SIZE:-""}
@@ -786,7 +786,7 @@ fi
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
     CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
-    CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
+    CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     CMD="python -m lm_eval --model $API_LM_EVAL_MODEL --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
