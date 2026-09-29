@@ -100,6 +100,10 @@
 #   --no-track-thinking-metrics              Default: on iff a close token is known.
 #   --log-length-metrics - Aggregate response_length_* / thinking_length_* into results and W&B.
 #                          thinking_format_* is aggregated regardless.
+#   --reasoning-effort <level> - Chat-template argument reasoning_effort (e.g. low, medium, high)
+#                          for models whose template reads it (gpt-oss). hf and vllm backends
+#                          only; forces the chat template on. Letters, digits, '_' and '-'.
+#                          Other templates ignore it. Combine with --thinking for the metrics.
 #
 # Examples:
 #   # Single HF model, auto-detect everything
@@ -164,6 +168,7 @@ THINK_END_TOKEN=""
 THINK_START_TOKEN=""
 AUTODETECT_THINK_TOKENS=""
 TRACK_THINKING_METRICS=""     # "", "true", "false"
+REASONING_EFFORT=""
 LOG_LENGTH_METRICS=""
 TASK_FILE_OVERRIDE=""
 TABLE_METRICS_OVERRIDE=""
@@ -221,6 +226,7 @@ while [[ $# -gt 0 ]]; do
         --autodetect-think-tokens)   AUTODETECT_THINK_TOKENS="true";    shift ;;
         --track-thinking-metrics)    TRACK_THINKING_METRICS="$2";       shift 2 ;;
         --no-track-thinking-metrics) TRACK_THINKING_METRICS="false";    shift ;;
+        --reasoning-effort)          REASONING_EFFORT="$2";             shift 2 ;;
         --log-length-metrics)        LOG_LENGTH_METRICS="true";         shift ;;
         --convert-to-hf) CONVERT_TO_HF="true";           shift ;;
         --hf-output-dir) HF_OUTPUT_DIR_FLAG="$2";         shift 2 ;;
@@ -350,6 +356,24 @@ if [[ "$THINKING_TOUCHED" == "true" && ( "$EFFECTIVE_BACKEND" == "megatron_lm" |
     exit 1
 fi
 
+# reasoning_effort is a chat-template argument: only backends that render the template
+# in-job with extra arguments (hf, vllm; the default is vllm) can pass it on.
+if [[ -n "$REASONING_EFFORT" ]]; then
+    if [[ ! "$REASONING_EFFORT" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        echo "Error: --reasoning-effort expects a level like low, medium or high (got '$REASONING_EFFORT')"
+        exit 1
+    fi
+    if [[ -n "$EFFECTIVE_BACKEND" && "$EFFECTIVE_BACKEND" != "vllm" && "$EFFECTIVE_BACKEND" != "hf" ]]; then
+        echo "Error: --reasoning-effort is not supported with the $EFFECTIVE_BACKEND backend (hf and vllm only)"
+        exit 1
+    fi
+    if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" ]]; then
+        echo "Error: --reasoning-effort is a chat-template argument; drop --no-chat-template"
+        exit 1
+    fi
+    CHAT_TEMPLATE_OVERRIDE="true"
+fi
+
 # The openai backend needs an endpoint; fail here, not after scheduling.
 if [[ "$EFFECTIVE_BACKEND" == "openai" && -z "${API_BASE_URL_FLAG:-${API_BASE_URL:-}}" ]]; then
     echo "Error: --backend openai requires --api-base-url <url> (or an exported API_BASE_URL)"
@@ -429,6 +453,7 @@ fi
 [[ "$AUTODETECT_THINK_TOKENS" == "true" ]] && export AUTODETECT_THINK_TOKENS="true"
 [[ -n "$TRACK_THINKING_METRICS"         ]] && export TRACK_THINKING_METRICS
 [[ "$LOG_LENGTH_METRICS" == "true"      ]] && export LOG_LENGTH_METRICS="true"
+[[ -n "$REASONING_EFFORT"               ]] && export REASONING_EFFORT
 
 # --- Environment defaults ---
 # sbatch reads SBATCH_RESERVATION natively (CLI > env > script directives).
@@ -591,6 +616,7 @@ if [[ "$THINKING_TOUCHED" == "true" ]]; then
     echo "  Thinking: enable=${ENABLE_THINKING_OVERRIDE:-<unset>} autodetect=${AUTODETECT_THINK_TOKENS:-false} track=${TRACK_THINKING_METRICS:-<derive>} lengths=${LOG_LENGTH_METRICS:-false}"
     [[ -n "$THINK_START_TOKEN" || -n "$THINK_END_TOKEN" ]] && echo "  Think tokens: start='${THINK_START_TOKEN:-<none>}' end='${THINK_END_TOKEN:-<none>}'"
 fi
+[[ -n "$REASONING_EFFORT" ]] && echo "  Reasoning effort: $REASONING_EFFORT"
 if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
     echo "  API:    ${API_BASE_URL} (model=${API_MODEL_NAME:-<from --model>})"
     echo "  API RPM: ${API_REQUESTS_PER_MINUTE:-unlimited}"
@@ -630,6 +656,7 @@ if [[ -n "$MODEL_PATH" ]]; then
         if [[ "$THINKING_UMBRELLA" == "true" || "$ENABLE_THINKING_OVERRIDE" == "true" ]]; then
             MODEL_NAME="${MODEL_NAME}-think"
         fi
+        [[ -n "$REASONING_EFFORT" ]] && MODEL_NAME="${MODEL_NAME}-effort-${REASONING_EFFORT}"
     fi
 
     # --- Convert a Megatron checkpoint to HF before evaluating it ---

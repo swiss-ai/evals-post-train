@@ -70,6 +70,7 @@ usage() {
     echo " THINK_START_TOKEN: Force the reasoning open token, e.g. '<think>'. Needed for thinking_format_has_open."
     echo " TRACK_THINKING_METRICS: 'true'/'false' to force the thinking metrics on/off (default: on iff a close token is known)."
     echo " LOG_LENGTH_METRICS: 'true' to aggregate response_length_*/thinking_length_* (thinking_format_* is always aggregated)."
+    echo " REASONING_EFFORT: chat-template argument reasoning_effort (e.g. low/medium/high, read by gpt-oss's template); hf and vllm only."
 	echo "For more information see the README: https://github.com/swiss-ai/evals?tab=readme-ov-file."
 }
 die() {
@@ -259,6 +260,7 @@ THINK_END_TOKEN=${THINK_END_TOKEN:-""}
 THINK_START_TOKEN=${THINK_START_TOKEN:-""}
 TRACK_THINKING_METRICS=${TRACK_THINKING_METRICS:-""}   # "" | true | false
 LOG_LENGTH_METRICS=${LOG_LENGTH_METRICS:-false}
+REASONING_EFFORT=${REASONING_EFFORT:-""}
 
 # Validate booleans (don't coerce): a typo'd 'ture' read as false would waste a GPU job.
 # Assign directly so a bad value aborts under set -e.
@@ -300,6 +302,19 @@ THINK_ARGS=""
 [[ "$AUTODETECT_THINK_TOKENS" == "True" ]] && THINK_ARGS="${THINK_ARGS},autodetect_think_tokens=True"
 [[ -n "$TRACK_THINKING_METRICS" ]] && THINK_ARGS="${THINK_ARGS},track_thinking_metrics=${TRACK_THINKING_METRICS}"
 
+# Extra chat-template arguments (hf and vllm), as a second --model_args token: the harness
+# refuses a first token containing '{' (it must then be all JSON) but reads each further
+# comma-free key=value token with ast.literal_eval, so this one becomes a dict. Needs the
+# `--model_args 'a' 'b'` form: argparse gives `--model_args='a'` exactly one value.
+CHAT_TEMPLATE_ARGS=""
+if [[ -n "$REASONING_EFFORT" ]]; then
+    [[ "$REASONING_EFFORT" =~ ^[A-Za-z0-9_-]+$ ]] \
+        || die "REASONING_EFFORT must be a level like low, medium or high (got '$REASONING_EFFORT')."
+    [[ "$LM_EVAL_BACKEND" == "vllm" || "$LM_EVAL_BACKEND" == "hf" ]] \
+        || die "REASONING_EFFORT is only supported with the hf and vllm backends (got $LM_EVAL_BACKEND)."
+    CHAT_TEMPLATE_ARGS=" 'chat_template_args={\"reasoning_effort\":\"${REASONING_EFFORT}\"}'"
+fi
+
 if [ -f "$TASKS" ]; then
     echo "Reading task list from file: $TASKS"
     # Filter out comments and blank lines, then join with commas
@@ -338,7 +353,7 @@ printf '%s\n' "MODEL=$MODEL" "NAME=$NAME" "TOKENIZER=$TOKENIZER" "BS=$BS" "REVIS
 printf '%s\n' "ENABLE_THINKING=$ENABLE_THINKING (explicit=$ENABLE_THINKING_EXPLICIT)" \
 	"AUTODETECT_THINK_TOKENS=$AUTODETECT_THINK_TOKENS" "THINK_START_TOKEN=$THINK_START_TOKEN" \
 	"THINK_END_TOKEN=$THINK_END_TOKEN" "TRACK_THINKING_METRICS=$TRACK_THINKING_METRICS" \
-	"LOG_LENGTH_METRICS=$LOG_LENGTH_METRICS" ""
+	"LOG_LENGTH_METRICS=$LOG_LENGTH_METRICS" "REASONING_EFFORT=$REASONING_EFFORT" ""
 
 # Generic envs.
 export MASTER_ADDR=$(hostname)
@@ -774,13 +789,13 @@ if [[ "$COMMON_MODEL_ARGS" == *\'* ]]; then
 fi
 
 if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
+    CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     CMD="python -m lm_eval --model $API_LM_EVAL_MODEL --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
-    CMD="accelerate launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
+    CMD="accelerate launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 fi

@@ -113,6 +113,9 @@ _eval_create_run_config() {
         --field "judge_args=${JUDGE_EXTRA_ARGS:-}"
         --field "judge_model_prefix=${JUDGE_MODEL_PREFIX:-}"
     )
+    # Only when set: run_config_matches() compares exactly, so an always-present field
+    # would make every earlier result look foreign and rerun it.
+    [[ -n "${REASONING_EFFORT:-}" ]] && fields+=(--field "reasoning_effort=$REASONING_EFFORT")
 
     EVAL_RUN_CONFIG="$state_dir/run_config.json"
     export EVAL_RUN_CONFIG
