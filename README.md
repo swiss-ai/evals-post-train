@@ -402,7 +402,7 @@ bash scripts/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B
 
 | Question                                    | Flag                                             | Default                                                                                 |
 |---------------------------------------------|--------------------------------------------------|-----------------------------------------------------------------------------------------|
-| Does the model reason?                      | `--enable-thinking`                              | vLLM: off (this repo pins `enable_thinking=False`); hf: the chat template's own default |
+| Does the model reason?                      | `--enable-thinking`                              | the chat template's own default (`enable_thinking` is not sent unless set)              |
 | Are the reasoning tokens discovered?        | `--autodetect-think-tokens`                      | off — the template is never scanned                                                     |
 | Does the trace get stripped before scoring? | *(implicit)* whenever a **close** token is known | off                                                                                     |
 | Are the thinking metrics recorded?          | `--track-thinking-metrics`                       | on iff a close token is known                                                           |
@@ -470,11 +470,15 @@ Two caveats worth internalising:
 
 | Backend              | Support         | `enable_thinking`                                                                |
 |----------------------|-----------------|----------------------------------------------------------------------------------|
-| `vllm` (recommended) | full            | forwarded always; this repo defaults it to `False`                               |
+| `vllm` (recommended) | full            | forwarded **only when explicitly set**; otherwise the template's default applies |
 | `hf`                 | full            | forwarded **only when explicitly set**; otherwise the template's default applies |
-| `sglang`             | available       | uses the SGLang backend and its dedicated container                              |
+| `sglang`             | available       | forwarded **only when explicitly set**; uses its dedicated container             |
 | `megatron_lm`        | **unsupported** | requesting thinking metrics is a hard error                                      |
 | `openai`             | **unsupported** | requesting thinking metrics is a hard error                                      |
+
+> [!NOTE]
+> Templates such as Qwen3's default to reasoning when `enable_thinking` is not passed. For a
+> non-thinking baseline of such a model, pass `--no-enable-thinking` explicitly.
 
 ### Examples
 
@@ -956,7 +960,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `LOGS_ROOT` | `$SCRATCH/eval_logs_start/` | Root directory for evaluation logs |
 | `WANDB_ENTITY` | `apertus` | W&B entity |
 | `WANDB_PROJECT` | `swissai-evals-test` | W&B project. This is `evaluate.sbatch`'s own default when invoked directly; `launch_evaluations.sh` sets its own default of `apertus-1.5-post-training-v0.0` before the sbatch script ever runs (see [The Launch Script](#the-launch-script)), so export `WANDB_PROJECT` explicitly to keep test/smoke runs out of the production project. |
-| `ENABLE_THINKING` | `false` | Chat-template argument: whether the model reasons. Emitted for `hf` **only when set explicitly**. |
+| `ENABLE_THINKING` | *(unset)* | Chat-template argument: whether the model reasons. Emitted for `hf`, `vllm` and `sglang` **only when set explicitly**; unset leaves the template's default. |
 | `AUTODETECT_THINK_TOKENS` | `false` | Read the reasoning open/close tokens from the chat template |
 | `THINK_START_TOKEN` | (unset) | Force the reasoning open token, e.g. `<think>` |
 | `THINK_END_TOKEN` | (unset) | Force the reasoning close token, e.g. `</think>`. Arms the strip and the metrics. |
