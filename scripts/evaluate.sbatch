@@ -63,7 +63,7 @@ usage() {
     echo " EVAL_RUN_CONFIG: Normalized result provenance file used for safe resume (required; set by launcher)."
     echo " EVAL_VERIFY_ENV_IMPORTS: 'true' to repeat the preparation job's deep Python import checks inside the evaluation job (default: false)."
     echo " EVAL_CHUNKS_FILE: Resumable array chunk manifest (set automatically by launcher)."
-    echo " Thinking / reasoning metrics (hf, vllm and sglang backends only; megatron_lm is unsupported):"
+    echo " Thinking / reasoning metrics (hf, vllm, sglang and openai backends; megatron_lm is unsupported):"
     echo " ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: unset, the template's own default)."
     echo " AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
     echo " THINK_END_TOKEN: Force the reasoning close token, e.g. '</think>'. A known close token arms the strip AND the metrics."
@@ -279,10 +279,11 @@ AUTODETECT_THINK_TOKENS=$(_norm_bool AUTODETECT_THINK_TOKENS "$AUTODETECT_THINK_
 LOG_LENGTH_METRICS=$(_norm_bool LOG_LENGTH_METRICS "$LOG_LENGTH_METRICS")
 [[ -z "$TRACK_THINKING_METRICS" ]] || TRACK_THINKING_METRICS=$(_norm_bool TRACK_THINKING_METRICS "$TRACK_THINKING_METRICS")
 
-# Thinking emits a trace before the answer; raise the budget unless the caller set it.
-if [[ "$ENABLE_THINKING" == "True" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then
+# Thinking emits a trace before the answer; raise the budget unless the caller set it. A model
+# given a reasoning effort (gpt-oss) reasons at every level, so it gets the same budget.
+if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then
     MAX_NEW_TOKENS=16384
-    echo "ENABLE_THINKING=True: raising default MAX_NEW_TOKENS to $MAX_NEW_TOKENS"
+    echo "ENABLE_THINKING=True or REASONING_EFFORT set: raising default MAX_NEW_TOKENS to $MAX_NEW_TOKENS"
 fi
 
 # lm_eval splits --model_args on commas, so a comma in a token would inject an extra key.
@@ -483,16 +484,9 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
         die "Thinking/reasoning metrics are unsupported with LM_EVAL_BACKEND=$LM_EVAL_BACKEND."
     fi
 fi
-# openai renders the template client-side, so ENABLE_THINKING and REASONING_EFFORT reach the
-# model; the reasoning can't be split off an API response, so no think tokens or metrics.
-if [[ $LM_EVAL_BACKEND == "openai" ]]; then
-    if [[ -n "$THINK_ARGS" ]] || [[ "$LOG_LENGTH_METRICS" == "True" ]]; then
-        die "Think tokens and thinking/length metrics are unsupported with LM_EVAL_BACKEND=openai."
-    fi
-fi
 
 THINKING_DEFAULT_MODEL_ARG=""
-if [[ "$ENABLE_THINKING" == "True" ]]; then
+if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]]; then
     # This is a backend default, not a CLI --gen_kwargs override: task-local
     # generation_kwargs therefore retain priority.
     THINKING_DEFAULT_MODEL_ARG=",max_gen_toks=$MAX_NEW_TOKENS"
@@ -580,12 +574,13 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
         [[ $BOS = true ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
         # Rendered client-side with the HF tokenizer, so template arguments apply here; forward
         # enable_thinking only when set (unset keeps the template default).
-        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS${THINKING_DEFAULT_MODEL_ARG}"
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS${THINKING_DEFAULT_MODEL_ARG}${THINK_ARGS}"
         (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
     else
-        # chat/completions leaves the template to the server; the harness would refuse these.
-        if (( ENABLE_THINKING_EXPLICIT )) || [[ -n "$REASONING_EFFORT" ]]; then
-            die "ENABLE_THINKING/REASONING_EFFORT need the completions endpoint (unset API_CHAT_ENDPOINT)."
+        # chat/completions leaves the template to the server, whose reasoning parser (if any)
+        # takes the reasoning out of the reply; the harness would refuse the template args.
+        if (( ENABLE_THINKING_EXPLICIT )) || [[ -n "$REASONING_EFFORT" ]] || [[ -n "$THINK_ARGS" ]]; then
+            die "ENABLE_THINKING/REASONING_EFFORT/think tokens need the completions endpoint (unset API_CHAT_ENDPOINT)."
         fi
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenized_requests=False"
     fi

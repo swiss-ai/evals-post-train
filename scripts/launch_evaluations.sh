@@ -87,9 +87,9 @@
 #   --judge-requests-per-minute N - Per-judge-model endpoint-wide request limit
 #   --keep-judge         - Do not auto-cancel judge model after evaluation finishes
 #
-# Thinking / reasoning metrics (hf, vllm and sglang backends; the openai backend takes only the
-# chat-template switches --enable-thinking/--no-enable-thinking and --reasoning-effort, which it
-# renders client-side -- nothing splits the reasoning off an API response, so no metrics):
+# Thinking / reasoning metrics (hf, vllm, sglang and openai backends; on openai the chat template
+# is rendered client-side and the reasoning stripped from the API response, and there
+# --enable-thinking on its own only switches the template):
 #   --thinking           - Umbrella flag: make the model reason AND record the thinking metrics.
 #                          Implies --enable-thinking, --autodetect-think-tokens (unless
 #                          --think-end-token is given), --track-thinking-metrics true,
@@ -372,16 +372,13 @@ fi
 # The openai backend renders the chat template client-side, so its switches reach the model;
 # but nothing splits the reasoning off an API response, so there is nothing to measure.
 if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
-    if [[ "$THINKING_UMBRELLA" == "true" || -n "$THINK_END_TOKEN" || -n "$THINK_START_TOKEN" \
-          || "$AUTODETECT_THINK_TOKENS" == "true" || -n "$TRACK_THINKING_METRICS" \
-          || "$LOG_LENGTH_METRICS" == "true" ]]; then
-        echo "Error: --thinking, think tokens and thinking/length metrics are not supported with the openai backend"
-        echo "       (it can't split the reasoning off an API response). It does take the chat-template"
-        echo "       switches --enable-thinking/--no-enable-thinking and --reasoning-effort."
-        exit 1
+    # --enable-thinking on its own only switches the template here (as since it came to this
+    # backend); with --thinking or a think token the reasoning is stripped and measured, as on
+    # the other backends.
+    if [[ "$THINKING_UMBRELLA" != "true" && -z "$THINK_END_TOKEN" && -z "$THINK_START_TOKEN" \
+          && "$AUTODETECT_THINK_TOKENS" != "true" && -z "$TRACK_THINKING_METRICS" ]]; then
+        THINKING_METRICS_ASKED="false"
     fi
-    # --enable-thinking here only switches the template; it asks for no metrics.
-    THINKING_METRICS_ASKED="false"
     if [[ -n "$ENABLE_THINKING_OVERRIDE" ]]; then
         if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" ]]; then
             echo "Error: --enable-thinking/--no-enable-thinking are chat-template arguments; drop --no-chat-template"
