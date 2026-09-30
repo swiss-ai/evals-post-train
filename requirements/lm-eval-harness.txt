@@ -3,4 +3,4 @@
 # One "<owner>/<repo> <full commit>" per line; bump a commit here to ship a
 # newer harness. Runs that build their own environment (the default) are not
 # affected: they still follow LM_EVAL_HARNESS_BRANCH, or the repo's HEAD.
-swiss-ai/lm-evaluation-harness b0798f6a3e347ea010628041e1f0ed374fad826c
+swiss-ai/lm-evaluation-harness 98ce30f2efb9ef758401545ce9adb79a6feab1c7
