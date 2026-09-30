@@ -487,13 +487,18 @@ Two caveats worth internalising:
 | `hf`                 | full            | forwarded **only when explicitly set**; otherwise the template's default applies |
 | `sglang`             | full            | forwarded **only when explicitly set**; uses its dedicated container             |
 | `megatron_lm`        | **unsupported** | requesting thinking metrics is a hard error                                      |
-| `openai`             | template only   | `--enable-thinking`/`--no-enable-thinking` and `--reasoning-effort` are rendered client-side (`local-completions`); `--thinking`, think tokens and metrics are a hard error |
+| `openai`             | full (`local-completions`) | rendered client-side; forwarded **only when explicitly set**. `--enable-thinking` on its own only switches the template; `--thinking` or a think token also strips and measures the reasoning |
 
 On `openai` the harness renders the chat template itself before sending the prompt to
-`/v1/completions`, so the template switches reach the model, but nothing splits the reasoning off
-the response: the scored text includes it, and no thinking or length metrics are recorded. For
-gpt-oss over an API that means `--reasoning-effort high` alone (no `--thinking`, no think tokens).
-`API_CHAT_ENDPOINT=true` (chat/completions) leaves the template to the server and refuses them.
+`/v1/completions`, so the template switches reach the model. With `--thinking` or a think token it
+also holds the task's stop sequences back while the model reasons (they often occur inside the
+reasoning), strips the reasoning before scoring and records the thinking metrics, as on vllm.
+Reasoning markers made of special tokens (gpt-oss's `<|channel|>…<|message|>`) are kept in the
+server's text for that (`skip_special_tokens: false`). `--enable-thinking` on its own only switches
+the template: the reasoning is then scored with the answer, so prefer `--thinking`. A reasoning
+effort raises the default token budget like `--enable-thinking` does (gpt-oss reasons at every
+level). `API_CHAT_ENDPOINT=true` (chat/completions) leaves the template to the server and refuses
+them.
 
 > [!NOTE]
 > Templates such as Qwen3's default to reasoning when `enable_thinking` is not passed. For a
