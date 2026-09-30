@@ -87,7 +87,9 @@
 #   --judge-requests-per-minute N - Per-judge-model endpoint-wide request limit
 #   --keep-judge         - Do not auto-cancel judge model after evaluation finishes
 #
-# Thinking / reasoning metrics (hf, vllm and sglang backends only):
+# Thinking / reasoning metrics (hf, vllm and sglang backends; the openai backend takes only the
+# chat-template switches --enable-thinking/--no-enable-thinking and --reasoning-effort, which it
+# renders client-side -- nothing splits the reasoning off an API response, so no metrics):
 #   --thinking           - Umbrella flag: make the model reason AND record the thinking metrics.
 #                          Implies --enable-thinking, --autodetect-think-tokens (unless
 #                          --think-end-token is given), --track-thinking-metrics true,
@@ -105,8 +107,8 @@
 #   --log-length-metrics - Aggregate response_length_* / thinking_length_* into results and W&B.
 #                          thinking_format_* is aggregated regardless.
 #   --reasoning-effort <level> - Chat-template argument reasoning_effort (e.g. low, medium, high)
-#                          for models whose template reads it (gpt-oss). hf, vllm and sglang
-#                          backends only; forces the chat template on. Letters, digits, '_' and '-'.
+#                          for models whose template reads it (gpt-oss). hf, vllm, sglang and
+#                          openai backends; forces the chat template on. Letters, digits, '_' and '-'.
 #                          Other templates ignore it. For gpt-oss, combine with --thinking and
 #                          --think-start-token '<|channel|>analysis<|message|>'
 #                          --think-end-token '<|channel|>final<|message|>' (not auto-detected).
@@ -350,6 +352,10 @@ if [[ "$THINKING_UMBRELLA" == "true" || -n "$ENABLE_THINKING_OVERRIDE" \
     THINKING_TOUCHED="true"
 fi
 
+# Resolve the backend as evaluate.sbatch will, so an ambient LM_EVAL_BACKEND fails here,
+# not after scheduling.
+EFFECTIVE_BACKEND="${BACKEND_FLAG:-${LM_EVAL_BACKEND:-}}"
+
 THINKING_METRICS_ASKED="false"
 if [[ "$THINKING_UMBRELLA" == "true" || "$ENABLE_THINKING_OVERRIDE" == "true" \
       || "$TRACK_THINKING_METRICS" == "true" \
@@ -358,24 +364,44 @@ if [[ "$THINKING_UMBRELLA" == "true" || "$ENABLE_THINKING_OVERRIDE" == "true" \
     THINKING_METRICS_ASKED="true"
 fi
 
-# Length/reasoning producers exist only for hf/vllm/sglang. Resolve the backend as
-# evaluate.sbatch will, so an ambient LM_EVAL_BACKEND fails here, not after scheduling.
-EFFECTIVE_BACKEND="${BACKEND_FLAG:-${LM_EVAL_BACKEND:-}}"
-if [[ "$THINKING_TOUCHED" == "true" && ( "$EFFECTIVE_BACKEND" == "megatron_lm" || "$EFFECTIVE_BACKEND" == "openai" ) ]]; then
+# Length/reasoning producers exist only for hf/vllm/sglang.
+if [[ "$THINKING_TOUCHED" == "true" && "$EFFECTIVE_BACKEND" == "megatron_lm" ]]; then
     echo "Error: thinking and length metrics are not supported with the $EFFECTIVE_BACKEND backend"
     exit 1
 fi
+# The openai backend renders the chat template client-side, so its switches reach the model;
+# but nothing splits the reasoning off an API response, so there is nothing to measure.
+if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
+    if [[ "$THINKING_UMBRELLA" == "true" || -n "$THINK_END_TOKEN" || -n "$THINK_START_TOKEN" \
+          || "$AUTODETECT_THINK_TOKENS" == "true" || -n "$TRACK_THINKING_METRICS" \
+          || "$LOG_LENGTH_METRICS" == "true" ]]; then
+        echo "Error: --thinking, think tokens and thinking/length metrics are not supported with the openai backend"
+        echo "       (it can't split the reasoning off an API response). It does take the chat-template"
+        echo "       switches --enable-thinking/--no-enable-thinking and --reasoning-effort."
+        exit 1
+    fi
+    # --enable-thinking here only switches the template; it asks for no metrics.
+    THINKING_METRICS_ASKED="false"
+    if [[ -n "$ENABLE_THINKING_OVERRIDE" ]]; then
+        if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" ]]; then
+            echo "Error: --enable-thinking/--no-enable-thinking are chat-template arguments; drop --no-chat-template"
+            exit 1
+        fi
+        CHAT_TEMPLATE_OVERRIDE="true"
+    fi
+fi
 
 # reasoning_effort is a chat-template argument: only backends that render the template
-# in-job with extra arguments (hf, vllm, sglang; the default is vllm) can pass it on.
+# with extra arguments (hf, vllm, sglang in-job; openai client-side; the default is vllm)
+# can pass it on.
 if [[ -n "$REASONING_EFFORT" ]]; then
     if [[ ! "$REASONING_EFFORT" =~ ^[A-Za-z0-9_-]+$ ]]; then
         echo "Error: --reasoning-effort expects a level like low, medium or high (got '$REASONING_EFFORT')"
         exit 1
     fi
     if [[ -n "$EFFECTIVE_BACKEND" && "$EFFECTIVE_BACKEND" != "vllm" && "$EFFECTIVE_BACKEND" != "hf" \
-          && "$EFFECTIVE_BACKEND" != "sglang" ]]; then
-        echo "Error: --reasoning-effort is not supported with the $EFFECTIVE_BACKEND backend (hf, vllm and sglang only)"
+          && "$EFFECTIVE_BACKEND" != "sglang" && "$EFFECTIVE_BACKEND" != "openai" ]]; then
+        echo "Error: --reasoning-effort is not supported with the $EFFECTIVE_BACKEND backend (hf, vllm, sglang and openai only)"
         exit 1
     fi
     if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" ]]; then
