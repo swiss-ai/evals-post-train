@@ -83,7 +83,7 @@
 #   --judge-requests-per-minute N - Per-judge-model endpoint-wide request limit
 #   --keep-judge         - Do not auto-cancel judge model after evaluation finishes
 #
-# Thinking / reasoning metrics (hf and vllm backends only):
+# Thinking / reasoning metrics (hf, vllm and sglang backends only):
 #   --thinking           - Umbrella flag: make the model reason AND record the thinking metrics.
 #                          Implies --enable-thinking, --autodetect-think-tokens (unless
 #                          --think-end-token is given), --track-thinking-metrics true,
@@ -101,8 +101,8 @@
 #   --log-length-metrics - Aggregate response_length_* / thinking_length_* into results and W&B.
 #                          thinking_format_* is aggregated regardless.
 #   --reasoning-effort <level> - Chat-template argument reasoning_effort (e.g. low, medium, high)
-#                          for models whose template reads it (gpt-oss). hf and vllm backends
-#                          only; forces the chat template on. Letters, digits, '_' and '-'.
+#                          for models whose template reads it (gpt-oss). hf, vllm and sglang
+#                          backends only; forces the chat template on. Letters, digits, '_' and '-'.
 #                          Other templates ignore it. For gpt-oss, combine with --thinking and
 #                          --think-start-token '<|channel|>analysis<|message|>'
 #                          --think-end-token '<|channel|>final<|message|>' (not auto-detected).
@@ -359,14 +359,15 @@ if [[ "$THINKING_TOUCHED" == "true" && ( "$EFFECTIVE_BACKEND" == "megatron_lm" |
 fi
 
 # reasoning_effort is a chat-template argument: only backends that render the template
-# in-job with extra arguments (hf, vllm; the default is vllm) can pass it on.
+# in-job with extra arguments (hf, vllm, sglang; the default is vllm) can pass it on.
 if [[ -n "$REASONING_EFFORT" ]]; then
     if [[ ! "$REASONING_EFFORT" =~ ^[A-Za-z0-9_-]+$ ]]; then
         echo "Error: --reasoning-effort expects a level like low, medium or high (got '$REASONING_EFFORT')"
         exit 1
     fi
-    if [[ -n "$EFFECTIVE_BACKEND" && "$EFFECTIVE_BACKEND" != "vllm" && "$EFFECTIVE_BACKEND" != "hf" ]]; then
-        echo "Error: --reasoning-effort is not supported with the $EFFECTIVE_BACKEND backend (hf and vllm only)"
+    if [[ -n "$EFFECTIVE_BACKEND" && "$EFFECTIVE_BACKEND" != "vllm" && "$EFFECTIVE_BACKEND" != "hf" \
+          && "$EFFECTIVE_BACKEND" != "sglang" ]]; then
+        echo "Error: --reasoning-effort is not supported with the $EFFECTIVE_BACKEND backend (hf, vllm and sglang only)"
         exit 1
     fi
     if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" ]]; then

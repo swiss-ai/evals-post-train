@@ -165,10 +165,6 @@ class LaunchFlowTests(unittest.TestCase):
                  "--api-model-name", "test-model", "--reasoning-effort", "high"],
                 "not supported with the openai backend",
             ),
-            "sglang backend": (
-                ["--backend", "sglang", "--reasoning-effort", "high"],
-                "not supported with the sglang backend",
-            ),
             "no chat template": (
                 ["--no-chat-template", "--reasoning-effort", "high"],
                 "drop --no-chat-template",
@@ -183,6 +179,25 @@ class LaunchFlowTests(unittest.TestCase):
                 )
                 self.assertNotEqual(completed.returncode, 0)
                 self.assertIn(message, completed.stdout + completed.stderr)
+
+    def test_reasoning_effort_is_accepted_on_sglang(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            completed = _launch(
+                "single", "--task", "aime25", "--model", "openai/gpt-oss-120b",
+                "--backend", "sglang", "--reasoning-effort", "high", "--logs-root", tmp,
+            )
+            output = completed.stdout + completed.stderr
+            self.assertEqual(completed.returncode, 0, output)
+            config = _run_config(tmp)
+        self.assertEqual(config["configuration"]["reasoning_effort"], "high")
+
+    def test_evaluate_passes_think_args_to_sglang(self) -> None:
+        sbatch = (REPO_ROOT / "scripts/evaluate.sbatch").read_text()
+        sglang_args = next(
+            line for line in sbatch.splitlines()
+            if "tokenizer_path=$TOKENIZER" in line and "COMMON_MODEL_ARGS=" in line
+        )
+        self.assertIn("${THINK_ARGS}", sglang_args)
 
     def test_evaluate_passes_reasoning_effort_as_its_own_model_args_token(self) -> None:
         # The harness refuses a first --model_args token containing '{', and argparse gives

@@ -186,7 +186,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--autodetect-think-tokens` | Read the reasoning open/close tokens from the model's chat template. |
 | `--track-thinking-metrics <true\|false>` / `--no-track-thinking-metrics` | Force the thinking metrics on or off (default: on iff a close token is known). |
 | `--log-length-metrics` | Aggregate `response_length_*` / `thinking_length_*` into results and W&B. `thinking_format_*` is aggregated regardless. |
-| `--reasoning-effort <level>` | Chat-template argument `reasoning_effort` (e.g. `low`/`medium`/`high`) for models whose template reads it, such as gpt-oss. hf and vllm backends only. See [Reasoning effort](#reasoning-effort). |
+| `--reasoning-effort <level>` | Chat-template argument `reasoning_effort` (e.g. `low`/`medium`/`high`) for models whose template reads it, such as gpt-oss. hf, vllm and sglang backends only. See [Reasoning effort](#reasoning-effort). |
 
 > [!TIP]
 > Inference hyperparameters such as batch size (`BS`), `MAX_LENGTH`, and `MAX_NEW_TOKENS` are not exposed as launcher flags — set them as environment variables consumed by `evaluate.sbatch` (see [SBATCH Scripts](#sbatch-scripts)). `SIZE` is retained as informational/legacy metadata. vLLM keeps the compatible TP=4/DP=1 topology unless the model name unambiguously identifies a model below 30B, in which case it uses TP=1/DP=4; explicit topology variables always win.
@@ -430,7 +430,7 @@ bash scripts/launch_evaluations.sh single --task aime25 --model openai/gpt-oss-1
   --think-start-token '<|channel|>analysis<|message|>' --think-end-token '<|channel|>final<|message|>'
 ```
 
-It goes to the harness as `chat_template_args={"reasoning_effort":"<level>"}` (hf and vllm only;
+It goes to the harness as `chat_template_args={"reasoning_effort":"<level>"}` (hf, vllm and sglang only;
 the launcher refuses other backends), forces the chat template on, is part of the run
 configuration (results of another level are never resumed into this one), and adds
 `-effort-<level>` to an auto-derived run name. A template that doesn't read `reasoning_effort`
@@ -472,7 +472,7 @@ Two caveats worth internalising:
 |----------------------|-----------------|----------------------------------------------------------------------------------|
 | `vllm` (recommended) | full            | forwarded **only when explicitly set**; otherwise the template's default applies |
 | `hf`                 | full            | forwarded **only when explicitly set**; otherwise the template's default applies |
-| `sglang`             | available       | forwarded **only when explicitly set**; uses its dedicated container             |
+| `sglang`             | full            | forwarded **only when explicitly set**; uses its dedicated container             |
 | `megatron_lm`        | **unsupported** | requesting thinking metrics is a hard error                                      |
 | `openai`             | **unsupported** | requesting thinking metrics is a hard error                                      |
 
