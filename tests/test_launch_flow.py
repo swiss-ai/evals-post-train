@@ -160,10 +160,9 @@ class LaunchFlowTests(unittest.TestCase):
 
     def test_reasoning_effort_is_refused_where_it_cannot_reach_the_template(self) -> None:
         cases = {
-            "openai backend": (
-                ["--backend", "openai", "--api-base-url", "http://localhost:8000",
-                 "--api-model-name", "test-model", "--reasoning-effort", "high"],
-                "not supported with the openai backend",
+            "megatron backend": (
+                ["--backend", "megatron_lm", "--reasoning-effort", "high"],
+                "not supported with the megatron_lm backend",
             ),
             "no chat template": (
                 ["--no-chat-template", "--reasoning-effort", "high"],
@@ -179,6 +178,75 @@ class LaunchFlowTests(unittest.TestCase):
                 )
                 self.assertNotEqual(completed.returncode, 0)
                 self.assertIn(message, completed.stdout + completed.stderr)
+
+    def test_openai_takes_the_chat_template_switches(self) -> None:
+        # The harness renders the template client-side (local-completions), so they reach it.
+        api = ["--backend", "openai", "--api-base-url", "http://localhost:8000",
+               "--api-model-name", "test-model"]
+        cases = {
+            "effort": (["--reasoning-effort", "high"], {"reasoning_effort": "high"}),
+            "thinking on": (["--enable-thinking"], {"enable_thinking": "true"}),
+            "thinking off": (["--no-enable-thinking"], {"enable_thinking": "false"}),
+            "both": (["--enable-thinking", "--reasoning-effort", "low"],
+                     {"enable_thinking": "true", "reasoning_effort": "low"}),
+        }
+        for name, (arguments, expected) in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                completed = _launch(
+                    "single", "--task", "aime25", *api, *arguments, "--logs-root", tmp,
+                )
+                output = completed.stdout + completed.stderr
+                self.assertEqual(completed.returncode, 0, output)
+                self.assertIn("Chat:   true", output)
+                self.assertNotIn("no reasoning close token", output)
+                config = _run_config(tmp)["configuration"]
+                for key, value in expected.items():
+                    self.assertEqual(config[key], value, key)
+
+    def test_openai_refuses_what_needs_the_reasoning_split_off(self) -> None:
+        api = ["--backend", "openai", "--api-base-url", "http://localhost:8000",
+               "--api-model-name", "test-model"]
+        cases = {
+            "umbrella": ["--thinking"],
+            "close token": ["--think-end-token", "</think>"],
+            "open token": ["--think-start-token", "<think>"],
+            "autodetect": ["--autodetect-think-tokens"],
+            "metrics": ["--track-thinking-metrics", "true"],
+            "lengths": ["--log-length-metrics"],
+            "gpt-oss recipe": ["--thinking", "--reasoning-effort", "high",
+                               "--think-start-token", "<|channel|>analysis<|message|>",
+                               "--think-end-token", "<|channel|>final<|message|>"],
+        }
+        for name, arguments in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                completed = _launch(
+                    "single", "--task", "aime25", *api, *arguments, "--logs-root", tmp,
+                )
+                output = completed.stdout + completed.stderr
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn("not supported with the openai backend", output)
+                self.assertIn("--enable-thinking/--no-enable-thinking and --reasoning-effort", output)
+
+    def test_openai_template_switches_need_the_chat_template(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            completed = _launch(
+                "single", "--task", "aime25", "--backend", "openai",
+                "--api-base-url", "http://localhost:8000", "--api-model-name", "test-model",
+                "--no-chat-template", "--enable-thinking", "--logs-root", tmp,
+            )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("drop --no-chat-template", completed.stdout + completed.stderr)
+
+    def test_evaluate_passes_template_args_to_openai_completions(self) -> None:
+        sbatch = (REPO_ROOT / "scripts/evaluate.sbatch").read_text()
+        self.assertIn(
+            "python -m lm_eval --model $API_LM_EVAL_MODEL --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ",
+            sbatch,
+        )
+        completions = sbatch[sbatch.index('if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then'):]
+        completions = completions[: completions.index("    else")]
+        self.assertIn(',enable_thinking=${ENABLE_THINKING}"', completions)
+        self.assertIn("${THINKING_DEFAULT_MODEL_ARG}", completions)
 
     def test_launch_summary_shows_partition_and_qos(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

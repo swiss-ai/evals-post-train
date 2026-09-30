@@ -189,7 +189,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--autodetect-think-tokens` | Read the reasoning open/close tokens from the model's chat template. Only templates that declare them as `inner_token = '…'` / `outer_token = '…'` (Apertus-style) are recognised; for other models pass the tokens explicitly. |
 | `--track-thinking-metrics <true\|false>` / `--no-track-thinking-metrics` | Force the thinking metrics on or off (default: on iff a close token is known). |
 | `--log-length-metrics` | Aggregate `response_length_*` / `thinking_length_*` into results and W&B. `thinking_format_*` is aggregated regardless. |
-| `--reasoning-effort <level>` | Chat-template argument `reasoning_effort` (e.g. `low`/`medium`/`high`) for models whose template reads it, such as gpt-oss. hf, vllm and sglang backends only. See [Reasoning effort](#reasoning-effort). |
+| `--reasoning-effort <level>` | Chat-template argument `reasoning_effort` (e.g. `low`/`medium`/`high`) for models whose template reads it, such as gpt-oss. hf, vllm, sglang and openai backends. See [Reasoning effort](#reasoning-effort). |
 
 > [!TIP]
 > Inference hyperparameters such as batch size (`BS`), `MAX_LENGTH`, and `MAX_NEW_TOKENS` are not exposed as launcher flags — set them as environment variables consumed by `evaluate.sbatch` (see [SBATCH Scripts](#sbatch-scripts)). `SIZE` is retained as informational/legacy metadata. vLLM keeps the compatible TP=4/DP=1 topology unless the model name unambiguously identifies a model below 30B, in which case it uses TP=1/DP=4; explicit topology variables always win.
@@ -443,8 +443,8 @@ bash scripts/launch_evaluations.sh single --task aime25 --model openai/gpt-oss-1
   --think-start-token '<|channel|>analysis<|message|>' --think-end-token '<|channel|>final<|message|>'
 ```
 
-It goes to the harness as `chat_template_args={"reasoning_effort":"<level>"}` (hf, vllm and sglang only;
-the launcher refuses other backends), forces the chat template on, is part of the run
+It goes to the harness as `chat_template_args={"reasoning_effort":"<level>"}` (hf, vllm, sglang and
+openai; the launcher refuses megatron_lm), forces the chat template on, is part of the run
 configuration (results of another level are never resumed into this one), and adds
 `-effort-<level>` to an auto-derived run name. A template that doesn't read `reasoning_effort`
 ignores it silently -- check the rendered prompt in the job log. It does not turn reasoning on or
@@ -487,7 +487,13 @@ Two caveats worth internalising:
 | `hf`                 | full            | forwarded **only when explicitly set**; otherwise the template's default applies |
 | `sglang`             | full            | forwarded **only when explicitly set**; uses its dedicated container             |
 | `megatron_lm`        | **unsupported** | requesting thinking metrics is a hard error                                      |
-| `openai`             | **unsupported** | requesting thinking metrics is a hard error                                      |
+| `openai`             | template only   | `--enable-thinking`/`--no-enable-thinking` and `--reasoning-effort` are rendered client-side (`local-completions`); `--thinking`, think tokens and metrics are a hard error |
+
+On `openai` the harness renders the chat template itself before sending the prompt to
+`/v1/completions`, so the template switches reach the model, but nothing splits the reasoning off
+the response: the scored text includes it, and no thinking or length metrics are recorded. For
+gpt-oss over an API that means `--reasoning-effort high` alone (no `--thinking`, no think tokens).
+`API_CHAT_ENDPOINT=true` (chat/completions) leaves the template to the server and refuses them.
 
 > [!NOTE]
 > Templates such as Qwen3's default to reasoning when `enable_thinking` is not passed. For a

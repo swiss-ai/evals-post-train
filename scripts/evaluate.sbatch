@@ -70,7 +70,7 @@ usage() {
     echo " THINK_START_TOKEN: Force the reasoning open token, e.g. '<think>'. Needed for thinking_format_has_open."
     echo " TRACK_THINKING_METRICS: 'true'/'false' to force the thinking metrics on/off (default: on iff a close token is known)."
     echo " LOG_LENGTH_METRICS: 'true' to aggregate response_length_*/thinking_length_* (thinking_format_* is always aggregated)."
-    echo " REASONING_EFFORT: chat-template argument reasoning_effort (e.g. low/medium/high, read by gpt-oss's template); hf, vllm and sglang only."
+    echo " REASONING_EFFORT: chat-template argument reasoning_effort (e.g. low/medium/high, read by gpt-oss's template); hf, vllm, sglang and openai."
 	echo "For more information see the README: https://github.com/swiss-ai/evals?tab=readme-ov-file."
 }
 die() {
@@ -310,8 +310,9 @@ CHAT_TEMPLATE_ARGS=""
 if [[ -n "$REASONING_EFFORT" ]]; then
     [[ "$REASONING_EFFORT" =~ ^[A-Za-z0-9_-]+$ ]] \
         || die "REASONING_EFFORT must be a level like low, medium or high (got '$REASONING_EFFORT')."
-    [[ "$LM_EVAL_BACKEND" == "vllm" || "$LM_EVAL_BACKEND" == "hf" || "$LM_EVAL_BACKEND" == "sglang" ]] \
-        || die "REASONING_EFFORT is only supported with the hf, vllm and sglang backends (got $LM_EVAL_BACKEND)."
+    [[ "$LM_EVAL_BACKEND" == "vllm" || "$LM_EVAL_BACKEND" == "hf" || "$LM_EVAL_BACKEND" == "sglang" \
+       || "$LM_EVAL_BACKEND" == "openai" ]] \
+        || die "REASONING_EFFORT is only supported with the hf, vllm, sglang and openai backends (got $LM_EVAL_BACKEND)."
     CHAT_TEMPLATE_ARGS=" 'chat_template_args={\"reasoning_effort\":\"${REASONING_EFFORT}\"}'"
 fi
 
@@ -477,9 +478,16 @@ awk -v fraction="$VLLM_MEMORY_FRACTION" \
 # export VLLM_DISABLE_CUSTOM_ALL_REDUCE=1
 
 # The harness only implements the reasoning producers for hf/vllm/sglang; fail loudly otherwise.
-if [[ $LM_EVAL_BACKEND == "megatron_lm" || $LM_EVAL_BACKEND == "openai" ]]; then
+if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     if [[ -n "$THINK_ARGS" ]] || (( ENABLE_THINKING_EXPLICIT )) || [[ "$LOG_LENGTH_METRICS" == "True" ]]; then
         die "Thinking/reasoning metrics are unsupported with LM_EVAL_BACKEND=$LM_EVAL_BACKEND."
+    fi
+fi
+# openai renders the template client-side, so ENABLE_THINKING and REASONING_EFFORT reach the
+# model; the reasoning can't be split off an API response, so no think tokens or metrics.
+if [[ $LM_EVAL_BACKEND == "openai" ]]; then
+    if [[ -n "$THINK_ARGS" ]] || [[ "$LOG_LENGTH_METRICS" == "True" ]]; then
+        die "Think tokens and thinking/length metrics are unsupported with LM_EVAL_BACKEND=openai."
     fi
 fi
 
@@ -570,7 +578,15 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
         # regardless of the tokenizer setting.
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER,tokenized_requests=False"
         [[ $BOS = true ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
+        # Rendered client-side with the HF tokenizer, so template arguments apply here; forward
+        # enable_thinking only when set (unset keeps the template default).
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS${THINKING_DEFAULT_MODEL_ARG}"
+        (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
     else
+        # chat/completions leaves the template to the server; the harness would refuse these.
+        if (( ENABLE_THINKING_EXPLICIT )) || [[ -n "$REASONING_EFFORT" ]]; then
+            die "ENABLE_THINKING/REASONING_EFFORT need the completions endpoint (unset API_CHAT_ENDPOINT)."
+        fi
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenized_requests=False"
     fi
     # API models take an integer batch size; throughput comes from num_concurrent instead.
@@ -788,7 +804,7 @@ if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
 elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
-    CMD="python -m lm_eval --model $API_LM_EVAL_MODEL --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
+    CMD="python -m lm_eval --model $API_LM_EVAL_MODEL --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
     CMD="accelerate launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
