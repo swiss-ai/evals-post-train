@@ -175,6 +175,8 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--megatron-iter <iter>` | For Megatron-LM checkpoints, the iteration to evaluate (e.g. `8926`); defaults to `latest`. Exported as `CKPT_ITERATION`. |
 | `--harness-branch B` | Resolve lm-evaluation-harness from a branch, tag, or full commit SHA in the task-selected repository (default: repository HEAD); the resolved commit is shared by every chunk |
 | `--reservation <name>` | Submit evaluation jobs and any automatically launched judge under this SLURM reservation. |
+| `--qos <name>` | Submit every job, including any automatically launched judge, under this SLURM QOS (e.g. `highprio`). Exported as `SBATCH_QOS`. |
+| `--partition <name>` | Submit every job, including any automatically launched judge, to this SLURM partition (e.g. `highprio`; default: `normal`). Exported as `SBATCH_PARTITION`. |
 | `--judge <none\|auto\|preset>` | Judge-model control for LLM-as-a-judge tasks. `none` (default) disables auto-launch; `auto` scans the task list using the mapping in `scripts/launch_judge.py`; a preset name (e.g. `qwen3.5-27b`, `llama-3.3-70b`) launches that judge. |
 | `--judge-args <str>` | Extra arguments forwarded to `scripts/launch_judge.py` |
 | `--judge-requests-per-minute N` | Endpoint-wide request limit applied separately to each hosted judge model (for example, `30`) |

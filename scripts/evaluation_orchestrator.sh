@@ -143,6 +143,10 @@ _eval_launch_judge() {
     fi
     [[ -z "${SBATCH_RESERVATION:-}" ]] \
         || launch_args+=(--reservation "$SBATCH_RESERVATION")
+    # The judge passes its partition on the sbatch command line, which beats SBATCH_PARTITION;
+    # SBATCH_QOS reaches it from the environment.
+    [[ -z "${SBATCH_PARTITION:-}" ]] \
+        || launch_args+=(--partition "$SBATCH_PARTITION")
     [[ "${EVAL_DRY_RUN:-false}" != "true" ]] || launch_args+=(--dry-run)
 
     echo ""
@@ -170,7 +174,7 @@ _eval_schedule_judge_cleanup() {
 
     local dependency=""
     [[ -n "$dependency_job" ]] && dependency="--dependency=afterany:$dependency_job"
-    local -a command=(sbatch --parsable --account="${SBATCH_ACCOUNT:-infra01}" --partition=normal
+    local -a command=(sbatch --parsable --account="${SBATCH_ACCOUNT:-infra01}" --partition="${SBATCH_PARTITION:-normal}"
         --job-name judge-cleanup --time=00:05:00)
     [[ -n "$dependency" ]] && command+=("$dependency")
     command+=(--wrap="scancel $JUDGE_JOB_IDS")
