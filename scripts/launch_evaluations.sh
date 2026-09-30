@@ -75,6 +75,10 @@
 #   --reservation <name> - Submit jobs under a SLURM reservation, including an auto-launched judge
 #                          (exported as SBATCH_RESERVATION; ambient SBATCH_RESERVATION is respected
 #                          for evaluation jobs when the flag is absent)
+#   --qos <name>         - Submit every job, including an auto-launched judge, under this SLURM QOS
+#                          (exported as SBATCH_QOS), e.g. highprio
+#   --partition <name>   - Submit every job, including an auto-launched judge, to this SLURM
+#                          partition (exported as SBATCH_PARTITION; default: normal), e.g. highprio
 #   --judge <none|auto|preset> - Judge model control:
 #                          none (default): disable judge auto-launch
 #                          auto: detect judge-dependent tasks and launch needed judges
@@ -160,6 +164,8 @@ MEGATRON_ITER=""
 SINGLE_TASK=""
 HARNESS_BRANCH=""
 RESERVATION_FLAG=""
+QOS_FLAG=""
+PARTITION_FLAG=""
 JUDGE_MODE="none"       # auto, none, or a preset name
 JUDGE_EXTRA_ARGS=""
 JUDGE_REQUESTS_PER_MINUTE_FLAG=""
@@ -207,6 +213,8 @@ while [[ $# -gt 0 ]]; do
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --harness-branch) HARNESS_BRANCH="$2";        shift 2 ;;
         --reservation)   RESERVATION_FLAG="$2";        shift 2 ;;
+        --qos)           QOS_FLAG="$2";                shift 2 ;;
+        --partition)     PARTITION_FLAG="$2";          shift 2 ;;
         --judge)         JUDGE_MODE="$2";              shift 2 ;;
         --judge-args)    JUDGE_EXTRA_ARGS="$2";        shift 2 ;;
         --judge-requests-per-minute) JUDGE_REQUESTS_PER_MINUTE_FLAG="$2"; shift 2 ;;
@@ -459,8 +467,11 @@ fi
 [[ -n "$REASONING_EFFORT"               ]] && export REASONING_EFFORT
 
 # --- Environment defaults ---
-# sbatch reads SBATCH_RESERVATION natively (CLI > env > script directives).
+# sbatch reads SBATCH_RESERVATION, SBATCH_QOS and SBATCH_PARTITION natively
+# (CLI > env > script directives).
 [[ -n "$RESERVATION_FLAG" ]] && export SBATCH_RESERVATION="$RESERVATION_FLAG"
+[[ -n "$QOS_FLAG" ]] && export SBATCH_QOS="$QOS_FLAG"
+[[ -n "$PARTITION_FLAG" ]] && export SBATCH_PARTITION="$PARTITION_FLAG"
 export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 export WANDB_PROJECT=${WANDB_PROJECT:-apertus-1.5-post-training-v0.1}
 export LOGS_ROOT=${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}
@@ -624,6 +635,7 @@ if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
     echo "  API:    ${API_BASE_URL} (model=${API_MODEL_NAME:-<from --model>})"
     echo "  API RPM: ${API_REQUESTS_PER_MINUTE:-unlimited}"
 fi
+echo "  Slurm:  partition=${SBATCH_PARTITION:-normal} qos=${SBATCH_QOS:-<default>}${SBATCH_RESERVATION:+ reservation=$SBATCH_RESERVATION}"
 echo "  Judge RPM: ${JUDGE_REQUESTS_PER_MINUTE:-unlimited}"
 echo "  Judge model prefix: ${JUDGE_MODEL_PREFIX:-<none>}"
 
@@ -746,7 +758,7 @@ if [[ "$EVAL_FAILURE_POLICY" == "fail-fast" && -n "$JUDGE_JOB_IDS" \
     SCANCEL_CMD="scancel $JUDGE_JOB_IDS"
     CLEANUP_JOB=$(sbatch --parsable \
         --account=infra01 \
-        --partition=normal \
+        --partition="${SBATCH_PARTITION:-normal}" \
         --job-name "judge-cleanup" \
         --dependency="afterany:${DEP_STRING}" \
         --time=00:05:00 \

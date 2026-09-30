@@ -180,6 +180,24 @@ class LaunchFlowTests(unittest.TestCase):
                 self.assertNotEqual(completed.returncode, 0)
                 self.assertIn(message, completed.stdout + completed.stderr)
 
+    def test_launch_summary_shows_partition_and_qos(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            completed = _launch(
+                "single", "--task", "hellaswag", "--model", "test/model",
+                "--qos", "highprio", "--partition", "highprio", "--logs-root", tmp,
+            )
+        output = completed.stdout + completed.stderr
+        self.assertEqual(completed.returncode, 0, output)
+        self.assertIn("Slurm:  partition=highprio qos=highprio", output)
+
+    def test_no_partition_is_hard_coded_on_an_sbatch_command_line(self) -> None:
+        # A --partition on the command line beats SBATCH_PARTITION, so it must follow it.
+        for script in ("scripts/launch_evaluations.sh", "scripts/evaluation_orchestrator.sh"):
+            text = (REPO_ROOT / script).read_text()
+            self.assertNotIn("--partition=normal", text, script)
+        orchestrator = (REPO_ROOT / "scripts/evaluation_orchestrator.sh").read_text()
+        self.assertIn('launch_args+=(--partition "$SBATCH_PARTITION")', orchestrator)
+
     def test_reasoning_effort_is_accepted_on_sglang(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
