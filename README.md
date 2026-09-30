@@ -76,9 +76,10 @@ bash scripts/launch_evaluations.sh olmo-easy --model Qwen/Qwen2.5-7B --num-fewsh
 # Evaluate a small model on a single task, useful for testing newly implemented tasks
 bash scripts/launch_evaluations.sh single --task multijail --model meta-llama/Llama-3.2-3B --backend vllm
 
-# Thinking / reasoning eval with an isolated W&B run name
+# Thinking / reasoning eval with an isolated W&B run name. The tokens are explicit because
+# --thinking only auto-detects them from Apertus-style templates (see "Thinking / Reasoning Metrics")
 bash scripts/launch_evaluations.sh posttrain --model Qwen/Qwen3-8B \
-  --thinking --name Qwen3-8B-think
+  --thinking --think-start-token '<think>' --think-end-token '</think>' --name Qwen3-8B-think
 # ...then build the thinking-only table from that run (details: "Building a thinking-only table")
 python make_html_table.py --thinking --metrics-file configs/apertus/tasks_posttrain_final.txt --entity apertus --project <project> --models Qwen3-8B-think --output thinking_table.html
 
@@ -185,7 +186,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--enable-thinking` / `--no-enable-thinking` | Chat-template argument deciding whether the model reasons. `--enable-thinking` **on its own records nothing** — a reasoning close token must also be known. |
 | `--think-end-token <str>` | Force the reasoning close token, e.g. `'</think>'`. A known close token arms the trace strip **and** the thinking metrics. |
 | `--think-start-token <str>` | Force the reasoning open token, e.g. `'<think>'`. Needed for `thinking_format_has_open`. |
-| `--autodetect-think-tokens` | Read the reasoning open/close tokens from the model's chat template. |
+| `--autodetect-think-tokens` | Read the reasoning open/close tokens from the model's chat template. Only templates that declare them as `inner_token = '…'` / `outer_token = '…'` (Apertus-style) are recognised; for other models pass the tokens explicitly. |
 | `--track-thinking-metrics <true\|false>` / `--no-track-thinking-metrics` | Force the thinking metrics on or off (default: on iff a close token is known). |
 | `--log-length-metrics` | Aggregate `response_length_*` / `thinking_length_*` into results and W&B. `thinking_format_*` is aggregated regardless. |
 | `--reasoning-effort <level>` | Chat-template argument `reasoning_effort` (e.g. `low`/`medium`/`high`) for models whose template reads it, such as gpt-oss. hf, vllm and sglang backends only. See [Reasoning effort](#reasoning-effort). |
@@ -385,27 +386,37 @@ No manual dependency management is needed -- the launcher handles everything via
 ## Thinking / Reasoning Metrics
 
 For reasoning models, the harness strips the reasoning trace before scoring the answer, and records
-how long that trace was and whether it was well-formed. Enable all of it with one flag:
+how long that trace was and whether it was well-formed. Enable all of it with `--thinking`, plus
+the model's reasoning tokens unless its chat template declares them (see the note below):
 
 ```bash
-bash scripts/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B --thinking
+bash scripts/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B \
+  --thinking --think-start-token '<think>' --think-end-token '</think>'
 ```
 
 > [!WARNING]
 > **`--enable-thinking` on its own records nothing.** It is purely a chat-template argument that
 > decides whether the model reasons. The trace strip and every thinking metric are armed by a known
 > reasoning **close token** — supplied with `--think-end-token '</think>'` or discovered with
-> `--autodetect-think-tokens`. `--thinking` wires both up for you; the launcher refuses to submit a
-> job that would silently record nothing. If the model's chat template declares no reasoning
-> tokens, autodetection fails loudly *inside the job* (after queueing, at model construction) —
-> for such models pass `--think-end-token` explicitly or skip `--thinking`.
+> `--autodetect-think-tokens`. `--thinking` turns on auto-detection unless you pass
+> `--think-end-token`, and the launcher refuses a job that has neither.
+
+> [!IMPORTANT]
+> **Auto-detection only recognises templates that declare the tokens** as Jinja variables,
+> `inner_token = '…'` (open) and `outer_token = '…'` (close), as Apertus templates do. Templates
+> that write the tokens literally (e.g. Qwen3's `<think>` … `</think>`) or use another format
+> (e.g. gpt-oss's channels) declare nothing, so detection finds no close token: the job still runs,
+> but the trace is not stripped and no thinking metrics are recorded. The only sign is the job-log
+> warning `no reasoning close token is known`. For such models always pass `--think-start-token`
+> and `--think-end-token`. Detection fails loudly only when a template declares the tokens but the
+> close can't be read as a literal.
 
 ### The four independent switches
 
 | Question                                    | Flag                                             | Default                                                                                 |
 |---------------------------------------------|--------------------------------------------------|-----------------------------------------------------------------------------------------|
 | Does the model reason?                      | `--enable-thinking`                              | the chat template's own default (`enable_thinking` is not sent unless set)              |
-| Are the reasoning tokens discovered?        | `--autodetect-think-tokens`                      | off — the template is never scanned                                                     |
+| Are the reasoning tokens discovered?        | `--autodetect-think-tokens` (declared tokens only) | off — the template is never scanned                                                   |
 | Does the trace get stripped before scoring? | *(implicit)* whenever a **close** token is known | off                                                                                     |
 | Are the thinking metrics recorded?          | `--track-thinking-metrics`                       | on iff a close token is known                                                           |
 
@@ -414,7 +425,7 @@ template on (the reasoning tokens live in it). Any granular flag you pass overri
 
 Thinking runs also change **generation**: sampling is forced (`do_sample=true`,
 `THINK_TEMPERATURE=0.6`, `THINK_TOP_P=0.95` — reasoning degrades under greedy), and the default
-generation budget rises to 8192 tokens for tasks that do not define `max_gen_toks`. A task's own
+generation budget rises to 16384 tokens for tasks that do not define `max_gen_toks`. A task's own
 YAML value always takes priority (so AIME keeps its 32768). Override the fallback via the
 `THINK_*` / `MAX_NEW_TOKENS` env vars (see
 [SBATCH Scripts](#sbatch-scripts)); `NOTHINK_TEMPERATURE` enables the same sampling for no-think
@@ -437,8 +448,8 @@ the launcher refuses other backends), forces the chat template on, is part of th
 configuration (results of another level are never resumed into this one), and adds
 `-effort-<level>` to an auto-derived run name. A template that doesn't read `reasoning_effort`
 ignores it silently -- check the rendered prompt in the job log. It does not turn reasoning on or
-set the think tokens by itself, and `--thinking` can't auto-detect gpt-oss's: its template has no
-`<think>`-style pair, so without the explicit tokens above the whole `analysis` channel stays in the
+set the think tokens by itself, and `--thinking` can't auto-detect gpt-oss's: its template declares
+no `inner_token`/`outer_token`, so without the explicit tokens above the whole `analysis` channel stays in the
 scored response and the thinking metrics stay off (the job log warns `no reasoning close token is
 known`). With them, only the `final` channel is scored.
 
@@ -486,8 +497,11 @@ Two caveats worth internalising:
 
 ```bash
 # Reasoning model, everything on, quick smoke test
-bash scripts/launch_evaluations.sh single --task gsm8k_cot \
-  --model Qwen/Qwen3-8B --thinking --limit 20
+bash scripts/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B --limit 20 \
+  --thinking --think-start-token '<think>' --think-end-token '</think>'
+
+# A model whose template declares inner_token/outer_token (Apertus-style): --thinking alone
+bash scripts/launch_evaluations.sh single --task gsm8k_cot --model my/apertus-reasoner --thinking
 
 # Explicit tokens rather than template auto-detection
 bash scripts/launch_evaluations.sh posttrain --model my/reasoner --backend vllm \
@@ -945,7 +959,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `BS` | `auto:20` | Batch size |
 | `SIZE` | `1` | Informational/legacy model-size metadata; topology inference uses the model name/path instead |
 | `MAX_LENGTH` | (backend/model default) | Optional total context limit, passed as the backend-native setting (`max_model_len` for vLLM/SGLang, `seq_length` for Megatron, `max_length` for HF/API) |
-| `MAX_NEW_TOKENS` | `8192` with thinking; otherwise unused | Model-level generation fallback for thinking runs. Task YAML `max_gen_toks` always takes priority; an explicit value overrides the fallback. HF has no model-level override and therefore keeps its native fallback for tasks without a value. |
+| `MAX_NEW_TOKENS` | `16384` with thinking; otherwise unused | Model-level generation fallback for thinking runs. Task YAML `max_gen_toks` always takes priority; an explicit value overrides the fallback. HF has no model-level override and therefore keeps its native fallback for tasks without a value. |
 | `VLLM_TP_SIZE` / `VLLM_DP_SIZE` | auto | Explicit vLLM topology; either value can be omitted and is derived from the four allocated GPUs. Both values must multiply to 4. |
 | `VLLM_AUTO_PARALLELISM` | `true` | With no explicit topology, use TP=1/DP=4 only when the model name unambiguously identifies `<30B`; otherwise retain TP=4/DP=1. |
 | `VLLM_MEMORY_FRACTION` | `0.8` | vLLM `gpu_memory_utilization` / SGLang `mem_fraction_static` |

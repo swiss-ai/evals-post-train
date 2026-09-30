@@ -33,7 +33,7 @@ usage() {
 	echo " REVISION: Only used in huggingface models. If set, this revision of the model will be evaluated."
 	echo " SIZE: Legacy/informational approximate model size in billions."
 	echo " MAX_LENGTH: Optional backend context limit (vLLM max_model_len; Megatron seq_length)."
-	echo " MAX_NEW_TOKENS: Thinking-run default for tasks without a task-local max_gen_toks (default: 8192 when thinking)."
+	echo " MAX_NEW_TOKENS: Thinking-run default for tasks without a task-local max_gen_toks (default: 16384 when thinking)."
 	echo " VLLM_TP_SIZE / VLLM_DP_SIZE: Explicit vLLM topology. Defaults to TP=4/DP=1, or TP=1/DP=4 when a model name unambiguously indicates <30B."
 	echo " VLLM_MEMORY_FRACTION: vLLM/SGLang GPU memory fraction (default: 0.8)."
 	echo " MEGATRON_MICRO_BATCH_SIZE: Megatron micro-batch override; otherwise uses numeric BS or 1 when BS=auto."
