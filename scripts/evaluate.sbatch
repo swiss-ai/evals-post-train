@@ -52,6 +52,7 @@ usage() {
     echo " API_NUM_CONCURRENT: Concurrent requests (default: 8)."
     echo " API_REQUESTS_PER_MINUTE: Optional endpoint-wide request limit for the benchmarked model."
     echo " API_MAX_RETRIES: Retries per request (default: 3)."
+    echo " API_REQUEST_TIMEOUT: Seconds to wait for one request before retrying it (default: 3600; lm-eval's own 300 cuts off long reasoning)."
     echo " JUDGE_REQUESTS_PER_MINUTE: Optional endpoint-wide request limit, applied separately to each judge model."
     echo " JUDGE_MODEL_PREFIX: Preferred host scope for judge model IDs (default: USER)."
     echo " LM_EVAL_RATE_LIMIT_STATE_DIR: Shared coordination directory for rate-limited Slurm workers (set by launcher)."
@@ -211,6 +212,10 @@ API_MODEL_NAME=${API_MODEL_NAME:-""}
 API_NUM_CONCURRENT=${API_NUM_CONCURRENT:-8}
 API_REQUESTS_PER_MINUTE=${API_REQUESTS_PER_MINUTE:-""}
 API_MAX_RETRIES=${API_MAX_RETRIES:-3}
+# Requests are not streamed, so nothing comes back until the whole generation is done:
+# lm-eval's default 300s abandons and retries long reasoning (32k tokens on a busy
+# endpoint takes ~20-30 min). Only a ceiling -- a request returns as soon as it is done.
+API_REQUEST_TIMEOUT=${API_REQUEST_TIMEOUT:-3600}
 export JUDGE_REQUESTS_PER_MINUTE=${JUDGE_REQUESTS_PER_MINUTE:-""}
 export JUDGE_MODEL_PREFIX=${JUDGE_MODEL_PREFIX:-${USER:-}}
 
@@ -559,7 +564,7 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
         API_BASE_URL="$API_BASE_URL/$API_ENDPOINT_SUFFIX"
     fi
     # Rebuilt from scratch: no model is loaded in-job, so dtype etc. do not apply.
-    COMMON_MODEL_ARGS="model=$API_MODEL_NAME,base_url=$API_BASE_URL,num_concurrent=$API_NUM_CONCURRENT,max_retries=$API_MAX_RETRIES"
+    COMMON_MODEL_ARGS="model=$API_MODEL_NAME,base_url=$API_BASE_URL,num_concurrent=$API_NUM_CONCURRENT,max_retries=$API_MAX_RETRIES,timeout=$API_REQUEST_TIMEOUT"
     if [[ -n "$API_REQUESTS_PER_MINUTE" ]]; then
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,requests_per_minute=$API_REQUESTS_PER_MINUTE"
     fi
