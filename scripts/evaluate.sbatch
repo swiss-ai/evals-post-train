@@ -806,7 +806,11 @@ elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     CMD="python -m lm_eval --model $API_LM_EVAL_MODEL --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
-    CMD="accelerate launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ${COMMON_EVAL_ARGS[@]}"
+    # Not the `accelerate` console script: the base env is a --system-site-packages venv
+    # without its own copy, so that resolves to the container's, whose shebang (and so
+    # every worker) runs the system Python, missing the env's packages. The module form
+    # runs under the env's Python, which the workers inherit.
+    CMD="python -m accelerate.commands.launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ${COMMON_EVAL_ARGS[@]}"
 elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
 fi

@@ -316,7 +316,7 @@ class LaunchFlowTests(unittest.TestCase):
             r"""CHAT_TEMPLATE_ARGS=" 'chat_template_args={\"reasoning_effort\":\"${REASONING_EFFORT}\"}'" """.rstrip(),
             sbatch,
         )
-        for launcher in ("python -m lm_eval", "accelerate launch --num_processes=4  -m lm_eval"):
+        for launcher in ("python -m lm_eval", "python -m accelerate.commands.launch --num_processes=4  -m lm_eval"):
             self.assertIn(
                 f"{launcher} --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ",
                 sbatch,
