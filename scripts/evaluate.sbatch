@@ -534,7 +534,17 @@ fi
 echo "Serving apertus1p5: $SERVE_APERTUS1P5"
 
 if (( SERVE_APERTUS1P5 )); then
-    TRANSFORMERS_SPEC=""
+    # Leaving this empty is not enough protection: alpaca-eval/peft below pull in
+    # sentence-transformers, which declares its own transformers bound, and pip's
+    # resolver will silently replace the image's apertus1p5-registering build with a
+    # stock PyPI release to satisfy it - AutoConfig then can't recognize the checkpoint
+    # at all. Pin to whatever's already installed, captured at container runtime since
+    # the exact dev version baked into the image changes across rebuilds.
+    TRANSFORMERS_SPEC="\"transformers==\$(python -c 'import transformers; print(transformers.__version__)')\""
+    # The unconditional tokenizers pin below (0.22.x) is for the transformers==5.12.1
+    # path; this image's transformers requires tokenizers>=0.23.1,<0.24.0, and pinning
+    # both at once is an unsatisfiable conflict. Same runtime-capture approach.
+    TOKENIZERS_SPEC="\"tokenizers==\$(python -c 'import tokenizers; print(tokenizers.__version__)')\""
     # This image's vLLM is a .precompiled build whose kernels come from
     # humming-kernels and it requires ==0.1.10, so it is not forced to 0.1.2 here.
     HUMMING_SPEC=""
@@ -553,6 +563,7 @@ if (( SERVE_APERTUS1P5 )); then
     fi
 else
     TRANSFORMERS_SPEC="\"transformers==5.12.1\""
+    TOKENIZERS_SPEC="\"tokenizers>=0.22.0,<0.23.0\""
     HUMMING_SPEC="\"humming-kernels[cu13]==0.1.2\""
     EXTRA_PKGS=""
 fi
@@ -565,7 +576,7 @@ pip install --no-cache-dir --upgrade \
     \"antlr4-python3-runtime==4.11\" \
     \"datasketch<2.0\" \
     segtok \
-    \"tokenizers>=0.22.0,<0.23.0\" \
+    $TOKENIZERS_SPEC \
     mistral-common \
     $HUMMING_SPEC \
     tenacity \
