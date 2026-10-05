@@ -5,7 +5,6 @@ import argparse
 import wandb
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import re
 
 BASE_MODEL_NAME = "baseline-apertus-1-sft"
@@ -79,9 +78,9 @@ def get_metric(summary, metric):
         if "stderr" in k:
             continue
         k_lower = k.lower()
-        task_lower = task.lower()
-        # Key must contain the task name
-        if task_lower not in k_lower:
+        # The task name must match exactly; substring matching would borrow
+        # scores from a different task (e.g. "humaneval" -> "humaneval_instruct").
+        if k.split("/", 1)[0].lower() != task.lower():
             continue
         # If we have a metric_name, key must contain it
         if metric_name and metric_name.lower() not in k_lower:
@@ -599,6 +598,11 @@ def main():
 
     os.makedirs(args.output, exist_ok=True)
 
+
+    # Lazy import: matplotlib is only needed for PNG rendering and is not a
+    # declared dependency, so importing it at module level would break use of
+    # get_metric etc. in environments without it (e.g. CI unit tests).
+    import matplotlib.pyplot as plt
 
     n_rows = len(df)
     n_cols = len(df.columns)
