@@ -51,8 +51,11 @@
 #   --name <name>        - Override the eval run name (default: auto-derived from model path)
 #   --task <task>         - Task name for 'single' mode (e.g. hellaswag, gsm8k_cot)
 #   --wandb-project <name> - Override the W&B project name (default: apertus-1.5-post-training-v0.1)
-#   --chat-template      - Apply chat template (auto-detected for Instruct/Chat/SFT/DPO models)
-#   --no-chat-template   - Force disable chat template
+#   --chat-template      - Apply the chat template to every task (the default)
+#   --no-chat-template   - Apply it to none (base models)
+#   --chat-template-by-type - Generative tasks with the chat template, log-likelihood ones
+#                          (multiple_choice/loglikelihood output_type) without it: two lm-eval
+#                          passes per job, merged into one result (scripts/task_output_types.py)
 #   --tokenizer <tok>    - Custom tokenizer (default: same as model)
 #   --bos                - Prepend BOS token
 #   --num-fewshot N      - Override num_fewshot for all tasks (default: use task YAML defaults)
@@ -205,6 +208,7 @@ while [[ $# -gt 0 ]]; do
         --task)         SINGLE_TASK="$2";             shift 2 ;;
         --chat-template)    CHAT_TEMPLATE_OVERRIDE="true";  shift ;;
         --no-chat-template) CHAT_TEMPLATE_OVERRIDE="false"; shift ;;
+        --chat-template-by-type) CHAT_TEMPLATE_OVERRIDE="by-type"; shift ;;
         --tokenizer)    CUSTOM_TOKENIZER="$2";        shift 2 ;;
         --bos)          BOS_FLAG="true";              shift ;;
         --backend)      BACKEND_FLAG="$2";            shift 2 ;;
@@ -384,7 +388,8 @@ if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
             echo "Error: --enable-thinking/--no-enable-thinking are chat-template arguments; drop --no-chat-template"
             exit 1
         fi
-        CHAT_TEMPLATE_OVERRIDE="true"
+        # by-type keeps the template on the generative tasks, the only ones these affect.
+        [[ "$CHAT_TEMPLATE_OVERRIDE" == "by-type" ]] || CHAT_TEMPLATE_OVERRIDE="true"
     fi
 fi
 
@@ -405,7 +410,7 @@ if [[ -n "$REASONING_EFFORT" ]]; then
         echo "Error: --reasoning-effort is a chat-template argument; drop --no-chat-template"
         exit 1
     fi
-    CHAT_TEMPLATE_OVERRIDE="true"
+    [[ "$CHAT_TEMPLATE_OVERRIDE" == "by-type" ]] || CHAT_TEMPLATE_OVERRIDE="true"
 fi
 
 # The openai backend needs an endpoint; fail here, not after scheduling.
@@ -459,7 +464,7 @@ if [[ "$THINKING_METRICS_ASKED" == "true" ]]; then
         echo "Error: thinking metrics require the chat template; drop --no-chat-template"
         exit 1
     fi
-    CHAT_TEMPLATE_OVERRIDE="true"
+    [[ "$CHAT_TEMPLATE_OVERRIDE" == "by-type" ]] || CHAT_TEMPLATE_OVERRIDE="true"
 
     # Without a close token nothing is stripped or recorded -- the run silently produces nothing.
     if [[ -z "$THINK_END_TOKEN" && "$AUTODETECT_THINK_TOKENS" != "true" ]]; then
