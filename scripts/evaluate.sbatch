@@ -105,6 +105,12 @@ WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
 LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-true}
+# by-type: generative tasks with the chat template, log-likelihood ones without
+# (two lm-eval passes, merged; see scripts/task_output_types.py).
+case "$APPLY_CHAT_TEMPLATE" in
+    true|false|by-type) ;;
+    *) echo "APPLY_CHAT_TEMPLATE must be true, false or by-type (got '$APPLY_CHAT_TEMPLATE')" >&2; exit 1 ;;
+esac
 HARNESS_LIMIT=${HARNESS_LIMIT:-""}
 LM_EVAL_HARNESS_BRANCH=${LM_EVAL_HARNESS_BRANCH:-""}
 EVAL_ENV_MANIFEST=${EVAL_ENV_MANIFEST:-""}
@@ -628,11 +634,10 @@ fi
 
 MAX_BATCH_SIZE=${MAX_BATCH_SIZE:-""}
 
+# --tasks, --output_path and the chat-template flags are per lm-eval pass: see make_cmd.
 COMMON_EVAL_ARGS=(
 	--trust_remote_code
 	--batch_size $BS
-	--tasks $TASKS
-	--output_path $HARNESS_EVAL_DIR
 	--log_samples
 	--write_out
 	--confirm_run_unsafe_code
@@ -653,11 +658,6 @@ fi
 
 if [[ -n "${NUM_FEWSHOT}" ]]; then
 	COMMON_EVAL_ARGS+=(--num_fewshot $NUM_FEWSHOT)
-fi
-
-if [[ $APPLY_CHAT_TEMPLATE = true ]]; then
-	COMMON_EVAL_ARGS+=(--apply_chat_template)
-	COMMON_EVAL_ARGS+=(--fewshot_as_multiturn)
 fi
 
 # Aggregates response_length_*/thinking_length_* into results.json and W&B (thinking_format_*
@@ -799,26 +799,76 @@ if [[ "$COMMON_MODEL_ARGS" == *\'* ]]; then
     die "Model args must not contain a single quote: $COMMON_MODEL_ARGS"
 fi
 
-if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ${COMMON_EVAL_ARGS[@]}"
-elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
-    CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ${COMMON_EVAL_ARGS[@]}"
-elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
-    CMD="python -m lm_eval --model $API_LM_EVAL_MODEL --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ${COMMON_EVAL_ARGS[@]}"
-elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
-    # Not the `accelerate` console script: the base env is a --system-site-packages venv
-    # without its own copy, so that resolves to the container's, whose shebang (and so
-    # every worker) runs the system Python, missing the env's packages. The module form
-    # runs under the env's Python, which the workers inherit.
-    CMD="python -m accelerate.commands.launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ${COMMON_EVAL_ARGS[@]}"
-elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
-    CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args='$COMMON_MODEL_ARGS' ${COMMON_EVAL_ARGS[@]}"
-fi
-TIMED_CMD="echo Evaluation process starting: \$(date -Is)
-$CMD"
+# make_cmd <tasks> <output dir> <chat template: true|false>: one lm-eval pass, in CMD.
+make_cmd() {
+    local eval_args="${COMMON_EVAL_ARGS[*]} --tasks $1 --output_path $2"
+    [[ $3 == true ]] && eval_args="$eval_args --apply_chat_template --fewshot_as_multiturn"
+    if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
+        CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS $eval_args"
+    elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
+        CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS $eval_args"
+    elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
+        CMD="python -m lm_eval --model $API_LM_EVAL_MODEL --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS $eval_args"
+    elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
+        # Not the `accelerate` console script: the base env is a --system-site-packages venv
+        # without its own copy, so that resolves to the container's, whose shebang (and so
+        # every worker) runs the system Python, missing the env's packages. The module form
+        # runs under the env's Python, which the workers inherit.
+        CMD="python -m accelerate.commands.launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS $eval_args"
+    elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
+        CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args='$COMMON_MODEL_ARGS' $eval_args"
+    fi
+}
+
+case "$LM_EVAL_BACKEND" in
+    vllm|megatron_lm) CONTAINER_ENV=./containers/env_vllm.toml ;;
+    sglang) CONTAINER_ENV=./containers/env_sglang.toml ;;
+    *) CONTAINER_ENV=./containers/env.toml ;;
+esac
 
 echo "Environment manifest: $EVAL_ENV_MANIFEST"
-echo "Final command: $CMD"
+TIMED_CMD="echo Evaluation process starting: \$(date -Is)"
+if [[ $APPLY_CHAT_TEMPLATE != by-type ]]; then
+    make_cmd "$TASKS" "$HARNESS_EVAL_DIR" "$APPLY_CHAT_TEMPLATE"
+    TIMED_CMD="$TIMED_CMD
+$CMD"
+    echo "Final command: $CMD"
+else
+    # Sort the tasks by how lm-eval scores them, in the evaluation container (it reads
+    # the harness's task index), then run each kind as its own pass and merge the two
+    # into $HARNESS_EVAL_DIR, so everything downstream sees one result as usual.
+    KINDS_FILE="$HARNESS_EVAL_DIR/.task-kinds.sh"
+    srun -n 1 --mpi=pmix -ul --environment=$CONTAINER_ENV bash -lc "
+    set -euo pipefail
+    unset SSL_CERT_FILE
+    $LOAD_ENV_CMD
+    cd $PWD && python -m scripts.task_output_types --tasks '$TASKS' --output '$KINDS_FILE'
+    " || die "Could not sort the tasks by output type (scripts/task_output_types.py)."
+    source "$KINDS_FILE"
+    if [[ -z "$RAW_TASKS" || -z "$CHAT_TASKS" ]]; then
+        # One kind only: a single pass straight into the eval directory.
+        if [[ -n "$RAW_TASKS" ]]; then
+            make_cmd "$RAW_TASKS" "$HARNESS_EVAL_DIR" false
+        else
+            make_cmd "$CHAT_TASKS" "$HARNESS_EVAL_DIR" true
+        fi
+        TIMED_CMD="$TIMED_CMD
+$CMD"
+        echo "Final command: $CMD"
+    else
+        # Outside eval_* so the result scan never takes a pass for a whole evaluation.
+        PASS_ROOT="$HARNESS_DIR/.passes/$(basename "$HARNESS_EVAL_DIR")"
+        make_cmd "$CHAT_TASKS" "$PASS_ROOT/chat" true
+        TIMED_CMD="$TIMED_CMD
+$CMD"
+        echo "Final command (chat template): $CMD"
+        make_cmd "$RAW_TASKS" "$PASS_ROOT/raw" false
+        TIMED_CMD="$TIMED_CMD
+$CMD
+cd $PWD && python -m scripts.alignment.merge_split_results --split_dirs '$PASS_ROOT/chat' '$PASS_ROOT/raw' --output_dir '$HARNESS_EVAL_DIR'"
+        echo "Final command (no chat template): $CMD"
+    fi
+fi
 
 # Environment preparation happens once in a dependency job. This duration is
 # therefore evaluation-only and remains meaningful when results are aggregated.

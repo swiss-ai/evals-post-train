@@ -322,6 +322,36 @@ class LaunchFlowTests(unittest.TestCase):
                 sbatch,
             )
 
+    def test_chat_template_by_type_is_recorded_in_the_run_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            completed = _launch(
+                "single", "--task", "gsm8k,arc_easy", "--backend", "openai",
+                "--api-base-url", "http://localhost:8000", "--api-model-name", "test-model",
+                "--chat-template-by-type", "--reasoning-effort", "high", "--logs-root", tmp,
+            )
+            output = completed.stdout + completed.stderr
+            self.assertEqual(completed.returncode, 0, output)
+            config = _run_config(tmp)
+        # Template switches only touch the generative tasks, so they keep by-type.
+        self.assertEqual(config["configuration"]["apply_chat_template"], "by-type")
+        self.assertIn("Chat:   by-type", output)
+
+    def test_evaluate_runs_each_kind_as_its_own_pass(self) -> None:
+        sbatch = (REPO_ROOT / "scripts/evaluate.sbatch").read_text()
+        self.assertIn("true|false|by-type) ;;", sbatch)
+        self.assertIn("python -m scripts.task_output_types --tasks '$TASKS'", sbatch)
+        self.assertIn('make_cmd "$CHAT_TASKS" "$PASS_ROOT/chat" true', sbatch)
+        self.assertIn('make_cmd "$RAW_TASKS" "$PASS_ROOT/raw" false', sbatch)
+        self.assertIn(
+            "python -m scripts.alignment.merge_split_results --split_dirs '$PASS_ROOT/chat' '$PASS_ROOT/raw' --output_dir '$HARNESS_EVAL_DIR'",
+            sbatch,
+        )
+        # The chat-template flags are per pass, never in the shared arguments.
+        common = sbatch[sbatch.index("COMMON_EVAL_ARGS=("):]
+        common = common[: common.index(")")]
+        self.assertNotIn("--apply_chat_template", common)
+        self.assertNotIn("--tasks", common)
+
     def test_harness_pins_only_the_swiss_ai_fork(self) -> None:
         pins = [
             line.split()
