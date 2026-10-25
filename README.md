@@ -1320,6 +1320,56 @@ aaii/run_gdpval.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
 
 ---
 
+## Alternative: EvalScope (SWE-bench, SWE-bench Pro)
+
+`scripts/run_evalscope_eval.sh` runs exactly two benchmarks through [EvalScope](https://github.com/modelscope/evalscope), a third harness next to lm-eval-harness and `inspect_evals`:
+
+| `--benchmark` | What | Images |
+|---|---|---|
+| `swe_bench` | SWE-bench Verified, 500 tasks (EvalScope's `swe_bench_verified_agentic`) | `swebench/sweb.eval.x86_64.*` (prebuilt, pulled) |
+| `swe_bench_pro` | SWE-bench Pro **v1**, 731 tasks (see below) | `jefzda/sweap-images:<tag>` |
+
+Both use the same protocol. The agent works through a multi-turn bash loop inside the instance's own container and submits a `git diff`. EvalScope then applies that patch in a fresh container and runs the instance's tests. An instance counts as resolved when every fail-to-pass and pass-to-pass test passes. Pass `--benchmark swe_bench,swe_bench_pro` to run both in one go.
+
+The script installs EvalScope into its own venv from `requirements/evalscope-runtime.txt` (pinned exactly). It can't share the lm-eval/Inspect environment because EvalScope's `math-verify` pin conflicts with that environment's `antlr4` pin. The script takes `--model`/`--api-base-url` and uses the same serving-key fallback as `run_inspect_eval.sh`. It writes EvalScope's own outputs plus a `summary.json` to `logs/evalscope/<name>/`. Besides the scores, `summary.json` records what's needed to reproduce the run: the EvalScope version, the Hugging Face dataset revision for each benchmark (both pinned in `scripts/evalscope_runner/run.py`, override with `--dataset-revision <benchmark>=<sha>`) and the `SWE-bench_Pro-os` commit (EvalScope pins `ca10a60`).
+
+SWE-bench is scored by `scripts/evalscope_runner/swe_bench_scoring.py`, not EvalScope's own scorer. The evaluation itself is the same: the same `swebench` test spec, eval script, patch-apply fallbacks and grading. EvalScope's version uses the Docker SDK directly, which never pulls the image and doesn't work without a Docker daemon. This one creates its container through EvalScope's sandbox layer, so it pulls the image and works on both `--sandbox` engines.
+
+**This is SWE-bench Pro v1.** EvalScope implements v1: 731 tasks, `jefzda/sweap-images`, and the v1 run scripts. On 2026-09-22 Scale released V2, made it the dataset's `default` config, and kept v1 as config `v1`. V2 has 642 validated tasks shipped as [Harbor](https://github.com/laude-institute/harbor) tasks with `ghcr.io/scaleapi/swe-bench_pro-v2` images. Scoring V2 rows with the v1 pipeline fails even the reference patches, because the test patch it applies doesn't exist in the v1 images. The runner therefore pins the dataset to its last v1 commit, `7ab5114` (override with `--dataset-revision swe_bench_pro=<sha>`). Its scores are v1 numbers and aren't comparable with V2 ones.
+
+Every sample runs in its own sandbox container (`--sandbox`):
+
+- `docker`: EvalScope's own path, using a local Docker daemon.
+- `k8s`: one unprivileged pod per sandbox in the current namespace, via `scripts/evalscope_runner/k8s_sandbox.py`, with no Docker daemon needed. This is the same approach as evals-svc's Terminal-Bench trial pods. The service account needs `create`/`get`/`delete` on `pods` and `create`/`get` on `pods/exec`. The images are linux/amd64, so the pods are pinned to amd64 nodes. Pod settings come from `EVALSCOPE_K8S_*` env vars (see the module docstring). The runner itself doesn't have to run in the cluster: from a laptop, `--sandbox k8s` uses your current kubeconfig context, and `EVALSCOPE_K8S_NAMESPACE` picks the namespace (e.g. on Breithorn). Pods started that way have no owner pod, so if the runner dies, delete leftovers with `kubectl delete pods -l evalscope-run=<EVALSCOPE_K8S_RUN_LABEL>`.
+
+Notes:
+
+- The default `swe_bench_toolcall` strategy needs a served model with tool calling (vLLM `--enable-auto-tool-choice` plus a parser, sglang `--tool-call-parser`). `--strategy swe_bench_backticks` drives the agent through plain text instead.
+- The step cap is 250 by default, and each instance's test run can take up to `eval_timeout` (3600 s). A full run is long.
+- Each sandbox defaults to 4 GiB and 2 CPUs. Some instances need more (EvalScope's docs mention NodeBB); use `--sandbox-config '{"memory_limit": "8g"}'`.
+- The instance images total many GB and are pulled from DockerHub, so expect pull rate limits. Set `EVALSCOPE_K8S_IMAGE_PULL_SECRET` for an authenticated pull.
+
+```bash
+# Pipeline check without a model: score each instance's reference patch (every instance should resolve)
+scripts/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --gold --limit 2
+
+# Smoke test: two instances of each benchmark, two sandboxes at a time
+scripts/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --model <served model with tool calling> \
+  --api-base-url https://api.swissai.svc.cscs.ch/v1 --limit 2 --max-concurrency 2
+
+# Inside a k8s Job (the default there): pods on amd64 nodes, more memory per sandbox
+scripts/run_evalscope_eval.sh --benchmark swe_bench_pro --model <served model> --api-base-url <url> \
+  --sandbox k8s --sandbox-config '{"memory_limit": "8g", "cpu_limit": 4}' --max-concurrency 8
+
+# From a laptop, sandboxes as pods in a Breithorn namespace; patient retries for a shared, rate-limited key
+EVALSCOPE_K8S_NAMESPACE=<namespace> EVALSCOPE_K8S_RUN_LABEL=my-run \
+  scripts/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
+  --api-base-url https://api.swissai.svc.cscs.ch/v1 --sandbox k8s --limit 1 --max-concurrency 1 \
+  --generation-config '{"retries": 100, "retry_interval": 60}'
+```
+
+---
+
 ## Notes
 
 > [!NOTE]
@@ -1418,6 +1468,8 @@ evals/
 │   ├── aggregate_chunks.sbatch # Aggregation job for chunked evaluations
 │   ├── run_inspect_eval.sh    # Inspect AI / inspect_evals benchmarks (alternative to lm-eval-harness above)
 │   ├── run_inspect_eval.sbatch # SLURM wrapper for run_inspect_eval.sh (CPU-only; no model loaded in-job)
+│   ├── run_evalscope_eval.sh  # SWE-bench Verified + SWE-bench Pro via EvalScope (own venv)
+│   ├── evalscope_runner/      # EvalScope driver (run.py), SWE-bench scorer, pod-per-sandbox k8s backend
 │   └── alignment/                   # Python package for W&B upload and data handling
 │       ├── wandb_alignment_utils.py # Core upload logic with stratified sample selection
 │       ├── update_wandb_alignment.py       # Per-model W&B upload script (lm-eval-harness results)
