@@ -2,7 +2,13 @@
 # EVAL_PREBUILT_ENV=1), and that the prebuilt image (containers/Dockerfile.eval)
 # bakes in.
 inspect-ai>=0.3.258
-inspect-evals
+# Pinned, not left to resolve to whatever is newest when the image is built: tasks
+# such as agent_threat_bench* (registered in 0.25.0) were missing from an image built
+# before that release ("No inspect tasks were found at the specified paths"), and an
+# unpinned line makes every image's task list depend on its build date. The agentdojo
+# extra adds pydantic[email] and deepdiff, which that task needs (ImportError:
+# email-validator is not installed).
+inspect-evals[agentdojo]==0.25.0
 # Required by Inspect's openai-api provider (used whenever --api-base-url is
 # given) even for non-OpenAI-hosted endpoints -- confirmed by a bare
 # `inspect-ai` install failing with "OpenAI Compatible API requires optional
