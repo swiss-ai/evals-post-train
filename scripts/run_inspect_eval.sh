@@ -80,6 +80,10 @@
 #   grants access (email critpt@artificialanalysis.ai); the run still completes and writes its
 #   submission batch to a local file instead of posting it.
 #   SKIP_INSTALL=1 to skip the runtime pip install of inspect-ai/inspect-evals.
+#   EVAL_INSPECT_VENV -- a virtualenv holding requirements/inspect-runtime.txt; when set, its
+#   bin/ goes first on PATH so `inspect`, `python` and `python3` below all run from it. The
+#   prebuilt image sets it: Inspect lives apart from lm-eval-harness there, whose datasets pin
+#   would otherwise hold inspect-evals back.
 #
 # Results are NOT viewed at https://inspect.aisi.org.uk/ -- that site is Inspect's
 # documentation. Logs land in --logs-dir as .eval files; view them with:
@@ -195,6 +199,11 @@ PRE_RUN_LOGS=$(find "$LOGS_DIR" -name '*.eval' 2>/dev/null | sort)
 # a preinstalled environment needs this safety net just as much as a freshly pip-installed one.
 # See the patch's own module docstring for the full failure/fix reasoning.
 export PYTHONPATH="$(pwd)/scripts/sandbox_patches${PYTHONPATH:+:$PYTHONPATH}"
+
+if [[ -n "${EVAL_INSPECT_VENV:-}" ]]; then
+    [[ -x "$EVAL_INSPECT_VENV/bin/inspect" ]] || die "EVAL_INSPECT_VENV=$EVAL_INSPECT_VENV has no bin/inspect"
+    export PATH="$EVAL_INSPECT_VENV/bin:$PATH"
+fi
 
 # EVAL_PREBUILT_ENV=1 (the prebuilt image, containers/Dockerfile.eval) has these baked in too.
 if [[ "${SKIP_INSTALL:-0}" != "1" && "${EVAL_PREBUILT_ENV:-0}" != "1" ]]; then
