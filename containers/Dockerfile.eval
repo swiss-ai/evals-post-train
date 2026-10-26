@@ -20,9 +20,14 @@ RUN apt-get update -qq \
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements/eval-runtime.txt requirements/inspect-runtime.txt /tmp/requirements/
-RUN pip install --no-cache-dir \
-        -r /tmp/requirements/eval-runtime.txt \
-        -r /tmp/requirements/inspect-runtime.txt
+RUN pip install --no-cache-dir -r /tmp/requirements/eval-runtime.txt
+
+# Inspect gets its own virtualenv: lm-eval-harness pins datasets==4.0.0, and
+# in one environment pip would resolve inspect-evals to the last release that
+# accepts it (January 2026) instead of the pinned one. run_inspect_eval.sh puts
+# EVAL_INSPECT_VENV/bin first on PATH.
+RUN python -m venv /opt/inspect-venv \
+    && /opt/inspect-venv/bin/pip install --no-cache-dir -r /tmp/requirements/inspect-runtime.txt
 
 # Each pinned harness as its own --no-deps overlay, the same layout
 # build_eval_env.sh produces, so several forks (all the lm_eval package)
@@ -40,6 +45,7 @@ RUN grep -Ev '^[[:space:]]*(#|$)' /tmp/requirements/lm-eval-harness.txt \
     done
 
 ENV EVAL_PREBUILT_ENV=1 \
-    EVAL_PREBUILT_HARNESS_ROOT=/opt/lm-eval-harness
+    EVAL_PREBUILT_HARNESS_ROOT=/opt/lm-eval-harness \
+    EVAL_INSPECT_VENV=/opt/inspect-venv
 
 WORKDIR /work
