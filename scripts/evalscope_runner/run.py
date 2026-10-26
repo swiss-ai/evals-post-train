@@ -119,12 +119,21 @@ def sandbox_config(args: argparse.Namespace) -> Dict[str, Any]:
     return {**K8S_SANDBOX_DEFAULTS, **given} if args.sandbox == "k8s" else given
 
 
+def environment_extra_params(name: str) -> Dict[str, Any]:
+    """extra_params the environment supplies: the eval image checks SWE-bench_Pro-os out at
+    EvalScope's pinned commit (EVALSCOPE_SWE_BENCH_PRO_REPO), so nothing is cloned at run time."""
+    repo = os.environ.get("EVALSCOPE_SWE_BENCH_PRO_REPO")
+    if name == "swe_bench_pro" and repo:
+        return {"swe_bench_pro_repo_path": repo}
+    return {}
+
+
 def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dict[str, str]) -> Dict[str, Any]:
     extra_params = parse_pairs(args.extra_param, "--extra-param", as_json=True)
     dataset_args = {
         BENCHMARKS[n]["evalscope"]: {
             "hf_dataset_revision": revisions[n],
-            "extra_params": {**BENCHMARKS[n]["extra_params"], **extra_params},
+            "extra_params": {**BENCHMARKS[n]["extra_params"], **environment_extra_params(n), **extra_params},
             **({"shuffle": True} if args.shuffle else {}),
         }
         for n in names

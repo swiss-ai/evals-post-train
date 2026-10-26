@@ -357,6 +357,16 @@ class TaskConfigTest(unittest.TestCase):
         self.assertEqual((cfg["eval_type"], cfg["dataset_hub"], cfg["no_timestamp"]), ("openai_api", "huggingface", True))
         self.assertNotIn("limit", cfg)
 
+    def test_prebuilt_pro_repo_is_a_pro_default(self):
+        with mock.patch.dict(os.environ, {"EVALSCOPE_SWE_BENCH_PRO_REPO": "/opt/swe-bench-pro-os"}):
+            cfg = self._cfg("swe_bench,swe_bench_pro")
+            explicit = self._cfg("swe_bench_pro", "--extra-param", "swe_bench_pro_repo_path=/elsewhere")
+        self.assertEqual(
+            cfg["dataset_args"]["swe_bench_pro"]["extra_params"], {"swe_bench_pro_repo_path": "/opt/swe-bench-pro-os"}
+        )
+        self.assertNotIn("swe_bench_pro_repo_path", cfg["dataset_args"]["swe_bench_verified_agentic"]["extra_params"])
+        self.assertEqual(explicit["dataset_args"]["swe_bench_pro"]["extra_params"]["swe_bench_pro_repo_path"], "/elsewhere")
+
     def test_pro_pinned_to_v1(self):
         # The last pre-V2 commit: v1 scoring against V2 rows fails even gold patches.
         self.assertEqual(run.BENCHMARKS["swe_bench_pro"]["revision"], "7ab5114912baf22bb098818e604c02fe7ad2c11f")
