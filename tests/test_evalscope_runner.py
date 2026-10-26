@@ -375,6 +375,11 @@ class TaskConfigTest(unittest.TestCase):
         )
         self.assertEqual(cfg["sandbox"]["default_config"], {"memory_limit": "8g"})
 
+    def test_k8s_sandbox_memory_default(self):
+        self.assertEqual(self._cfg("swe_bench_pro", "--sandbox", "k8s")["sandbox"]["default_config"], {"memory_limit": "8g"})
+        cfg = self._cfg("swe_bench_pro", "--sandbox", "k8s", "--sandbox-config", '{"memory_limit": "16g", "cpu_limit": 4}')
+        self.assertEqual(cfg["sandbox"]["default_config"], {"memory_limit": "16g", "cpu_limit": 4})
+
     def test_shuffle(self):
         self.assertNotIn("shuffle", self._cfg("swe_bench")["dataset_args"]["swe_bench_verified_agentic"])
         self.assertTrue(self._cfg("swe_bench", "--shuffle")["dataset_args"]["swe_bench_verified_agentic"]["shuffle"])

@@ -52,6 +52,12 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
 # applies when generation_config is empty: --generation-config is merged over it instead.
 DEFAULT_GENERATION_CONFIG: Dict[str, Any] = {"temperature": 0.0}
 
+# --sandbox k8s defaults: ms-enclave's 4g OOM-kills SWE-bench Pro's element-web and teleport
+# tests, while an 8 GiB request often does not schedule on Breithorn's amd64 nodes. So the
+# limit is 8g and the request (EVALSCOPE_K8S_MEMORY_REQUEST) 4g, unless memory_limit is given.
+K8S_SANDBOX_DEFAULTS: Dict[str, Any] = {"memory_limit": "8g"}
+K8S_MEMORY_REQUEST = "4g"
+
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
@@ -107,6 +113,12 @@ def resolved_revisions(names: List[str], overrides: List[str]) -> Dict[str, str]
     return {n: given.get(n, BENCHMARKS[n]["revision"]) for n in names}
 
 
+def sandbox_config(args: argparse.Namespace) -> Dict[str, Any]:
+    """--sandbox-config, over K8S_SANDBOX_DEFAULTS for --sandbox k8s."""
+    given = json.loads(args.sandbox_config)
+    return {**K8S_SANDBOX_DEFAULTS, **given} if args.sandbox == "k8s" else given
+
+
 def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dict[str, str]) -> Dict[str, Any]:
     extra_params = parse_pairs(args.extra_param, "--extra-param", as_json=True)
     dataset_args = {
@@ -147,7 +159,7 @@ def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dic
         "no_timestamp": True,
         # Every sandbox (agent loop and scorer) reads this; the engine stays "docker"
         # either way -- with --sandbox k8s, the Docker manager itself is swapped out.
-        "sandbox": {"enabled": True, "engine": "docker", "default_config": json.loads(args.sandbox_config)},
+        "sandbox": {"enabled": True, "engine": "docker", "default_config": sandbox_config(args)},
     }
     if agent:
         # Only explicitly given fields: EvalScope keeps the benchmark's own
@@ -236,10 +248,12 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     from scripts.evalscope_runner import swe_bench_scoring
 
-    swe_bench_scoring.install(json.loads(args.sandbox_config))
+    swe_bench_scoring.install(sandbox_config(args))
     if args.sandbox == "k8s":
         from scripts.evalscope_runner import k8s_sandbox
 
+        if "memory_limit" not in json.loads(args.sandbox_config):
+            os.environ.setdefault("EVALSCOPE_K8S_MEMORY_REQUEST", K8S_MEMORY_REQUEST)
         k8s_sandbox.install()
     if args.gold:
         install_gold()

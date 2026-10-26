@@ -41,8 +41,9 @@
 #                               outputs (predictions/, reviews/, reports/, logs/) plus summary.json.
 #   --sandbox docker|k8s       See above.
 #   --sandbox-config <json>    Merged into every sandbox's config, e.g.
-#                               '{"memory_limit": "8g", "cpu_limit": 4}' (default 4g / 2 CPUs per
-#                               sandbox; NodeBB instances are known to need more).
+#                               '{"memory_limit": "16g", "cpu_limit": 4}' (default 2 CPUs per sandbox;
+#                               memory 4g with docker, and with k8s an 8g limit over a 4g request,
+#                               since 4g OOM-kills some SWE-bench Pro tests -- see run.py).
 #   --limit <n>                 First n samples per benchmark (smoke tests); a fraction < 1 is a
 #                               share of the dataset.
 #   --shuffle                   Shuffle each dataset (EvalScope's seed 42) before --limit, so a small
