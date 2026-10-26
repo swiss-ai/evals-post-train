@@ -1346,12 +1346,14 @@ Notes:
 
 - The default `swe_bench_toolcall` strategy needs a served model with tool calling (vLLM `--enable-auto-tool-choice` plus a parser, sglang `--tool-call-parser`). `--strategy swe_bench_backticks` drives the agent through plain text instead.
 - The step cap is 250 by default, and each instance's test run can take up to `eval_timeout` (3600 s). A full run is long.
-- Each sandbox defaults to 4 GiB and 2 CPUs. Some instances need more (EvalScope's docs mention NodeBB); use `--sandbox-config '{"memory_limit": "8g"}'`.
+- Each sandbox defaults to 4 GiB and 2 CPUs. Some SWE-bench Pro instances need more. teleport's tests peak at about 7.4 GiB and are OOM-killed at 4 GiB. element-web fails the same way, and EvalScope's docs mention NodeBB. Use `--sandbox-config '{"memory_limit": "8g"}'`. On a busy cluster, an 8 GiB pod may never schedule. `EVALSCOPE_K8S_MEMORY_REQUEST=4g` then reserves only 4 GiB but still lets the pod use up to the 8 GiB limit. Memory above the request isn't guaranteed: under node memory pressure such pods are evicted first.
+- A sample whose evaluation fails for an infrastructure reason still scores as unresolved in EvalScope's report. Examples: an OOM-killed container, a pod that never schedules, or the cluster API dropping out. Such samples are listed under `evaluation_errors` in `summary.json`, and the run then exits non-zero. A patch that doesn't apply, or tests that time out, are the model's failures and aren't counted there.
+- `--limit N` takes the first N instances, which are mostly from one repository. Add `--shuffle` (fixed seed 42) for a sample across repositories that is still the same on every run.
 - The instance images total many GB and are pulled from DockerHub, so expect pull rate limits. Set `EVALSCOPE_K8S_IMAGE_PULL_SECRET` for an authenticated pull.
 
 ```bash
 # Pipeline check without a model: score each instance's reference patch (every instance should resolve)
-scripts/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --gold --limit 2
+scripts/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --gold --limit 20 --shuffle
 
 # Smoke test: two instances of each benchmark, two sandboxes at a time
 scripts/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --model <served model with tool calling> \
@@ -1361,10 +1363,12 @@ scripts/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --model <serve
 scripts/run_evalscope_eval.sh --benchmark swe_bench_pro --model <served model> --api-base-url <url> \
   --sandbox k8s --sandbox-config '{"memory_limit": "8g", "cpu_limit": 4}' --max-concurrency 8
 
-# From a laptop, sandboxes as pods in a Breithorn namespace; patient retries for a shared, rate-limited key
-EVALSCOPE_K8S_NAMESPACE=<namespace> EVALSCOPE_K8S_RUN_LABEL=my-run \
-  scripts/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
-  --api-base-url https://api.swissai.svc.cscs.ch/v1 --sandbox k8s --limit 1 --max-concurrency 1 \
+# From a laptop, sandboxes as pods in a Breithorn namespace; patient retries for a shared, rate-limited key.
+# Keep the laptop awake (caffeinate -i on macOS): a sleeping laptop loses DNS and the run's samples error out.
+EVALSCOPE_K8S_NAMESPACE=<namespace> EVALSCOPE_K8S_RUN_LABEL=my-run EVALSCOPE_K8S_MEMORY_REQUEST=4g \
+  caffeinate -i scripts/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --sandbox k8s --sandbox-config '{"memory_limit": "8g"}' --limit 1 --max-concurrency 1 \
   --generation-config '{"retries": 100, "retry_interval": 60}'
 ```
 

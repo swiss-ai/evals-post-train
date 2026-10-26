@@ -1,11 +1,15 @@
 import asyncio
+import base64
 import importlib.util
 import json
 import os
+import re
+import shlex
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from scripts.evalscope_runner import k8s_sandbox, run
@@ -55,6 +59,13 @@ class PodManifestTest(unittest.TestCase):
         self.assertEqual(m["metadata"]["ownerReferences"][0]["uid"], "uid-1")
         self.assertEqual(m["spec"]["imagePullSecrets"], [{"name": "dockerhub"}])
 
+    def test_memory_request_below_limit(self):
+        with mock.patch.dict(os.environ, {"EVALSCOPE_K8S_MEMORY_REQUEST": "4g"}, clear=True):
+            m = k8s_sandbox.pod_manifest("p", "ns", self.CONFIG, "run1")
+        resources = m["spec"]["containers"][0]["resources"]
+        self.assertEqual(resources["requests"], {"cpu": "4", "memory": "4Gi"})
+        self.assertEqual(resources["limits"], {"cpu": "4", "memory": "8Gi"})
+
     def test_memory_units(self):
         self.assertEqual(k8s_sandbox.k8s_memory("4g"), "4Gi")
         self.assertEqual(k8s_sandbox.k8s_memory("512m"), "512Mi")
@@ -77,6 +88,40 @@ class ExecHelpersTest(unittest.TestCase):
         failure = {"status": "Failure", "details": {"causes": [{"reason": "ExitCode", "message": "3"}]}}
         self.assertEqual(k8s_sandbox.returncode_from_status(json.dumps(failure)), 3)
         self.assertEqual(k8s_sandbox.returncode_from_status("garbage"), 1)
+
+    def test_exec_failure_message(self):
+        exit_code = {"status": "Failure", "message": "exit 3", "details": {"causes": [{"reason": "ExitCode", "message": "3"}]}}
+        self.assertEqual(k8s_sandbox.exec_failure_message(json.dumps(exit_code)), "")
+        self.assertEqual(k8s_sandbox.exec_failure_message('{"status": "Success"}'), "")
+        self.assertEqual(k8s_sandbox.exec_failure_message(None), "")
+        gone = {"status": "Failure", "message": "OCI runtime exec failed", "reason": "InternalError"}
+        self.assertEqual(k8s_sandbox.exec_failure_message(json.dumps(gone)), "OCI runtime exec failed")
+
+    def test_describe_termination(self):
+        def status(name, terminated):
+            return SimpleNamespace(container_statuses=[SimpleNamespace(name=name, state=SimpleNamespace(terminated=terminated))])
+
+        oom = SimpleNamespace(reason="OOMKilled", exit_code=137)
+        self.assertEqual(
+            k8s_sandbox.describe_termination(status("main", oom)), "container main terminated: OOMKilled (exit 137)"
+        )
+        self.assertEqual(k8s_sandbox.describe_termination(status("main", None)), "")
+        self.assertEqual(k8s_sandbox.describe_termination(SimpleNamespace(container_statuses=None)), "")
+
+    def test_termination_waits_for_kubelet(self):
+        running = SimpleNamespace(container_statuses=[SimpleNamespace(name="main", state=SimpleNamespace(terminated=None))])
+        oom = SimpleNamespace(
+            container_statuses=[
+                SimpleNamespace(name="main", state=SimpleNamespace(terminated=SimpleNamespace(reason="OOMKilled", exit_code=137)))
+            ]
+        )
+        core = mock.Mock()
+        core.read_namespaced_pod.side_effect = [SimpleNamespace(status=running), SimpleNamespace(status=oom)]
+        manager = k8s_sandbox.K8sPodSandboxManager()
+        with mock.patch.object(manager, "_core", return_value=core), mock.patch.object(
+            k8s_sandbox, "_TERMINATION_POLL_INTERVAL", 0
+        ):
+            self.assertEqual(asyncio.run(manager._termination("pod-1")), "container main terminated: OOMKilled (exit 137)")
 
     def test_hosts_localhost_ipv4_only(self):
         with tempfile.TemporaryDirectory() as d:
@@ -109,18 +154,51 @@ class ExecHelpersTest(unittest.TestCase):
 @unittest.skipUnless(HAS_ENCLAVE, "ms-enclave not installed (requirements/evalscope-runtime.txt)")
 class ExecuteToolTest(unittest.TestCase):
     def _manager(self, exec_result, volumes=None):
+        """A manager whose pod is a dict of files; exec_result is the user command's
+        (exit code, stdout, stderr)."""
         manager = k8s_sandbox.K8sPodSandboxManager()
         manager._sandboxes["s1"] = k8s_sandbox._Sandbox("pod-1", volumes or {})
+        manager._termination = mock.AsyncMock(return_value="")
+        files = {}
         calls = []
 
         async def fake_exec(pod, argv, timeout=None):
             calls.append((pod, argv, timeout))
-            if argv[:2] == ["sh", "-c"] and "tar czf" in argv[2]:
-                return 0, self._b64, ""
-            return exec_result
+            script = argv[2]
+            if script.startswith("mkdir /tmp/.evalscope-exec-"):
+                job = script.split()[1]
+                calls.append(("command", shlex.split(script.split("( ", 1)[1].split(" > ", 1)[0])))
+                code, out, err = exec_result
+                files.update({f"{job}/out": out.encode(), f"{job}/err": err.encode(), f"{job}/rc": f"{code}\n".encode()})
+                return 0, "", ""
+            if script.startswith("i=0; while"):
+                if self._dropped_waits:
+                    self._dropped_waits -= 1
+                    return 0, "", ""  # a dropped stream: Success, but no exit code yet
+                return 0, files[re.search(r"cat (\S+)", script).group(1)].decode(), ""
+            if "tar czf" in script:
+                files[re.search(r"tar czf (\S+)", script).group(1)] = base64.b64decode(self._b64)
+                return 0, "", ""
+            if script.startswith("wc -c < "):
+                return 0, f"{len(files[script.split()[-1]])}\n", ""
+            if script.startswith("dd if="):
+                path = re.search(r"dd if=(\S+)", script).group(1)
+                index = int(re.search(r"skip=(\d+)", script).group(1))
+                size = k8s_sandbox._DOWNLOAD_CHUNK
+                piece = files[path][index * size : (index + 1) * size]
+                if self._short_reads and "download" in path:
+                    self._short_reads -= 1
+                    piece = piece[:-1]
+                return 0, base64.encodebytes(piece).decode(), ""
+            if script.startswith(("rm -f", "rm -rf")):
+                return 0, "", ""
+            raise AssertionError(f"unexpected exec: {script}")
 
         manager._exec = fake_exec
         return manager, calls
+
+    _dropped_waits = 0
+    _short_reads = 0
 
     def _run(self, manager, command, timeout=30):
         return asyncio.run(manager.execute_tool("s1", "shell_executor", {"command": command, "timeout": timeout}))
@@ -164,7 +242,65 @@ class ExecuteToolTest(unittest.TestCase):
             manager, calls = self._manager((0, "", ""), {host: {"bind": "/workspace", "mode": "rw"}})
             self._run(manager, ["bash", "/workspace/entryscript.sh"], timeout=3600)
             self.assertEqual(Path(host, "output.json").read_text(), '{"tests": []}')
-            self.assertEqual(calls[0][2], 3600)
+            self.assertIn(("command", ["timeout", "-s", "TERM", "-k", "5s", "3600.0s", "bash", "/workspace/entryscript.sh"]), calls)
+
+    def test_download_in_verified_chunks(self):
+        with tempfile.TemporaryDirectory() as pod_side, tempfile.TemporaryDirectory() as host:
+            payload = os.urandom(2500)
+            Path(pod_side, "stdout.log").write_bytes(payload)
+            self._b64 = k8s_sandbox.tar_dir_b64(pod_side)
+            # One short read per download: retried, not passed on truncated.
+            self._short_reads = 1
+            manager, calls = self._manager((0, "", ""), {host: {"bind": "/workspace", "mode": "rw"}})
+            with mock.patch.object(k8s_sandbox, "_DOWNLOAD_CHUNK", 1000):
+                self._run(manager, ["true"])
+            self.assertEqual(Path(host, "stdout.log").read_bytes(), payload)
+            reads = [c for c in calls if c[1][:2] == ["sh", "-c"] and c[1][2].startswith("dd if=/tmp/.evalscope-download")]
+            self.assertGreater(len(reads), len(base64.b64decode(self._b64)) // 1000 + 1)
+
+    def test_download_gives_up_on_persistent_short_reads(self):
+        with tempfile.TemporaryDirectory() as pod_side, tempfile.TemporaryDirectory() as host:
+            Path(pod_side, "stdout.log").write_bytes(os.urandom(100))
+            self._b64 = k8s_sandbox.tar_dir_b64(pod_side)
+            self._short_reads = k8s_sandbox._DOWNLOAD_ATTEMPTS
+            manager, _ = self._manager((0, "", ""), {host: {"bind": "/workspace", "mode": "rw"}})
+            result = self._run(manager, ["true"])
+            self.assertIn("chunk 0 came back as", result.error)
+
+    def test_dropped_wait_is_retried(self):
+        from ms_enclave.sandbox.model import ExecutionStatus
+
+        self._b64 = ""
+        self._dropped_waits = 2
+        manager, calls = self._manager((3, "partial\n", "boom\n"))
+        with mock.patch.object(k8s_sandbox, "_WAIT_RETRY_S", 0):
+            result = self._run(manager, ["make", "test"], timeout=3600)
+        self.assertEqual((result.status, result.output, result.error), (ExecutionStatus.ERROR, "partial\n", "boom\n"))
+        self.assertEqual(sum(1 for c in calls if c[0] == "command"), 1)
+        self.assertEqual(sum(1 for c in calls if c[1][:2] == ["sh", "-c"] and c[1][2].startswith("i=0")), 3)
+
+    def test_dead_container_stops_the_wait(self):
+        self._b64 = ""
+        manager, _ = self._manager((0, "", ""))
+
+        async def failing_exec(pod, argv, timeout=None):
+            return 1, "", "OCI runtime exec failed"
+
+        manager._exec = failing_exec
+        manager._termination = mock.AsyncMock(return_value="container main terminated: OOMKilled (exit 137)")
+        result = self._run(manager, ["true"], timeout=3600)
+        self.assertIn("OOMKilled (exit 137)", result.error)
+
+    def test_failure_names_terminated_container(self):
+        self._b64 = ""
+        manager, _ = self._manager((0, "", ""), {"/unused": {"bind": "/workspace", "mode": "rw"}})
+        manager._sync_back = mock.AsyncMock(side_effect=RuntimeError("download: pack failed (exit 1)"))
+        manager._termination = mock.AsyncMock(return_value="container main terminated: OOMKilled (exit 137)")
+        result = self._run(manager, ["true"])
+        self.assertEqual(
+            result.error,
+            "Execution failed: download: pack failed (exit 1) (container main terminated: OOMKilled (exit 137))",
+        )
 
 
 @unittest.skipUnless(HAS_EVALSCOPE, "evalscope not installed (requirements/evalscope-runtime.txt)")
@@ -239,12 +375,40 @@ class TaskConfigTest(unittest.TestCase):
         )
         self.assertEqual(cfg["sandbox"]["default_config"], {"memory_limit": "8g"})
 
+    def test_shuffle(self):
+        self.assertNotIn("shuffle", self._cfg("swe_bench")["dataset_args"]["swe_bench_verified_agentic"])
+        self.assertTrue(self._cfg("swe_bench", "--shuffle")["dataset_args"]["swe_bench_verified_agentic"]["shuffle"])
+
     def test_generation_config_keeps_temperature_default(self):
         self.assertEqual(self._cfg("swe_bench")["generation_config"], {"temperature": 0.0})
         cfg = self._cfg("swe_bench", "--generation-config", '{"retries": 100}')
         self.assertEqual(cfg["generation_config"], {"temperature": 0.0, "retries": 100})
         cfg = self._cfg("swe_bench", "--generation-config", '{"temperature": 0.6}')
         self.assertEqual(cfg["generation_config"], {"temperature": 0.6})
+
+    def test_evaluation_errors(self):
+        def sample(instance_id, completed, error=""):
+            result = {"completed": completed, "resolved": False, "report": {"error": error} if error else {}}
+            return json.dumps({"sample_score": {"score": {"metadata": result}, "sample_metadata": {"instance_id": instance_id}}})
+
+        with tempfile.TemporaryDirectory() as work_dir:
+            reviews = Path(work_dir, "reviews", "gold")
+            reviews.mkdir(parents=True)
+            Path(reviews, "swe_bench_pro_default.jsonl").write_text(
+                "\n".join([sample("ok", True), sample("lost", False, "download failed")]) + "\n"
+            )
+            Path(reviews, "swe_bench_verified_agentic_default.jsonl").write_text(
+                "\n".join(
+                    [
+                        sample("bad-patch", False, "Error in evaluating model for x: x Patch Apply Failed:\n..."),
+                        sample("slow", False, "Error in evaluating model for x: x Test timed out after 1800 seconds."),
+                    ]
+                )
+                + "\n"
+            )
+            self.assertEqual(
+                run.evaluation_errors(work_dir), {"gold/swe_bench_pro_default": {"count": 1, "instances": ["lost"]}}
+            )
 
     def test_only_the_two_benchmarks(self):
         for bad in ("gsm8k", "swe_bench_verified_agentic", ""):

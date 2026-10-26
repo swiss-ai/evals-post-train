@@ -11,14 +11,15 @@ What the Docker manager does and how it maps here:
 
 - create_sandbox: a pod with the DockerSandboxConfig's image, working_dir,
   env_vars, cpu_limit and memory_limit (requests == limits), kept alive by a
-  sleep loop; platform ("linux/amd64") becomes a kubernetes.io/arch node
+  sleep loop (EVALSCOPE_K8S_MEMORY_REQUEST lowers the memory request); platform ("linux/amd64") becomes a kubernetes.io/arch node
   selector. Once Ready, "localhost" is made IPv4-only in /etc/hosts, as it
   effectively is under Docker (see _HOSTS_LOCALHOST_IPV4_ONLY). Bind-mount volumes ({host_dir: {"bind": path, "mode": ...}}, used
   by SWE-bench_Pro's evaluation step) are emulated: the host dir is copied in
   after the pod is Ready, and copied back out after every command for "rw"
   ones, so the caller reads its output files from the host dir as with Docker.
-- execute_tool("shell_executor"): an exec of the same argv under GNU timeout,
-  with the same ToolResult status/output/error shapes ms-enclave's own
+- execute_tool("shell_executor"): the same argv under GNU timeout, run detached
+  in the pod (output and exit code to files, waited for by short execs, so a
+  dropped exec stream is retried instead of misread as success), with the same ToolResult status/output/error shapes ms-enclave's own
   ShellExecutor returns, so EvalScope's exit-code parsing is unchanged.
 - delete_sandbox: deletes the pod. Pods are also owned by the runner's own pod
   (EVALSCOPE_K8S_OWNER_POD_NAME/_UID), so Kubernetes garbage-collects them if
@@ -36,6 +37,7 @@ Environment (all optional):
   EVALSCOPE_K8S_READY_TIMEOUT      seconds to wait for a pod to become Ready (default: 1800,
                                    SWE-bench images are several GB)
   EVALSCOPE_K8S_RUN_LABEL          value of the evalscope-run pod label (default: random)
+  EVALSCOPE_K8S_MEMORY_REQUEST     memory request below the limit, e.g. "4g" (default: the limit)
 """
 
 from __future__ import annotations
@@ -59,10 +61,24 @@ _MANAGED_BY = "evals-post-train-evalscope"
 # Stay under Linux's 128 KiB single-argument cap (MAX_ARG_STRLEN) when writing
 # base64 chunks through `printf %s <chunk>`.
 _B64_CHUNK = 100_000
+# Downloads are read back in pieces of this many raw bytes: one exec streaming tens of
+# MB of output loses frames now and then (silently, with a Success status), while every
+# read up to 32 MB arrived intact.
+_DOWNLOAD_CHUNK = 8 * 1024 * 1024
+_DOWNLOAD_ATTEMPTS = 3
 # Exit codes `timeout` produces when it kills the command: GNU's 124 (and 137 after
 # KILL), busybox's 143 (128 + TERM). Only counted as a timeout once the elapsed time
 # reached the limit, so a command that itself exits 143 early is still an error.
 _TIMEOUT_EXIT_CODES = (124, 137, 143)
+# A command runs detached in the pod and is waited for by short execs of at most this
+# many seconds: a dropped exec stream (API server restart, laptop network) can end
+# with a Success status while the command still runs, so no stream may be load-bearing.
+_WAIT_SLICE_S = 60
+# Pause before retrying a wait exec that failed, e.g. while the API server is down.
+_WAIT_RETRY_S = 5
+# How long a failed exec waits for the kubelet to report a killed container.
+_TERMINATION_POLLS = 10
+_TERMINATION_POLL_INTERVAL = 3
 # Waiting reasons that never resolve by themselves.
 _FATAL_WAITING_REASONS = {"InvalidImageName", "ErrImageNeverPull", "CreateContainerConfigError"}
 # Pods get an IPv6 link-local address on eth0, Docker containers (IPv6 off) do not, so
@@ -129,6 +145,30 @@ def returncode_from_status(err_channel: Optional[str]) -> int:
     return 1
 
 
+def exec_failure_message(err_channel: Optional[str]) -> str:
+    """The Status message when the exec itself failed (no command exit code), e.g.
+    "OCI runtime exec failed" once the container is gone; "" otherwise."""
+    try:
+        status = json.loads(err_channel or "")
+    except (json.JSONDecodeError, TypeError):
+        return (err_channel or "").strip()
+    if not isinstance(status, dict) or status.get("status") == "Success":
+        return ""
+    causes = (status.get("details") or {}).get("causes") or []
+    if any(cause.get("reason") == "ExitCode" for cause in causes):
+        return ""
+    return str(status.get("message") or "")
+
+
+def describe_termination(pod_status: Any) -> str:
+    """ "container main terminated: OOMKilled (exit 137)" for a dead sandbox container, else ""."""
+    for cs in getattr(pod_status, "container_statuses", None) or []:
+        terminated = cs.state.terminated if cs.state else None
+        if cs.name == "main" and terminated:
+            return f"container main terminated: {terminated.reason or 'unknown reason'} (exit {terminated.exit_code})"
+    return ""
+
+
 def _cfg(config: Any, name: str, default: Any = None) -> Any:
     if isinstance(config, dict):
         return config.get(name, default)
@@ -140,13 +180,18 @@ def pod_manifest(name: str, namespace: str, config: Any, run_label: str) -> Dict
     cpu = str(_cfg(config, "cpu_limit", 2.0))
     memory = k8s_memory(_cfg(config, "memory_limit", "4g"))
     resources = {"cpu": cpu, "memory": memory}
+    # A lower memory request lets a sandbox schedule on a node whose memory is mostly
+    # reserved (not used) and still grow to the limit, at the risk of node-pressure
+    # eviction (a request above the limit is rejected by the API server).
+    request = os.environ.get("EVALSCOPE_K8S_MEMORY_REQUEST")
+    requests = dict(resources, memory=k8s_memory(request)) if request else dict(resources)
     container: Dict[str, Any] = {
         "name": "main",
         "image": _cfg(config, "image"),
         # No `sleep infinity`: not every image's sleep understands it.
         "command": ["sh", "-c", "trap 'exit 0' TERM; while :; do sleep 3600 & wait $!; done"],
         "env": [{"name": k, "value": str(v)} for k, v in (_cfg(config, "env_vars") or {}).items()],
-        "resources": {"requests": dict(resources), "limits": dict(resources)},
+        "resources": {"requests": requests, "limits": dict(resources)},
         # Task images run as root and expect to; still no privilege escalation.
         "securityContext": {"allowPrivilegeEscalation": False},
     }
@@ -193,12 +238,21 @@ def tar_dir_b64(source_dir: Union[str, Path]) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def untar_b64(data: str, target_dir: Union[str, Path]) -> None:
-    """Inverse of `tar czf - . | base64` run in the pod (newlines tolerated)."""
+def b64_bytes(data: str) -> bytes:
+    """Decode `base64` output from the pod (its line wrapping tolerated)."""
+    return base64.b64decode("".join(data.split()))
+
+
+def untar_bytes(raw: bytes, target_dir: Union[str, Path]) -> None:
+    """Extract a (gzipped) tar archive into target_dir."""
     Path(target_dir).mkdir(parents=True, exist_ok=True)
-    raw = base64.b64decode("".join(data.split()))
     with tarfile.open(fileobj=io.BytesIO(raw), mode="r:*") as tf:
         tf.extractall(target_dir, filter="data")
+
+
+def untar_b64(data: str, target_dir: Union[str, Path]) -> None:
+    """Inverse of `tar czf - . | base64` run in the pod (newlines tolerated)."""
+    untar_bytes(b64_bytes(data), target_dir)
 
 
 def _load_kube_config() -> None:
@@ -373,8 +427,13 @@ class K8sPodSandboxManager:
                 if hard_deadline and time.monotonic() > hard_deadline:
                     return 124, "".join(out), "".join(err)
             with lock:
+                # The last update() before the close can buffer output that the loop
+                # never read: drain it, or large outputs come back silently truncated.
+                out.append(resp.read_stdout(timeout=0) or "")
+                err.append(resp.read_stderr(timeout=0) or "")
                 err_channel = resp.read_channel(ERROR_CHANNEL)
-            return returncode_from_status(err_channel), "".join(out), "".join(err)
+            stderr = "".join(err) or exec_failure_message(err_channel)
+            return returncode_from_status(err_channel), "".join(out), stderr
         finally:
             stop.set()
             with lock:
@@ -387,11 +446,68 @@ class K8sPodSandboxManager:
         deadline = float(timeout) + 30 if timeout else None
         return await asyncio.to_thread(self._exec_blocking, pod, timeout_argv(argv, timeout), deadline)
 
+    async def _termination(self, pod: str, polls: int = _TERMINATION_POLLS) -> str:
+        # The kubelet reports a killed container a few seconds after its execs fail.
+        for attempt in range(polls):
+            try:
+                pod_obj = await asyncio.to_thread(self._core().read_namespaced_pod, pod, self._namespace)
+            except Exception:
+                return ""
+            termination = describe_termination(pod_obj.status)
+            if termination or attempt == polls - 1:
+                return termination
+            await asyncio.sleep(_TERMINATION_POLL_INTERVAL)
+        return ""
+
     async def _checked(self, pod: str, script: str, what: str) -> str:
         code, out, err = await self._exec(pod, ["sh", "-c", script], timeout=600)
         if code != 0:
             raise RuntimeError(f"{what} in sandbox pod {pod} failed (exit {code}): {err.strip()[:500]}")
         return out
+
+    async def _run_detached(self, pod: str, command: Union[str, List[str]], timeout: Optional[float]) -> tuple[int, str, str]:
+        """Run command (under GNU timeout) detached in the pod and wait for its exit code
+        file, so a dropped exec stream costs a retry instead of a wrong result."""
+        job = f"/tmp/.evalscope-exec-{uuid.uuid4().hex[:12]}"
+        argv = timeout_argv(list(command) if isinstance(command, (list, tuple)) else shlex.split(command), timeout)
+        # mkdir doubles as the guard that a retried start never runs the command twice.
+        start = (
+            f"mkdir {job} || exit 0; ( {shlex.join(argv)} > {job}/out 2> {job}/err < /dev/null; "
+            f"echo $? > {job}/rc.tmp && mv {job}/rc.tmp {job}/rc ) > /dev/null 2>&1 &"
+        )
+        wait = (
+            f"i=0; while [ ! -f {job}/rc ] && [ $i -lt {_WAIT_SLICE_S * 10} ]; do "
+            f"sleep 0.1 2>/dev/null || sleep 1; i=$((i+1)); done; cat {job}/rc 2>/dev/null"
+        )
+        deadline = time.monotonic() + float(timeout) + 60 if timeout else None
+        await self._retrying(pod, start, "start command", deadline)
+        while True:
+            rc = (await self._retrying(pod, wait, "wait for command", deadline)).strip()
+            if rc.isdigit():
+                break
+            if deadline and time.monotonic() > deadline:
+                raise RuntimeError(f"command in sandbox pod {pod} did not finish within {timeout}s plus a minute")
+        out = (await self._read_file(pod, f"{job}/out")).decode("utf-8", errors="replace")
+        err = (await self._read_file(pod, f"{job}/err")).decode("utf-8", errors="replace")
+        await self._checked(pod, f"rm -rf {job}", "clean up command")
+        return int(rc), out, err
+
+    async def _retrying(self, pod: str, script: str, what: str, deadline: Optional[float]) -> str:
+        """_checked, retried while the exec fails and the container is still alive."""
+        while True:
+            try:
+                code, out, err = await self._exec(pod, ["sh", "-c", script], timeout=_WAIT_SLICE_S + 30)
+                if code == 0:
+                    return out
+                problem = f"exit {code}: {err.strip()[:300]}"
+            except Exception as exc:
+                problem = str(exc)[:300]
+            termination = await self._termination(pod, polls=1)
+            if termination:
+                raise RuntimeError(f"{what} in sandbox pod {pod}: {termination}")
+            if deadline and time.monotonic() > deadline:
+                raise RuntimeError(f"{what} in sandbox pod {pod} kept failing ({problem})")
+            await asyncio.sleep(_WAIT_RETRY_S)
 
     async def execute_tool(self, sandbox_id: str, tool_name: str, parameters: Dict[str, Any]) -> Any:
         from ms_enclave.sandbox.model import ExecutionStatus, ToolResult
@@ -413,11 +529,17 @@ class K8sPodSandboxManager:
 
         started = time.monotonic()
         try:
-            code, out, err = await self._exec(sandbox.pod, command, timeout=timeout)
+            code, out, err = await self._run_detached(sandbox.pod, command, timeout)
             await self._sync_back(sandbox)
         except Exception as exc:
+            # A killed container (OOMKilled at the memory limit) fails every later exec
+            # with a bare runtime error: name the actual cause.
+            termination = await self._termination(sandbox.pod)
             return ToolResult(
-                tool_name=tool_name, status=ExecutionStatus.ERROR, output="", error=f"Execution failed: {exc}"
+                tool_name=tool_name,
+                status=ExecutionStatus.ERROR,
+                output="",
+                error=f"Execution failed: {exc}" + (f" ({termination})" if termination else ""),
             )
         elapsed = time.monotonic() - started
 
@@ -455,14 +577,44 @@ class K8sPodSandboxManager:
             pod, f"base64 -d {tmp} | tar xzf - -C {shlex.quote(target_dir)} && rm -f {tmp}", "upload: extract"
         )
 
+    async def _download_dir(self, pod: str, source_dir: str, host_dir: Union[str, Path]) -> None:
+        tmp = "/tmp/.evalscope-download.tgz"
+        # GNU tar exits 1 when a file changed while it was read (a test process still
+        # writing a log): the archive is still complete up to that point.
+        await self._checked(pod, f"tar czf {tmp} -C {shlex.quote(source_dir)} .; [ $? -le 1 ]", "download: pack")
+        raw = await self._read_file(pod, tmp)
+        await self._checked(pod, f"rm -f {tmp}", "download: clean up")
+        untar_bytes(raw, host_dir)
+
+    async def _read_file(self, pod: str, path: str) -> bytes:
+        """A file's bytes, read in verified chunks (see _DOWNLOAD_CHUNK)."""
+        size = int((await self._checked(pod, f"wc -c < {path}", "download: size")).strip())
+        raw = bytearray()
+        for index, offset in enumerate(range(0, size, _DOWNLOAD_CHUNK)):
+            expected = min(_DOWNLOAD_CHUNK, size - offset)
+            for _ in range(_DOWNLOAD_ATTEMPTS):
+                chunk = b64_bytes(
+                    await self._checked(
+                        pod,
+                        f"dd if={path} bs={_DOWNLOAD_CHUNK} skip={index} count=1 2>/dev/null | base64",
+                        "download: read chunk",
+                    )
+                )
+                if len(chunk) == expected:
+                    break
+            else:
+                raise RuntimeError(
+                    f"download from sandbox pod {pod}: chunk {index} came back as {len(chunk)} of "
+                    f"{expected} bytes in {_DOWNLOAD_ATTEMPTS} attempts"
+                )
+            raw += chunk
+        return bytes(raw)
+
     async def _sync_back(self, sandbox: _Sandbox) -> None:
         for host_dir, mount in sandbox.volumes.items():
             if mount.get("mode", "rw") != "rw":
                 continue
-            out = await self._checked(
-                sandbox.pod, f"tar czf - -C {shlex.quote(mount['bind'])} . | base64", "download"
-            )
-            untar_b64(out, host_dir)
+            await self._download_dir(sandbox.pod, mount["bind"], host_dir)
 
     async def put_dir(self, sandbox_id: str, source_dir: Union[str, Path], target_dir: str) -> bool:
         sandbox = self._sandboxes.get(sandbox_id)

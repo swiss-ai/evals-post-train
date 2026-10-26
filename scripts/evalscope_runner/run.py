@@ -9,6 +9,11 @@ sandbox to a Kubernetes pod (k8s_sandbox.install()), runs it, and writes
 --gold skips the agent and the model: each sample's reference patch is the
 prediction (install_gold()), so a run checks the scoring pipeline itself --
 every sample should come out resolved.
+
+A sample whose evaluation itself failed (sandbox, cluster or network trouble) is
+scored unresolved by EvalScope, like a wrong patch. Those are counted in
+summary.json's evaluation_errors, and the run exits non-zero if there are any:
+its score is not a model score.
 """
 
 from __future__ import annotations
@@ -58,6 +63,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--sandbox", choices=("docker", "k8s"), default="docker")
     p.add_argument("--sandbox-config", default="{}", help="JSON merged into every sandbox's config.")
     p.add_argument("--limit", type=float, default=None)
+    p.add_argument("--shuffle", action="store_true", help="Shuffle (seed 42) before --limit.")
     p.add_argument("--max-concurrency", type=int, default=4)
     p.add_argument("--max-steps", type=int, default=None)
     p.add_argument("--strategy", default=None)
@@ -107,6 +113,7 @@ def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dic
         BENCHMARKS[n]["evalscope"]: {
             "hf_dataset_revision": revisions[n],
             "extra_params": {**BENCHMARKS[n]["extra_params"], **extra_params},
+            **({"shuffle": True} if args.shuffle else {}),
         }
         for n in names
     }
@@ -173,6 +180,33 @@ def collect_reports(work_dir: str) -> List[Dict[str, Any]]:
     return reports
 
 
+# Reasons SWE-bench's eval_instance gives up that are the model's doing, not the
+# infrastructure's: an unresolved sample, not an evaluation error.
+_MODEL_FAILURES = ("Patch Apply Failed", "Test timed out")
+
+
+def evaluation_errors(work_dir: str) -> Dict[str, Dict[str, Any]]:
+    """Per review file, the samples whose evaluation did not complete for reasons other
+    than the model's patch: {"<model>/<dataset>_<subset>": {"count", "instances"}}."""
+    errors: Dict[str, Dict[str, Any]] = {}
+    for path in sorted(glob.glob(os.path.join(work_dir, "reviews", "*", "*.jsonl"))):
+        instances = []
+        with open(path) as f:
+            for line in f:
+                sample = json.loads(line)["sample_score"]
+                result = sample["score"].get("metadata") or {}
+                if result.get("completed", True):
+                    continue
+                error = str((result.get("report") or {}).get("error", ""))
+                if any(marker in error for marker in _MODEL_FAILURES):
+                    continue
+                instances.append((sample.get("sample_metadata") or {}).get("instance_id") or sample.get("sample_id"))
+        if instances:
+            key = os.path.splitext(os.path.relpath(path, os.path.join(work_dir, "reviews")))[0]
+            errors[key] = {"count": len(instances), "instances": instances}
+    return errors
+
+
 def swe_bench_pro_os_commit() -> Optional[str]:
     try:
         from evalscope.benchmarks.swe_bench_pro.utils import PINNED_COMMIT
@@ -228,6 +262,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "dataset_revisions": revisions,
         "limit": cfg.get("limit"),
         "reports": collect_reports(args.work_dir),
+        "evaluation_errors": evaluation_errors(args.work_dir),
     }
     if "swe_bench_pro" in names:
         summary["swe_bench_pro_os_commit"] = swe_bench_pro_os_commit()
@@ -236,6 +271,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(json.dumps(summary, indent=2))
     if not summary["reports"]:
         print(f"No EvalScope reports found under {args.work_dir}/reports", file=sys.stderr)
+        return 1
+    if summary["evaluation_errors"]:
+        total = sum(e["count"] for e in summary["evaluation_errors"].values())
+        print(
+            f"{total} sample(s) could not be evaluated (see evaluation_errors in {args.work_dir}/summary.json "
+            "and their logs): the scores count them as unresolved.",
+            file=sys.stderr,
+        )
         return 1
     return 0
 

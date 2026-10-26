@@ -45,6 +45,8 @@
 #                               sandbox; NodeBB instances are known to need more).
 #   --limit <n>                 First n samples per benchmark (smoke tests); a fraction < 1 is a
 #                               share of the dataset.
+#   --shuffle                   Shuffle each dataset (EvalScope's seed 42) before --limit, so a small
+#                               --limit covers several repos (SWE-bench Verified is sorted by repo).
 #   --max-concurrency <n>       Samples in flight at once = sandboxes alive at once (default: 4).
 #   --max-steps <n>             Agent loop step cap (default: the benchmark's, 250 for both).
 #   --strategy <name>           swe_bench_toolcall (the default, function calling) or
@@ -112,6 +114,7 @@ while (( $# > 0 )); do
         --sandbox) SANDBOX=$2; shift 2 ;;
         --api-base-url) API_BASE_URL=$2; shift 2 ;;
         --gold) GOLD=1; shift ;;
+        --shuffle) RUN_ARGS+=("$1"); shift ;;
         --sandbox-config|--limit|--max-concurrency|--max-steps|--strategy|--command-timeout|\
         --generation-config|--dataset-revision|--extra-param|--api-timeout)
             RUN_ARGS+=("$1" "$2"); shift 2 ;;
