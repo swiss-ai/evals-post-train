@@ -29,6 +29,21 @@ RUN pip install --no-cache-dir -r /tmp/requirements/eval-runtime.txt
 RUN python -m venv /opt/inspect-venv \
     && /opt/inspect-venv/bin/pip install --no-cache-dir -r /tmp/requirements/inspect-runtime.txt
 
+# EvalScope (SWE-bench Verified and Pro, run_evalscope_eval.sh) in a third one:
+# its math-verify pin conflicts with eval-runtime.txt's antlr4. SWE-bench_Pro-os,
+# which EvalScope would otherwise clone at run time, is checked out at the commit
+# the installed EvalScope pins (EVALSCOPE_SWE_BENCH_PRO_REPO).
+COPY requirements/evalscope-runtime.txt /tmp/requirements/
+RUN python -m venv /opt/evalscope-venv \
+    && /opt/evalscope-venv/bin/pip install --no-cache-dir -r /tmp/requirements/evalscope-runtime.txt \
+    && pro=$(/opt/evalscope-venv/bin/python -c \
+        "from evalscope.benchmarks.swe_bench_pro.utils import PRO_REPO_URL, PINNED_COMMIT; print(PRO_REPO_URL, PINNED_COMMIT)") \
+    && set -- $pro \
+    && git clone --quiet "$1" /opt/swe-bench-pro-os \
+    && git -C /opt/swe-bench-pro-os checkout --quiet "$2" \
+    && git -C /opt/swe-bench-pro-os rev-parse HEAD > /opt/swe-bench-pro-os.commit \
+    && rm -rf /opt/swe-bench-pro-os/.git
+
 # Each pinned harness as its own --no-deps overlay, the same layout
 # build_eval_env.sh produces, so several forks (all the lm_eval package)
 # could live side by side. evaluate.sbatch checks .commit against the pin
@@ -46,6 +61,8 @@ RUN grep -Ev '^[[:space:]]*(#|$)' /tmp/requirements/lm-eval-harness.txt \
 
 ENV EVAL_PREBUILT_ENV=1 \
     EVAL_PREBUILT_HARNESS_ROOT=/opt/lm-eval-harness \
-    EVAL_INSPECT_VENV=/opt/inspect-venv
+    EVAL_INSPECT_VENV=/opt/inspect-venv \
+    EVALSCOPE_VENV=/opt/evalscope-venv \
+    EVALSCOPE_SWE_BENCH_PRO_REPO=/opt/swe-bench-pro-os
 
 WORKDIR /work

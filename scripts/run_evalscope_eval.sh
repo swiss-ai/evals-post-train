@@ -71,6 +71,10 @@
 #                    fallback run_inspect_eval.sh uses).
 #   EVALSCOPE_VENV   venv to install into / run from (default: a cache dir keyed by the
 #                    requirements file's hash). SKIP_INSTALL=1 runs with the current python3 as is.
+#                    With EVAL_PREBUILT_ENV=1 (the prebuilt image, containers/Dockerfile.eval) it
+#                    must already hold EvalScope: nothing is installed at run time.
+#   EVALSCOPE_SWE_BENCH_PRO_REPO  a SWE-bench_Pro-os checkout at EvalScope's pinned commit, used
+#                    instead of cloning one into ~/.cache/evalscope (the prebuilt image has one).
 #   EVALSCOPE_K8S_*  --sandbox k8s pod settings (namespace, tolerations, owner pod, pull secret,
 #                    ready timeout): see scripts/evalscope_runner/k8s_sandbox.py.
 #   HF_TOKEN         if the dataset download needs one.
@@ -163,6 +167,12 @@ REQUIREMENTS=requirements/evalscope-runtime.txt
 if [[ "${SKIP_INSTALL:-0}" == "1" ]]; then
     PY=python3
     echo "SKIP_INSTALL=1: running with $(command -v python3) as is (no venv, no install)"
+elif [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
+    PY="${EVALSCOPE_VENV:-}/bin/python"
+    [[ -n "${EVALSCOPE_VENV:-}" && -x "$PY" ]] ||
+        die "EVAL_PREBUILT_ENV=1 but EVALSCOPE_VENV (${EVALSCOPE_VENV:-unset}) has no bin/python:" \
+            "this image has no EvalScope environment, and a prebuilt image installs nothing at run time."
+    echo "EVAL_PREBUILT_ENV=1: using $EVALSCOPE_VENV (no install)"
 else
     req_hash=$( (sha256sum "$REQUIREMENTS" 2>/dev/null || shasum -a 256 "$REQUIREMENTS") | cut -c1-12)
     EVALSCOPE_VENV=${EVALSCOPE_VENV:-"${XDG_CACHE_HOME:-$HOME/.cache}/evals-post-train/evalscope-$req_hash"}
