@@ -16,7 +16,7 @@
 # Every sample gets its own sandbox container, so this needs a container runtime:
 #   --sandbox docker  EvalScope's own path, a local Docker daemon (a dev box / docker launcher).
 #   --sandbox k8s     One unprivileged pod per sandbox in the current namespace, through
-#                     scripts/evalscope_runner/k8s_sandbox.py (no Docker daemon needed; same
+#                     scripts/k8s_sandbox.py (no Docker daemon needed; same
 #                     approach as evals-svc's Terminal-Bench trial pods). Needs a ServiceAccount
 #                     that can create/get/delete pods and pods/exec. The images are linux/amd64,
 #                     so the pods are pinned to amd64 nodes (not Clariden's GH200s).
@@ -75,8 +75,8 @@
 #                    must already hold EvalScope: nothing is installed at run time.
 #   EVALSCOPE_SWE_BENCH_PRO_REPO  a SWE-bench_Pro-os checkout at EvalScope's pinned commit, used
 #                    instead of cloning one into ~/.cache/evalscope (the prebuilt image has one).
-#   EVALSCOPE_K8S_*  --sandbox k8s pod settings (namespace, tolerations, owner pod, pull secret,
-#                    ready timeout): see scripts/evalscope_runner/k8s_sandbox.py.
+#   SANDBOX_K8S_*  --sandbox k8s pod settings (namespace, tolerations, owner pod, pull secret,
+#                    ready timeout): see scripts/k8s_sandbox.py.
 #   HF_TOKEN         if the dataset download needs one.
 #
 # SWE-bench_Pro also clones scaleapi/SWE-bench_Pro-os (pinned by EvalScope to ca10a60) for each

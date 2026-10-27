@@ -12,7 +12,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from scripts.evalscope_runner import k8s_sandbox, run
+from scripts import k8s_sandbox
+from scripts.evalscope_runner import run
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HAS_ENCLAVE = importlib.util.find_spec("ms_enclave") is not None
@@ -40,17 +41,17 @@ class PodManifestTest(unittest.TestCase):
         self.assertEqual(c["resources"]["requests"], c["resources"]["limits"])
         self.assertEqual(m["spec"]["nodeSelector"], {"kubernetes.io/arch": "amd64"})
         self.assertFalse(m["spec"]["automountServiceAccountToken"])
-        self.assertEqual(m["metadata"]["labels"]["evalscope-run"], "run1")
+        self.assertEqual(m["metadata"]["labels"]["sandbox-run"], "run1")
         self.assertNotIn("ownerReferences", m["metadata"])
         self.assertNotIn("tolerations", m["spec"])
 
     def test_env_overrides(self):
         env = {
-            "EVALSCOPE_K8S_NODE_ARCH": "arm64",
-            "EVALSCOPE_K8S_TOLERATIONS": "hpc=true",
-            "EVALSCOPE_K8S_OWNER_POD_NAME": "runner",
-            "EVALSCOPE_K8S_OWNER_POD_UID": "uid-1",
-            "EVALSCOPE_K8S_IMAGE_PULL_SECRET": "dockerhub",
+            "SANDBOX_K8S_NODE_ARCH": "arm64",
+            "SANDBOX_K8S_TOLERATIONS": "hpc=true",
+            "SANDBOX_K8S_OWNER_POD_NAME": "runner",
+            "SANDBOX_K8S_OWNER_POD_UID": "uid-1",
+            "SANDBOX_K8S_IMAGE_PULL_SECRET": "dockerhub",
         }
         with mock.patch.dict(os.environ, env, clear=True):
             m = k8s_sandbox.pod_manifest("p", "ns", self.CONFIG, "run1")
@@ -60,11 +61,25 @@ class PodManifestTest(unittest.TestCase):
         self.assertEqual(m["spec"]["imagePullSecrets"], [{"name": "dockerhub"}])
 
     def test_memory_request_below_limit(self):
-        with mock.patch.dict(os.environ, {"EVALSCOPE_K8S_MEMORY_REQUEST": "4g"}, clear=True):
+        with mock.patch.dict(os.environ, {"SANDBOX_K8S_MEMORY_REQUEST": "4g"}, clear=True):
             m = k8s_sandbox.pod_manifest("p", "ns", self.CONFIG, "run1")
         resources = m["spec"]["containers"][0]["resources"]
         self.assertEqual(resources["requests"], {"cpu": "4", "memory": "4Gi"})
         self.assertEqual(resources["limits"], {"cpu": "4", "memory": "8Gi"})
+
+    def test_old_setting_names_still_read(self):
+        with mock.patch.dict(os.environ, {"EVALSCOPE_K8S_NODE_ARCH": "arm64"}, clear=True):
+            self.assertEqual(k8s_sandbox.setting("NODE_ARCH"), "arm64")
+        with mock.patch.dict(os.environ, {"EVALSCOPE_K8S_NODE_ARCH": "arm64", "SANDBOX_K8S_NODE_ARCH": "amd64"}, clear=True):
+            self.assertEqual(k8s_sandbox.setting("NODE_ARCH"), "amd64")
+
+    def test_requests_capped_at_limits(self):
+        env = {"SANDBOX_K8S_MEMORY_REQUEST": "4g", "SANDBOX_K8S_CPU_REQUEST": "1"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            small = k8s_sandbox.pod_manifest("p", "ns", dict(self.CONFIG, memory_limit="2g", cpu_limit=0.5), "run1")
+        resources = small["spec"]["containers"][0]["resources"]
+        self.assertEqual(resources["requests"], {"cpu": "0.5", "memory": "2Gi"})
+        self.assertEqual(k8s_sandbox.quantity_value("1500m"), 1.5)
 
     def test_memory_units(self):
         self.assertEqual(k8s_sandbox.k8s_memory("4g"), "4Gi")
@@ -165,7 +180,7 @@ class ExecuteToolTest(unittest.TestCase):
         async def fake_exec(pod, argv, timeout=None):
             calls.append((pod, argv, timeout))
             script = argv[2]
-            if script.startswith("mkdir /tmp/.evalscope-exec-"):
+            if script.startswith("mkdir /tmp/.sandbox-exec-"):
                 job = script.split()[1]
                 calls.append(("command", shlex.split(script.split("( ", 1)[1].split(" > ", 1)[0])))
                 code, out, err = exec_result
@@ -255,7 +270,7 @@ class ExecuteToolTest(unittest.TestCase):
             with mock.patch.object(k8s_sandbox, "_DOWNLOAD_CHUNK", 1000):
                 self._run(manager, ["true"])
             self.assertEqual(Path(host, "stdout.log").read_bytes(), payload)
-            reads = [c for c in calls if c[1][:2] == ["sh", "-c"] and c[1][2].startswith("dd if=/tmp/.evalscope-download")]
+            reads = [c for c in calls if c[1][:2] == ["sh", "-c"] and c[1][2].startswith("dd if=/tmp/.sandbox-download")]
             self.assertGreater(len(reads), len(base64.b64decode(self._b64)) // 1000 + 1)
 
     def test_download_gives_up_on_persistent_short_reads(self):

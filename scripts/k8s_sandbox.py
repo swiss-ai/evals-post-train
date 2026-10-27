@@ -1,17 +1,19 @@
-"""Pod-per-sandbox Kubernetes backend for EvalScope's ms-enclave sandboxes.
+"""Pod-per-sandbox Kubernetes backend, shared by the EvalScope and Harbor runners.
 
-EvalScope's agentic SWE-bench and SWE-bench_Pro run every sample in its own
-container through ms-enclave's Docker manager. Our runners have no Docker
-daemon (k8s Jobs are unprivileged pods, CSCS refuses privileged containers), so
-install() swaps that manager for this one: each sandbox is a plain,
-unprivileged pod running the same image -- the approach evals-svc's
-harbor_envs/evals_k8s.py already takes for Terminal-Bench's trial containers.
+Both run every sample/trial in its own container, normally through a Docker daemon. Our
+runners have none (k8s Jobs are unprivileged pods, CSCS refuses privileged containers, Clariden
+has no Docker), so each sandbox is a plain, unprivileged pod running the same image -- the
+approach evals-svc's harbor_envs/evals_k8s.py takes for Terminal-Bench's trial containers.
+
+- EvalScope: install() swaps ms-enclave's Docker manager for K8sPodSandboxManager.
+- Harbor: scripts/harbor_runner/k8s_environment.py is a Harbor environment built on
+  K8sPodSandboxManager's pod, exec and file-transfer primitives.
 
 What the Docker manager does and how it maps here:
 
 - create_sandbox: a pod with the DockerSandboxConfig's image, working_dir,
   env_vars, cpu_limit and memory_limit (requests == limits), kept alive by a
-  sleep loop (EVALSCOPE_K8S_MEMORY_REQUEST lowers the memory request); platform ("linux/amd64") becomes a kubernetes.io/arch node
+  sleep loop (SANDBOX_K8S_MEMORY_REQUEST/_CPU_REQUEST lower the requests); platform ("linux/amd64") becomes a kubernetes.io/arch node
   selector. Once Ready, "localhost" is made IPv4-only in /etc/hosts, as it
   effectively is under Docker (see _HOSTS_LOCALHOST_IPV4_ONLY). Bind-mount volumes ({host_dir: {"bind": path, "mode": ...}}, used
   by SWE-bench_Pro's evaluation step) are emulated: the host dir is copied in
@@ -22,22 +24,23 @@ What the Docker manager does and how it maps here:
   dropped exec stream is retried instead of misread as success), with the same ToolResult status/output/error shapes ms-enclave's own
   ShellExecutor returns, so EvalScope's exit-code parsing is unchanged.
 - delete_sandbox: deletes the pod. Pods are also owned by the runner's own pod
-  (EVALSCOPE_K8S_OWNER_POD_NAME/_UID), so Kubernetes garbage-collects them if
+  (SANDBOX_K8S_OWNER_POD_NAME/_UID), so Kubernetes garbage-collects them if
   the runner dies without cleaning up.
 
 Sandbox pods never get a service-account token: the model under test runs
 arbitrary commands in them.
 
-Environment (all optional):
-  EVALSCOPE_K8S_NAMESPACE          default: the in-cluster namespace, else the kubeconfig's
-  EVALSCOPE_K8S_NODE_ARCH          node arch override (default: from the config's platform)
-  EVALSCOPE_K8S_TOLERATIONS        "key=value,..." tolerated for NoSchedule and NoExecute
-  EVALSCOPE_K8S_OWNER_POD_NAME/_UID  owner reference for garbage collection
-  EVALSCOPE_K8S_IMAGE_PULL_SECRET  imagePullSecret name (DockerHub pull rate limits)
-  EVALSCOPE_K8S_READY_TIMEOUT      seconds to wait for a pod to become Ready (default: 1800,
+Environment (all optional; each SANDBOX_K8S_* is also read under its old name EVALSCOPE_K8S_*):
+  SANDBOX_K8S_NAMESPACE          default: the in-cluster namespace, else the kubeconfig's
+  SANDBOX_K8S_NODE_ARCH          node arch override (default: from the config's platform)
+  SANDBOX_K8S_TOLERATIONS        "key=value,..." tolerated for NoSchedule and NoExecute
+  SANDBOX_K8S_OWNER_POD_NAME/_UID  owner reference for garbage collection
+  SANDBOX_K8S_IMAGE_PULL_SECRET  imagePullSecret name (DockerHub pull rate limits)
+  SANDBOX_K8S_READY_TIMEOUT      seconds to wait for a pod to become Ready (default: 1800,
                                    SWE-bench images are several GB)
-  EVALSCOPE_K8S_RUN_LABEL          value of the evalscope-run pod label (default: random)
-  EVALSCOPE_K8S_MEMORY_REQUEST     memory request below the limit, e.g. "4g" (default: the limit)
+  SANDBOX_K8S_RUN_LABEL          value of the sandbox-run pod label (default: random)
+  SANDBOX_K8S_MEMORY_REQUEST     memory request below the limit, e.g. "4g" (default: the limit)
+  SANDBOX_K8S_CPU_REQUEST        CPU request below the limit, e.g. "1" (default: the limit)
 """
 
 from __future__ import annotations
@@ -56,8 +59,14 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+def setting(name: str, default: Optional[str] = None) -> Optional[str]:
+    """SANDBOX_K8S_<name>, else its old name EVALSCOPE_K8S_<name> (from when only the EvalScope
+    runner used this module), else default."""
+    return os.environ.get(f"SANDBOX_K8S_{name}") or os.environ.get(f"EVALSCOPE_K8S_{name}") or default
+
+
 _INCLUSTER_NS = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-_MANAGED_BY = "evals-post-train-evalscope"
+_MANAGED_BY = "evals-post-train-sandbox"
 # Stay under Linux's 128 KiB single-argument cap (MAX_ARG_STRLEN) when writing
 # base64 chunks through `printf %s <chunk>`.
 _B64_CHUNK = 100_000
@@ -105,9 +114,21 @@ def k8s_memory(value: Union[str, int, float, None]) -> str:
     return f"{number}{unit.upper()}i" if unit else number
 
 
+def quantity_value(quantity: str) -> float:
+    """A Kubernetes quantity ("4Gi", "512Mi", "1500m", "2") as a number, for comparisons."""
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)([a-zA-Z]*)", str(quantity).strip())
+    if not match:
+        raise ValueError(f"not a Kubernetes quantity: {quantity!r}")
+    number, unit = float(match.group(1)), match.group(2)
+    factors = {"": 1, "m": 1e-3, "k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "Ki": 2**10, "Mi": 2**20, "Gi": 2**30, "Ti": 2**40}
+    if unit not in factors:
+        raise ValueError(f"unknown unit in Kubernetes quantity: {quantity!r}")
+    return number * factors[unit]
+
+
 def node_arch(platform: Optional[str]) -> Optional[str]:
-    """ "linux/amd64" -> "amd64"; EVALSCOPE_K8S_NODE_ARCH wins."""
-    override = os.environ.get("EVALSCOPE_K8S_NODE_ARCH")
+    """ "linux/amd64" -> "amd64"; SANDBOX_K8S_NODE_ARCH wins."""
+    override = setting("NODE_ARCH")
     if override:
         return override
     if not platform:
@@ -169,6 +190,17 @@ def describe_termination(pod_status: Any) -> str:
     return ""
 
 
+def _logger() -> Any:
+    """EvalScope's logger when this runs under EvalScope, else the standard one (Harbor)."""
+    try:
+        from evalscope.utils.logger import get_logger
+    except ImportError:
+        import logging
+
+        return logging.getLogger(__name__)
+    return get_logger()
+
+
 def _cfg(config: Any, name: str, default: Any = None) -> Any:
     if isinstance(config, dict):
         return config.get(name, default)
@@ -180,11 +212,16 @@ def pod_manifest(name: str, namespace: str, config: Any, run_label: str) -> Dict
     cpu = str(_cfg(config, "cpu_limit", 2.0))
     memory = k8s_memory(_cfg(config, "memory_limit", "4g"))
     resources = {"cpu": cpu, "memory": memory}
-    # A lower memory request lets a sandbox schedule on a node whose memory is mostly
-    # reserved (not used) and still grow to the limit, at the risk of node-pressure
-    # eviction (a request above the limit is rejected by the API server).
-    request = os.environ.get("EVALSCOPE_K8S_MEMORY_REQUEST")
-    requests = dict(resources, memory=k8s_memory(request)) if request else dict(resources)
+    # Lower requests let a sandbox schedule on a node whose memory/CPU is mostly reserved (not
+    # used) and still grow to the limit, at the risk of node-pressure eviction (memory) or
+    # throttling (CPU). Capped at the limit: a request above it is rejected by the API server.
+    requests = dict(resources)
+    memory_request = setting("MEMORY_REQUEST")
+    if memory_request:
+        requests["memory"] = min(k8s_memory(memory_request), memory, key=quantity_value)
+    cpu_request = setting("CPU_REQUEST")
+    if cpu_request:
+        requests["cpu"] = min(str(cpu_request), cpu, key=quantity_value)
     container: Dict[str, Any] = {
         "name": "main",
         "image": _cfg(config, "image"),
@@ -207,23 +244,24 @@ def pod_manifest(name: str, namespace: str, config: Any, run_label: str) -> Dict
     arch = node_arch(_cfg(config, "platform"))
     if arch:
         spec["nodeSelector"] = {"kubernetes.io/arch": arch}
-    tolerations = [t.strip() for t in os.environ.get("EVALSCOPE_K8S_TOLERATIONS", "").split(",") if t.strip()]
+    tolerations = [t.strip() for t in setting("TOLERATIONS", "").split(",") if t.strip()]
     if tolerations:
         spec["tolerations"] = [
             {"key": k, "operator": "Equal", "value": v, "effect": effect}
             for k, v in (t.split("=", 1) for t in tolerations)
             for effect in ("NoSchedule", "NoExecute")
         ]
-    pull_secret = os.environ.get("EVALSCOPE_K8S_IMAGE_PULL_SECRET")
+    pull_secret = setting("IMAGE_PULL_SECRET")
     if pull_secret:
         spec["imagePullSecrets"] = [{"name": pull_secret}]
     metadata: Dict[str, Any] = {
         "name": name,
         "namespace": namespace,
-        "labels": {"app.kubernetes.io/managed-by": _MANAGED_BY, "evalscope-run": run_label},
+        # sandbox-pod selects exactly this pod, e.g. for a per-sandbox NetworkPolicy.
+        "labels": {"app.kubernetes.io/managed-by": _MANAGED_BY, "sandbox-run": run_label, "sandbox-pod": name},
     }
-    owner_name = os.environ.get("EVALSCOPE_K8S_OWNER_POD_NAME")
-    owner_uid = os.environ.get("EVALSCOPE_K8S_OWNER_POD_UID")
+    owner_name = setting("OWNER_POD_NAME")
+    owner_uid = setting("OWNER_POD_UID")
     if owner_name and owner_uid:
         metadata["ownerReferences"] = [{"apiVersion": "v1", "kind": "Pod", "name": owner_name, "uid": owner_uid}]
     return {"apiVersion": "v1", "kind": "Pod", "metadata": metadata, "spec": spec}
@@ -266,7 +304,7 @@ def _load_kube_config() -> None:
 
 
 def _default_namespace() -> str:
-    ns = os.environ.get("EVALSCOPE_K8S_NAMESPACE")
+    ns = setting("NAMESPACE")
     if ns:
         return ns
     if _INCLUSTER_NS.is_file():
@@ -297,8 +335,8 @@ class K8sPodSandboxManager:
 
     def __init__(self, **_: Any) -> None:
         self._namespace = ""
-        self._run_label = os.environ.get("EVALSCOPE_K8S_RUN_LABEL") or uuid.uuid4().hex[:8]
-        self._ready_timeout = float(os.environ.get("EVALSCOPE_K8S_READY_TIMEOUT", "1800"))
+        self._run_label = setting("RUN_LABEL") or uuid.uuid4().hex[:8]
+        self._ready_timeout = float(setting("READY_TIMEOUT", "1800"))
         self._sandboxes: Dict[str, _Sandbox] = {}
 
     # --- lifecycle ----------------------------------------------------------
@@ -324,7 +362,7 @@ class K8sPodSandboxManager:
 
     async def create_sandbox(self, sandbox_type: Any = None, config: Any = None, sandbox_id: Optional[str] = None) -> str:
         sandbox_id = sandbox_id or uuid.uuid4().hex[:12]
-        pod = f"evalscope-{self._run_label}-{sandbox_id}"[:63].rstrip("-")
+        pod = f"sandbox-{self._run_label}-{sandbox_id}"[:63].rstrip("-")
         manifest = pod_manifest(pod, self._namespace, config, self._run_label)
         await asyncio.to_thread(self._core().create_namespaced_pod, self._namespace, manifest)
         sandbox = _Sandbox(pod, dict(_cfg(config, "volumes") or {}))
@@ -333,9 +371,7 @@ class K8sPodSandboxManager:
             await self._wait_ready(pod)
             code, _, err = await self._exec(pod, ["sh", "-c", _HOSTS_LOCALHOST_IPV4_ONLY], timeout=60)
             if code != 0:
-                from evalscope.utils.logger import get_logger
-
-                get_logger().warning(
+                _logger().warning(
                     f"sandbox pod {pod}: could not make localhost IPv4-only in /etc/hosts "
                     f"(exit {code}: {err.strip()[:200]}); localhost resolves to ::1 there, unlike under Docker"
                 )
@@ -468,7 +504,7 @@ class K8sPodSandboxManager:
     async def _run_detached(self, pod: str, command: Union[str, List[str]], timeout: Optional[float]) -> tuple[int, str, str]:
         """Run command (under GNU timeout) detached in the pod and wait for its exit code
         file, so a dropped exec stream costs a retry instead of a wrong result."""
-        job = f"/tmp/.evalscope-exec-{uuid.uuid4().hex[:12]}"
+        job = f"/tmp/.sandbox-exec-{uuid.uuid4().hex[:12]}"
         argv = timeout_argv(list(command) if isinstance(command, (list, tuple)) else shlex.split(command), timeout)
         # mkdir doubles as the guard that a retried start never runs the command twice.
         start = (
@@ -568,7 +604,7 @@ class K8sPodSandboxManager:
 
     async def _upload_dir(self, pod: str, source_dir: Union[str, Path], target_dir: str) -> None:
         b64 = tar_dir_b64(source_dir)
-        tmp = "/tmp/.evalscope-upload.b64"
+        tmp = "/tmp/.sandbox-upload.b64"
         await self._checked(pod, f"mkdir -p {shlex.quote(target_dir)} && : > {tmp}", "upload: prepare")
         for offset in range(0, len(b64), _B64_CHUNK):
             chunk = b64[offset : offset + _B64_CHUNK]
@@ -578,7 +614,7 @@ class K8sPodSandboxManager:
         )
 
     async def _download_dir(self, pod: str, source_dir: str, host_dir: Union[str, Path]) -> None:
-        tmp = "/tmp/.evalscope-download.tgz"
+        tmp = "/tmp/.sandbox-download.tgz"
         # GNU tar exits 1 when a file changed while it was read (a test process still
         # writing a log): the archive is still complete up to that point.
         await self._checked(pod, f"tar czf {tmp} -C {shlex.quote(source_dir)} .; [ $? -le 1 ]", "download: pack")
