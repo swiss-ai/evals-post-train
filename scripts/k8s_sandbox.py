@@ -70,6 +70,9 @@ _MANAGED_BY = "evals-post-train-sandbox"
 # Stay under Linux's 128 KiB single-argument cap (MAX_ARG_STRLEN) when writing
 # base64 chunks through `printf %s <chunk>`.
 _B64_CHUNK = 100_000
+# Upload chunks written at once: one exec per chunk, so a large upload (a build stage's
+# output, tens of MB) is mostly round trips.
+_UPLOAD_PARALLEL = 8
 # Downloads are read back in pieces of this many raw bytes: one exec streaming tens of
 # MB of output loses frames now and then (silently, with a Success status), while every
 # read up to 32 MB arrived intact.
@@ -603,14 +606,23 @@ class K8sPodSandboxManager:
     # --- file transfer (tar + base64 over exec) --------------------------------
 
     async def _upload_dir(self, pod: str, source_dir: Union[str, Path], target_dir: str) -> None:
-        b64 = tar_dir_b64(source_dir)
-        tmp = "/tmp/.sandbox-upload.b64"
-        await self._checked(pod, f"mkdir -p {shlex.quote(target_dir)} && : > {tmp}", "upload: prepare")
-        for offset in range(0, len(b64), _B64_CHUNK):
-            chunk = b64[offset : offset + _B64_CHUNK]
-            await self._checked(pod, f"printf %s {shlex.quote(chunk)} >> {tmp}", "upload: write chunk")
+        await self._upload_tar_b64(pod, tar_dir_b64(source_dir), target_dir)
+
+    async def _upload_tar_b64(self, pod: str, b64: str, target_dir: str) -> None:
+        """Extract a base64-encoded gzipped tar into target_dir in the pod: written as
+        numbered chunk files, several at a time, then joined."""
+        tmp = f"/tmp/.sandbox-upload-{uuid.uuid4().hex[:8]}"
+        await self._checked(pod, f"mkdir -p {tmp} {shlex.quote(target_dir)}", "upload: prepare")
+        gate = asyncio.Semaphore(_UPLOAD_PARALLEL)
+
+        async def write(index: int, offset: int) -> None:
+            async with gate:
+                chunk = b64[offset : offset + _B64_CHUNK]
+                await self._checked(pod, f"printf %s {shlex.quote(chunk)} > {tmp}/{index:08d}", "upload: write chunk")
+
+        await asyncio.gather(*(write(i, offset) for i, offset in enumerate(range(0, len(b64), _B64_CHUNK))))
         await self._checked(
-            pod, f"base64 -d {tmp} | tar xzf - -C {shlex.quote(target_dir)} && rm -f {tmp}", "upload: extract"
+            pod, f"cat {tmp}/* | base64 -d | tar xzf - -C {shlex.quote(target_dir)} && rm -rf {tmp}", "upload: extract"
         )
 
     async def _download_dir(self, pod: str, source_dir: str, host_dir: Union[str, Path]) -> None:

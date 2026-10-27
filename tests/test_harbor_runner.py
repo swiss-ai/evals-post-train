@@ -26,7 +26,7 @@ class RunArgsTest(unittest.TestCase):
             run.parse_args(["--benchmark", "swe_bench_v2", "--gold", "--work-dir", "w", "--sandbox", "docker"])
 
     def test_docker_only_benchmarks_refuse_k8s(self):
-        for name in ("multi_swe_bench", "senior_swe_bench"):
+        for name in ("senior_swe_bench",):
             with self.assertRaises(SystemExit):
                 run.parse_args(["--benchmark", name, "--gold", "--work-dir", "w", "--sandbox", "k8s"])
             run.parse_args(["--benchmark", name, "--gold", "--work-dir", "w", "--sandbox", "docker"])
@@ -53,7 +53,7 @@ class HarborCommandTest(unittest.TestCase):
         args = run.parse_args(["--benchmark", "swe_bench", "--gold", "--work-dir", "w", "--sandbox", "docker"])
         cmd = run.harbor_command(args, "swe_bench", Path("w/jobs"))
         self.assertIn("oracle", cmd)
-        self.assertNotIn("--env", cmd)
+        self.assertEqual(cmd[cmd.index("--env") + 1], run.DOCKER_ENVIRONMENT)
         self.assertNotIn("-m", cmd)
 
     def test_adapter_tasks_are_generated(self):
@@ -120,16 +120,25 @@ class DockerfileReplayTest(unittest.TestCase):
         )
         self.assertEqual(k8s_env.parse_assignments("PATH /opt/bin:$PATH", {"PATH": "/bin"}), {"PATH": "/opt/bin:/bin"})
 
-    def test_multi_stage_is_refused(self):
+    def test_dockerfile_stages(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d, "Dockerfile")
-            path.write_text("FROM debian AS a\nRUN true\nFROM busybox\nCOPY --from=a /x /x\n")
-            with self.assertRaisesRegex(RuntimeError, "multi-stage"):
-                k8s_env.dockerfile_steps(path)
+            path.write_text("ARG V=1\nFROM debian AS fetch\nRUN true\nFROM busybox:$V\nCOPY --from=fetch /x /x\n")
+            stages = k8s_env.dockerfile_stages(path)
+            self.assertEqual([s["name"] for s in stages], ["fetch", None])
+            # Each stage sees the ARGs declared before the first FROM.
+            self.assertEqual([s["instruction"] for s in stages[1]["steps"]], ["ARG", "FROM", "COPY"])
+            path.write_text("FROM debian AS base\nRUN true\nFROM base\nRUN true\n")
+            with self.assertRaisesRegex(RuntimeError, "earlier stage"):
+                k8s_env.dockerfile_stages(path)
             path.write_text("# comment\nFROM swebench/x:latest\nWORKDIR /testbed\nRUN mkdir -p /logs\n")
-            self.assertEqual(
-                [s["instruction"] for s in k8s_env.dockerfile_steps(path)], ["FROM", "WORKDIR", "RUN"]
-            )
+            (stage,) = k8s_env.dockerfile_stages(path)
+            self.assertEqual([s["instruction"] for s in stage["steps"]], ["FROM", "WORKDIR", "RUN"])
+
+    def test_copies_into(self):
+        self.assertFalse(k8s_env.copies_into("/opt/python", 1))
+        for dest, n in (("/opt/", 1), ("/opt", 2), (".", 1), ("/", 1)):
+            self.assertTrue(k8s_env.copies_into(dest, n), dest)
 
     def test_wrappers_run(self):
         # in_dir/as_user produce plain sh commands: run one here.

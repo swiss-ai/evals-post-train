@@ -1328,25 +1328,27 @@ aaii/run_gdpval.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
 |---|---|---|
 | `swe_bench` | SWE-bench Verified (`swebench-verified@1.0`) | 500 |
 | `swe_bench_pro` | SWE-bench Pro **v1** (`swebenchpro@1.0`) | 731 |
-| `multi_swe_bench` | Multi-SWE-bench, generated locally by Harbor's adapter (no published dataset); `--sandbox docker` only | 1,632 |
+| `multi_swe_bench` | Multi-SWE-bench, generated locally by Harbor's adapter (no published dataset) | 1,632 |
 | `terminal_bench_2` | Terminal-Bench 2.0 | 89 |
 | `terminal_bench_4` | Terminal-Bench 4.0.0 | 66 |
 | `deep_swe` | DeepSWE v1.1 | 113 |
 | `slop_code_bench` | SlopCodeBench | 36 |
-| `senior_swe_bench` | Senior SWE-bench v2026.06 (public tasks); `--sandbox docker` only | 50 |
+| `senior_swe_bench` | Senior SWE-bench v2026.06 (public tasks); `--sandbox docker` only, grading needs `ANTHROPIC_API_KEY` (see below) | 50 |
 | `aider_polyglot` | Aider Polyglot | 225 |
 
 Harbor Hub datasets are pinned by content digest and the older registry datasets by version. Harbor runs in its own venv (`requirements/harbor-runtime.txt`, Python ≥ 3.12, installed with uv). The default agent is `terminus-2`, which drives a tmux session and needs no tool-call parser on the served model. It calls `--model` through litellm as `openai/<model>` at `--api-base-url`. `--gold` runs Harbor's `oracle` agent, which replays each task's reference solution, to check the environments and verifiers. Scores and run metadata go to `logs/harbor/<name>/summary.json`: per benchmark, the mean `reward`, or for verifiers that report several named metrics (SlopCodeBench) the mean of each.
 
 `--sandbox` picks where the task containers run:
 
-- `docker`: Harbor's own Docker environment. On Apple Silicon the linux/amd64 images run emulated.
+- `docker`: Harbor's own Docker environment (`scripts/harbor_runner/docker_environment.py` builds its network-allowlist proxy for the task images' platform). On Apple Silicon the linux/amd64 images run emulated; Erlang crashes under that emulation, so Senior SWE-bench's Elixir tasks only build on an amd64 host.
 - `k8s`: one unprivileged pod per trial through `scripts/harbor_runner/k8s_environment.py`, using the current kubeconfig, with no Docker daemon needed. The pods come from `scripts/k8s_sandbox.py` (shared with the EvalScope runner) and are pinned to amd64 nodes. Pod settings come from `SANDBOX_K8S_*` env vars (namespace, run label, CPU and memory requests, image pull secret, ...; see the module docstring). If the runner dies, delete leftover pods with `kubectl delete pods -l sandbox-run=<SANDBOX_K8S_RUN_LABEL>`.
-  - **Images:** tasks with a prebuilt image (Terminal-Bench, DeepSWE) run it directly. For the others, the pod starts from the Dockerfile's `FROM` image and replays its steps (`RUN`/`ENV`/`WORKDIR`/`COPY`), since pods can't build images. Multi-stage Dockerfiles (Multi-SWE-bench) are rejected.
+  - **Images:** tasks with a prebuilt image (Terminal-Bench, DeepSWE) run it directly. For the others, the pod starts from the Dockerfile's `FROM` image and replays its steps (`RUN`/`ENV`/`WORKDIR`/`COPY`), since pods can't build images. In a multi-stage Dockerfile (Multi-SWE-bench's fetch a standalone Python in a helper stage), each stage that a `COPY --from` names is replayed in a short-lived pod of its own and the paths are copied across. A stage built `FROM` an earlier stage is rejected.
   - **Network:** `no-network` and allowlist tasks get a NetworkPolicy. A NetworkPolicy can't express wildcard hostnames, so Senior SWE-bench, whose agent allowlists contain them (`*.pythonhosted.org`, …), is Docker-only. Harbor's Docker environment enforces those with an egress proxy.
   - **Permissions:** the namespace needs `create`/`get`/`delete` on pods and networkpolicies and `create`/`get` on pods/exec, which `rob-poc` on Breithorn has.
 
 **On Clariden:** the nodes are aarch64 and have no Docker, so `scripts/run_harbor_eval.sbatch` runs Harbor and the agent in a CPU job, with the task containers as Breithorn pods (`--sandbox k8s`, namespace `rob-poc` by default). The kubeconfig on Clariden authenticates through an OIDC login (kubelogin) that a batch job can't renew. Log in first (`kubectl get pods` works on the login node), and keep the run within the token's lifetime.
+
+Senior SWE-bench's verifier runs the task's tests, then LLM judges and a validation agent (Claude Sonnet 4.6 and Haiku 4.5 by default) that are part of its reward. Export `ANTHROPIC_API_KEY` (or `PORTKEY_API_KEY`) before the run; it's passed to the verifier as is. Without one, every trial ends with an empty reward and is listed under `evaluation_errors`.
 
 A trial that ends without a verifier reward (pod not scheduled, OOM-killed, build replay failed, API dropped) is listed under `evaluation_errors` in `summary.json`, and the run exits non-zero. A trial whose agent failed or timed out is still scored.
 
@@ -1355,8 +1357,11 @@ A trial that ends without a verifier reward (pod not scheduled, OOM-killed, buil
 SANDBOX_K8S_NAMESPACE=rob-poc scripts/run_harbor_eval.sh --sandbox k8s --gold --limit 1 \
   --benchmark swe_bench,swe_bench_pro,terminal_bench_2,terminal_bench_4,deep_swe,slop_code_bench,aider_polyglot
 
-# Multi-SWE-bench and Senior SWE-bench need a Docker daemon
-scripts/run_harbor_eval.sh --benchmark multi_swe_bench,senior_swe_bench --gold --limit 1 --sandbox docker
+# Multi-SWE-bench on Breithorn pods (its helper build stage runs in a pod of its own)
+SANDBOX_K8S_NAMESPACE=rob-poc scripts/run_harbor_eval.sh --sandbox k8s --gold --limit 1 --benchmark multi_swe_bench
+
+# Senior SWE-bench needs a Docker daemon and a key for its LLM graders
+ANTHROPIC_API_KEY=... scripts/run_harbor_eval.sh --benchmark senior_swe_bench --gold --limit 1 --sandbox docker
 
 # A model on Clariden (debug partition smoke test)
 sbatch -p debug -t 1:25:00 scripts/run_harbor_eval.sbatch --benchmark swe_bench,terminal_bench_2 \
