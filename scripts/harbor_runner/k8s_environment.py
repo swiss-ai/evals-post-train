@@ -18,7 +18,14 @@ The trial's image:
   applied as a build would and COPY/ADD sources uploaded from the task's environment dir.
   Pods cannot build images, and for these tasks (SWE-bench's FROM <prebuilt image> plus a few
   setup lines, or a from-scratch toolchain) the result is the same filesystem a build makes.
-  Multi-stage Dockerfiles (COPY --from) are rejected: run those with --sandbox docker.
+- Multi-stage Dockerfiles (Multi-SWE-bench: a helper stage fetches a standalone Python that
+  the last stage copies in): first, each stage that a COPY --from names is replayed in a pod
+  of its own (COPY --from=<image> runs the image as is), the paths it copies are packed and
+  read out, and that pod is deleted; then the last stage is replayed in the trial's pod with
+  those paths unpacked in place. A trial so holds one pod at a time: on a full cluster, trials
+  never sit on a pod while waiting for another. COPY --from paths are substituted with the
+  Dockerfile's own ARG/ENV values (not the base image's ENV). A stage built FROM an earlier
+  stage is rejected: use --sandbox docker.
 
 Network policy (agent and verifier phases): no-network and allowlist are enforced with a
 NetworkPolicy selecting the trial's pod (egress denied; for an allowlist, DNS plus the listed
@@ -29,6 +36,7 @@ The build replay runs before any policy, as a Docker build has network.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import re
@@ -37,8 +45,9 @@ import shutil
 import socket
 import tarfile
 import tempfile
+import uuid
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from harbor.environments.base import BaseEnvironment, ExecResult
 from harbor.environments.capabilities import EnvironmentCapabilities
@@ -106,9 +115,10 @@ def parse_assignments(value: str, env: Dict[str, str]) -> Dict[str, str]:
     return out
 
 
-def dockerfile_steps(dockerfile: Path) -> List[Dict[str, str]]:
-    """The Dockerfile's instructions as [{"instruction", "value"}], refusing what a pod
-    replay cannot reproduce."""
+def dockerfile_stages(dockerfile: Path) -> List[Dict[str, Any]]:
+    """The Dockerfile's build stages in order, as {"name", "steps"}: a stage's instructions
+    from its FROM on, after the ARGs declared before the first FROM (only FROM lines see
+    those). The last stage is the image. Refuses what a pod replay cannot reproduce."""
     from dockerfile_parse import DockerfileParser
 
     steps = [
@@ -116,15 +126,28 @@ def dockerfile_steps(dockerfile: Path) -> List[Dict[str, str]]:
         for item in DockerfileParser(path=str(dockerfile)).structure
         if item["instruction"].upper() != "COMMENT"
     ]
-    if sum(step["instruction"] == "FROM" for step in steps) != 1:
-        raise RuntimeError(
-            f"{dockerfile}: multi-stage Dockerfile; the Kubernetes environment replays a single "
-            "stage in a pod and cannot build this one: use --sandbox docker"
-        )
-    for step in steps:
-        if step["instruction"] in ("COPY", "ADD") and "--from" in step["value"]:
-            raise RuntimeError(f"{dockerfile}: COPY --from needs a real build: use --sandbox docker")
-    return steps
+    first = next((i for i, step in enumerate(steps) if step["instruction"] == "FROM"), None)
+    if first is None:
+        raise RuntimeError(f"{dockerfile}: no FROM")
+    stages: List[Dict[str, Any]] = []
+    for step in steps[first:]:
+        if step["instruction"] != "FROM":
+            stages[-1]["steps"].append(step)
+            continue
+        words = [t for t in step["value"].split() if not t.startswith("--")]
+        name = words[2].lower() if len(words) == 3 and words[1].lower() == "as" else None
+        if words[0].lower() in {stage["name"] for stage in stages}:
+            raise RuntimeError(
+                f"{dockerfile}: FROM {words[0]} builds on an earlier stage, which the pod replay "
+                "cannot reproduce: use --sandbox docker"
+            )
+        stages.append({"name": name, "steps": [*steps[:first], step]})
+    return stages
+
+
+def copies_into(dest: str, n_sources: int) -> bool:
+    """Whether COPY puts its sources into dest (a directory) rather than at dest itself."""
+    return dest.endswith("/") or n_sources > 1 or PurePosixPath(dest).name in ("", ".", "..")
 
 
 def as_user(argv: List[str], user: Optional[str]) -> List[str]:
@@ -214,31 +237,36 @@ class K8sPodEnvironment(BaseEnvironment):
 
     async def start(self, force_build: bool) -> None:
         await self._manager.start()
-        steps: List[Dict[str, str]] = []
+        stages: List[Dict[str, Any]] = []
         image = self.task_env_config.docker_image
         if not image or (force_build and self._dockerfile.is_file()):
-            steps = dockerfile_steps(self._dockerfile)
-            image = self._from_image(steps)
+            stages = dockerfile_stages(self._dockerfile)
+            image = self._from_image(stages[-1]["steps"])
+        exports = await self._export_stages(stages[-1]["steps"], stages[:-1]) if stages else {}
+        self._sandbox_id = await self._manager.create_sandbox(None, self._pod_config(image), self.session_id_suffix())
+        self._pod = self._manager._sandboxes[self._sandbox_id].pod
+        if stages:
+            self._image_env, self._image_workdir, self._image_user = await self._replay(
+                self._pod, stages[-1]["steps"], exports
+            )
+        # Harbor's Docker environment bind-mounts these from the trial dir, so they exist by
+        # construction; in a pod nobody makes them, and the verifier's redirect into
+        # /logs/verifier fails before the tests run. World-writable for non-root agent users.
+        paths = EnvironmentPaths()
+        dirs = [str(d) for d in (paths.agent_dir, paths.user_agent_dir, paths.verifier_dir, paths.artifacts_dir)]
+        await self._build_step(self._pod, ["sh", "-c", f"mkdir -p {' '.join(dirs)} && chmod 777 {' '.join(dirs)}"], None, {}, None, 60, {"instruction": "setup", "value": "/logs"})
+        if self.network_policy.network_mode != NetworkMode.PUBLIC:
+            await self._apply_network_policy(self.network_policy)
+
+    def _pod_config(self, image: str) -> Dict[str, Any]:
         memory_mb = self._effective_memory_mb
-        config = {
+        return {
             "image": image,
             "platform": "linux/amd64",
             "cpu_limit": self._effective_cpus or 1,
             "memory_limit": f"{memory_mb}m" if memory_mb else None,
             "env_vars": self._startup_env(),
         }
-        self._sandbox_id = await self._manager.create_sandbox(None, config, self.session_id_suffix())
-        self._pod = self._manager._sandboxes[self._sandbox_id].pod
-        if steps:
-            await self._replay(steps)
-        # Harbor's Docker environment bind-mounts these from the trial dir, so they exist by
-        # construction; in a pod nobody makes them, and the verifier's redirect into
-        # /logs/verifier fails before the tests run. World-writable for non-root agent users.
-        paths = EnvironmentPaths()
-        dirs = [str(d) for d in (paths.agent_dir, paths.user_agent_dir, paths.verifier_dir, paths.artifacts_dir)]
-        await self._build_step(["sh", "-c", f"mkdir -p {' '.join(dirs)} && chmod 777 {' '.join(dirs)}"], None, {}, None, 60, {"instruction": "setup", "value": "/logs"})
-        if self.network_policy.network_mode != NetworkMode.PUBLIC:
-            await self._apply_network_policy(self.network_policy)
 
     def session_id_suffix(self) -> str:
         # Pod names: sandbox-<run label>-<this>; keep the trial recognisable, cut to fit 63 chars.
@@ -266,8 +294,12 @@ class K8sPodEnvironment(BaseEnvironment):
                 return substitute(tokens[0], args)
         raise RuntimeError(f"{self._dockerfile}: no FROM")
 
-    async def _replay(self, steps: List[Dict[str, str]]) -> None:
-        code, out, err = await self._manager._run_detached(self._pod, ["sh", "-c", _READ_IMAGE_ENV], 60)
+    async def _replay(
+        self, pod: str, steps: List[Dict[str, str]], exports: Dict[int, bytes]
+    ) -> Tuple[Dict[str, str], Optional[str], Optional[str]]:
+        """Replay one stage's steps in pod (exports: _export_stages's packed COPY --from paths);
+        returns the image's ENV, WORKDIR and USER."""
+        code, out, err = await self._manager._run_detached(pod, ["sh", "-c", _READ_IMAGE_ENV], 60)
         base_env = dict(item.split("=", 1) for item in out.split("\0") if "=" in item) if code == 0 else {}
         env: Dict[str, str] = {}
         args: Dict[str, str] = {}
@@ -276,7 +308,7 @@ class K8sPodEnvironment(BaseEnvironment):
         user: Optional[str] = None
         timeout = int(self.task_env_config.build_timeout_sec or 1800)
         before_from = True
-        for step in steps:
+        for index, step in enumerate(steps):
             kind, value = step["instruction"], step["value"]
             scope = {**base_env, **args, **env}
             if kind == "FROM":
@@ -290,29 +322,31 @@ class K8sPodEnvironment(BaseEnvironment):
             elif kind == "WORKDIR":
                 path = substitute(value.strip(), scope)
                 workdir = str(PurePosixPath(workdir or "/") / path)
-                await self._build_step(["mkdir", "-p", workdir], None, {}, None, 60, step)
+                await self._build_step(pod, ["mkdir", "-p", workdir], None, {}, None, 60, step)
             elif kind == "SHELL":
                 shell = json.loads(value)
             elif kind == "USER":
                 user = substitute(value.strip(), scope).split(":", 1)[0]
             elif kind == "RUN":
                 argv = json.loads(value) if value.lstrip().startswith("[") else [*shell, value]
-                await self._build_step(argv, workdir, {**args, **env}, user, timeout, step)
+                await self._build_step(pod, argv, workdir, {**args, **env}, user, timeout, step)
             elif kind in ("COPY", "ADD"):
-                await self._copy(value, workdir or "/", scope, kind == "ADD", step)
+                await self._copy(pod, value, workdir or "/", scope, kind == "ADD", step, exports.get(index))
             elif kind not in _IGNORED_INSTRUCTIONS:
                 raise RuntimeError(f"{self._dockerfile}: {kind} is not supported by the pod replay")
-        self._image_env, self._image_workdir, self._image_user = env, workdir, user
+        return env, workdir, user
 
     async def _build_step(
-        self, argv: List[str], cwd: Optional[str], env: Dict[str, str], user: Optional[str], timeout: int, step: Dict
+        self, pod: str, argv: List[str], cwd: Optional[str], env: Dict[str, str], user: Optional[str], timeout: int, step: Dict
     ) -> None:
-        code, out, err = await self._manager._run_detached(self._pod, in_dir(as_user(argv, user), cwd, env), timeout)
+        code, out, err = await self._manager._run_detached(pod, in_dir(as_user(argv, user), cwd, env), timeout)
         if code != 0:
             tail = (out + err).strip()[-1500:]
-            raise RuntimeError(f"pod {self._pod}: {step['instruction']} {step['value'][:200]} failed (exit {code}): {tail}")
+            raise RuntimeError(f"pod {pod}: {step['instruction']} {step['value'][:200]} failed (exit {code}): {tail}")
 
-    async def _copy(self, value: str, workdir: str, scope: Dict[str, str], is_add: bool, step: Dict) -> None:
+    async def _copy(
+        self, pod: str, value: str, workdir: str, scope: Dict[str, str], is_add: bool, step: Dict, packed: Optional[bytes]
+    ) -> None:
         tokens = shlex.split(value) if not value.lstrip().startswith("[") else json.loads(value)
         chown = next((t.split("=", 1)[1] for t in tokens if t.startswith("--chown=")), None)
         chmod = next((t.split("=", 1)[1] for t in tokens if t.startswith("--chmod=")), None)
@@ -320,13 +354,20 @@ class K8sPodEnvironment(BaseEnvironment):
         *sources, dest = paths
         dest_abs = str(PurePosixPath(workdir) / dest)
         into_dir = dest.endswith("/") or len(sources) > 1
+        if packed is not None:
+            # COPY --from, packed by _export_stages; unpacked at the destination (not at /, so
+            # a symlinked directory such as /bin stays a symlink).
+            target = PurePosixPath(dest_abs)
+            target_dir = str(target if copies_into(dest, len(sources)) else target.parent)
+            await self._manager._upload_tar_b64(pod, base64.b64encode(packed).decode(), target_dir)
+            sources = []
         with tempfile.TemporaryDirectory() as staging:
             root = Path(staging)
             for source in sources:
                 if is_add and re.match(r"https?://", source):
                     target = f"{dest_abs.rstrip('/')}/{PurePosixPath(source).name}" if into_dir else dest_abs
                     await self._build_step(
-                        ["sh", "-c", f"mkdir -p \"$(dirname {shlex.quote(target)})\" && curl -fsSL -o {shlex.quote(target)} {shlex.quote(source)}"],
+                        pod, ["sh", "-c", f"mkdir -p \"$(dirname {shlex.quote(target)})\" && curl -fsSL -o {shlex.quote(target)} {shlex.quote(source)}"],
                         None, {}, None, 600, step,
                     )
                     continue
@@ -348,10 +389,66 @@ class K8sPodEnvironment(BaseEnvironment):
                         target.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(match, target)
             if any(root.iterdir()):
-                await self._manager._upload_dir(self._pod, root, "/")
+                await self._manager._upload_dir(pod, root, "/")
         for flag, tool in ((chown, "chown"), (chmod, "chmod")):
             if flag:
-                await self._build_step([tool, "-R", flag, dest_abs], None, {}, None, 120, step)
+                await self._build_step(pod, [tool, "-R", flag, dest_abs], None, {}, None, 120, step)
+
+    async def _export_stages(self, steps: List[Dict[str, str]], earlier: List[Dict[str, Any]]) -> Dict[int, bytes]:
+        """For each COPY --from in steps (by index): the paths it copies, packed in the stage
+        it names (one of earlier, by name or number) or in that image, laid out as they land
+        under the destination. Each source runs in a pod of its own, deleted before the next."""
+        copies: Dict[str, List[Tuple[int, List[str], str]]] = {}
+        scope: Dict[str, str] = {}
+        before_from = True
+        for index, step in enumerate(steps):
+            kind, value = step["instruction"], step["value"]
+            if kind == "FROM":
+                before_from = False
+            elif kind == "ARG":
+                scope.update({k: v for k, v in parse_assignments(value, scope).items() if not before_from})
+            elif kind == "ENV":
+                scope.update(parse_assignments(value, scope))
+            elif kind in ("COPY", "ADD"):
+                tokens = shlex.split(value) if not value.lstrip().startswith("[") else json.loads(value)
+                ref = next((substitute(t.split("=", 1)[1], scope) for t in tokens if t.startswith("--from=")), None)
+                if ref:
+                    *sources, dest = [substitute(t, scope) for t in tokens if not t.startswith("--")]
+                    copies.setdefault(ref.lower(), []).append((index, sources, dest))
+        exports: Dict[int, bytes] = {}
+        names = [stage["name"] for stage in earlier]
+        for ref, items in copies.items():
+            number = int(ref) if ref.isdigit() else (names.index(ref) if ref in names else None)
+            if number is not None and number >= len(earlier):
+                raise RuntimeError(f"{self._dockerfile}: COPY --from={ref}: no such earlier stage")
+            stage_steps = earlier[number]["steps"] if number is not None else []
+            inner = await self._export_stages(stage_steps, earlier[:number]) if stage_steps else {}
+            image = self._from_image(stage_steps) if stage_steps else ref
+            sandbox_id = await self._manager.create_sandbox(
+                None, self._pod_config(image), f"s{uuid.uuid4().hex[:4]}-{self.session_id_suffix()}"
+            )
+            try:
+                pod = self._manager._sandboxes[sandbox_id].pod
+                workdir = (await self._replay(pod, stage_steps, inner))[1] if stage_steps else None
+                for index, sources, dest in items:
+                    exports[index] = await self._pack(pod, workdir, sources, dest, steps[index])
+            finally:
+                await self._manager.delete_sandbox(sandbox_id)
+        return exports
+
+    async def _pack(self, pod: str, workdir: Optional[str], sources: List[str], dest: str, step: Dict) -> bytes:
+        """sources (relative to workdir) as a tar.gz laid out as they land: in the destination
+        directory, or, for a single source to a path, under the destination's name."""
+        staging = f"/tmp/.sandbox-stage-{uuid.uuid4().hex[:8]}"
+        into = staging if copies_into(dest, len(sources)) else f"{staging}/{shlex.quote(PurePosixPath(dest).name)}"
+        script = [f"mkdir -p {staging}"]
+        for source in sources:
+            src = shlex.quote(str(PurePosixPath(workdir or "/") / source))
+            # A directory's contents are copied, a file itself.
+            script.append(f"if [ -d {src} ]; then mkdir -p {into} && cp -a {src}/. {into}/; else cp -a {src} {into}; fi")
+        script.append(f"tar czf {staging}.tgz -C {staging} .")
+        await self._build_step(pod, ["sh", "-c", " && ".join(script)], None, {}, None, 600, step)
+        return await self._manager._read_file(pod, f"{staging}.tgz")
 
     # --- exec and files -------------------------------------------------------
 
