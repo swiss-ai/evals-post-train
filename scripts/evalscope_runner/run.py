@@ -2,7 +2,7 @@
 
 Builds an EvalScope TaskConfig from the flags, routes SWE-bench's scoring through
 the sandbox service (swe_bench_scoring.install()) and, with --sandbox k8s, every
-sandbox to a Kubernetes pod (k8s_sandbox.install()), runs it, and writes
+sandbox to a Kubernetes pod (scripts/k8s_sandbox.py: install()), runs it, and writes
 <work-dir>/summary.json: the scores plus everything needed to reproduce the run
 (evalscope version, dataset revisions, SWE-bench_Pro-os commit, sandbox engine).
 
@@ -54,7 +54,7 @@ DEFAULT_GENERATION_CONFIG: Dict[str, Any] = {"temperature": 0.0}
 
 # --sandbox k8s defaults: ms-enclave's 4g OOM-kills SWE-bench Pro's element-web and teleport
 # tests, while an 8 GiB request often does not schedule on Breithorn's amd64 nodes. So the
-# limit is 8g and the request (EVALSCOPE_K8S_MEMORY_REQUEST) 4g, unless memory_limit is given.
+# limit is 8g and the request (SANDBOX_K8S_MEMORY_REQUEST) 4g, unless memory_limit is given.
 K8S_SANDBOX_DEFAULTS: Dict[str, Any] = {"memory_limit": "8g"}
 K8S_MEMORY_REQUEST = "4g"
 
@@ -259,10 +259,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     swe_bench_scoring.install(sandbox_config(args))
     if args.sandbox == "k8s":
-        from scripts.evalscope_runner import k8s_sandbox
+        from scripts import k8s_sandbox
 
-        if "memory_limit" not in json.loads(args.sandbox_config):
-            os.environ.setdefault("EVALSCOPE_K8S_MEMORY_REQUEST", K8S_MEMORY_REQUEST)
+        if "memory_limit" not in json.loads(args.sandbox_config) and not k8s_sandbox.setting("MEMORY_REQUEST"):
+            os.environ["SANDBOX_K8S_MEMORY_REQUEST"] = K8S_MEMORY_REQUEST
         k8s_sandbox.install()
     if args.gold:
         install_gold()

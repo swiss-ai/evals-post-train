@@ -1,0 +1,9 @@
+# Packages run_harbor_eval.sh installs into its own venv (Harbor needs Python >= 3.12 and
+# pins its own dependency set, so it does not share the lm-eval/Inspect or EvalScope envs).
+# Pinned exactly: a bump is a deliberate, recorded change (keep HARBOR_VERSION in
+# scripts/harbor_runner/run.py in step: the Multi-SWE-bench adapter is fetched at that tag).
+harbor==0.25.0
+# --sandbox k8s: scripts/harbor_runner/k8s_environment.py (pods through the Kubernetes API,
+# Dockerfiles replayed with dockerfile-parse).
+kubernetes==37.0.1
+dockerfile-parse==2.0.1
