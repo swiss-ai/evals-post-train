@@ -172,6 +172,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--account <name>` | Override the Slurm account used by submitted jobs |
 | `--merge-only` | Skip evaluation and aggregate the already completed task outputs |
 | `--debug` | Resolve and print the orchestration plan without submitting jobs |
+| `--max-length N` | Backend context limit in tokens, exported as `MAX_LENGTH` (vLLM/SGLang `max_model_len`, Megatron `seq_length`, hf/openai `max_length`). Default: the backend's own. `loglikelihood_rolling` tasks such as `uncheatable_eval` cut each document into windows of this size, so set it to the model's context to score documents whole. |
 | `--limit N` | Limit number of samples per task (forwarded as `--limit` to lm-eval-harness; default: no limit). Useful for quick sanity checks. |
 | `--megatron-iter <iter>` | For Megatron-LM checkpoints, the iteration to evaluate (e.g. `8926`); defaults to `latest`. Exported as `CKPT_ITERATION`. |
 | `--harness-branch B` | Resolve lm-evaluation-harness from a branch, tag, or full commit SHA in the task-selected repository (default: repository HEAD); the resolved commit is shared by every chunk |
@@ -192,7 +193,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--reasoning-effort <level>` | Chat-template argument `reasoning_effort` (e.g. `low`/`medium`/`high`) for models whose template reads it, such as gpt-oss. hf, vllm, sglang and openai backends. See [Reasoning effort](#reasoning-effort). |
 
 > [!TIP]
-> Inference hyperparameters such as batch size (`BS`), `MAX_LENGTH`, and `MAX_NEW_TOKENS` are not exposed as launcher flags — set them as environment variables consumed by `evaluate.sbatch` (see [SBATCH Scripts](#sbatch-scripts)). `SIZE` is retained as informational/legacy metadata. vLLM keeps the compatible TP=4/DP=1 topology unless the model name unambiguously identifies a model below 30B, in which case it uses TP=1/DP=4; explicit topology variables always win.
+> Inference hyperparameters such as batch size (`BS`) and `MAX_NEW_TOKENS` are not exposed as launcher flags (`MAX_LENGTH` is: `--max-length`) — set them as environment variables consumed by `evaluate.sbatch` (see [SBATCH Scripts](#sbatch-scripts)). `SIZE` is retained as informational/legacy metadata. vLLM keeps the compatible TP=4/DP=1 topology unless the model name unambiguously identifies a model below 30B, in which case it uses TP=1/DP=4; explicit topology variables always win.
 
 ### Judge Model Launching
 

@@ -169,6 +169,26 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("cannot be used with EVAL_PREBUILT_ENV=1", completed.stderr)
 
+    def test_max_length_reaches_the_run_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            completed = _launch(
+                "single", "--task", "uncheatable_eval", "--model", "test/model",
+                "--max-length", "65536", "--logs-root", tmp,
+            )
+            output = completed.stdout + completed.stderr
+            self.assertEqual(completed.returncode, 0, output)
+            self.assertIn("Max length: 65536", output)
+            self.assertEqual(_run_config(tmp)["configuration"]["max_length"], "65536")
+
+    def test_max_length_must_be_a_positive_integer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            completed = _launch(
+                "single", "--task", "uncheatable_eval", "--model", "test/model",
+                "--max-length", "32k", "--logs-root", tmp,
+            )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("--max-length must be a positive integer", completed.stderr)
+
     def test_reasoning_effort_is_a_named_part_of_the_run_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
