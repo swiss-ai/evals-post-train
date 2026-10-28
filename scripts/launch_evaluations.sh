@@ -65,6 +65,10 @@
 #   --num-fewshot N      - Override num_fewshot for all tasks (default: use task YAML defaults)
 #                          Note: tasks with num_fewshot=0 in YAML are never overridden.
 #                          OLMo3 uses 5-shot for most MC tasks; pass --num-fewshot 5 to match.
+#   --max-length N       - Backend context limit in tokens (exports MAX_LENGTH: vLLM/SGLang
+#                          max_model_len, Megatron seq_length, hf/openai max_length).
+#                          Default: the backend's own. loglikelihood_rolling tasks (e.g.
+#                          uncheatable_eval) cut documents into windows of this size.
 #   --backend <backend>  - lm-eval backend: hf, vllm, sglang, megatron_lm, openai (default: from sbatch script)
 #   --api-base-url <url> - OpenAI-compatible endpoint for the 'openai' backend (required with it,
 #                          unless API_BASE_URL is exported). Bare host, /v1 root, or full endpoint URL.
@@ -174,6 +178,8 @@ FEWSHOT_FLAG=""
 # Keep an ambient HARNESS_LIMIT (the graceful launcher has no --limit flag, so callers export
 # it); blanking it here would ship the cleared value into the job. --limit still overrides.
 HARNESS_LIMIT="${HARNESS_LIMIT:-}"
+# Same for an ambient MAX_LENGTH; --max-length overrides it.
+MAX_LENGTH="${MAX_LENGTH:-}"
 MEGATRON_ITER=""
 SINGLE_TASK=""
 HARNESS_BRANCH=""
@@ -228,6 +234,7 @@ while [[ $# -gt 0 ]]; do
         --api-endpoint) API_ENDPOINT_FLAG="$2";       shift 2 ;;
         --megatron-iter) MEGATRON_ITER="$2";            shift 2 ;;
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
+        --max-length) MAX_LENGTH="$2";          shift 2 ;;
         --harness-branch) HARNESS_BRANCH="$2";        shift 2 ;;
         --reservation)   RESERVATION_FLAG="$2";        shift 2 ;;
         --qos)           QOS_FLAG="$2";                shift 2 ;;
@@ -717,6 +724,12 @@ echo "  Judge model prefix: ${JUDGE_MODEL_PREFIX:-<none>}"
 
 # --- Harness limit override ---
 [[ -n "$HARNESS_LIMIT" ]] && export HARNESS_LIMIT="$HARNESS_LIMIT"
+
+# --- Backend context limit ---
+if [[ -n "$MAX_LENGTH" ]]; then
+    [[ "$MAX_LENGTH" =~ ^[1-9][0-9]*$ ]] || { echo "Error: --max-length must be a positive integer (got '$MAX_LENGTH')." >&2; exit 1; }
+    export MAX_LENGTH
+fi
 [[ -n "$HARNESS_BRANCH" ]] && export LM_EVAL_HARNESS_BRANCH="$HARNESS_BRANCH"
 
 # Judge allocation is deferred to submit_evaluation(), after its result scan.
@@ -788,6 +801,7 @@ if [[ -n "$MODEL_PATH" ]]; then
     [[ -n "$CUSTOM_TOKENIZER" ]] && echo "  Tok:    $CUSTOM_TOKENIZER"
     [[ -n "$BOS_FLAG" ]] && echo "  BOS:    $BOS_FLAG"
     [[ -n "$FEWSHOT_FLAG" ]] && echo "  Fewshot: $FEWSHOT_FLAG"
+    [[ -n "$MAX_LENGTH" ]] && echo "  Max length: $MAX_LENGTH"
     [[ -n "$HARNESS_BRANCH" ]] && echo "  Harness branch: $HARNESS_BRANCH"
     echo "  W&B:    $WANDB_ENTITY/$WANDB_PROJECT"
     echo "======================================"
