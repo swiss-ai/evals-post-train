@@ -74,7 +74,13 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
             "Kubernetes NetworkPolicy cannot express (Harbor's Docker environment enforces them with an egress proxy)"
         ),
     },
-    "aider_polyglot": {"dataset": "aider-polyglot@1.0", "about": "Aider Polyglot, 225 exercises in 6 languages"},
+    "aider_polyglot": {
+        "dataset": "aider-polyglot@1.0",
+        "about": "Aider Polyglot, 225 exercises in 6 languages",
+        # Its tests/test.sh exits before writing a reward when the solution does not build
+        # (e.g. C++ "CMake build failed"): a failed exercise, not a broken verifier.
+        "missing_reward_is_zero": True,
+    },
 }
 
 
@@ -164,15 +170,20 @@ def harbor_env(args: argparse.Namespace) -> Dict[str, str]:
     return env
 
 
-def summarize_job(job_dir: Path) -> Dict[str, Any]:
+def summarize_job(job_dir: Path, missing_reward_is_zero: bool = False) -> Dict[str, Any]:
     """Mean reward over the trials that were scored, and the trials that were not.
 
     Most verifiers write a single "reward"; some write several named metrics instead (e.g.
     SlopCodeBench's core_pass_rate, strict_pass_rate, erosion, ...): every metric's mean is
-    reported under metrics, and mean_reward is the "reward" one where there is one."""
+    reported under metrics, and mean_reward is the "reward" one where there is one.
+
+    missing_reward_is_zero (the benchmark's own setting): a verifier that ran but wrote no reward
+    file scores 0 instead of being an evaluation error; those trials are listed under
+    no_reward_file."""
     rewards: List[float] = []
     metrics: Dict[str, List[float]] = {}
     errors: List[Dict[str, str]] = []
+    no_reward_file: List[Dict[str, str]] = []
     for path in sorted(glob.glob(str(job_dir / "*" / "result.json"))):
         with open(path) as f:
             trial = json.load(f)
@@ -184,6 +195,11 @@ def summarize_job(job_dir: Path) -> Dict[str, Any]:
                     metrics.setdefault(key, []).append(float(value))
             continue
         exc = trial.get("exception_info") or {}
+        if missing_reward_is_zero and exc.get("exception_type") == "RewardFileNotFoundError":
+            rewards.append(0.0)
+            metrics.setdefault("reward", []).append(0.0)
+            no_reward_file.append({"task": trial.get("task_name"), "trial": trial.get("trial_name")})
+            continue
         errors.append(
             {
                 "task": trial.get("task_name"),
@@ -199,6 +215,8 @@ def summarize_job(job_dir: Path) -> Dict[str, Any]:
         "n_scored": len(rewards),
         "evaluation_errors": errors,
     }
+    if no_reward_file:
+        summary["no_reward_file"] = no_reward_file
     # With --attempts > 1, Harbor's own pass@k over the attempts of each task.
     job_result = job_dir / "result.json"
     if job_result.exists():
@@ -258,7 +276,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             proc.terminate()
         code = proc.wait()
         results[name] = {"dataset": BENCHMARKS[name].get("dataset") or f"adapter:{BENCHMARKS[name]['adapter']}"}
-        results[name].update(summarize_job(jobs_dir / name))
+        results[name].update(summarize_job(jobs_dir / name, BENCHMARKS[name].get("missing_reward_is_zero", False)))
         if stopped:
             results[name]["interrupted"] = True
         elif code != 0:

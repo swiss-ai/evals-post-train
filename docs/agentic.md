@@ -33,7 +33,7 @@ Harbor Hub datasets are pinned by content digest and the older registry datasets
 
 Senior SWE-bench's verifier runs the task's tests, then LLM judges and a validation agent (Claude Sonnet 4.6 and Haiku 4.5 by default) that are part of its reward. Export `ANTHROPIC_API_KEY` (or `PORTKEY_API_KEY`) before the run; it's passed to the verifier as is. Without one, every trial ends with an empty reward and is listed under `evaluation_errors`.
 
-A trial that ends without a verifier reward (pod not scheduled, OOM-killed, build replay failed, API dropped) is listed under `evaluation_errors` in `summary.json`, and the run exits non-zero. A trial whose agent failed or timed out is still scored.
+A trial that ends without a verifier reward (pod not scheduled, OOM-killed, build replay failed, API dropped) is listed under `evaluation_errors` in `summary.json`, and the run exits non-zero. A trial whose agent failed or timed out is still scored. Exception: Aider Polyglot's `tests/test.sh` exits without writing a reward when the solution does not build, so there a missing reward file scores 0 (those trials are listed under `no_reward_file`).
 
 `summary.json` is rewritten after each benchmark. If the run is stopped (SIGTERM, e.g. a Slurm time limit), the current benchmark is summarized from the trials that finished and marked `interrupted`.
 

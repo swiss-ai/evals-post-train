@@ -105,6 +105,26 @@ class SummaryTest(unittest.TestCase):
         self.assertIsNone(summary["mean_reward"])
         self.assertEqual(summary["metrics"], {"core_pass_rate": 0.75, "erosion": 0.25})
 
+    def test_missing_reward_file(self):
+        """An evaluation error by default; a 0 for a benchmark that says a missing reward is one."""
+        with tempfile.TemporaryDirectory() as job:
+            trials = {
+                "a__1": {"task_name": "a", "trial_name": "a__1", "verifier_result": {"rewards": {"reward": 1.0}}},
+                "b__1": {"task_name": "b", "trial_name": "b__1",
+                         "exception_info": {"exception_type": "RewardFileNotFoundError", "exception_message": "x"}},
+                "c__1": {"task_name": "c", "trial_name": "c__1",
+                         "exception_info": {"exception_type": "RuntimeError", "exception_message": "pod OOMKilled"}},
+            }
+            for name, trial in trials.items():
+                Path(job, name).mkdir()
+                Path(job, name, "result.json").write_text(json.dumps(trial))
+            default = run.summarize_job(Path(job))
+            zero = run.summarize_job(Path(job), missing_reward_is_zero=True)
+        self.assertEqual((default["mean_reward"], default["n_scored"], len(default["evaluation_errors"])), (1.0, 1, 2))
+        self.assertEqual((zero["mean_reward"], zero["n_scored"], len(zero["evaluation_errors"])), (0.5, 2, 1))
+        self.assertEqual(zero["no_reward_file"], [{"task": "b", "trial": "b__1"}])
+        self.assertTrue(run.BENCHMARKS["aider_polyglot"]["missing_reward_is_zero"])
+
     def test_pass_at_k_from_job_stats(self):
         with tempfile.TemporaryDirectory() as job:
             Path(job, "t0").mkdir()
