@@ -5,22 +5,28 @@ import json
 import math
 import argparse
 import wandb
-import wandb.sdk.lib.server
 import re
 
-_orig_query_with_timeout = wandb.sdk.lib.server.Server.query_with_timeout
+try:
+    import wandb.sdk.lib.server
+except ImportError:
+    # wandb >= 0.21 moved/removed the internal server module the patch targets;
+    # nothing to patch in that case.
+    pass
+else:
+    _orig_query_with_timeout = wandb.sdk.lib.server.Server.query_with_timeout
 
-def _patched_query_with_timeout(self):
-    try:
-        _orig_query_with_timeout(self)
-    except TypeError:
-        if hasattr(self, "_viewer") and self._viewer:
-            flags = self._viewer.get("flags")
-            self._flags = json.loads(flags) if isinstance(flags, str) else {}
-        else:
-            self._flags = {}
+    def _patched_query_with_timeout(self):
+        try:
+            _orig_query_with_timeout(self)
+        except TypeError:
+            if hasattr(self, "_viewer") and self._viewer:
+                flags = self._viewer.get("flags")
+                self._flags = json.loads(flags) if isinstance(flags, str) else {}
+            else:
+                self._flags = {}
 
-wandb.sdk.lib.server.Server.query_with_timeout = _patched_query_with_timeout
+    wandb.sdk.lib.server.Server.query_with_timeout = _patched_query_with_timeout
 
 
 TEST_BENCHMARKS = {
@@ -205,7 +211,9 @@ def get_metric(summary, metric, fuzzy=True):
         if "stderr" in k:
             continue
         k_lower = k.lower()
-        if task.lower() not in k_lower:
+        # The task name must match exactly; substring matching would borrow
+        # scores from a different task (e.g. "humaneval" -> "humaneval_instruct").
+        if k.split("/", 1)[0].lower() != task.lower():
             continue
         if metric_name and metric_name.lower() not in k_lower:
             continue
