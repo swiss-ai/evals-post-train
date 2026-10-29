@@ -190,11 +190,12 @@ class DockerfileReplayTest(unittest.TestCase):
     def test_network_policy(self):
         from harbor.models.task.config import NetworkMode, NetworkPolicy
 
-        deny = k8s_env.network_policy_manifest("p", "pod-1", NetworkPolicy(network_mode=NetworkMode.NO_NETWORK))
+        deny = k8s_env.network_policy_manifest("p", "pod-1", NetworkPolicy(network_mode=NetworkMode.NO_NETWORK), "r1")
         self.assertEqual(deny["spec"]["podSelector"], {"matchLabels": {"sandbox-pod": "pod-1"}})
+        self.assertEqual(deny["metadata"]["labels"]["sandbox-run"], "r1")
         self.assertEqual(deny["spec"]["egress"], [])
         allow = k8s_env.network_policy_manifest(
-            "p", "pod-1", NetworkPolicy(network_mode=NetworkMode.ALLOWLIST, allowed_hosts=["10.0.0.0/8"])
+            "p", "pod-1", NetworkPolicy(network_mode=NetworkMode.ALLOWLIST, allowed_hosts=["10.0.0.0/8"]), "r1"
         )
         self.assertEqual(allow["spec"]["egress"][1], {"to": [{"ipBlock": {"cidr": "10.0.0.0/8"}}]})
 

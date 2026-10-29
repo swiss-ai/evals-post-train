@@ -9,6 +9,7 @@
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --partition=normal
 #SBATCH --time=11:59:00
+#SBATCH --signal=B:USR1@180
 
 # run_harbor_eval.sbatch - SLURM wrapper for scripts/harbor/run_harbor_eval.sh on Clariden.
 #
@@ -21,6 +22,11 @@
 # Kubernetes access is your kubeconfig on Clariden (~/.kube/config). For Breithorn that is an OIDC
 # login through kubelogin, which a batch job cannot renew: log in first (kubectl get pods works on
 # the login node) and keep the run within the token's lifetime.
+#
+# Pods are labelled sandbox-run=harbor-<job id>. Three minutes before the time limit the job stops
+# the run (summary.json keeps the trials that finished, see scripts/harbor/run.py), and at the end
+# it deletes whatever pods and NetworkPolicies with that label are left (a run cut off mid-trial
+# does not clean up after itself).
 #
 # Usage:
 #   sbatch [-p debug -t 1:00:00] scripts/harbor/run_harbor_eval.sbatch <run_harbor_eval.sh args...>
@@ -52,8 +58,20 @@ command -v kubectl >/dev/null && kubectl -n "$SANDBOX_K8S_NAMESPACE" auth can-i 
 ARGS=("$@")
 [[ " ${ARGS[*]} " == *" --sandbox "* ]] || ARGS+=(--sandbox k8s)
 
+# In the background so the USR1 trap (--signal above) runs while the run is still going.
+srun -n 1 bash scripts/harbor/run_harbor_eval.sh "${ARGS[@]}" &
+RUN_PID=$!
+trap 'echo "Time limit near: stopping the run"; kill -TERM "$RUN_PID"' USR1
 STATUS=0
-srun -n 1 bash scripts/harbor/run_harbor_eval.sh "${ARGS[@]}" || STATUS=$?
-echo "Leftover pods, if the run died: kubectl -n $SANDBOX_K8S_NAMESPACE delete pods -l sandbox-run=$SANDBOX_K8S_RUN_LABEL"
+wait "$RUN_PID" || STATUS=$?
+# wait returns early (status > 128) when the trap fires; wait for srun to finish stopping.
+while kill -0 "$RUN_PID" 2>/dev/null; do wait "$RUN_PID" || STATUS=$?; done
+
+if [[ " ${ARGS[*]} " != *" --sandbox docker "* ]] && command -v kubectl >/dev/null; then
+    # Bounded: with an expired kubelogin token, kubectl waits for a browser login.
+    timeout 120 kubectl -n "$SANDBOX_K8S_NAMESPACE" delete pods,networkpolicies \
+        -l "sandbox-run=$SANDBOX_K8S_RUN_LABEL" --ignore-not-found --wait=false ||
+        echo "warning: could not clean up; run: kubectl -n $SANDBOX_K8S_NAMESPACE delete pods,networkpolicies -l sandbox-run=$SANDBOX_K8S_RUN_LABEL" >&2
+fi
 echo "END TIME: $(date)"
 exit $STATUS
