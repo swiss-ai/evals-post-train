@@ -7,11 +7,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from scripts.harbor_runner import run
+from scripts.harbor import run
 
 HAS_HARBOR = importlib.util.find_spec("harbor") is not None and importlib.util.find_spec("dockerfile_parse") is not None
 if HAS_HARBOR:
-    from scripts.harbor_runner import k8s_environment as k8s_env
+    from scripts.harbor import k8s_environment as k8s_env
 
 
 class RunArgsTest(unittest.TestCase):

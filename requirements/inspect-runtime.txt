@@ -4,7 +4,7 @@
 # Exact pins: an unpinned inspect-evals silently changes benchmarks (the image
 # had 0.3.105, whose bfcl is V1 exec_simple only). 0.19.0 is the newest release
 # whose gpqa_diamond still takes epochs and whose hle takes judge_prompt and
-# graders, as aaii/ passes them.
+# graders, as scripts/aaii/ passes them.
 inspect-ai==0.3.283
 inspect-evals==0.19.0
 # Required by Inspect's openai-api provider (used whenever --api-base-url is
@@ -14,7 +14,7 @@ inspect-evals==0.19.0
 openai
 # Required by inspect_evals/scicode's dataset loader (a Google Drive download)
 # but not declared as an inspect-evals dependency -- confirmed by a real run
-# (--task scicode, plain and aaii/-wrapped alike) failing with "Google Drive
+# (--task scicode, plain and scripts/aaii/-wrapped alike) failing with "Google Drive
 # download requires optional dependencies. Install with: pip install gdown".
 gdown
 # inspect_evals/scicode's own scorer runtime deps (its docker-requirements.txt,
@@ -26,6 +26,6 @@ numpy
 scipy
 sympy
 h5py
-# scripts.alignment.update_wandb_inspect (the W&B upload) runs from this
+# scripts.results.update_wandb_inspect (the W&B upload) runs from this
 # environment too.
 wandb>=0.20.1

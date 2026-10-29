@@ -1,4 +1,4 @@
-"""CritPt task (aaii/aa_critpt.py): the two-step solver (reasoning generate,
+"""CritPt task (scripts/aaii/aa_critpt.py): the two-step solver (reasoning generate,
 then a separate parse generate against the challenge's own code_template),
 the scorer's capture-only behavior, and the grading-server Hook's batching/
 guard logic -- exercised through inspect_ai's own eval() with mockllm, same
@@ -15,7 +15,7 @@ from inspect_ai import eval as inspect_eval
 from inspect_ai.dataset import Sample
 from inspect_ai.model import ChatMessageAssistant, ModelOutput, get_model
 
-from aaii.aa_critpt import (
+from scripts.aaii.aa_critpt import (
     CHALLENGE_COUNT,
     _group_submissions_by_epoch,
     critpt_capture_scorer,
@@ -61,7 +61,7 @@ def _run(n_samples: int, epochs: int = 1):
     # sample's turn's output. Forcing fully sequential execution keeps the
     # REASONING_COMPLETION/PARSED_CODE assignment deterministic per sample.
     #
-    # A fresh tempdir per call, not one shared log_dir: aaii/aa_critpt.py's
+    # A fresh tempdir per call, not one shared log_dir: scripts/aaii/aa_critpt.py's
     # own Hook is a globally-registered Inspect Hook (confirmed by its
     # "hooks enabled: 1" startup banner), so it fires automatically after
     # EVERY inspect_eval() call in this file, including from tests that

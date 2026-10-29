@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from scripts import k8s_sandbox
-from scripts.evalscope_runner import run
+from scripts.evalscope import run
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HAS_ENCLAVE = importlib.util.find_spec("ms_enclave") is not None
@@ -336,7 +336,7 @@ class InstallTest(unittest.TestCase):
     def test_swe_bench_scoring_routed_through_sandbox_service(self):
         import evalscope.benchmarks.swe_bench.utils as upstream
 
-        from scripts.evalscope_runner import swe_bench_scoring
+        from scripts.evalscope import swe_bench_scoring
 
         original = upstream.eval_instance
         try:
@@ -460,13 +460,13 @@ class TaskConfigTest(unittest.TestCase):
 class ShellWrapperTest(unittest.TestCase):
     def _run(self, *arguments, env=None):
         with tempfile.TemporaryDirectory() as stub_dir:
-            # SKIP_INSTALL=1 runs `python3 -m scripts.evalscope_runner.run`: stub it to echo its argv.
+            # SKIP_INSTALL=1 runs `python3 -m scripts.evalscope.run`: stub it to echo its argv.
             stub = Path(stub_dir, "python3")
             stub.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$ARGV_OUT"\n')
             stub.chmod(0o755)
             argv_out = Path(stub_dir, "argv")
             completed = subprocess.run(
-                ["bash", "scripts/run_evalscope_eval.sh", *arguments],
+                ["bash", "scripts/evalscope/run_evalscope_eval.sh", *arguments],
                 cwd=REPO_ROOT,
                 env=os.environ
                 | {"PATH": f"{stub_dir}:{os.environ['PATH']}", "SKIP_INSTALL": "1", "ARGV_OUT": str(argv_out)}
@@ -497,7 +497,7 @@ class ShellWrapperTest(unittest.TestCase):
                 env={"TARGET_API_KEY": "k"},
             )
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(argv[:2], ["-m", "scripts.evalscope_runner.run"])
+        self.assertEqual(argv[:2], ["-m", "scripts.evalscope.run"])
         pairs = dict(zip(argv[2::2], argv[3::2]))
         self.assertEqual(pairs["--api-base-url"], "http://host:8000/v1")
         self.assertEqual(pairs["--benchmark"], "swe_bench_pro")

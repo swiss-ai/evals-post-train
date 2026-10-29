@@ -29,3 +29,7 @@ scripts/wandb_api_key.txt
 scripts/openai_api_key.txt
 scripts/critpt_api_key.txt
 eval_output/
+
+# Copied into the repo root by scripts/inspect_ai/run_inspect_eval.sh (inspect_evals' SciCode helpers)
+/process_data.py
+/test_util.py

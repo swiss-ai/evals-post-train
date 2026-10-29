@@ -43,10 +43,10 @@ class ContainerMountTests(unittest.TestCase):
                     )
 
     def test_harness_overlay_is_archived_and_staged_on_node_local_storage(self):
-        build_script = (REPO_ROOT / "scripts" / "build_eval_env.sh").read_text(
+        build_script = (REPO_ROOT / "scripts" / "lm_eval_harness" / "build_eval_env.sh").read_text(
             encoding="utf-8"
         )
-        evaluate_script = (REPO_ROOT / "scripts" / "evaluate.sbatch").read_text(
+        evaluate_script = (REPO_ROOT / "scripts" / "lm_eval_harness" / "evaluate.sbatch").read_text(
             encoding="utf-8"
         )
 
