@@ -69,11 +69,19 @@ def create_model_evaluation_from_harbor_run(
             Metric(name="n_scored", score=result.get("n_scored", 0)),
             Metric(name="n_errors", score=len(result.get("evaluation_errors", []))),
         ]
+        # Trials the summary scored 0 because their verifier wrote no reward (run.py's
+        # missing_reward_is_zero, e.g. Aider Polyglot's failed builds) are failed samples here too.
+        zero = {t["trial"] for t in result.get("no_reward_file", [])}
         trials = []
         for path in sorted((work_dir / "jobs" / name).glob("*/result.json")):
             with open(path) as f:
                 trial = json.load(f)
-            trials.append(_summarize_trial(trial))
+            summary_trial = _summarize_trial(trial)
+            if summary_trial["trial"] in zero:
+                summary_trial["rewards"] = {"reward": 0.0}
+                summary_trial["pass@1"] = 0.0
+                summary_trial["metrics"].append("pass@1")
+            trials.append(summary_trial)
             start, end = _parse_time(trial.get("started_at")), _parse_time(trial.get("finished_at"))
             if start:
                 started_at = start if started_at is None else min(started_at, start)
