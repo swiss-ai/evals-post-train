@@ -63,6 +63,7 @@ def create_model_evaluation_from_harbor_run(
         if values is None:  # summary.json from before per-metric means: mean_reward only
             values = {} if result.get("mean_reward") is None else {"reward": result["mean_reward"]}
         metrics = [Metric(name=key, score=value) for key, value in values.items()]
+        metrics += [Metric(name=f"pass@{k}", score=v) for k, v in result.get("pass_at_k", {}).items()]
         metrics += [
             Metric(name="n_trials", score=result.get("n_trials", 0)),
             Metric(name="n_scored", score=result.get("n_scored", 0)),

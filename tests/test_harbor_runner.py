@@ -105,6 +105,16 @@ class SummaryTest(unittest.TestCase):
         self.assertIsNone(summary["mean_reward"])
         self.assertEqual(summary["metrics"], {"core_pass_rate": 0.75, "erosion": 0.25})
 
+    def test_pass_at_k_from_job_stats(self):
+        with tempfile.TemporaryDirectory() as job:
+            Path(job, "t0").mkdir()
+            Path(job, "t0", "result.json").write_text(json.dumps({"verifier_result": {"rewards": {"reward": 1.0}}}))
+            Path(job, "result.json").write_text(
+                json.dumps({"stats": {"evals": {"terminus-2__tb": {"pass_at_k": {"2": 0.5, "3": 0.75}}}}})
+            )
+            summary = run.summarize_job(Path(job))
+        self.assertEqual(summary["pass_at_k"], {"2": 0.5, "3": 0.75})
+
 
 class MainTest(unittest.TestCase):
     def test_stopped_run_keeps_finished_scores(self):
