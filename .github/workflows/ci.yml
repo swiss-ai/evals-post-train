@@ -77,4 +77,4 @@ jobs:
         run: python -m pip install -r requirements/harbor-runtime.txt
 
       - name: Run Harbor runner tests
-        run: python -m unittest tests.test_harbor_runner -v
+        run: python -m unittest tests.test_harbor_runner tests.test_harbor_wandb -v

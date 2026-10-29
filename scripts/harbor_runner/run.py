@@ -3,8 +3,10 @@
 Each benchmark is a Harbor dataset: a registry reference pinned below (a version, or a Harbor
 Hub content digest), or, for Multi-SWE-bench, which has an adapter but no published dataset,
 tasks generated locally by Harbor's adapter at the pinned Harbor version. One `harbor run` job
-per benchmark, under <work-dir>/jobs/<benchmark>; then <work-dir>/summary.json with each
-benchmark's mean reward and the trials that could not be scored.
+per benchmark, under <work-dir>/jobs/<benchmark>; <work-dir>/summary.json, rewritten after each
+benchmark, has each one's mean reward and the trials that could not be scored. On SIGTERM (e.g. a
+Slurm time limit) harbor is stopped and the current benchmark is summarized from the trials that
+finished, marked interrupted.
 
 A trial that ends without a verifier reward (the sandbox failed to start, a pod was
 OOM-killed, the build replay failed, the cluster API dropped out) is an evaluation error,
@@ -23,6 +25,7 @@ import glob
 import json
 import os
 import platform
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -208,14 +211,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     jobs_dir.mkdir(parents=True, exist_ok=True)
     env = harbor_env(args)
     results: Dict[str, Any] = {}
-    for name in args.benchmarks:
-        cmd = harbor_command(args, name, jobs_dir)
-        print("Running:", " ".join(cmd), flush=True)
-        code = subprocess.run(cmd, env=env, cwd=REPO_ROOT).returncode
-        results[name] = {"dataset": BENCHMARKS[name].get("dataset") or f"adapter:{BENCHMARKS[name]['adapter']}"}
-        results[name].update(summarize_job(jobs_dir / name))
-        if code != 0:
-            results[name]["harbor_exit_code"] = code
     summary = {
         "harbor_version": harbor_version(),
         "model": "oracle (reference solutions)" if args.gold else args.model,
@@ -226,9 +221,40 @@ def main(argv: Optional[List[str]] = None) -> int:
         "attempts": args.attempts,
         "benchmarks": results,
     }
-    with open(work_dir / "summary.json", "w") as f:
-        json.dump(summary, f, indent=2)
+    # SIGTERM (e.g. a Slurm time limit): stop harbor, but keep the scores of the trials that
+    # finished.
+    stopped = False
+    proc: Optional[subprocess.Popen] = None
+
+    def stop(signum: int, frame: Any) -> None:
+        nonlocal stopped
+        stopped = True
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+
+    signal.signal(signal.SIGTERM, stop)
+    for name in args.benchmarks:
+        if stopped:
+            break
+        cmd = harbor_command(args, name, jobs_dir)
+        print("Running:", " ".join(cmd), flush=True)
+        proc = subprocess.Popen(cmd, env=env, cwd=REPO_ROOT)
+        if stopped:  # the signal came between the check above and the start
+            proc.terminate()
+        code = proc.wait()
+        results[name] = {"dataset": BENCHMARKS[name].get("dataset") or f"adapter:{BENCHMARKS[name]['adapter']}"}
+        results[name].update(summarize_job(jobs_dir / name))
+        if stopped:
+            results[name]["interrupted"] = True
+        elif code != 0:
+            results[name]["harbor_exit_code"] = code
+        # After each benchmark, so a run that is stopped still leaves the finished ones' scores.
+        with open(work_dir / "summary.json", "w") as f:
+            json.dump(summary, f, indent=2)
     print(json.dumps(summary, indent=2))
+    if stopped:
+        print(f"Stopped: {work_dir}/summary.json has the trials that finished.", file=sys.stderr)
+        return 128 + signal.SIGTERM
     failed = {n: r for n, r in results.items() if r["evaluation_errors"] or r.get("harbor_exit_code") or not r["n_trials"]}
     if failed:
         print(

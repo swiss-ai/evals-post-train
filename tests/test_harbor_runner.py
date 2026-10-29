@@ -106,6 +106,35 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(summary["metrics"], {"core_pass_rate": 0.75, "erosion": 0.25})
 
 
+class MainTest(unittest.TestCase):
+    def test_stopped_run_keeps_finished_scores(self):
+        """SIGTERM mid-run: summary.json has the benchmarks so far, the current one interrupted."""
+        import signal
+        import threading
+
+        def fake_command(args, name, jobs_dir):
+            trial = jobs_dir / name / "t1"
+            trial.mkdir(parents=True, exist_ok=True)
+            (trial / "result.json").write_text(json.dumps({"verifier_result": {"rewards": {"reward": 1.0}}}))
+            return ["sleep", "0" if name == "swe_bench" else "30"]
+
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(run, "harbor_command", fake_command):
+            timer = threading.Timer(1.0, os.kill, (os.getpid(), signal.SIGTERM))
+            timer.start()
+            try:
+                code = run.main(["--benchmark", "swe_bench,terminal_bench_2,deep_swe", "--gold", "--work-dir", d,
+                                 "--sandbox", "docker"])
+            finally:
+                timer.cancel()
+                signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            summary = json.loads((Path(d) / "summary.json").read_text())["benchmarks"]
+        self.assertEqual(code, 128 + signal.SIGTERM)
+        self.assertEqual(list(summary), ["swe_bench", "terminal_bench_2"])
+        self.assertNotIn("interrupted", summary["swe_bench"])
+        self.assertTrue(summary["terminal_bench_2"]["interrupted"])
+        self.assertEqual(summary["terminal_bench_2"]["mean_reward"], 1.0)
+
+
 @unittest.skipUnless(HAS_HARBOR, "harbor not installed (requirements/harbor-runtime.txt)")
 class DockerfileReplayTest(unittest.TestCase):
     def test_substitute(self):

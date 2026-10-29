@@ -1353,6 +1353,10 @@ Senior SWE-bench's verifier runs the task's tests, then LLM judges and a validat
 
 A trial that ends without a verifier reward (pod not scheduled, OOM-killed, build replay failed, API dropped) is listed under `evaluation_errors` in `summary.json`, and the run exits non-zero. A trial whose agent failed or timed out is still scored.
 
+`summary.json` is rewritten after each benchmark. If the run is stopped (SIGTERM, e.g. a Slurm time limit), the current benchmark is summarized from the trials that finished and marked `interrupted`.
+
+`--wandb-entity <entity> --wandb-project <project>` uploads the results to W&B as one run named `--name`, through the same `ModelEvaluation` structure and `upload_multi_model_results` as lm-eval-harness and Inspect runs. Each benchmark gets its `reward` (or its named verifier metrics), `n_trials`, `n_scored` and `n_errors`, plus a few passed, failed and unscored trials as samples. It uploads also when some trials were not scored, so check `n_errors`. To upload an existing run (e.g. one that was stopped): `python -m scripts.alignment.update_wandb_harbor --entity <e> --project <p> --name <name> --work-dir logs/harbor/<name>` from the Harbor venv.
+
 ```bash
 # Pipeline check without a model: reference solutions, one task per benchmark, pods on Breithorn
 SANDBOX_K8S_NAMESPACE=rob-poc scripts/run_harbor_eval.sh --sandbox k8s --gold --limit 1 \
@@ -1538,7 +1542,9 @@ evals/
 │       ├── merge_split_results.py          # Merges results from chunk jobs
 │       ├── data_structures.py              # Sample, Metric, Task, ModelEvaluation classes
 │       ├── inspect_wandb_utils.py          # Builds ModelEvaluation objects from Inspect .eval logs
-│       └── update_wandb_inspect.py         # Per-model W&B upload script (Inspect .eval logs)
+│       ├── update_wandb_inspect.py         # Per-model W&B upload script (Inspect .eval logs)
+│       ├── harbor_wandb_utils.py           # Builds ModelEvaluation objects from a Harbor run
+│       └── update_wandb_harbor.py          # Per-model W&B upload script (Harbor runs)
 ├── make_html_table.py                # Reporting: interactive HTML results table (reads W&B)
 ├── make_table.py                     # Reporting: hyperparameter-sweep table, PNG + CSV (reads W&B)
 ├── runners/              # Multi-model evaluation scripts
