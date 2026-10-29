@@ -1,9 +1,0 @@
-{
-	"show_in_table": ["mmlu/acc", "gsm8k/exact_match", "arc_challenge/acc", "hellaswag/acc", "m_hellaswag/acc", "m_arc/acc", "include_base_44/acc"],
-	"root": "swissai_eval",
-	"groups": {
-		"swissai_eval": ["mmlu", "hellaswag", "mmlu_continuation", "winogrande", "piqa", "openbookqa", "arc_challenge", "arc_easy", "commonsense_qa", "lambada_openai", "lambada_standard", "wikitext", "gsm8k", "squadv2", "include_base_44", "xcopa", "xnli", "xwinograd", "pawsx", "m_arc", "global_mmlu", "m_hellaswag"],
-		"english": ["mmlu", "hellaswag", "mmlu_continuation", "winogrande", "piqa", "openbookqa", "arc_challenge", "arc_easy", "commonsense_qa", "lambada_openai", "lambada_standard", "wikitext", "gsm8k", "squadv2"],
-		"multilingual": ["include_base_44", "xcopa", "xnli", "xwinograd", "pawsx", "m_arc", "global_mmlu", "m_hellaswag"]
-	}
-}

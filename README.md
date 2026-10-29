@@ -143,7 +143,7 @@ bash scripts/launch_evaluations.sh --model <hf_path_or_local_path> [options]
 
 **Mode 2: Model-list script** (for batch evaluation of predefined model sets)
 ```bash
-bash scripts/launch_evaluations.sh <mode> --script runners/hf_eval_multiple_other_models.sh
+bash scripts/launch_evaluations.sh <mode> --script runners/example_models.sh
 ```
 Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `hf_base_runner.sh`.
 
@@ -278,7 +278,7 @@ bash scripts/launch_evaluations.sh default \
 
 # Run all models from a batch script on the safety suite
 bash scripts/launch_evaluations.sh olmo-safety \
-  --script runners/hf_eval_multiple_other_models.sh --chunk-size 4
+  --script runners/example_models.sh --chunk-size 4
 ```
 
 `--bos` explicitly prepends a BOS token. Normally leave it unset unless the model requires it; chat-template detection does not infer this option.
@@ -1008,18 +1008,18 @@ reasoning-token support for that backend, so it would otherwise record nothing s
 
 ## Multi-Model Scripts
 
-Scripts in `runners/` define `MODEL_CHECKPOINTS` associative arrays and source `hf_base_runner.sh`:
+A model-list script defines a `MODEL_CHECKPOINTS` associative array and sources `hf_base_runner.sh`; copy `runners/example_models.sh` and list your models:
 
 ```bash
-# runners/hf_eval_multiple_other_models.sh
 declare -A MODEL_CHECKPOINTS=(
     ["Llama-3.1-8B-Instruct"]="meta-llama/Llama-3.1-8B-Instruct"
     ["OLMo-2-1124-7B-Instruct"]="allenai/OLMo-2-1124-7B-Instruct"
-    # Uncomment models as needed...
 )
-export APPLY_CHAT_TEMPLATE=true
-source runners/hf_base_runner.sh "SFT models"
+export APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-true}
+source runners/hf_base_runner.sh "models"
 ```
+
+Base models take the launcher's `--no-chat-template` (Apertus base checkpoints also `--tokenizer alehc/swissai-tokenizer --bos`).
 
 `hf_base_runner.sh` handles the model loop and delegates resumable chunk orchestration to `scripts/evaluation_orchestrator.sh`. It respects `EVAL_CHUNK_SIZE`, `EVAL_MAX_PARALLEL`, `EVAL_MAX_RETRIES`, `SBATCH_SCRIPT`, and `WANDB_*`.
 
@@ -1543,10 +1543,7 @@ evals/
 ├── make_table.py                     # Reporting: hyperparameter-sweep table, PNG + CSV (reads W&B)
 ├── runners/              # Multi-model evaluation scripts
 │   ├── hf_base_runner.sh            # Generic runner (delegates chunk orchestration)
-│   ├── hf_eval_multiple_other_models.sh
-│   ├── hf_eval_multiple_other_base_models.sh
-│   ├── hf_eval_multiple_apertus_models.sh
-│   └── hf_eval_multiple_apertus_base_models.sh
+│   └── example_models.sh            # Model-list template for --script
 └── containers/                      # Enroot/Pyxis runtime configurations
     ├── env.toml                     # Standard HF/OpenAI container config
     ├── env_vllm.toml                # vLLM/Megatron container config
