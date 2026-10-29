@@ -52,8 +52,29 @@ jobs:
 
       - name: Validate JSON configuration
         run: |
-          python -m json.tool configs/tasks.json >/dev/null
           python -m json.tool configs/eval_export/task_mappings.json >/dev/null
 
       - name: Run offline unit tests
         run: python -m unittest discover -s tests -v
+
+  harbor:
+    # The default job skips these: Harbor needs Python >= 3.12 and its own pinned set.
+    name: Harbor runner tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Harbor runtime
+        run: python -m pip install -r requirements/harbor-runtime.txt
+
+      - name: Run Harbor runner tests
+        run: python -m unittest tests.test_harbor_runner -v

@@ -32,7 +32,7 @@
 #   --model <path>            - Single HF model or local checkpoint path. Required unless
 #                               --script is given, or --backend openai is used with
 #                               --api-model-name (which then also fills --model's slot).
-#   --script <path>           - Run a model-list script (e.g. hf_eval_multiple_other_models.sh)
+#   --script <path>           - Run a model-list script (e.g. runners/example_models.sh)
 #   --megatron-iter <iter>    - For Megatron models, specify the iteration number to evaluate
 #                               (e.g. 8926), defaults to "latest"
 #   --convert-to-hf           - Convert the Megatron checkpoint at --model to a Hugging Face
@@ -138,7 +138,7 @@
 #   bash scripts/launch_evaluations.sh olmo-easy --model Qwen/Qwen2.5-7B --no-chat-template
 #
 #   # Run a multi-model script
-#   bash scripts/launch_evaluations.sh posttrain --script runners/hf_eval_multiple_other_models.sh
+#   bash scripts/launch_evaluations.sh posttrain --script runners/example_models.sh
 #
 #   # Run a single task
 #   bash scripts/launch_evaluations.sh single --task hellaswag --model meta-llama/Llama-3.1-8B-Instruct
@@ -625,7 +625,7 @@ case "$EVAL_MODE" in
         ;;
     "eval-debug")
         export TASKS=./configs/apertus/eval_debug.txt
-        export TABLE_METRICS=./configs/olmo/eval_debug_main_table.txt
+        export TABLE_METRICS=./configs/apertus/eval_debug_main_table.txt
         ;;
     "single")
         export TASKS="$SINGLE_TASK"
