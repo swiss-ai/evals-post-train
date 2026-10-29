@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.alignment.wandb_alignment_utils import (
+from scripts.results.wandb_alignment_utils import (
     create_model_evaluation_from_results,
 )
 
@@ -56,7 +56,7 @@ class WandbAlignmentUtilsTests(unittest.TestCase):
             )
 
             with self.assertLogs(
-                "scripts.alignment.wandb_alignment_utils", level="WARNING"
+                "scripts.results.wandb_alignment_utils", level="WARNING"
             ) as logs:
                 evaluation = create_model_evaluation_from_results(
                     "test-model", eval_dir

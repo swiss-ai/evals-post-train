@@ -5,7 +5,7 @@
 # Pinned exactly: a bump is a deliberate, recorded change.
 evalscope[sandbox]==1.14.0
 ms-enclave[docker]==0.0.8
-# scripts/k8s_sandbox.py: the pod-per-sample sandbox backend.
+# scripts/common/k8s_sandbox.py: the pod-per-sample sandbox backend.
 kubernetes==37.0.1
 # SWE-bench_Pro's patch-extraction fallback (evalscope's [swe-bench] extra).
 swebench==4.1.0

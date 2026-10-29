@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from scripts.task_output_types import Classifier
+from scripts.lm_eval_harness.task_output_types import Classifier
 
 
 def _entry(kind, cfg=None, tags=()):

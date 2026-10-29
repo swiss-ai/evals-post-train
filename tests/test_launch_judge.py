@@ -2,7 +2,7 @@ import shlex
 import unittest
 from unittest.mock import patch
 
-from scripts import launch_judge
+from scripts.lm_eval_harness import launch_judge
 from swiss_ai_model_launch import JobStatus, LaunchArgs
 
 

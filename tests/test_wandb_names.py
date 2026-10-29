@@ -1,6 +1,6 @@
 import unittest
 
-from scripts.alignment.wandb_names import (
+from scripts.results.wandb_names import (
     WANDB_ARTIFACT_NAME_LIMIT,
     WANDB_RUN_ID_MAX_LENGTH,
     make_sample_table_key,

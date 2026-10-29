@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.eval_export.exporter import (
+from scripts.results.eval_export.exporter import (
     ExportError,
     _evaluation_name,
     _internal_task_mapping,

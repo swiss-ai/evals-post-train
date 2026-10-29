@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.alignment.harbor_wandb_utils import create_model_evaluation_from_harbor_run
+from scripts.results.harbor_wandb_utils import create_model_evaluation_from_harbor_run
 
 
 def _trial(task, reward=None, error=None, start="2026-10-27T09:00:00Z", end="2026-10-27T09:10:00Z"):

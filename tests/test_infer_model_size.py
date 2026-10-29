@@ -1,6 +1,6 @@
 import unittest
 
-from scripts.infer_model_size import infer_parameter_billions
+from scripts.lm_eval_harness.infer_model_size import infer_parameter_billions
 
 
 class InferModelSizeTests(unittest.TestCase):

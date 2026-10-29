@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.alignment.merge_split_results import merge_split_results
-from scripts.eval_state import (
+from scripts.results.merge_split_results import merge_split_results
+from scripts.lm_eval_harness.eval_state import (
     RUN_CONFIG_FILENAME,
     make_run_config,
     read_tasks,
@@ -145,7 +145,7 @@ class EvalStateTests(unittest.TestCase):
                 "EVAL_MAX_PARALLEL": "2",
                 "EVAL_MAX_RETRIES": "1",
                 "EVAL_FORCE_TASKS": "",
-                "SBATCH_SCRIPT": "scripts/evaluate.sbatch",
+                "SBATCH_SCRIPT": "scripts/lm_eval_harness/evaluate.sbatch",
                 "LM_EVAL_BACKEND": "vllm",
                 # The environment-preparation path, even inside the prebuilt image.
                 "EVAL_PREBUILT_ENV": "0",
@@ -154,7 +154,7 @@ class EvalStateTests(unittest.TestCase):
                 [
                     "bash",
                     "-c",
-                    "set -euo pipefail; source scripts/evaluation_orchestrator.sh; "
+                    "set -euo pipefail; source scripts/lm_eval_harness/evaluation_orchestrator.sh; "
                     "submit_evaluation test/model test-model",
                 ],
                 cwd=repo_root,
@@ -165,7 +165,7 @@ class EvalStateTests(unittest.TestCase):
             )
             output = completed.stdout + completed.stderr
             self.assertIn("--array=0-2%2", output)
-            self.assertIn("scripts/prepare_eval_env.sbatch", output)
+            self.assertIn("scripts/lm_eval_harness/prepare_eval_env.sbatch", output)
             self.assertIn("afterany:dry-array-0", output)
             self.assertIn("--job-name=eval-ctrl-test-model-a0", output)
 
@@ -198,7 +198,7 @@ class EvalStateTests(unittest.TestCase):
                 "EVAL_FAILURE_POLICY": "resume",
                 "EVAL_CHUNK_SIZE": "2",
                 "EVAL_FORCE_TASKS": "",
-                "SBATCH_SCRIPT": "scripts/evaluate.sbatch",
+                "SBATCH_SCRIPT": "scripts/lm_eval_harness/evaluate.sbatch",
                 "LM_EVAL_BACKEND": "vllm",
                 "EVAL_PREBUILT_ENV": "0",
                 "JUDGE_MODE": "none",
@@ -207,7 +207,7 @@ class EvalStateTests(unittest.TestCase):
                 [
                     "bash",
                     "-c",
-                    "set -euo pipefail; source scripts/evaluation_orchestrator.sh; "
+                    "set -euo pipefail; source scripts/lm_eval_harness/evaluation_orchestrator.sh; "
                     "submit_evaluation test/model test-model",
                 ],
                 cwd=repo_root,
