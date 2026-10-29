@@ -26,7 +26,8 @@
 # Pods are labelled sandbox-run=harbor-<job id>. Three minutes before the time limit the job stops
 # the run (summary.json keeps the trials that finished, see scripts/harbor/run.py), and at the end
 # it deletes whatever pods and NetworkPolicies with that label are left (a run cut off mid-trial
-# does not clean up after itself).
+# does not clean up after itself). With a SANDBOX_K8S_RUN_LABEL set by hand it only prints the
+# command, since other runs may share that label.
 #
 # Usage:
 #   sbatch [-p debug -t 1:00:00] scripts/harbor/run_harbor_eval.sbatch <run_harbor_eval.sh args...>
@@ -61,17 +62,24 @@ ARGS=("$@")
 # In the background so the USR1 trap (--signal above) runs while the run is still going.
 srun -n 1 bash scripts/harbor/run_harbor_eval.sh "${ARGS[@]}" &
 RUN_PID=$!
-trap 'echo "Time limit near: stopping the run"; kill -TERM "$RUN_PID"' USR1
+# "|| true": the signal can come after the run ended, and set -e must not skip the cleanup below.
+trap 'echo "Time limit near: stopping the run"; kill -TERM "$RUN_PID" 2>/dev/null || true' USR1
 STATUS=0
 wait "$RUN_PID" || STATUS=$?
 # wait returns early (status > 128) when the trap fires; wait for srun to finish stopping.
 while kill -0 "$RUN_PID" 2>/dev/null; do wait "$RUN_PID" || STATUS=$?; done
 
-if [[ " ${ARGS[*]} " != *" --sandbox docker "* ]] && command -v kubectl >/dev/null; then
+CLEANUP="kubectl -n $SANDBOX_K8S_NAMESPACE delete pods,networkpolicies -l sandbox-run=$SANDBOX_K8S_RUN_LABEL"
+if [[ " ${ARGS[*]} " == *" --sandbox docker "* ]] || ! command -v kubectl >/dev/null; then
+    :
+elif [[ "$SANDBOX_K8S_RUN_LABEL" != "harbor-$SLURM_JOB_ID" ]]; then
+    # A label set by hand may be shared with other runs: their pods must not go with this job.
+    echo "Not cleaning up (custom SANDBOX_K8S_RUN_LABEL); leftover pods, if any: $CLEANUP" >&2
+else
     # Bounded: with an expired kubelogin token, kubectl waits for a browser login.
     timeout 120 kubectl -n "$SANDBOX_K8S_NAMESPACE" delete pods,networkpolicies \
         -l "sandbox-run=$SANDBOX_K8S_RUN_LABEL" --ignore-not-found --wait=false ||
-        echo "warning: could not clean up; run: kubectl -n $SANDBOX_K8S_NAMESPACE delete pods,networkpolicies -l sandbox-run=$SANDBOX_K8S_RUN_LABEL" >&2
+        echo "warning: could not clean up; run: $CLEANUP" >&2
 fi
 echo "END TIME: $(date)"
 exit $STATUS
