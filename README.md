@@ -1288,11 +1288,11 @@ python -m scripts.alignment.update_wandb_inspect --entity <entity> --project <pr
 
 ---
 
-## Alternative: tau2-bench / terminal-bench / GDPval-AA v2 (standalone AA-protocol runners)
+## Alternative: tau2-bench / GDPval-AA v2 (standalone AA-protocol runners)
 
-Three more Artificial-Analysis-aligned benchmarks, each its own standalone script rather than an Inspect AI task — none of these three go through `run_inspect_eval.sh` or `inspect_evals` at all. This repo already documents *different*, narrower `inspect_evals` ports of tau2-bench and GDPval above (in the Inspect AI section) — those are independent implementations, not the same code as the scripts below, and don't necessarily match Artificial Analysis's real protocol values. There is no `inspect_evals` port of Terminal-Bench at all.
+Two more Artificial-Analysis-aligned benchmarks, each its own standalone script rather than an Inspect AI task — neither goes through `run_inspect_eval.sh` or `inspect_evals` at all. This repo already documents *different*, narrower `inspect_evals` ports of tau2-bench and GDPval above (in the Inspect AI section) — those are independent implementations, not the same code as the scripts below, and don't necessarily match Artificial Analysis's real protocol values. Terminal-Bench with Artificial Analysis's protocol runs through the [Harbor runner](#harbor-swe-bench-swe-bench-pro-and-other-agentic-coding-and-terminal-benchmarks): `--benchmark terminal_bench_2_1 --attempts 3` (terminus-2 is its default agent).
 
-Each script installs its own dependencies at runtime (tau2-bench/Harbor/Stirrup), takes `--model`/`--api-base-url` the same way `run_inspect_eval.sh` does (falling back to `scripts/cscs_serving_api_key.txt` for the serving key), bakes in Artificial Analysis's protocol defaults, and writes results to a local scratch dir instead of posting to a callback (unlike evals-svc's own copies of this same logic, which these scripts were extracted from). See each script's own `--help` for full options.
+Each script installs its own dependencies at runtime (tau2-bench/Stirrup), takes `--model`/`--api-base-url` the same way `run_inspect_eval.sh` does (falling back to `scripts/cscs_serving_api_key.txt` for the serving key), bakes in Artificial Analysis's protocol defaults, and writes results to a local scratch dir instead of posting to a callback (unlike evals-svc's own copies of this same logic, which these scripts were extracted from). See each script's own `--help` for full options.
 
 ```bash
 # tau2-bench (tau2-bench v1.0.1, banking_knowledge domain, bm25_grep retrieval, 5 trials, 200
@@ -1303,12 +1303,6 @@ Each script installs its own dependencies at runtime (tau2-bench/Harbor/Stirrup)
 aaii/run_tau2_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
   --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --user-llm openai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --num-tasks 2 --num-trials 1
-
-# terminal-bench (Harbor, Terminus 2 agent, terminal-bench-2-1 dataset, 3 trials). Needs a real
-# Docker daemon or podman (the script falls back to podman through a docker-compatible shim,
-# same as evals-svc's own runner does on Clariden) -- smoke test with one task/one trial:
-aaii/run_terminal_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
-  --api-base-url https://api.swissai.svc.cscs.ch/v1 --num-tasks 1 --num-trials 1
 
 # GDPval-AA v2 (Stirrup, the full 220-task openai/gdpval gold set, up to 250 turns, E2B sandbox
 # by default -- needs E2B_API_KEY; pass --sandbox-backend local for the free, non-isolated
@@ -1331,6 +1325,7 @@ aaii/run_gdpval.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
 | `swe_bench_pro` | SWE-bench Pro **v1** (`swebenchpro@1.0`) | 731 |
 | `multi_swe_bench` | Multi-SWE-bench, generated locally by Harbor's adapter (no published dataset) | 1,632 |
 | `terminal_bench_2` | Terminal-Bench 2.0 | 89 |
+| `terminal_bench_2_1` | Terminal-Bench 2.1, the version Artificial Analysis reports (their protocol: `terminus-2`, `--attempts 3`) | 89 |
 | `terminal_bench_4` | Terminal-Bench 4.0.0 | 66 |
 | `deep_swe` | DeepSWE v1.1 | 113 |
 | `slop_code_bench` | SlopCodeBench | 36 |
@@ -1373,7 +1368,12 @@ sbatch -p debug -t 1:25:00 scripts/run_harbor_eval.sbatch --benchmark swe_bench,
   --model RCP-AIaaS/Qwen/Qwen3.6-35B-A3B --api-base-url https://api.swissai.svc.cscs.ch/v1 --limit 1
 ```
 
-`aaii/run_terminal_bench.sh` (Terminal-Bench 2.1 with Artificial Analysis's protocol, which evals-svc delegates to) is unchanged.
+With `--attempts <k>` > 1, `summary.json` also has Harbor's `pass_at_k` per benchmark. Artificial Analysis's Terminal-Bench protocol:
+
+```bash
+scripts/run_harbor_eval.sh --benchmark terminal_bench_2_1 --attempts 3 \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1
+```
 
 ---
 

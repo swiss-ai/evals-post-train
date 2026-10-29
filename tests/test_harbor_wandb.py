@@ -32,6 +32,7 @@ class HarborWandbTests(unittest.TestCase):
                     },
                     "slop_code_bench": {"metrics": {"strict_pass_rate": 0.25}, "n_trials": 1, "n_scored": 1,
                                         "evaluation_errors": []},
+                    "aider_polyglot": {"mean_reward": 1.0, "n_trials": 2, "n_scored": 2, "pass_at_k": {"2": 1.0}},
                 }
             }
             (work_dir / "summary.json").write_text(json.dumps(summary))
@@ -52,6 +53,9 @@ class HarborWandbTests(unittest.TestCase):
         self.assertEqual(flat["swe_bench/reward"], 0.5)
         self.assertEqual(flat["swe_bench/n_errors"], 1)
         self.assertEqual(flat["slop_code_bench/strict_pass_rate"], 0.25)
+        # An older summary.json (mean_reward only), with pass@k from --attempts.
+        self.assertEqual(flat["aider_polyglot/reward"], 1.0)
+        self.assertEqual(flat["aider_polyglot/pass@2"], 1.0)
         swe = evaluation.tasks[0]
         self.assertEqual(len(swe.samples), 3)
         by_task = {s.sample_data["task"]: s.sample_data for s in swe.samples}
