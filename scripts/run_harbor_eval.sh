@@ -53,11 +53,16 @@
 #   --max-concurrency <n>       Trials in flight at once = containers alive at once (default: 4).
 #   --attempts <n>              Attempts per task (default: 1; pass@k from more).
 #   --timeout-multiplier <f>    Multiplies every task's timeouts (default: 1.0).
+#   --wandb-entity <entity>     Upload the results to W&B (with --wandb-project; also WANDB_ENTITY):
+#   --wandb-project <project>   one run named --name, per benchmark its reward (or verifier
+#                               metrics), n_trials/n_scored/n_errors and a few sample trials.
+#                               Uploaded also when some trials were not scored (n_errors > 0).
 #
 # Environment:
 #   TARGET_API_KEY   key for --api-base-url (default: scripts/cscs_serving_api_key.txt).
 #   HARBOR_VENV      venv to install into / run from (default: a cache dir keyed by the
 #                    requirements file's hash).
+#   WANDB_API_KEY    for the W&B upload (default: scripts/wandb_api_key.txt).
 #   SANDBOX_K8S_*  --sandbox k8s pod settings, shared with the EvalScope runner: namespace
 #                    (SANDBOX_K8S_NAMESPACE), node arch, tolerations, memory request, run label
 #                    (pods are labelled sandbox-run=<label>), pull secret, ready timeout. See
@@ -87,6 +92,8 @@ WORK_DIR=""
 SANDBOX=""
 GOLD=0
 API_BASE_URL=${API_BASE_URL:-""}
+WANDB_ENTITY=${WANDB_ENTITY:-""}
+WANDB_PROJECT=${WANDB_PROJECT:-""}
 RUN_ARGS=()
 
 while (( $# > 0 )); do
@@ -97,6 +104,8 @@ while (( $# > 0 )); do
         --sandbox) SANDBOX=$2; shift 2 ;;
         --api-base-url) API_BASE_URL=$2; shift 2 ;;
         --gold) GOLD=1; shift ;;
+        --wandb-entity) WANDB_ENTITY=$2; shift 2 ;;
+        --wandb-project) WANDB_PROJECT=$2; shift 2 ;;
         --benchmark|--agent|--agent-kwarg|--limit|--task|--max-concurrency|--attempts|--timeout-multiplier)
             RUN_ARGS+=("$1" "$2"); shift 2 ;;
         -h|--help) usage; exit 0 ;;
@@ -112,6 +121,18 @@ else
     [[ -n "$API_BASE_URL" ]] || die "Missing --api-base-url. See --help."
     [[ "$API_BASE_URL" == */v1 || "$API_BASE_URL" == */v1/ ]] || API_BASE_URL="${API_BASE_URL%/}/v1"
     MODEL_ARGS=(--model "$MODEL" --api-base-url "${API_BASE_URL%/}")
+fi
+
+if [[ -n "$WANDB_ENTITY" && -z "$WANDB_PROJECT" ]] || [[ -z "$WANDB_ENTITY" && -n "$WANDB_PROJECT" ]]; then
+    die "--wandb-entity and --wandb-project must be given together (or neither, to skip W&B upload)."
+fi
+if [[ -n "$WANDB_ENTITY" ]]; then
+    WANDB_API_KEY="${WANDB_API_KEY:-}"
+    if [[ -z "$WANDB_API_KEY" && -f ./scripts/wandb_api_key.txt ]]; then
+        WANDB_API_KEY="$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)"
+    fi
+    [[ -n "$WANDB_API_KEY" ]] || die "W&B upload requested but WANDB_API_KEY is not set and scripts/wandb_api_key.txt is missing."
+    export WANDB_API_KEY
 fi
 
 if [[ -z "$SANDBOX" ]]; then
@@ -149,6 +170,17 @@ mkdir -p "$WORK_DIR"
 CMD=("$PY" -m scripts.harbor_runner.run "${MODEL_ARGS[@]}" --work-dir "$WORK_DIR" --sandbox "$SANDBOX"
      ${RUN_ARGS[@]+"${RUN_ARGS[@]}"})
 echo "Running: ${CMD[*]}"
-"${CMD[@]}"
+STATUS=0
+"${CMD[@]}" || STATUS=$?
 echo ""
 echo "Done. Scores and run metadata: $WORK_DIR/summary.json"
+
+if [[ -n "$WANDB_ENTITY" && -f "$WORK_DIR/summary.json" ]]; then
+    UPLOAD_CMD=("$PY" -m scripts.alignment.update_wandb_harbor --entity "$WANDB_ENTITY"
+                --project "$WANDB_PROJECT" --name "$NAME" --work-dir "$WORK_DIR")
+    echo ""
+    echo "Uploading results to wandb"
+    echo "Running: ${UPLOAD_CMD[*]}"
+    "${UPLOAD_CMD[@]}"
+fi
+exit $STATUS

@@ -7,3 +7,5 @@ harbor==0.25.0
 # Dockerfiles replayed with dockerfile-parse).
 kubernetes==37.0.1
 dockerfile-parse==2.0.1
+# --wandb-entity/--wandb-project: scripts.alignment.update_wandb_harbor runs from this venv.
+wandb==0.31.0
