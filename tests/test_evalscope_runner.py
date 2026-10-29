@@ -12,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from scripts import k8s_sandbox
+from scripts.common import k8s_sandbox
 from scripts.evalscope import run
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

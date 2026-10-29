@@ -259,7 +259,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     swe_bench_scoring.install(sandbox_config(args))
     if args.sandbox == "k8s":
-        from scripts import k8s_sandbox
+        from scripts.common import k8s_sandbox
 
         if "memory_limit" not in json.loads(args.sandbox_config) and not k8s_sandbox.setting("MEMORY_REQUEST"):
             os.environ["SANDBOX_K8S_MEMORY_REQUEST"] = K8S_MEMORY_REQUEST
