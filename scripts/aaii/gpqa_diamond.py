@@ -13,16 +13,14 @@ scoring", 5 repeats per question.
 epochs is a real keyword parameter on inspect_evals' own gpqa_diamond
 function (confirmed via `inspect.signature(gpqa_diamond)` against the
 installed inspect_evals), forwarded straight into Task(epochs=...) --
-so this needs no native `--epochs`-behind-a-literal-`--` CLI relocation the
-way evals-svc's own defaults-injection currently does for the same setting.
+so this needs no native `--epochs` passed behind a literal `--` on the CLI.
 
 epochs=5 is this wrapper's own keyword *default*, not a value hardcoded into
 the call -- so `--task-arg epochs=1` still reaches inspect_evals/gpqa_diamond
 for a smoke test, same as it would unwrapped. A no-argument wrapper that
 calls _gpqa_diamond(epochs=5) directly, as an earlier version of this file
 did, silently drops any `--task-arg epochs=...` override with a "param not
-used" warning instead (confirmed against scripts/aaii/hle.py's identical mistake,
-caught live against evals-svc's own self-grading path).
+used" warning instead (the same mistake scripts/aaii/hle.py once had).
 
 Everything else already matches inspect_evals' own defaults, so nothing
 else is overridden here: cot=True (matches simple-evals' own CoT-eliciting

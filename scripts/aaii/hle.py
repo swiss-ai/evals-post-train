@@ -9,8 +9,7 @@ equality-checker judge "adapted from the original HLE paper" using "GPT-5.6
 Luna (medium)", pass@1, a single judge. Mapped onto inspect_evals/hle's own
 task parameters (confirmed via `inspect.signature(hle)` against the
 installed inspect_evals, all three real keyword args -- no `--task-arg`/`--`
-CLI relocation needed the way evals-svc's own defaults-injection currently
-does it for the same three settings):
+on the CLI needed for them):
   - include_multi_modal=False  the text-only subset
   - judge_prompt="original"    inspect_evals' verbatim official-paper judge
                                 prompt -- the closest match to "adapted from
@@ -38,7 +37,7 @@ repo's docs/inspect-ai.md), and needs a real overridable
 parameter here to reach the task at all. A no-argument wrapper that calls
 _hle(judge_prompt="original", ...) directly, as an earlier version of this
 file did, silently drops that override with a "param not used" warning and
-hangs anyway -- confirmed live against evals-svc's own self-grading path.
+hangs anyway (seen in a real self-graded run).
 
 Plain `inspect_evals/hle` (bare `--task hle`) is also selectable and runs
 completely unwrapped -- no AAII defaults, whatever inspect_evals' own

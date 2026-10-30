@@ -79,9 +79,8 @@ scripts/inspect_ai/run_inspect_eval.sh --task scripts/aaii/hle.py \
 # provide_scientific_background=True and --epochs 3 (AA's protocol; plain scicode below keeps
 # inspect_evals' own background-free, --epochs 1 defaults) directly in the task. Needs a real
 # Docker daemon for its sandboxed code execution (true on a login node or inside the sbatch
-# container) -- unlike evals-svc's own AAII-wrapped scicode, which additionally pins
-# --sandbox local as a deployment-specific workaround for launchers with no Docker daemon; that
-# pin is NOT part of the AA protocol, so it is deliberately not baked in here:
+# container). Without one (e.g. in CSCS containers), pass --sandbox local; that is a deployment
+# choice, NOT part of the AA protocol, so it is deliberately not baked in here:
 scripts/inspect_ai/run_inspect_eval.sh --task scripts/aaii/scicode.py \
   --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --limit 2
@@ -175,11 +174,11 @@ python -m scripts.results.update_wandb_inspect --entity <entity> --project <proj
 
 ---
 
-## Standalone Artificial Analysis runners: tau2-bench / terminal-bench / GDPval-AA v2
+## Standalone Artificial Analysis runners: tau2-bench / GDPval-AA v2
 
-Three more Artificial-Analysis-aligned benchmarks, each its own standalone script rather than an Inspect AI task — none of these three go through `run_inspect_eval.sh` or `inspect_evals` at all. This repo already documents *different*, narrower `inspect_evals` ports of tau2-bench and GDPval above (in the Inspect AI section) — those are independent implementations, not the same code as the scripts below, and don't necessarily match Artificial Analysis's real protocol values. There is no `inspect_evals` port of Terminal-Bench at all; the [Harbor runner](harbor.md) runs the same protocol too (`--benchmark terminal_bench_2_1 --attempts 3`).
+Two more Artificial-Analysis-aligned benchmarks, each its own standalone script rather than an Inspect AI task — neither goes through `run_inspect_eval.sh` or `inspect_evals` at all. This repo already documents *different*, narrower `inspect_evals` ports of tau2-bench and GDPval above (in the Inspect AI section) — those are independent implementations, not the same code as the scripts below, and don't necessarily match Artificial Analysis's real protocol values. Terminal-Bench with Artificial Analysis's protocol runs through the [Harbor runner](harbor.md): `--benchmark terminal_bench_2_1 --attempts 3`.
 
-Each script installs its own dependencies at runtime (tau2-bench/Harbor/Stirrup), takes `--model`/`--api-base-url` the same way `run_inspect_eval.sh` does (falling back to `scripts/cscs_serving_api_key.txt` for the serving key), bakes in Artificial Analysis's protocol defaults, and writes results to a local scratch dir instead of posting to a callback (unlike evals-svc's own copies of this same logic, which these scripts were extracted from). See each script's own `--help` for full options.
+Each script installs its own dependencies at runtime (tau2-bench/Stirrup), takes `--model`/`--api-base-url` the same way `run_inspect_eval.sh` does (falling back to `scripts/cscs_serving_api_key.txt` for the serving key), bakes in Artificial Analysis's protocol defaults, and writes results to a local scratch dir. See each script's own `--help` for full options.
 
 ```bash
 # tau2-bench (tau2-bench v1.0.1, banking_knowledge domain, bm25_grep retrieval, 5 trials, 200
@@ -190,12 +189,6 @@ Each script installs its own dependencies at runtime (tau2-bench/Harbor/Stirrup)
 scripts/aaii/run_tau2_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
   --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --user-llm openai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --num-tasks 2 --num-trials 1
-
-# terminal-bench (Harbor, Terminus 2 agent, terminal-bench-2-1 dataset, 3 trials). Needs a real
-# Docker daemon or podman (the script falls back to podman through a docker-compatible shim,
-# same as evals-svc's own runner does on Clariden) -- smoke test with one task/one trial:
-scripts/aaii/run_terminal_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
-  --api-base-url https://api.swissai.svc.cscs.ch/v1 --num-tasks 1 --num-trials 1
 
 # GDPval-AA v2 (Stirrup, the full 220-task openai/gdpval gold set, up to 250 turns, E2B sandbox
 # by default -- needs E2B_API_KEY; pass --sandbox-backend local for the free, non-isolated

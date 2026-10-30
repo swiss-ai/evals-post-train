@@ -2,8 +2,7 @@
 
 Both run every sample/trial in its own container, normally through a Docker daemon. Our
 runners have none (k8s Jobs are unprivileged pods, CSCS refuses privileged containers, Clariden
-has no Docker), so each sandbox is a plain, unprivileged pod running the same image -- the
-approach evals-svc's harbor_envs/evals_k8s.py takes for Terminal-Bench's trial containers.
+has no Docker), so each sandbox is a plain, unprivileged pod running the same image.
 
 - EvalScope: install() swaps ms-enclave's Docker manager for K8sPodSandboxManager.
 - Harbor: scripts/harbor/k8s_environment.py is a Harbor environment built on

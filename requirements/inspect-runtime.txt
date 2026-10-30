@@ -19,9 +19,9 @@ openai
 gdown
 # inspect_evals/scicode's own scorer runtime deps (its docker-requirements.txt,
 # baked into the Docker image its Task declares by default) -- needed here too
-# for evals-svc's --sandbox local override: CSCS refuses privileged containers,
-# so the k8s/FirecREST backends run scicode's generated code as a plain
-# subprocess in this job instead of a nested sandbox.
+# for --sandbox local: CSCS refuses privileged containers, so there scicode's
+# generated code runs as a plain subprocess in this job instead of a nested
+# sandbox.
 numpy
 scipy
 sympy

@@ -130,9 +130,7 @@ CHALLENGE_COUNT = 70
 GRADING_URL_ENV = "CRITPT_GRADING_URL"
 GRADING_API_KEY_ENV = "CRITPT_API_KEY"
 # The real, production endpoint (see module docstring) -- a hardcoded
-# fallback, not just evals-svc's own settings.critpt_grading_url default, so
-# this task is self-sufficient when run standalone (`inspect eval
-# scripts/aaii/aa_critpt.py` directly, outside evals-svc's own env-building).
+# fallback, so the task needs no CRITPT_GRADING_URL to be set.
 DEFAULT_GRADING_URL = "https://artificialanalysis.ai/api/v2/critpt/evaluate"
 
 # Verbatim from the reference repo's templates/prompt_template_default.yaml,
@@ -307,10 +305,8 @@ class SubmitToCritPtGradingServer(Hooks):
         by_epoch = _group_submissions_by_epoch(samples, model_name)
 
         # Falls back to the real production endpoint (see DEFAULT_GRADING_URL)
-        # rather than requiring the caller to set CRITPT_GRADING_URL -- this
-        # task is self-sufficient standalone, not just under evals-svc (which
-        # always exports it anyway, since settings.critpt_grading_url has the
-        # same default). api_key has no such fallback -- there is no public
+        # rather than requiring the caller to set CRITPT_GRADING_URL. api_key
+        # has no such fallback -- there is no public
         # default credential, and its absence is the expected state until AA
         # grants this account access (see module docstring).
         url = os.environ.get(GRADING_URL_ENV) or DEFAULT_GRADING_URL

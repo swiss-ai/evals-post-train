@@ -1,19 +1,16 @@
 #!/bin/bash
 #
 # run_tau2_bench.sh - Run tau2-bench (https://github.com/sierra-research/tau2-bench) against a
-# model, standalone -- the same real protocol evals-svc's own tau_bench.py suite runs, extracted
-# here so it's runnable directly from evals-post-train without going through evals-svc's API.
-# NOT the same benchmark as this repo's inspect_evals/tau2 (documented separately above): that's
-# a narrower, independent inspect_evals port; this script drives the real tau2-bench package,
-# matching evals-svc's own protocol exactly (AA_PROTOCOL below).
+# model with Artificial Analysis's protocol (AA_PROTOCOL below). NOT the same benchmark as this
+# repo's inspect_evals/tau2 (docs/inspect-ai.md): that's a narrower, independent inspect_evals
+# port; this script drives the real tau2-bench package.
 #
 # The default is Artificial Analysis's tau^3-Banking protocol, so scores line up with the AA
 # Intelligence Index: tau2-bench v1.0.1, domain banking_knowledge, retrieval bm25_grep, 5 trials
 # per task, 200 max steps, user simulator + NL-assertion judge GPT-5.4 mini (medium reasoning),
 # pass@1 averaged over trials (reported here as pass^k for k=1..num_trials, tau2-bench's own
 # metric). Every default can be overridden; a run that deviates is just a different, non-AA-
-# protocol run -- this script does not track/refuse that the way evals-svc's own aa_protocol
-# flag does.
+# protocol run.
 #
 # The agent (the model under test) is reached the same way run_inspect_eval.sh reaches its
 # model: --api-base-url wraps --model as an OpenAI-compatible endpoint via litellm; without
@@ -72,8 +69,7 @@
 #   -- <extra args>             Forwarded verbatim to `tau2 run`.
 #
 # Results: tau2 writes <data dir>/simulations/<--save-to>/results.json (every simulation, its
-# reward and messages) -- this script also prints a pass^k summary computed from it, same
-# metric evals-svc's own results-parsing computes.
+# reward and messages) -- this script also prints a pass^k summary computed from it.
 #
 # Example (banking_knowledge smoke test against a CSCS-served model):
 #   scripts/aaii/run_tau2_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \

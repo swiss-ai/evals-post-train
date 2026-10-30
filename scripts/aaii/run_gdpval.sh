@@ -1,18 +1,15 @@
 #!/bin/bash
 #
 # run_gdpval.sh - Run GDPval-AA v2 (https://artificialanalysis.ai/evaluations/gdpval-aa) against
-# a model, standalone -- the same real protocol evals-svc's own gdpval.py suite runs (Stirrup,
-# AA's own open-source agent harness, github.com/ArtificialAnalysis/Stirrup), extracted here so
-# it's runnable directly from evals-post-train without going through evals-svc's API. NOT the
-# same as this repo's inspect_evals/gdpval (documented separately above): that's a narrower,
-# independent port with a different (bash/python-in-Docker, no web) tool surface; this script
-# drives Stirrup, matching AA's stated protocol tools (Web Fetch, Web Search, View Image, Code
-# Exec, Finish, Abandon Task) and evals-svc's own implementation exactly.
+# a model with Artificial Analysis's protocol, through Stirrup (AA's own open-source agent
+# harness, github.com/ArtificialAnalysis/Stirrup). NOT the same as this repo's
+# inspect_evals/gdpval (docs/inspect-ai.md): that's a narrower, independent port with a different
+# (bash/python-in-Docker, no web) tool surface; this script drives Stirrup, matching AA's stated
+# protocol tools (Web Fetch, Web Search, View Image, Code Exec, Finish, Abandon Task).
 #
 # Protocol (AA's methodology page): the full 220-task openai/gdpval gold set, 1 generation per
-# task, up to 250 turns, a code-exec sandbox (E2B by default here, matching AA's real protocol;
-# evals-svc itself defaults to a free local subprocess sandbox instead -- see --sandbox-backend
-# below for the cost/isolation tradeoff). GRADING here is a proxy, not AA's real cross-model Elo
+# task, up to 250 turns, a code-exec sandbox (E2B by default, matching AA's real protocol; see
+# --sandbox-backend below for the cheaper, non-isolated alternative). GRADING here is a proxy, not AA's real cross-model Elo
 # (that needs their whole comparison pool, not reproducible standalone): a win/tie/loss rate
 # from pairwise comparisons between the model's own deliverable and each task's human-expert
 # reference deliverable, judged by whichever of a 3-provider judge panel (OpenAI/Google/
@@ -40,8 +37,7 @@
 #   --max-concurrency <n>        Parallel tasks (default: 4).
 #   --sandbox-backend <name>    "e2b" (default here -- AA's real protocol; isolated, real
 #                               per-second cost, needs E2B_API_KEY) or "local" (free plain
-#                               subprocess, NOT isolated from the agent's own generated code --
-#                               evals-svc's own default, for cost reasons).
+#                               subprocess, NOT isolated from the agent's own generated code).
 #   --e2b-template <name>       E2B sandbox template (default: code-interpreter-v1).
 #   --workdir <path>            Scratch dir for generated deliverables (default: a temp dir
 #                               under /tmp).
@@ -59,7 +55,7 @@
 # Results: one directory per task under <workdir>/gdpval_runs/<task_id>/ (every deliverable
 # file the agent produced), a printed win/tie/loss summary once grading completes (or a note
 # that no judge credentials were configured), and a structured <workdir>/gdpval_result.json
-# (status/results/samples/error, same shape evals-svc's own callback payload uses).
+# (status/results/samples/error).
 #
 # Example (smoke test, free local sandbox, no grading credentials):
 #   scripts/aaii/run_gdpval.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
@@ -374,8 +370,8 @@ async def main():
         for i, r in enumerate(results)
     ]
 
-    # Same "succeeded whenever there is anything to show" rule as evals-svc's own results
-    # parsing: real graded results, or at least one deliverable generated even if ungraded.
+    # Succeeded whenever there is anything to show: real graded results, or at least one
+    # deliverable generated even if ungraded.
     any_deliverable = len(generation_errors) < len(rows)
     status = "succeeded" if results_payload is not None or any_deliverable else "failed"
     payload = {"status": status, "results": results_payload, "samples": samples}

@@ -698,8 +698,8 @@ in the checkout and that the packages import, then runs, never installing
 anything. `run_inspect_eval.sh` skips its install the same way. A mismatch
 (the scripts come from a different commit than the image) fails the job with
 a message naming both commits, so run the image with the scripts from the
-commit it was built from. evals-svc's k8s Jobs do exactly that, and fall back
-to the environment-building path when no image exists for a commit yet.
+commit it was built from, or use the environment-building path when no image
+exists for a commit yet.
 
 The harness is pinned, not the moving `HEAD` the building path follows: to
 ship a newer harness, bump its commit in `requirements/lm-eval-harness.txt`.
