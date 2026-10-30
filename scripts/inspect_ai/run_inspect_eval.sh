@@ -58,12 +58,10 @@
 #                              <mode>` to override (e.g. --display none).
 #   --name <name>              Run name, used for the log directory (default: derived from --model).
 #   --logs-dir <path>          Where Inspect writes .eval log files (default: logs/inspect/<name>).
-#   --wandb-entity <entity>    WandB entity to upload results to. Also settable via WANDB_ENTITY.
-#                              Uploading only happens when both this and --wandb-project are set
-#                              (unlike evaluate.sbatch's lm-eval-harness pipeline, upload here is
-#                              opt-in -- this script is also used for one-off/smoke-test runs that
-#                              you may not want landing in W&B).
-#   --wandb-project <project>  WandB project to upload results to. Also settable via WANDB_PROJECT.
+#   --wandb-entity <entity>    W&B entity and project to upload the results to (also WANDB_ENTITY,
+#   --wandb-project <project>  WANDB_PROJECT; default apertus/apertus-1.5-post-training-v0.1).
+#                              Uploaded whenever a W&B key is available, like lm-eval-harness runs.
+#   --no-wandb                 Don't upload (also WANDB_MODE=disabled), e.g. for a smoke test.
 #   -- <extra args>            Everything after a literal -- is forwarded verbatim to
 #                              `inspect eval`/`inspect eval-set` (e.g. -- --temperature 0.5
 #                              --max-connections 10).
@@ -73,8 +71,8 @@
 #   TARGET_API_KEY -- API key for the --api-base-url endpoint (default: CSCS_SERVING_API from
 #   scripts/cscs_serving_api_key.txt, same fallback as evaluate.sbatch's openai backend).
 #   WANDB_ENTITY, WANDB_PROJECT -- see --wandb-entity/--wandb-project above.
-#   WANDB_API_KEY -- required if uploading to W&B (default: scripts/wandb_api_key.txt, same
-#   fallback as evaluate.sbatch).
+#   WANDB_API_KEY -- for the W&B upload (default: scripts/wandb_api_key.txt, same fallback as
+#   evaluate.sbatch; without either, no upload).
 #   CRITPT_API_KEY -- grading-server credential for the CritPt task (scripts/aaii/aa_critpt.py); default:
 #   scripts/critpt_api_key.txt. Optional -- unset is the expected state until Artificial Analysis
 #   grants access (email critpt@artificialanalysis.ai); the run still completes and writes its
@@ -112,8 +110,7 @@ LOGS_DIR=""
 EVAL_SET=0
 API_BASE_URL=${API_BASE_URL:-""}
 API_MODEL_NAME=${API_MODEL_NAME:-""}
-WANDB_ENTITY=${WANDB_ENTITY:-""}
-WANDB_PROJECT=${WANDB_PROJECT:-""}
+NO_WANDB=0
 MODEL_ROLES=()
 TASK_ARGS=()
 EXTRA_ARGS=()
@@ -132,6 +129,7 @@ while (( $# > 0 )); do
         --api-base-url) API_BASE_URL=$2; shift 2 ;;
         --wandb-entity) WANDB_ENTITY=$2; shift 2 ;;
         --wandb-project) WANDB_PROJECT=$2; shift 2 ;;
+        --no-wandb) NO_WANDB=1; shift ;;
         -h|--help) usage; exit 0 ;;
         --) shift; EXTRA_ARGS+=("$@"); break ;;
         *) die "Unknown argument: $1 (see --help)" ;;
@@ -140,8 +138,12 @@ done
 
 [[ -n "$TASKS" ]] || die "Missing --task. See --help."
 [[ -n "$MODEL" ]] || die "Missing --model. See --help."
-if [[ -n "$WANDB_ENTITY" && -z "$WANDB_PROJECT" ]] || [[ -z "$WANDB_ENTITY" && -n "$WANDB_PROJECT" ]]; then
-    die "--wandb-entity and --wandb-project must be given together (or neither, to skip W&B upload)."
+# shellcheck source=scripts/common/wandb.sh
+source scripts/common/wandb.sh
+if (( NO_WANDB )); then
+    wandb_setup "--no-wandb"
+else
+    wandb_setup || exit 1
 fi
 
 API_MODEL_NAME=${API_MODEL_NAME:-$MODEL}
@@ -286,18 +288,11 @@ fi
 echo ""
 echo "Done. View results with: inspect view --log-dir $LOGS_DIR"
 
-if [[ -n "$WANDB_ENTITY" ]]; then
+if (( WANDB_UPLOAD )); then
     NEW_LOGS=$(comm -13 <(echo "$PRE_RUN_LOGS") <(find "$LOGS_DIR" -name '*.eval' 2>/dev/null | sort))
     if [[ -z "$NEW_LOGS" ]]; then
         echo "No new .eval logs found under $LOGS_DIR -- skipping W&B upload." >&2
     else
-        WANDB_API_KEY="${WANDB_API_KEY:-}"
-        if [[ -z "$WANDB_API_KEY" && -f ./scripts/wandb_api_key.txt ]]; then
-            WANDB_API_KEY="$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)"
-        fi
-        [[ -n "$WANDB_API_KEY" ]] || die "W&B upload requested but WANDB_API_KEY is not set and scripts/wandb_api_key.txt is missing."
-        export WANDB_API_KEY
-
         UPLOAD_CMD=(python -m scripts.results.update_wandb_inspect --entity "$WANDB_ENTITY" \
             --project "$WANDB_PROJECT" --name "$NAME")
         while IFS= read -r log; do UPLOAD_CMD+=(--eval-log "$log"); done <<< "$NEW_LOGS"

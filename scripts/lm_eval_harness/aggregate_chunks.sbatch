@@ -91,12 +91,16 @@ if (( MISSING_DURATIONS > 0 )); then
     echo "WARNING: $MISSING_DURATIONS result directories had no valid duration; aggregated duration is partial ($DURATION seconds)" >&2
 fi
 
-echo "Uploading merged results to wandb"
-WANDB_CMD="cd $PWD && python -m scripts.results.update_wandb_alignment --entity $WANDB_ENTITY --project $WANDB_PROJECT --logs_root $MERGED_DIR --name $NAME --main_metrics $TABLE_METRICS --eval_duration $DURATION"
-echo "Running: $WANDB_CMD"
-srun -ul --mpi=pmix --environment=./containers/env.toml bash -c " \
-    $WANDB_CMD
-"
+if [[ "${WANDB_MODE:-}" == disabled || -z "${WANDB_API_KEY:-}" ]]; then
+    echo "Skipping W&B upload ($([[ "${WANDB_MODE:-}" == disabled ]] && echo "WANDB_MODE=disabled" || echo "no WANDB_API_KEY")). Merged results in: $MERGED_DIR"
+else
+    echo "Uploading merged results to wandb"
+    WANDB_CMD="cd $PWD && python -m scripts.results.update_wandb_alignment --entity $WANDB_ENTITY --project $WANDB_PROJECT --logs_root $MERGED_DIR --name $NAME --main_metrics $TABLE_METRICS --eval_duration $DURATION"
+    echo "Running: $WANDB_CMD"
+    srun -ul --mpi=pmix --environment=./containers/env.toml bash -c " \
+        $WANDB_CMD
+    "
+fi
 
 echo "Aggregation complete"
 echo "END TIME: $(date)"

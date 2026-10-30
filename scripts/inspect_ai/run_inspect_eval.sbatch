@@ -29,8 +29,8 @@
 # scripts/<name>_key.txt. HF_TOKEN/CSCS_SERVING_API/WANDB_API_KEY fall back to their key files;
 # other provider keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, TARGET_API_KEY, ...) must already be
 # exported -- there's no fixed set of providers to special-case here, unlike the harness's single
-# backend. WANDB_API_KEY is only actually needed if you pass --wandb-entity/--wandb-project (or
-# set WANDB_ENTITY/WANDB_PROJECT) to opt into uploading results.
+# backend. With a WANDB_API_KEY the results are uploaded to W&B (see run_inspect_eval.sh's
+# --wandb-entity/--wandb-project; --no-wandb to skip).
 
 set -e
 
