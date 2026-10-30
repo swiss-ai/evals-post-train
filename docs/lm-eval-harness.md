@@ -85,6 +85,8 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--max-length N` | Backend context limit in tokens, exported as `MAX_LENGTH` (vLLM/SGLang `max_model_len`, Megatron `seq_length`, hf/openai `max_length`). Default: the backend's own. `loglikelihood_rolling` tasks such as `uncheatable_eval` cut each document into windows of this size, so set it to the model's context to score documents whole. |
 | `--limit N` | Limit number of samples per task (forwarded as `--limit` to lm-eval-harness; default: no limit). Useful for quick sanity checks. |
 | `--megatron-iter <iter>` | For Megatron-LM checkpoints, the iteration to evaluate (e.g. `8926`); defaults to `latest`. Exported as `CKPT_ITERATION`. |
+| `--convert-to-hf` | Convert the Megatron checkpoint at `--model` to HF first, then evaluate the result (needs `--megatron-iter`). See [Megatron checkpoints](#megatron-checkpoints). |
+| `--hf-output-dir <path>` | Where `--convert-to-hf` writes the converted checkpoint. |
 | `--harness-branch B` | Resolve lm-evaluation-harness from a branch, tag, or full commit SHA in the task-selected repository (default: repository HEAD); the resolved commit is shared by every chunk |
 | `--reservation <name>` | Submit evaluation jobs and any automatically launched judge under this SLURM reservation. |
 | `--qos <name>` | Submit every job, including any automatically launched judge, under this SLURM QOS (e.g. `highprio`). Exported as `SBATCH_QOS`. |
@@ -189,9 +191,49 @@ bash scripts/lm_eval_harness/launch_evaluations.sh default \
 # Run all models from a batch script on the safety suite
 bash scripts/lm_eval_harness/launch_evaluations.sh olmo-safety \
   --script scripts/lm_eval_harness/runners/example_models.sh --chunk-size 4
+
+# The SGLang backend
+bash scripts/lm_eval_harness/launch_evaluations.sh olmo-easy --model /capstor/store/../apertus-.../checkpoints/ --backend sglang
+
+# Against an already-running OpenAI-compatible endpoint (vLLM serve, CSCS serving, ...) instead of
+# loading the model in the job
+bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B \
+  --backend openai --api-base-url http://nid001234:8000
+
+# A small model on a single task, useful for testing newly implemented tasks
+bash scripts/lm_eval_harness/launch_evaluations.sh single --task multijail --model meta-llama/Llama-3.2-3B --backend vllm
 ```
 
 `--bos` explicitly prepends a BOS token. Normally leave it unset unless the model requires it; chat-template detection does not infer this option.
+
+### Megatron checkpoints
+
+There are two ways to evaluate a Megatron-LM checkpoint:
+
+```bash
+# Natively with the megatron_lm backend, no conversion; --megatron-iter defaults to latest
+bash scripts/lm_eval_harness/launch_evaluations.sh olmo-easy --model /capstor/store/../apertus-.../checkpoints/ \
+  --backend megatron_lm --name Megatron-Test-260216 --megatron-iter 4000000
+
+# Converted to HF first, then evaluated with vLLM (recommended: supports vllm/sglang/hf and the
+# thinking metrics)
+bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k \
+  --model /capstor/store/cscs/swissai/infra01/apertus_checkpoints/v1p5/megatron/8B/pretraining \
+  --backend vllm --convert-to-hf --megatron-iter 430000 --name Apertus-v1p5-8B-pretraining
+```
+
+With `--convert-to-hf`, `--megatron-iter` is required (there is no `latest` for conversion). The converted checkpoint goes to `/capstor/.../infra01/hf_models/models/swiss-ai/<name>-iter<N>/` by default (`--hf-output-dir` overrides it), and an existing conversion is reused. Checkpoints saved with `--ckpt-fully-parallel-save` work too; `tools/checkpoint`'s converter needs swiss-ai/Megatron-LM's `fix/convert-fully-parallel-save-checkpoints` branch, or a merged equivalent, for those.
+
+To test the conversion alone, without an eval, e.g. on an iteration directory directly:
+
+```bash
+SBATCH_RESERVATION=<reservation> CHECK_EQ_HF=/capstor/store/cscs/swissai/infra01/apertus_checkpoints/v1p5/hf/8B/pretraining/iter_0430000 \
+  sbatch scripts/lm_eval_harness/convert_megatron_checkpoint.sbatch \
+  /capstor/store/cscs/swissai/infra01/apertus_checkpoints/v1p5/megatron/8B/pretraining/iter_0430000 \
+  /iopsstor/scratch/cscs/$USER/Apertus-v1p5-8B-pretraining-iter430000
+```
+
+`CHECK_EQ_HF` compares the result tensor by tensor with a known-good HF checkpoint, if you have one. The jobs need `--reservation` (or `SBATCH_RESERVATION=<name>`) on Clariden's shared partition.
 
 ---
 
