@@ -58,12 +58,14 @@ class HarborCommandTest(unittest.TestCase):
 
     def test_adapter_tasks_are_generated(self):
         args = run.parse_args(["--benchmark", "multi_swe_bench", "--gold", "--work-dir", "w", "--sandbox", "docker", "--limit", "3"])
-        with mock.patch.object(run.subprocess, "run") as sub:
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(run.subprocess, "run") as sub, \
+                mock.patch.object(run, "download_dataset", return_value=Path("/hf/msb")) as download:
             cmd = run.harbor_command(args, "multi_swe_bench", Path("w/jobs"))
+        download.assert_called_once_with("ByteDance-Seed/Multi-SWE-bench", run.BENCHMARKS["multi_swe_bench"]["hf_dataset"][1])
         generate = sub.call_args[0][0]
         self.assertEqual(generate[:2], ["uvx", "--from"])
         self.assertIn(f"@v{run.HARBOR_VERSION}#subdirectory=adapters/multi-swe-bench", generate[2])
-        self.assertEqual(generate[-2:], ["--limit", "3"])
+        self.assertEqual(generate[-4:], ["--dataset-path", "/hf/msb", "--limit", "3"])
         self.assertEqual(cmd[cmd.index("-p") + 1], str(Path("w/tasks/multi-swe-bench")))
 
     def test_patched_dataset_is_downloaded_and_run_locally(self):
@@ -85,6 +87,17 @@ class HarborCommandTest(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("-i") + 1], "polyglot_rust_*")
         self.assertNotIn("-d", cmd)
 
+    def test_installed_adapter_is_used(self):
+        with tempfile.TemporaryDirectory() as root:
+            binary = Path(root, "multi-swe-bench", "bin", "multi-swe-bench")
+            binary.parent.mkdir(parents=True)
+            binary.touch()
+            with mock.patch.dict(os.environ, {"HARBOR_ADAPTERS_ROOT": root, "EVAL_PREBUILT_ENV": "1"}, clear=True):
+                self.assertEqual(run.adapter_command("multi-swe-bench"), [str(binary)])
+                # A prebuilt image without it refuses to fetch it.
+                with self.assertRaises(SystemExit):
+                    run.adapter_command("other-adapter")
+
     def test_model_env(self):
         args = run.parse_args(["--benchmark", "swe_bench", "--model", "m", "--api-base-url", "https://x/v1", "--work-dir", "w",
                                "--sandbox", "docker"])
@@ -96,6 +109,28 @@ class HarborCommandTest(unittest.TestCase):
 
 
 class SummaryTest(unittest.TestCase):
+    def test_results_json_is_flat(self):
+        with tempfile.TemporaryDirectory() as jobs:
+            job = Path(jobs, "swe_bench")
+            trials = {
+                "a__1": {"task_name": "a", "trial_name": "a__1", "verifier_result": {"rewards": {"reward": 1.0}},
+                         "started_at": "2026-10-29T10:00:00", "finished_at": "2026-10-29T10:05:00",
+                         "agent_result": {"n_input_tokens": 10}},
+                "c__1": {"task_name": "c", "trial_name": "c__1",
+                         "exception_info": {"exception_type": "RuntimeError", "exception_message": "pod OOMKilled"}},
+            }
+            for name, trial in trials.items():
+                Path(job, name).mkdir(parents=True)
+                Path(job, name, "result.json").write_text(json.dumps(trial))
+            flat = run.flat_results({"swe_bench": run.summarize_job(job)}, Path(jobs))
+        self.assertEqual(
+            flat["results"], {"swe_bench": {"accuracy": 1.0, "n_trials": 2, "n_scored": 1, "evaluation_errors": 1}}
+        )
+        first, second = (s["sample"] for s in flat["samples"])
+        self.assertEqual((first["task"], first["reward"], first["duration_s"], first["n_input_tokens"]), ("a", 1.0, 300.0, 10))
+        self.assertEqual((second["reward"], second["exception"]), (None, "RuntimeError: pod OOMKilled"))
+        self.assertEqual([s["doc_id"] for s in flat["samples"]], [0, 1])
+
     def test_unscored_trials_are_errors(self):
         with tempfile.TemporaryDirectory() as job:
             trials = {

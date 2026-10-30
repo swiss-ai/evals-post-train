@@ -44,6 +44,21 @@ RUN python -m venv /opt/evalscope-venv \
     && git -C /opt/swe-bench-pro-os rev-parse HEAD > /opt/swe-bench-pro-os.commit \
     && rm -rf /opt/swe-bench-pro-os/.git
 
+# Harbor (agentic benchmarks, run_harbor_eval.sh) in a fourth: it pins its own
+# dependency set. Multi-SWE-bench has no published Harbor dataset, only an
+# adapter that generates the tasks; run.py would fetch it with uvx at run time,
+# so it is installed here from the same Harbor tag (HARBOR_VERSION in
+# scripts/harbor/run.py, the harbor pin in harbor-runtime.txt), as
+# HARBOR_ADAPTERS_ROOT/<adapter>/bin/<adapter>.
+COPY requirements/harbor-runtime.txt /tmp/requirements/
+RUN python -m venv /opt/harbor-venv \
+    && /opt/harbor-venv/bin/pip install --no-cache-dir -r /tmp/requirements/harbor-runtime.txt \
+    && version=$(/opt/harbor-venv/bin/python -c "from importlib.metadata import version; print(version('harbor'))") \
+    && python -m venv /opt/harbor-adapters/multi-swe-bench \
+    && /opt/harbor-adapters/multi-swe-bench/bin/pip install --no-cache-dir \
+        "git+https://github.com/harbor-framework/harbor@v$version#subdirectory=adapters/multi-swe-bench" \
+    && /opt/harbor-adapters/multi-swe-bench/bin/multi-swe-bench --help >/dev/null
+
 # Each pinned harness as its own --no-deps overlay, the same layout
 # build_eval_env.sh produces, so several forks (all the lm_eval package)
 # could live side by side. evaluate.sbatch checks .commit against the pin
@@ -63,6 +78,8 @@ ENV EVAL_PREBUILT_ENV=1 \
     EVAL_PREBUILT_HARNESS_ROOT=/opt/lm-eval-harness \
     EVAL_INSPECT_VENV=/opt/inspect-venv \
     EVALSCOPE_VENV=/opt/evalscope-venv \
-    EVALSCOPE_SWE_BENCH_PRO_REPO=/opt/swe-bench-pro-os
+    EVALSCOPE_SWE_BENCH_PRO_REPO=/opt/swe-bench-pro-os \
+    HARBOR_VENV=/opt/harbor-venv \
+    HARBOR_ADAPTERS_ROOT=/opt/harbor-adapters
 
 WORKDIR /work
