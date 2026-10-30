@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # wandb.sh - Whether, and where, a run_*_eval.sh wrapper uploads its results to W&B. Sourced
 # from the repo root.
 #
