@@ -1,6 +1,6 @@
 # Results: W&B, exports and tables
 
-Where results go after a run: W&B (lm-eval-harness, Inspect and Harbor runs share one upload path in `scripts/results/`), Every Eval Ever / Hugging Face exports, and the result tables.
+Where results go after a run: W&B (all four frameworks share one upload path in `scripts/results/`), Every Eval Ever / Hugging Face exports, and the result tables.
 
 ## W&B Integration
 
@@ -79,6 +79,8 @@ python -m scripts.results.update_wandb_all_models \
   --entity apertus --project swissai-evals \
   --logs_root /path/to/eval-logs
 ```
+
+Inspect AI, Harbor and EvalScope runs upload when their script gets `--wandb-entity <e> --wandb-project <p>`. To upload a finished run's work dir afterwards, run the framework's module from that framework's environment: `scripts.results.update_wandb_inspect`, `update_wandb_harbor` or `update_wandb_evalscope` (see [inspect-ai.md](inspect-ai.md), [harbor.md](harbor.md), [evalscope.md](evalscope.md)).
 
 ---
 

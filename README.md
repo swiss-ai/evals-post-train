@@ -13,8 +13,8 @@ Harbor and EvalScope run each task in its own container, in local Docker or as K
 
 | | lm-eval-harness | Inspect AI | Harbor | EvalScope |
 |---|---|---|---|---|
-| On Clariden | `launch_evaluations.sh` submits the jobs | `run_inspect_eval.sbatch` | `run_harbor_eval.sbatch` (task pods on Breithorn) | no sbatch yet (evals-svc runs it as a k8s Job) |
-| W&B upload | yes | yes | yes | not yet |
+| On Clariden | `launch_evaluations.sh` submits the jobs | `run_inspect_eval.sbatch` | `run_harbor_eval.sbatch` (task pods on Breithorn) | `run_evalscope_eval.sbatch` (sandbox pods on Breithorn) |
+| W&B upload | automatic | `--wandb-entity/--wandb-project` | `--wandb-entity/--wandb-project` | `--wandb-entity/--wandb-project` |
 
 ---
 
@@ -106,7 +106,7 @@ evals-post-train/
 │   ├── lm_eval_harness/   # launch_evaluations.sh: Slurm jobs that serve the model and run lm-eval, in resumable chunks; judges, Megatron conversion
 │   ├── inspect_ai/        # run_inspect_eval.sh/.sbatch, sandbox_patches/
 │   ├── harbor/            # run_harbor_eval.sh/.sbatch, run.py (benchmarks), k8s/docker environments, task_patches.py
-│   ├── evalscope/         # run_evalscope_eval.sh, run.py, SWE-bench scorer
+│   ├── evalscope/         # run_evalscope_eval.sh/.sbatch, run.py, SWE-bench scorer
 │   ├── aaii/              # Artificial Analysis protocol: Inspect tasks (*.py) and standalone runners (run_*.sh)
 │   ├── common/            # k8s_sandbox.py: pod-per-sandbox backend (Harbor, EvalScope)
 │   └── results/           # W&B upload, tables, exports

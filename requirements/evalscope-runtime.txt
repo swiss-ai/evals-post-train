@@ -9,3 +9,5 @@ ms-enclave[docker]==0.0.8
 kubernetes==37.0.1
 # SWE-bench_Pro's patch-extraction fallback (evalscope's [swe-bench] extra).
 swebench==4.1.0
+# The W&B upload (scripts/results/update_wandb_evalscope.py, --wandb-entity/--wandb-project).
+wandb==0.31.0

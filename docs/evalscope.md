@@ -49,3 +49,11 @@ SANDBOX_K8S_NAMESPACE=<namespace> SANDBOX_K8S_RUN_LABEL=my-run \
   --sandbox k8s --limit 1 --max-concurrency 1 \
   --generation-config '{"retries": 100, "retry_interval": 60}'
 ```
+
+**On Clariden:** the nodes are aarch64 and have no Docker, so `scripts/evalscope/run_evalscope_eval.sbatch` runs EvalScope and the agent in a CPU job, with the sandboxes as Breithorn pods (`--sandbox k8s`, namespace `rob-poc` by default). The kubeconfig on Clariden authenticates through an OIDC login (kubelogin) that a batch job can't renew. Log in first (`kubectl get pods` works on the login node), and keep the run within the token's lifetime. The pods are labelled `sandbox-run=evalscope-<job id>`, and the job deletes the ones left at the end. Three minutes before the time limit it stops the run; EvalScope writes `summary.json` only when a run finishes, so a stopped run has none.
+
+```bash
+sbatch -p debug -t 1:00:00 scripts/evalscope/run_evalscope_eval.sbatch --benchmark swe_bench,swe_bench_pro --gold --limit 2
+```
+
+`--wandb-entity <entity> --wandb-project <project>` uploads the results to W&B as one run named `--name`, through the same `ModelEvaluation` structure and `upload_multi_model_results` as the other frameworks. Each benchmark gets its `accuracy` (the share of instances resolved), `n_samples` and `n_errors`, plus a few resolved, unresolved and failed-evaluation instances as samples (tests passed of those required, the failing tests, tokens, the patch). `accuracy` counts failed evaluations as unresolved, so with `n_errors` > 0 it is too low. To upload an existing run: `python -m scripts.results.update_wandb_evalscope --entity <e> --project <p> --name <name> --work-dir logs/evalscope/<name>` from the EvalScope venv.
