@@ -51,6 +51,7 @@
 #   --name <name>        - Override the eval run name (default: auto-derived from model path)
 #   --task <task>         - Task name for 'single' mode (e.g. hellaswag, gsm8k_cot)
 #   --wandb-project <name> - Override the W&B project name (default: apertus-1.5-post-training-v0.1)
+#   --no-wandb           - Don't upload the results to W&B (exports WANDB_MODE=disabled)
 #   --chat-template      - Apply the chat template to every task (the default)
 #   --no-chat-template   - Apply it to none (base models)
 #   --chat-template-by-type - Generative tasks with the chat template, log-likelihood ones
@@ -248,6 +249,7 @@ while [[ $# -gt 0 ]]; do
         --logs-root)     LOGS_ROOT_FLAG="$2";           shift 2 ;;
         --wandb-entity)  WANDB_ENTITY_FLAG="$2";        shift 2 ;;
         --wandb-project) WANDB_PROJECT_FLAG="$2";       shift 2 ;;
+        --no-wandb)      export WANDB_MODE=disabled;    shift ;;
         --account)       SBATCH_ACCOUNT_FLAG="$2";      shift 2 ;;
         --force-tasks)   FORCE_TASKS="$2";              shift 2 ;;
         --merge-only)    EVAL_MERGE_ONLY="true";        shift ;;

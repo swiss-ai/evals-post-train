@@ -6,6 +6,8 @@ Benchmarks that need their own scorer, a judge or a simulated user: Inspect AI t
 
 [Inspect AI](https://inspect.aisi.org.uk/) (UK AISI's eval framework) and its [`inspect_evals`](https://github.com/UKGovernmentBEIS/inspect_evals) collection give access to benchmarks not covered by the lm-evaluation-harness suites above (e.g. tau2-bench, an agentic tool-use benchmark). Inspect's execution and logging model (task registry, model roles, `.eval` log files) differs enough from lm-eval-harness's that these run through their own script, `scripts/inspect_ai/run_inspect_eval.sh`, instead of `launch_evaluations.sh`.
 
+Results are uploaded to W&B whenever a W&B key is available (see [W&B upload](#wb-upload)); most examples below are smoke tests (`--limit`), so add `--no-wandb` to keep them out of the shared project.
+
 Run it directly (e.g. on a login node) or, like the rest of this pipeline, as a SLURM job via `scripts/inspect_ai/run_inspect_eval.sbatch`, which forwards all arguments to `run_inspect_eval.sh` inside the same container as the other backends -- but requests CPU-only resources, since these benchmarks evaluate an already-running served endpoint rather than loading a model in-job:
 
 ```bash
@@ -155,14 +157,14 @@ Results are **not** viewed at inspect.aisi.org.uk — that's Inspect's documenta
 
 #### W&B upload
 
-Unlike `evaluate.sbatch`'s lm-eval-harness pipeline, where every run uploads to W&B automatically, uploading here is **opt-in**: pass both `--wandb-entity`/`--wandb-project` (or set `WANDB_ENTITY`/`WANDB_PROJECT`) to enable it, since this script is also used for one-off/smoke-test runs you may not want landing in a shared W&B project.
+Like every framework here, it uploads whenever a W&B key is available (`WANDB_API_KEY` or `scripts/wandb_api_key.txt`), by default to `apertus/apertus-1.5-post-training-v0.1`; `--wandb-entity`/`--wandb-project` change that, and `--no-wandb` (or `WANDB_MODE=disabled`) skips the upload, e.g. for a smoke test.
 
 ```bash
 scripts/inspect_ai/run_inspect_eval.sh --task tau2_retail --model Qwen/Qwen3-8B \
-  --api-base-url http://nid001234:8000 --wandb-entity apertus --wandb-project swissai-evals-test
+  --api-base-url http://nid001234:8000 --wandb-project swissai-evals-test
 ```
 
-When enabled, the script waits for `inspect eval`/`eval-set` to finish, diffs `--logs-dir` against its contents from before the run to find the `.eval` log(s) this run produced, and uploads them with:
+When uploading, the script waits for `inspect eval`/`eval-set` to finish, diffs `--logs-dir` against its contents from before the run to find the `.eval` log(s) this run produced, and uploads them with:
 
 ```bash
 python -m scripts.results.update_wandb_inspect --entity <entity> --project <project> \

@@ -65,6 +65,13 @@
 #   --gold                      Score each instance's reference patch instead of running a model (no
 #                               --model/--api-base-url): a check of the scoring pipeline, where every
 #                               instance should come out resolved.
+#   --wandb-entity <entity>     W&B entity and project to upload the results to (also WANDB_ENTITY,
+#   --wandb-project <project>   WANDB_PROJECT; default apertus/apertus-1.5-post-training-v0.1): one
+#                               run named --name, per benchmark its accuracy (share resolved),
+#                               n_samples, n_errors and a few sample instances. Uploaded whenever a
+#                               W&B key is available, also when some evaluations failed (n_errors >
+#                               0: the accuracy is then too low); not for --gold runs.
+#   --no-wandb                  Don't upload (also WANDB_MODE=disabled).
 #
 # Environment:
 #   TARGET_API_KEY   key for --api-base-url (default: scripts/cscs_serving_api_key.txt, the same
@@ -78,6 +85,8 @@
 #   SANDBOX_K8S_*  --sandbox k8s pod settings (namespace, tolerations, owner pod, pull secret,
 #                    ready timeout): see scripts/common/k8s_sandbox.py.
 #   HF_TOKEN         if the dataset download needs one.
+#   WANDB_API_KEY    for the W&B upload (default: scripts/wandb_api_key.txt; without either, no
+#                    upload).
 #
 # SWE-bench_Pro also clones scaleapi/SWE-bench_Pro-os (pinned by EvalScope to ca10a60) for each
 # instance's run script and parser, into ~/.cache/evalscope; it needs git and network access.
@@ -108,6 +117,7 @@ WORK_DIR=""
 SANDBOX=""
 GOLD=0
 API_BASE_URL=${API_BASE_URL:-""}
+NO_WANDB=0
 RUN_ARGS=()
 
 while (( $# > 0 )); do
@@ -119,6 +129,9 @@ while (( $# > 0 )); do
         --sandbox) SANDBOX=$2; shift 2 ;;
         --api-base-url) API_BASE_URL=$2; shift 2 ;;
         --gold) GOLD=1; shift ;;
+        --wandb-entity) WANDB_ENTITY=$2; shift 2 ;;
+        --wandb-project) WANDB_PROJECT=$2; shift 2 ;;
+        --no-wandb) NO_WANDB=1; shift ;;
         --shuffle) RUN_ARGS+=("$1"); shift ;;
         --sandbox-config|--limit|--max-concurrency|--max-steps|--strategy|--command-timeout|\
         --generation-config|--dataset-revision|--extra-param|--api-timeout)
@@ -139,6 +152,16 @@ if [[ "$GOLD" == "1" ]]; then
 else
     [[ -n "$MODEL" ]] || die "Missing --model. See --help."
     [[ -n "$API_BASE_URL" ]] || die "Missing --api-base-url. See --help."
+fi
+
+# shellcheck source=scripts/common/wandb.sh
+source scripts/common/wandb.sh
+if (( NO_WANDB )); then
+    wandb_setup "--no-wandb"
+elif [[ "$GOLD" == "1" ]]; then
+    wandb_setup "--gold: reference patches, not a model"
+else
+    wandb_setup || exit 1
 fi
 
 if [[ -z "$SANDBOX" ]]; then
@@ -193,10 +216,36 @@ else
 fi
 
 mkdir -p "$WORK_DIR"
+# Written at the end of the run: one left by an earlier run here must not be taken (and
+# uploaded) for this one's.
+rm -f "$WORK_DIR/summary.json"
 CMD=("$PY" -m scripts.evalscope.run --benchmark "$BENCHMARK" "${MODEL_ARGS[@]}"
      --work-dir "$WORK_DIR" --sandbox "$SANDBOX"
      ${RUN_ARGS[@]+"${RUN_ARGS[@]}"})
 echo "Running: ${CMD[*]}"
-"${CMD[@]}"
+# In the background with SIGTERM passed on (e.g. the sbatch's time-limit signal), so the
+# runner and its sandboxes stop instead of bash exiting at once and leaving them running.
+"${CMD[@]}" &
+RUN_PID=$!
+trap 'kill -TERM "$RUN_PID" 2>/dev/null || true' TERM INT
+STATUS=0
+wait "$RUN_PID" || STATUS=$?
+# wait returns early (status > 128) when the trap fires; wait for the runner to finish stopping.
+while kill -0 "$RUN_PID" 2>/dev/null; do wait "$RUN_PID" || STATUS=$?; done
+trap - TERM INT
 echo ""
+if [[ ! -f "$WORK_DIR/summary.json" ]]; then
+    echo "No $WORK_DIR/summary.json: the run did not finish (exit $STATUS), nothing to upload." >&2
+    exit $STATUS
+fi
 echo "Done. Scores and run metadata: $WORK_DIR/summary.json"
+
+if (( WANDB_UPLOAD )); then
+    UPLOAD_CMD=("$PY" -m scripts.results.update_wandb_evalscope --entity "$WANDB_ENTITY"
+                --project "$WANDB_PROJECT" --name "$NAME" --work-dir "$WORK_DIR")
+    echo ""
+    echo "Uploading results to wandb"
+    echo "Running: ${UPLOAD_CMD[*]}"
+    "${UPLOAD_CMD[@]}"
+fi
+exit $STATUS

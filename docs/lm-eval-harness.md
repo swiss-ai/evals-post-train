@@ -79,6 +79,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--task-file <path>` / `--table-metrics <path>` | Task and main-metric files for `custom` mode |
 | `--logs-root <path>` | Override the evaluation output root |
 | `--wandb-entity <name>` / `--wandb-project <name>` | Override the W&B destination |
+| `--no-wandb` | Don't upload the results to W&B (exports `WANDB_MODE=disabled`; also skipped without a W&B key) |
 | `--account <name>` | Override the Slurm account used by submitted jobs |
 | `--merge-only` | Skip evaluation and aggregate the already completed task outputs |
 | `--debug` | Resolve and print the orchestration plan without submitting jobs |

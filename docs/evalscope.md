@@ -1,6 +1,6 @@
 # EvalScope
 
-`scripts/evalscope/run_evalscope_eval.sh` runs two benchmarks through [EvalScope](https://github.com/modelscope/evalscope); [Harbor](harbor.md) runs them too, with a different agent and scoring, so the scores differ. evals-svc runs SWE-bench through this path.
+`scripts/evalscope/run_evalscope_eval.sh` runs two benchmarks through [EvalScope](https://github.com/modelscope/evalscope); [Harbor](harbor.md) runs them too, with a different agent and scoring, so the scores differ.
 
 | `--benchmark` | What | Images |
 |---|---|---|
@@ -35,7 +35,7 @@ scripts/evalscope/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --go
 
 # Smoke test: two instances of each benchmark, two sandboxes at a time
 scripts/evalscope/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --model <served model with tool calling> \
-  --api-base-url https://api.swissai.svc.cscs.ch/v1 --limit 2 --max-concurrency 2
+  --api-base-url https://api.swissai.svc.cscs.ch/v1 --limit 2 --max-concurrency 2 --no-wandb
 
 # Inside a k8s Job (the default there): pods on amd64 nodes, more memory per sandbox
 scripts/evalscope/run_evalscope_eval.sh --benchmark swe_bench_pro --model <served model> --api-base-url <url> \
@@ -46,6 +46,14 @@ scripts/evalscope/run_evalscope_eval.sh --benchmark swe_bench_pro --model <serve
 SANDBOX_K8S_NAMESPACE=<namespace> SANDBOX_K8S_RUN_LABEL=my-run \
   caffeinate -i scripts/evalscope/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro \
   --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
-  --sandbox k8s --limit 1 --max-concurrency 1 \
+  --sandbox k8s --limit 1 --max-concurrency 1 --no-wandb \
   --generation-config '{"retries": 100, "retry_interval": 60}'
 ```
+
+**On Clariden:** the nodes are aarch64 and have no Docker, so `scripts/evalscope/run_evalscope_eval.sbatch` runs EvalScope and the agent in a CPU job, with the sandboxes as Breithorn pods (`--sandbox k8s`, namespace `rob-poc` by default). The kubeconfig on Clariden authenticates through an OIDC login (kubelogin) that a batch job can't renew. Log in first (`kubectl get pods` works on the login node), and keep the run within the token's lifetime. The pods are labelled `sandbox-run=evalscope-<job id>`, and the job deletes the ones left at the end. Three minutes before the time limit it stops the run; EvalScope writes `summary.json` only when a run finishes, so a stopped run has none.
+
+```bash
+sbatch -p debug -t 1:00:00 scripts/evalscope/run_evalscope_eval.sbatch --benchmark swe_bench,swe_bench_pro --gold --limit 2
+```
+
+The results go to W&B whenever a W&B key is available (`WANDB_API_KEY` or `scripts/wandb_api_key.txt`), by default to `apertus/apertus-1.5-post-training-v0.1`; `--wandb-entity`/`--wandb-project` change that, and `--no-wandb` (or `WANDB_MODE=disabled`) skips the upload, e.g. for a smoke test. They are uploaded as one run named `--name` (`--gold` runs are not uploaded), through the same `ModelEvaluation` structure and `upload_multi_model_results` as the other frameworks. Each benchmark gets its `accuracy` (the share of instances resolved), `n_samples` and `n_errors`, plus a few resolved, unresolved and failed-evaluation instances as samples (tests passed of those required, the failing tests, tokens, the patch). `accuracy` counts failed evaluations as unresolved, so with `n_errors` > 0 it is too low. To upload an existing run: `python -m scripts.results.update_wandb_evalscope --entity <e> --project <p> --name <name> --work-dir logs/evalscope/<name>` from the EvalScope venv.
