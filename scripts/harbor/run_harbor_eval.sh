@@ -65,7 +65,11 @@
 # Environment:
 #   TARGET_API_KEY   key for --api-base-url (default: scripts/cscs_serving_api_key.txt).
 #   HARBOR_VENV      venv to install into / run from (default: a cache dir keyed by the
-#                    requirements file's hash).
+#                    requirements file's hash). With EVAL_PREBUILT_ENV=1 (the prebuilt image,
+#                    containers/Dockerfile.eval) it must already hold Harbor: nothing is
+#                    installed at run time.
+#   HARBOR_ADAPTERS_ROOT  installed Harbor adapters (<root>/<adapter>/bin/<adapter>), used instead
+#                    of fetching them with uvx (the prebuilt image has Multi-SWE-bench's).
 #   WANDB_API_KEY    for the W&B upload (default: scripts/wandb_api_key.txt; without either, no
 #                    upload).
 #   SANDBOX_K8S_*  --sandbox k8s pod settings, shared with the EvalScope runner: namespace
@@ -156,17 +160,25 @@ export EVAL_MODEL_API_KEY="${TARGET_API_KEY:-$CSCS_SERVING_API}"
 # Harbor and the Multi-SWE-bench adapter are installed with uv (Harbor needs Python >= 3.12,
 # which uv fetches where the system has none, e.g. Clariden's 3.6).
 export PATH="$HOME/.local/bin:$PATH"
-command -v uv >/dev/null 2>&1 || die "uv is required (https://docs.astral.sh/uv/)."
 REQUIREMENTS=requirements/harbor-runtime.txt
-req_hash=$( (sha256sum "$REQUIREMENTS" 2>/dev/null || shasum -a 256 "$REQUIREMENTS") | cut -c1-12)
-HARBOR_VENV=${HARBOR_VENV:-"${XDG_CACHE_HOME:-$HOME/.cache}/evals-post-train/harbor-$req_hash"}
-PY="$HARBOR_VENV/bin/python"
-if [[ ! -f "$HARBOR_VENV/.installed-$req_hash" ]]; then
-    echo "Installing $REQUIREMENTS into $HARBOR_VENV"
-    { uv venv --quiet --allow-existing --python ">=3.12" "$HARBOR_VENV" &&
-        uv pip install --quiet --python "$PY" -r "$REQUIREMENTS"; } ||
-        die "Installing $REQUIREMENTS into $HARBOR_VENV failed."
-    touch "$HARBOR_VENV/.installed-$req_hash"
+if [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
+    PY="${HARBOR_VENV:-}/bin/python"
+    [[ -n "${HARBOR_VENV:-}" && -x "$PY" ]] ||
+        die "EVAL_PREBUILT_ENV=1 but HARBOR_VENV (${HARBOR_VENV:-unset}) has no bin/python:" \
+            "this image has no Harbor environment, and a prebuilt image installs nothing at run time."
+    echo "EVAL_PREBUILT_ENV=1: using $HARBOR_VENV (no install)"
+else
+    command -v uv >/dev/null 2>&1 || die "uv is required (https://docs.astral.sh/uv/)."
+    req_hash=$( (sha256sum "$REQUIREMENTS" 2>/dev/null || shasum -a 256 "$REQUIREMENTS") | cut -c1-12)
+    HARBOR_VENV=${HARBOR_VENV:-"${XDG_CACHE_HOME:-$HOME/.cache}/evals-post-train/harbor-$req_hash"}
+    PY="$HARBOR_VENV/bin/python"
+    if [[ ! -f "$HARBOR_VENV/.installed-$req_hash" ]]; then
+        echo "Installing $REQUIREMENTS into $HARBOR_VENV"
+        { uv venv --quiet --allow-existing --python ">=3.12" "$HARBOR_VENV" &&
+            uv pip install --quiet --python "$PY" -r "$REQUIREMENTS"; } ||
+            die "Installing $REQUIREMENTS into $HARBOR_VENV failed."
+        touch "$HARBOR_VENV/.installed-$req_hash"
+    fi
 fi
 
 mkdir -p "$WORK_DIR"
