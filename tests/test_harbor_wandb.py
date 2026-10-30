@@ -67,5 +67,27 @@ class HarborWandbTests(unittest.TestCase):
         self.assertNotIn("pass@1", evaluation.tasks[1].samples[0].sample_data)
 
 
+    def test_no_reward_file_trials_are_failed_samples(self):
+        """Trials the summary scored 0 (no_reward_file) are failed samples, not unscored ones."""
+        with tempfile.TemporaryDirectory() as temporary:
+            work_dir = Path(temporary)
+            summary = {"benchmarks": {"aider_polyglot": {
+                "metrics": {"reward": 0.5}, "n_trials": 2, "n_scored": 2, "evaluation_errors": [],
+                "no_reward_file": [{"task": "cpp", "trial": "cpp__abc"}],
+            }}}
+            (work_dir / "summary.json").write_text(json.dumps(summary))
+            for i, trial in enumerate([_trial("py", 1.0), _trial("cpp", error="RewardFileNotFoundError")]):
+                path = work_dir / "jobs" / "aider_polyglot" / f"t{i}" / "result.json"
+                path.parent.mkdir(parents=True)
+                path.write_text(json.dumps(trial))
+
+            evaluation, _ = create_model_evaluation_from_harbor_run("m", work_dir)
+
+        by_task = {s.sample_data["task"]: s.sample_data for s in evaluation.tasks[0].samples}
+        self.assertTrue(by_task["py"]["is_correct"])
+        self.assertIs(by_task["cpp"]["is_correct"], False)
+        self.assertEqual(by_task["cpp"]["rewards"], {"reward": 0.0})
+
+
 if __name__ == "__main__":
     unittest.main()

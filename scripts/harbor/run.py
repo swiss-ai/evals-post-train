@@ -2,11 +2,12 @@
 
 Each benchmark is a Harbor dataset: a registry reference pinned below (a version, or a Harbor
 Hub content digest), or, for Multi-SWE-bench, which has an adapter but no published dataset,
-tasks generated locally by Harbor's adapter at the pinned Harbor version. One `harbor run` job
-per benchmark, under <work-dir>/jobs/<benchmark>; <work-dir>/summary.json, rewritten after each
-benchmark, has each one's mean reward and the trials that could not be scored. On SIGTERM (e.g. a
-Slurm time limit) harbor is stopped and the current benchmark is summarized from the trials that
-finished, marked interrupted.
+tasks generated locally by Harbor's adapter at the pinned Harbor version. A dataset with a known
+verifier problem is downloaded and patched first (scripts/harbor/task_patches.py). One `harbor
+run` job per benchmark, under <work-dir>/jobs/<benchmark>; <work-dir>/summary.json, rewritten
+after each benchmark, has each one's mean reward and the trials that could not be scored. On
+SIGTERM (e.g. a Slurm time limit) harbor is stopped and the current benchmark is summarized from
+the trials that finished, marked interrupted.
 
 A trial that ends without a verifier reward (the sandbox failed to start, a pod was
 OOM-killed, the build replay failed, the cluster API dropped out) is an evaluation error,
@@ -29,7 +30,9 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
+
+from scripts.harbor.task_patches import patch_aider_polyglot
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HARBOR_VERSION = "0.25.0"
@@ -74,7 +77,15 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
             "Kubernetes NetworkPolicy cannot express (Harbor's Docker environment enforces them with an egress proxy)"
         ),
     },
-    "aider_polyglot": {"dataset": "aider-polyglot@1.0", "about": "Aider Polyglot, 225 exercises in 6 languages"},
+    "aider_polyglot": {
+        "dataset": "aider-polyglot@1.0",
+        "about": "Aider Polyglot, 225 exercises in 6 languages",
+        # Downloaded and patched to run every test (see patch_aider_polyglot).
+        "patch_tasks": patch_aider_polyglot,
+        # Its tests/test.sh exits before writing a reward when there is nothing to build or test
+        # (e.g. the agent deleted Cargo.toml): a failed exercise, not a broken verifier.
+        "missing_reward_is_zero": True,
+    },
 }
 
 
@@ -127,13 +138,27 @@ def generate_adapter_tasks(adapter: str, work_dir: Path, limit: Optional[int], t
     return out
 
 
+def patched_tasks(dataset: str, patch: Callable[[Path], None], out: Path) -> Path:
+    """A registry dataset downloaded afresh to <out>/<dataset name>/ and patched (see
+    scripts/harbor/task_patches.py)."""
+    cmd = [harbor_bin(), "download", dataset, "-o", str(out), "--export", "--overwrite"]
+    print("Downloading tasks:", " ".join(cmd), flush=True)
+    subprocess.run(cmd, check=True)
+    (tasks,) = [p for p in out.iterdir() if p.is_dir()]
+    patch(tasks)
+    return tasks
+
+
 def harbor_command(args: argparse.Namespace, name: str, jobs_dir: Path) -> List[str]:
     spec = BENCHMARKS[name]
     cmd = [harbor_bin(), "run", "-o", str(jobs_dir), "--job-name", name, "-y", "-q"]
     if "adapter" in spec:
         cmd += ["-p", str(generate_adapter_tasks(spec["adapter"], Path(args.work_dir), args.limit, args.task))]
     else:
-        cmd += ["-d", spec["dataset"]]
+        if "patch_tasks" in spec:
+            cmd += ["-p", str(patched_tasks(spec["dataset"], spec["patch_tasks"], Path(args.work_dir) / "tasks" / name))]
+        else:
+            cmd += ["-d", spec["dataset"]]
         for pattern in args.task:
             cmd += ["-i", pattern]
     if args.limit:
@@ -164,15 +189,20 @@ def harbor_env(args: argparse.Namespace) -> Dict[str, str]:
     return env
 
 
-def summarize_job(job_dir: Path) -> Dict[str, Any]:
+def summarize_job(job_dir: Path, missing_reward_is_zero: bool = False) -> Dict[str, Any]:
     """Mean reward over the trials that were scored, and the trials that were not.
 
     Most verifiers write a single "reward"; some write several named metrics instead (e.g.
     SlopCodeBench's core_pass_rate, strict_pass_rate, erosion, ...): every metric's mean is
-    reported under metrics, and mean_reward is the "reward" one where there is one."""
+    reported under metrics, and mean_reward is the "reward" one where there is one.
+
+    missing_reward_is_zero (the benchmark's own setting): a verifier that ran but wrote no reward
+    file scores 0 instead of being an evaluation error; those trials are listed under
+    no_reward_file."""
     rewards: List[float] = []
     metrics: Dict[str, List[float]] = {}
     errors: List[Dict[str, str]] = []
+    no_reward_file: List[Dict[str, str]] = []
     for path in sorted(glob.glob(str(job_dir / "*" / "result.json"))):
         with open(path) as f:
             trial = json.load(f)
@@ -184,6 +214,11 @@ def summarize_job(job_dir: Path) -> Dict[str, Any]:
                     metrics.setdefault(key, []).append(float(value))
             continue
         exc = trial.get("exception_info") or {}
+        if missing_reward_is_zero and exc.get("exception_type") == "RewardFileNotFoundError":
+            rewards.append(0.0)
+            metrics.setdefault("reward", []).append(0.0)
+            no_reward_file.append({"task": trial.get("task_name"), "trial": trial.get("trial_name")})
+            continue
         errors.append(
             {
                 "task": trial.get("task_name"),
@@ -199,6 +234,8 @@ def summarize_job(job_dir: Path) -> Dict[str, Any]:
         "n_scored": len(rewards),
         "evaluation_errors": errors,
     }
+    if no_reward_file:
+        summary["no_reward_file"] = no_reward_file
     # With --attempts > 1, Harbor's own pass@k over the attempts of each task.
     job_result = job_dir / "result.json"
     if job_result.exists():
@@ -258,7 +295,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             proc.terminate()
         code = proc.wait()
         results[name] = {"dataset": BENCHMARKS[name].get("dataset") or f"adapter:{BENCHMARKS[name]['adapter']}"}
-        results[name].update(summarize_job(jobs_dir / name))
+        if "patch_tasks" in BENCHMARKS[name]:
+            results[name]["patched_with"] = BENCHMARKS[name]["patch_tasks"].__name__
+        results[name].update(summarize_job(jobs_dir / name, BENCHMARKS[name].get("missing_reward_is_zero", False)))
         if stopped:
             results[name]["interrupted"] = True
         elif code != 0:

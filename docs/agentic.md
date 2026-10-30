@@ -17,7 +17,7 @@ Benchmarks where an agent works inside a task container: Harbor (the default) an
 | `deep_swe` | DeepSWE v1.1 | 113 |
 | `slop_code_bench` | SlopCodeBench | 36 |
 | `senior_swe_bench` | Senior SWE-bench v2026.06 (public tasks); `--sandbox docker` only, grading needs `ANTHROPIC_API_KEY` (see below) | 50 |
-| `aider_polyglot` | Aider Polyglot | 225 |
+| `aider_polyglot` | Aider Polyglot (`aider-polyglot@1.0`), patched to run every test (see below) | 225 |
 
 Harbor Hub datasets are pinned by content digest and the older registry datasets by version. Harbor runs in its own venv (`requirements/harbor-runtime.txt`, Python ≥ 3.12, installed with uv). The default agent is `terminus-2`, which drives a tmux session and needs no tool-call parser on the served model. It calls `--model` through litellm as `openai/<model>` at `--api-base-url`. `--gold` runs Harbor's `oracle` agent, which replays each task's reference solution, to check the environments and verifiers. Scores and run metadata go to `logs/harbor/<name>/summary.json`: per benchmark, the mean `reward`, or for verifiers that report several named metrics (SlopCodeBench) the mean of each.
 
@@ -33,7 +33,9 @@ Harbor Hub datasets are pinned by content digest and the older registry datasets
 
 Senior SWE-bench's verifier runs the task's tests, then LLM judges and a validation agent (Claude Sonnet 4.6 and Haiku 4.5 by default) that are part of its reward. Export `ANTHROPIC_API_KEY` (or `PORTKEY_API_KEY`) before the run; it's passed to the verifier as is. Without one, every trial ends with an empty reward and is listed under `evaluation_errors`.
 
-A trial that ends without a verifier reward (pod not scheduled, OOM-killed, build replay failed, API dropped) is listed under `evaluation_errors` in `summary.json`, and the run exits non-zero. A trial whose agent failed or timed out is still scored.
+A trial that ends without a verifier reward (pod not scheduled, OOM-killed, build replay failed, API dropped) is listed under `evaluation_errors` in `summary.json`, and the run exits non-zero. A trial whose agent failed or timed out is still scored. Exception: Aider Polyglot's `tests/test.sh` exits without writing a reward when there is nothing to build or test (e.g. the agent deleted `Cargo.toml`), so there a missing reward file scores 0 (those trials are listed under `no_reward_file`).
+
+**Aider Polyglot is patched.** Its exercises are Exercism's, which hide all but the first test until a learner un-hides them, and the published verifiers don't un-hide them for Rust (`#[ignore]`), JavaScript (`xtest`/`xit`), C++ (`EXERCISM_RUN_ALL_TESTS`) and 3 Java tasks (`@Disabled` variants), 107 of the 225 tasks: there a solution that passes the first test scores 1. The runner downloads the pinned dataset into `<work-dir>/tasks/aider_polyglot/` and patches it to run every test, as Aider's own benchmark does (`scripts/harbor/task_patches.py`), except Rust `macros`' 10 compile-fail tests, whose fixture files the dataset leaves out; `summary.json` records this as `patched_with`. A C++ test failure also fails the build there, which the patched `test.sh` scores 0 instead of leaving no reward. Scores from before this change (and other Harbor-based Aider Polyglot numbers) are not comparable.
 
 `summary.json` is rewritten after each benchmark. If the run is stopped (SIGTERM, e.g. a Slurm time limit), the current benchmark is summarized from the trials that finished and marked `interrupted`.
 
@@ -57,7 +59,7 @@ sbatch -p debug -t 1:25:00 scripts/harbor/run_harbor_eval.sbatch --benchmark swe
 
 `scripts/aaii/run_terminal_bench.sh` (the same protocol, which evals-svc's Terminal-Bench suite delegates to) is unchanged.
 
-With `--attempts <k>` > 1, `summary.json` also has Harbor's `pass_at_k` per benchmark. Artificial Analysis's Terminal-Bench protocol:
+With `--attempts <k>` > 1, `summary.json` also has Harbor's `pass_at_k` per benchmark. Harbor computes it itself and counts every trial without a reward as a failure, including the evaluation errors that `mean_reward` leaves out. Artificial Analysis's Terminal-Bench protocol:
 
 ```bash
 scripts/harbor/run_harbor_eval.sh --benchmark terminal_bench_2_1 --attempts 3 \
