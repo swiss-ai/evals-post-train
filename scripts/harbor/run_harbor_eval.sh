@@ -171,8 +171,17 @@ mkdir -p "$WORK_DIR"
 CMD=("$PY" -m scripts.harbor.run "${MODEL_ARGS[@]}" --work-dir "$WORK_DIR" --sandbox "$SANDBOX"
      ${RUN_ARGS[@]+"${RUN_ARGS[@]}"})
 echo "Running: ${CMD[*]}"
+# In the background with SIGTERM passed on, so that a stopped run (e.g. the sbatch's time-limit
+# signal) still writes summary.json: in the foreground, bash would exit at once and Slurm would
+# then kill the runner.
+"${CMD[@]}" &
+RUN_PID=$!
+trap 'kill -TERM "$RUN_PID" 2>/dev/null || true' TERM INT
 STATUS=0
-"${CMD[@]}" || STATUS=$?
+wait "$RUN_PID" || STATUS=$?
+# wait returns early (status > 128) when the trap fires; wait for the runner to finish stopping.
+while kill -0 "$RUN_PID" 2>/dev/null; do wait "$RUN_PID" || STATUS=$?; done
+trap - TERM INT
 echo ""
 echo "Done. Scores and run metadata: $WORK_DIR/summary.json"
 
