@@ -1,26 +1,31 @@
 #!/usr/bin/env python3
 
-import os
 import json
 import math
 import argparse
 import wandb
-import wandb.sdk.lib.server
-import re
 
-_orig_query_with_timeout = wandb.sdk.lib.server.Server.query_with_timeout
+# A workaround for a TypeError in older wandb's Server.query_with_timeout. wandb 0.29 removed
+# wandb.sdk.lib.server, so the patch applies only where that module exists.
+try:
+    import wandb.sdk.lib.server as _wandb_server
+except ImportError:
+    _wandb_server = None
 
-def _patched_query_with_timeout(self):
-    try:
-        _orig_query_with_timeout(self)
-    except TypeError:
-        if hasattr(self, "_viewer") and self._viewer:
-            flags = self._viewer.get("flags")
-            self._flags = json.loads(flags) if isinstance(flags, str) else {}
-        else:
-            self._flags = {}
+if _wandb_server is not None:
+    _orig_query_with_timeout = _wandb_server.Server.query_with_timeout
 
-wandb.sdk.lib.server.Server.query_with_timeout = _patched_query_with_timeout
+    def _patched_query_with_timeout(self):
+        try:
+            _orig_query_with_timeout(self)
+        except TypeError:
+            if hasattr(self, "_viewer") and self._viewer:
+                flags = self._viewer.get("flags")
+                self._flags = json.loads(flags) if isinstance(flags, str) else {}
+            else:
+                self._flags = {}
+
+    _wandb_server.Server.query_with_timeout = _patched_query_with_timeout
 
 
 TEST_BENCHMARKS = {
@@ -677,8 +682,8 @@ details[open] .arrow {{ transform: rotate(90deg); }}
 """)
 
     model_types_js = '[' + ','.join(
-        f'"sft"' if 'sft' in m.lower() and 'instruct' not in m.lower() and 'dpo' not in m.lower()
-        else f'"instruct"' for m in models
+        '"sft"' if 'sft' in m.lower() and 'instruct' not in m.lower() and 'dpo' not in m.lower()
+        else '"instruct"' for m in models
     ) + ']'
 
     is_olmo_js = '[' + ','.join(

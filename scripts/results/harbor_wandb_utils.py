@@ -9,7 +9,7 @@ Metric/Sample structures; the upload itself is wandb_alignment_utils.upload_mult
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 from .data_structures import Metric, ModelEvaluation, Sample, Task
 from .wandb_alignment_utils import _select_stratified_samples
