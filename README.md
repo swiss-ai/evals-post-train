@@ -14,7 +14,7 @@ Harbor and EvalScope run each task in its own container, in local Docker or as K
 | | lm-eval-harness | Inspect AI | Harbor | EvalScope |
 |---|---|---|---|---|
 | On Clariden | `launch_evaluations.sh` submits the jobs | `run_inspect_eval.sbatch` | `run_harbor_eval.sbatch` (task pods on Breithorn) | `run_evalscope_eval.sbatch` (sandbox pods on Breithorn) |
-| W&B upload | automatic | `--wandb-entity/--wandb-project` | `--wandb-entity/--wandb-project` | `--wandb-entity/--wandb-project` |
+| W&B upload | automatic | automatic | automatic | automatic |
 
 ---
 
@@ -33,24 +33,24 @@ bash scripts/lm_eval_harness/launch_evaluations.sh default --model meta-llama/Ll
 ```bash
 scripts/inspect_ai/run_inspect_eval.sh --task tau2_retail \
   --model RCP-AIaaS/Qwen/Qwen3.6-35B-A3B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
-  --model-role user=openai-api/swissai/RCP-AIaaS/Qwen/Qwen3.6-35B-A3B --limit 5
+  --model-role user=openai-api/swissai/RCP-AIaaS/Qwen/Qwen3.6-35B-A3B --limit 5 --no-wandb
 ```
 
 **Harbor**: SWE-bench Verified and Terminal-Bench 2, two tasks each, task containers as Breithorn pods.
 
 ```bash
 scripts/harbor/run_harbor_eval.sh --benchmark swe_bench,terminal_bench_2 --sandbox k8s \
-  --model RCP-AIaaS/Qwen/Qwen3.6-35B-A3B --api-base-url https://api.swissai.svc.cscs.ch/v1 --limit 2
+  --model RCP-AIaaS/Qwen/Qwen3.6-35B-A3B --api-base-url https://api.swissai.svc.cscs.ch/v1 --limit 2 --no-wandb
 ```
 
 **EvalScope**: SWE-bench Verified and Pro, two instances each, sandboxes in local Docker. The default agent works through tool calls, so the served model needs tool calling.
 
 ```bash
-scripts/evalscope/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --limit 2 \
+scripts/evalscope/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --limit 2 --no-wandb \
   --model <served model with tool calling> --api-base-url https://api.swissai.svc.cscs.ch/v1
 ```
 
-Each doc has more: Clariden jobs, checkpoints, reference-solution (gold) checks, judges, reasoning metrics.
+The examples above are smoke tests, hence `--no-wandb`: all four frameworks upload the results to W&B whenever a W&B key is available, by default to `apertus/apertus-1.5-post-training-v0.1` (`--wandb-entity`/`--wandb-project` change it; `--no-wandb` or `WANDB_MODE=disabled` skips it, e.g. for a smoke test; `--gold` runs are never uploaded). Each doc has more: Clariden jobs, checkpoints, reference-solution (gold) checks, judges, reasoning metrics.
 
 ---
 
@@ -70,21 +70,6 @@ echo -n "wandb_v1_abc123..." > scripts/wandb_api_key.txt
 | `OPENAI_API_KEY` | `scripts/openai_api_key.txt` | The optional `gpt` suite; falls back to `CSCS_SERVING_API` if unset. |
 | `WANDB_API_KEY` | `scripts/wandb_api_key.txt` | Uploading results to Weights & Biases. |
 | `CRITPT_API_KEY` | `scripts/critpt_api_key.txt` | Optional: the CritPt task's (`scripts/aaii/aa_critpt.py`) grading server. Access is granted case by case by the CritPt team (email critpt@artificialanalysis.ai); without it, a run still completes and just writes its submission batch to a local file instead of posting it for grading. |
-
----
-
-## Used by evals-svc
-
-[evals-svc](https://github.com/swiss-ai/evals-svc) runs evaluations through this repo: it clones it at a pinned commit (`evals_post_train_ref`) and runs in the image built from it (`ghcr.io/swiss-ai/evals-post-train-eval:<commit>`, `containers/Dockerfile.eval`, built on every push). It calls these paths, so renaming or removing one breaks it; change evals-svc in step:
-
-| evals-svc | Here |
-|---|---|
-| lm-eval-harness runs, checkpoint evals | `scripts/lm_eval_harness/launch_evaluations.sh` (and, through it, `evaluate.sbatch`), `convert_megatron_checkpoint.sbatch` |
-| Inspect AI runs | `scripts/inspect_ai/run_inspect_eval.sh`, and the tasks `scripts/aaii/{hle,gpqa_diamond,scicode,aa_lcr,aa_omniscience,aa_critpt}.py` by path |
-| EvalScope runs (SWE-bench Verified / Pro) | `scripts/evalscope/run_evalscope_eval.sh` |
-| τ²-bench, GDPval, Terminal-Bench suites | `scripts/aaii/run_tau2_bench.sh`, `run_gdpval.sh`, `run_terminal_bench.sh` |
-
-The Harbor runner (`scripts/harbor/`) is not used by evals-svc.
 
 ---
 

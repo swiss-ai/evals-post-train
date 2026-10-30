@@ -65,10 +65,13 @@
 #   --gold                      Score each instance's reference patch instead of running a model (no
 #                               --model/--api-base-url): a check of the scoring pipeline, where every
 #                               instance should come out resolved.
-#   --wandb-entity <entity>     Upload the results to W&B (with --wandb-project; also WANDB_ENTITY):
-#   --wandb-project <project>   one run named --name, per benchmark its accuracy (share resolved),
-#                               n_samples, n_errors and a few sample instances. Uploaded also when
-#                               some evaluations failed (n_errors > 0: the accuracy is then too low).
+#   --wandb-entity <entity>     W&B entity and project to upload the results to (also WANDB_ENTITY,
+#   --wandb-project <project>   WANDB_PROJECT; default apertus/apertus-1.5-post-training-v0.1): one
+#                               run named --name, per benchmark its accuracy (share resolved),
+#                               n_samples, n_errors and a few sample instances. Uploaded whenever a
+#                               W&B key is available, also when some evaluations failed (n_errors >
+#                               0: the accuracy is then too low); not for --gold runs.
+#   --no-wandb                  Don't upload (also WANDB_MODE=disabled).
 #
 # Environment:
 #   TARGET_API_KEY   key for --api-base-url (default: scripts/cscs_serving_api_key.txt, the same
@@ -82,7 +85,8 @@
 #   SANDBOX_K8S_*  --sandbox k8s pod settings (namespace, tolerations, owner pod, pull secret,
 #                    ready timeout): see scripts/common/k8s_sandbox.py.
 #   HF_TOKEN         if the dataset download needs one.
-#   WANDB_API_KEY    for the W&B upload (default: scripts/wandb_api_key.txt).
+#   WANDB_API_KEY    for the W&B upload (default: scripts/wandb_api_key.txt; without either, no
+#                    upload).
 #
 # SWE-bench_Pro also clones scaleapi/SWE-bench_Pro-os (pinned by EvalScope to ca10a60) for each
 # instance's run script and parser, into ~/.cache/evalscope; it needs git and network access.
@@ -113,8 +117,7 @@ WORK_DIR=""
 SANDBOX=""
 GOLD=0
 API_BASE_URL=${API_BASE_URL:-""}
-WANDB_ENTITY=${WANDB_ENTITY:-""}
-WANDB_PROJECT=${WANDB_PROJECT:-""}
+NO_WANDB=0
 RUN_ARGS=()
 
 while (( $# > 0 )); do
@@ -128,6 +131,7 @@ while (( $# > 0 )); do
         --gold) GOLD=1; shift ;;
         --wandb-entity) WANDB_ENTITY=$2; shift 2 ;;
         --wandb-project) WANDB_PROJECT=$2; shift 2 ;;
+        --no-wandb) NO_WANDB=1; shift ;;
         --shuffle) RUN_ARGS+=("$1"); shift ;;
         --sandbox-config|--limit|--max-concurrency|--max-steps|--strategy|--command-timeout|\
         --generation-config|--dataset-revision|--extra-param|--api-timeout)
@@ -150,16 +154,14 @@ else
     [[ -n "$API_BASE_URL" ]] || die "Missing --api-base-url. See --help."
 fi
 
-if [[ -n "$WANDB_ENTITY" && -z "$WANDB_PROJECT" ]] || [[ -z "$WANDB_ENTITY" && -n "$WANDB_PROJECT" ]]; then
-    die "--wandb-entity and --wandb-project must be given together (or neither, to skip W&B upload)."
-fi
-if [[ -n "$WANDB_ENTITY" ]]; then
-    WANDB_API_KEY="${WANDB_API_KEY:-}"
-    if [[ -z "$WANDB_API_KEY" && -f ./scripts/wandb_api_key.txt ]]; then
-        WANDB_API_KEY="$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)"
-    fi
-    [[ -n "$WANDB_API_KEY" ]] || die "W&B upload requested but WANDB_API_KEY is not set and scripts/wandb_api_key.txt is missing."
-    export WANDB_API_KEY
+# shellcheck source=scripts/common/wandb.sh
+source scripts/common/wandb.sh
+if (( NO_WANDB )); then
+    wandb_setup "--no-wandb"
+elif [[ "$GOLD" == "1" ]]; then
+    wandb_setup "--gold: reference patches, not a model"
+else
+    wandb_setup || exit 1
 fi
 
 if [[ -z "$SANDBOX" ]]; then
@@ -238,7 +240,7 @@ if [[ ! -f "$WORK_DIR/summary.json" ]]; then
 fi
 echo "Done. Scores and run metadata: $WORK_DIR/summary.json"
 
-if [[ -n "$WANDB_ENTITY" ]]; then
+if (( WANDB_UPLOAD )); then
     UPLOAD_CMD=("$PY" -m scripts.results.update_wandb_evalscope --entity "$WANDB_ENTITY"
                 --project "$WANDB_PROJECT" --name "$NAME" --work-dir "$WORK_DIR")
     echo ""

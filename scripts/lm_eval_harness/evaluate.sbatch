@@ -981,6 +981,8 @@ echo "Evaluation finished"
 if [[ "$EVAL_CHUNKED" == "true" ]]; then
     echo "Chunk job done. Skipping W&B upload; the controller will aggregate completed chunks."
     echo "Results in: $HARNESS_EVAL_DIR"
+elif [[ "${WANDB_MODE:-}" == disabled || -z "${WANDB_API_KEY:-}" ]]; then
+    echo "Skipping W&B upload ($([[ "${WANDB_MODE:-}" == disabled ]] && echo "WANDB_MODE=disabled" || echo "no WANDB_API_KEY")). Results in: $HARNESS_EVAL_DIR"
 else
     echo "Uploading results to wandb"
     WANDB_CMD="cd $PWD && python -m scripts.results.update_wandb_alignment --entity $WANDB_ENTITY --project $WANDB_PROJECT --logs_root $HARNESS_EVAL_DIR --name $NAME --main_metrics $TABLE_METRICS --eval_duration $DURATION"

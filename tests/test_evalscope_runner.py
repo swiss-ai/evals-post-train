@@ -505,11 +505,13 @@ class ShellWrapperTest(unittest.TestCase):
         self.assertEqual(pairs["--limit"], "2")
         self.assertEqual(pairs["--extra-param"], "eval_timeout=7200")
 
-    def test_wandb_entity_needs_project(self):
-        completed, argv = self._run("--benchmark", "swe_bench", "--gold", "--wandb-entity", "e")
-        self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("--wandb-project", completed.stderr)
-        self.assertEqual(argv, [])
+    def test_gold_is_not_uploaded(self):
+        with tempfile.TemporaryDirectory() as work:
+            completed, argv = self._run("--benchmark", "swe_bench", "--gold", "--wandb-entity", "e", "--work-dir", work,
+                                        env={"WANDB_API_KEY": "k"})
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("W&B upload: off (--gold", completed.stdout)
+        self.assertIn("--gold", argv)
 
     def test_gold(self):
         with tempfile.TemporaryDirectory() as work:

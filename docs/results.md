@@ -6,7 +6,7 @@ Where results go after a run: W&B (all four frameworks share one upload path in 
 
 ### Metrics Upload
 
-Results are automatically uploaded to W&B after evaluation completes (or after aggregation for chunked jobs). Each model gets a W&B run with:
+Results are automatically uploaded to W&B after evaluation completes (or after aggregation for chunked jobs), whenever a W&B key is available; `--no-wandb` (or `WANDB_MODE=disabled`) skips it. The same holds for Inspect AI, Harbor and EvalScope runs. Each model gets a W&B run with:
 
 - **`main_results`** table: summary metrics specified in the `*_main_table.txt` config
 - **Flat metrics**: all task metrics logged as `task_name/metric_name`
@@ -80,7 +80,7 @@ python -m scripts.results.update_wandb_all_models \
   --logs_root /path/to/eval-logs
 ```
 
-Inspect AI, Harbor and EvalScope runs upload when their script gets `--wandb-entity <e> --wandb-project <p>`. To upload a finished run's work dir afterwards, run the framework's module from that framework's environment: `scripts.results.update_wandb_inspect`, `update_wandb_harbor` or `update_wandb_evalscope` (see [inspect-ai.md](inspect-ai.md), [harbor.md](harbor.md), [evalscope.md](evalscope.md)).
+To upload a finished Inspect AI, Harbor or EvalScope run afterwards (e.g. one run with `--no-wandb`), run the framework's module from that framework's environment: `scripts.results.update_wandb_inspect`, `update_wandb_harbor` or `update_wandb_evalscope` (see [inspect-ai.md](inspect-ai.md), [harbor.md](harbor.md), [evalscope.md](evalscope.md)).
 
 ---
 

@@ -35,7 +35,7 @@ A trial that ends without a verifier reward (pod not scheduled, OOM-killed, buil
 
 `summary.json` is rewritten after each benchmark. If the run is stopped (SIGTERM, e.g. a Slurm time limit), the current benchmark is summarized from the trials that finished and marked `interrupted`.
 
-`--wandb-entity <entity> --wandb-project <project>` uploads the results to W&B as one run named `--name`, through the same `ModelEvaluation` structure and `upload_multi_model_results` as lm-eval-harness and Inspect runs. Each benchmark gets its `reward` (or its named verifier metrics), `n_trials`, `n_scored` and `n_errors`, plus a few passed, failed and unscored trials as samples. It uploads also when some trials were not scored, so check `n_errors`. To upload an existing run (e.g. one that was stopped): `python -m scripts.results.update_wandb_harbor --entity <e> --project <p> --name <name> --work-dir logs/harbor/<name>` from the Harbor venv.
+The results go to W&B whenever a W&B key is available (`WANDB_API_KEY` or `scripts/wandb_api_key.txt`), by default to `apertus/apertus-1.5-post-training-v0.1`; `--wandb-entity`/`--wandb-project` change that, and `--no-wandb` (or `WANDB_MODE=disabled`) skips the upload, e.g. for a smoke test. They are uploaded as one run named `--name` (`--gold` runs are not uploaded), through the same `ModelEvaluation` structure and `upload_multi_model_results` as lm-eval-harness and Inspect runs. Each benchmark gets its `reward` (or its named verifier metrics), `n_trials`, `n_scored` and `n_errors`, plus a few passed, failed and unscored trials as samples. It uploads also when some trials were not scored, so check `n_errors`. To upload an existing run (e.g. one that was stopped): `python -m scripts.results.update_wandb_harbor --entity <e> --project <p> --name <name> --work-dir logs/harbor/<name>` from the Harbor venv.
 
 ```bash
 # Pipeline check without a model: reference solutions, one task per benchmark, pods on Breithorn
@@ -50,7 +50,7 @@ ANTHROPIC_API_KEY=... scripts/harbor/run_harbor_eval.sh --benchmark senior_swe_b
 
 # A model on Clariden (debug partition smoke test)
 sbatch -p debug -t 1:25:00 scripts/harbor/run_harbor_eval.sbatch --benchmark swe_bench,terminal_bench_2 \
-  --model RCP-AIaaS/Qwen/Qwen3.6-35B-A3B --api-base-url https://api.swissai.svc.cscs.ch/v1 --limit 1
+  --model RCP-AIaaS/Qwen/Qwen3.6-35B-A3B --api-base-url https://api.swissai.svc.cscs.ch/v1 --limit 1 --no-wandb
 ```
 
 `scripts/aaii/run_terminal_bench.sh` (the same protocol, which evals-svc's Terminal-Bench suite delegates to) is unchanged.
