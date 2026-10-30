@@ -9,6 +9,8 @@ Evaluation infrastructure for LLMs on CSCS Alps (Clariden), with results in W&B.
 | [Harbor](https://github.com/harbor-framework/harbor) | Agentic coding and terminal benchmarks (SWE-bench, Terminal-Bench, DeepSWE, Aider Polyglot, ...) | endpoint | `scripts/harbor/run_harbor_eval.sh` | [docs/harbor.md](docs/harbor.md) |
 | [EvalScope](https://github.com/modelscope/evalscope) | SWE-bench Verified / Pro | endpoint | `scripts/evalscope/run_evalscope_eval.sh` | [docs/evalscope.md](docs/evalscope.md) |
 
+**Where the model runs.** Only lm-evaluation-harness loads the model itself: its Slurm job starts vLLM, SGLang, HF or Megatron-LM on the checkpoint. Inspect AI, Harbor and EvalScope call a model that is already served behind an OpenAI-compatible endpoint (`--model` + `--api-base-url`): the CSCS serving API (`https://api.swissai.svc.cscs.ch/v1`), or a server you start yourself, e.g. `vllm serve <checkpoint>` on a Clariden node. To evaluate your own checkpoint with them, serve it first and pass that server's URL. Harbor's and EvalScope's `--gold` runs need no model at all.
+
 Harbor and EvalScope run each task in its own container, in local Docker or as Kubernetes pods (Breithorn). `scripts/aaii/` has Artificial Analysis's versions of some benchmarks ([docs/inspect-ai.md](docs/inspect-ai.md)). Results: [docs/results.md](docs/results.md) (W&B, tables, Every Eval Ever / Hugging Face exports).
 
 | | lm-eval-harness | Inspect AI | Harbor | EvalScope |
@@ -93,7 +95,7 @@ evals-post-train/
 │   ├── harbor/            # run_harbor_eval.sh/.sbatch, run.py (benchmarks), k8s/docker environments, task_patches.py
 │   ├── evalscope/         # run_evalscope_eval.sh/.sbatch, run.py, SWE-bench scorer
 │   ├── aaii/              # Artificial Analysis protocol: Inspect tasks (*.py) and standalone runners (run_*.sh)
-│   ├── common/            # k8s_sandbox.py: pod-per-sandbox backend (Harbor, EvalScope)
+│   ├── common/            # k8s_sandbox.py (task containers as pods: Harbor, EvalScope), wandb.sh (the W&B upload rule)
 │   └── results/           # W&B upload, tables, exports
 ├── configs/               # lm-eval task lists, main-table metrics, model registry, export mappings
 ├── containers/            # Enroot/Pyxis configs and the prebuilt evaluation image (Dockerfile.eval)
