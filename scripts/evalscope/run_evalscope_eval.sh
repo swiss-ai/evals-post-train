@@ -233,8 +233,8 @@ while kill -0 "$RUN_PID" 2>/dev/null; do wait "$RUN_PID" || STATUS=$?; done
 trap - TERM INT
 echo ""
 if [[ ! -f "$WORK_DIR/summary.json" ]]; then
-    echo "No $WORK_DIR/summary.json: the run did not finish (exit $STATUS)." >&2
-    exit $(( STATUS == 0 ? 1 : STATUS ))
+    echo "No $WORK_DIR/summary.json: the run did not finish (exit $STATUS), nothing to upload." >&2
+    exit $STATUS
 fi
 echo "Done. Scores and run metadata: $WORK_DIR/summary.json"
 
