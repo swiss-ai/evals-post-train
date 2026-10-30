@@ -109,28 +109,6 @@ class HarborCommandTest(unittest.TestCase):
 
 
 class SummaryTest(unittest.TestCase):
-    def test_results_json_is_flat(self):
-        with tempfile.TemporaryDirectory() as jobs:
-            job = Path(jobs, "swe_bench")
-            trials = {
-                "a__1": {"task_name": "a", "trial_name": "a__1", "verifier_result": {"rewards": {"reward": 1.0}},
-                         "started_at": "2026-10-29T10:00:00", "finished_at": "2026-10-29T10:05:00",
-                         "agent_result": {"n_input_tokens": 10}},
-                "c__1": {"task_name": "c", "trial_name": "c__1",
-                         "exception_info": {"exception_type": "RuntimeError", "exception_message": "pod OOMKilled"}},
-            }
-            for name, trial in trials.items():
-                Path(job, name).mkdir(parents=True)
-                Path(job, name, "result.json").write_text(json.dumps(trial))
-            flat = run.flat_results({"swe_bench": run.summarize_job(job)}, Path(jobs))
-        self.assertEqual(
-            flat["results"], {"swe_bench": {"accuracy": 1.0, "n_trials": 2, "n_scored": 1, "evaluation_errors": 1}}
-        )
-        first, second = (s["sample"] for s in flat["samples"])
-        self.assertEqual((first["task"], first["reward"], first["duration_s"], first["n_input_tokens"]), ("a", 1.0, 300.0, 10))
-        self.assertEqual((second["reward"], second["exception"]), (None, "RuntimeError: pod OOMKilled"))
-        self.assertEqual([s["doc_id"] for s in flat["samples"]], [0, 1])
-
     def test_unscored_trials_are_errors(self):
         with tempfile.TemporaryDirectory() as job:
             trials = {

@@ -47,8 +47,7 @@
 #                               so terminus-2 knows a served model's context window.
 #   --name <name>              Run name (default: derived from --model).
 #   --work-dir <path>          Output dir (default: logs/harbor/<name>): jobs/<benchmark>/ (Harbor's
-#                               trials), summary.json, and results.json (flat scores and one
-#                               sample per trial, what evals-svc reports).
+#                               trials) and summary.json.
 #   --sandbox docker|k8s       See above.
 #   --limit <n>                 First n tasks per benchmark (smoke tests).
 #   --task <glob>               Only tasks matching this name (repeatable).

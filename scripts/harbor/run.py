@@ -22,7 +22,6 @@ document tasks whose reference solution does not, e.g. flaky tests).
 from __future__ import annotations
 
 import argparse
-import datetime
 import glob
 import json
 import os
@@ -279,59 +278,6 @@ def summarize_job(job_dir: Path, missing_reward_is_zero: bool = False) -> Dict[s
     return summary
 
 
-def job_trials(job_dir: Path) -> List[Dict[str, Any]]:
-    trials = []
-    for path in sorted(glob.glob(str(job_dir / "*" / "result.json"))):
-        with open(path) as f:
-            trials.append(trial_record(json.load(f)))
-    return trials
-
-
-def trial_record(trial: Dict[str, Any]) -> Dict[str, Any]:
-    """One trial, compactly: what results.json lists per sample."""
-    rewards = (trial.get("verifier_result") or {}).get("rewards") or {}
-    exc = trial.get("exception_info") or {}
-    agent = trial.get("agent_result") or {}
-    try:
-        duration = (
-            datetime.datetime.fromisoformat(trial["finished_at"]) - datetime.datetime.fromisoformat(trial["started_at"])
-        ).total_seconds()
-    except (KeyError, TypeError, ValueError):
-        duration = None
-    return {
-        "task": trial.get("task_name"),
-        "trial": trial.get("trial_name"),
-        "reward": rewards.get("reward"),
-        "rewards": rewards or None,
-        "exception": f"{exc.get('exception_type')}: {(exc.get('exception_message') or '')[:500]}" if exc else None,
-        "duration_s": duration,
-        "n_input_tokens": agent.get("n_input_tokens"),
-        "n_output_tokens": agent.get("n_output_tokens"),
-    }
-
-
-def flat_results(results: Dict[str, Any], jobs_dir: Path) -> Dict[str, Any]:
-    """results.json: per benchmark one flat dict of scores (accuracy = the mean reward over the
-    scored trials; any other named metric's mean; Harbor's pass@k; trial counts, and
-    evaluation_errors = how many trials could not be scored), and every trial as a sample. The
-    shape evals-svc reports as is."""
-    scores: Dict[str, Dict[str, Any]] = {}
-    samples: List[Dict[str, Any]] = []
-    for name, bench in results.items():
-        if bench.get("n_scored"):
-            flat: Dict[str, Any] = {"accuracy": bench["mean_reward"]}
-            flat.update({k: v for k, v in bench["metrics"].items() if k != "reward"})
-            flat.update({f"pass@{k}": v for k, v in (bench.get("pass_at_k") or {}).items()})
-            flat.update(n_trials=bench["n_trials"], n_scored=bench["n_scored"])
-            flat["evaluation_errors"] = len(bench["evaluation_errors"])
-            if bench.get("no_reward_file"):
-                flat["no_reward_file"] = len(bench["no_reward_file"])
-            scores[name] = flat
-        for trial in job_trials(jobs_dir / name):
-            samples.append({"task": name, "doc_id": len(samples), "sample": trial})
-    return {"results": scores, "samples": samples}
-
-
 def harbor_version() -> Optional[str]:
     try:
         from importlib.metadata import version
@@ -390,8 +336,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         # After each benchmark, so a run that is stopped still leaves the finished ones' scores.
         with open(work_dir / "summary.json", "w") as f:
             json.dump(summary, f, indent=2)
-        with open(work_dir / "results.json", "w") as f:
-            json.dump(flat_results(results, jobs_dir), f, indent=2)
     print(json.dumps(summary, indent=2))
     if stopped:
         print(f"Stopped: {work_dir}/summary.json has the trials that finished.", file=sys.stderr)
