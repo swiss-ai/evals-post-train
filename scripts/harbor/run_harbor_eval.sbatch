@@ -9,6 +9,7 @@
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --partition=normal
 #SBATCH --time=11:59:00
+#SBATCH --signal=B:USR1@180
 
 # run_harbor_eval.sbatch - SLURM wrapper for scripts/harbor/run_harbor_eval.sh on Clariden.
 #
@@ -21,6 +22,12 @@
 # Kubernetes access is your kubeconfig on Clariden (~/.kube/config). For Breithorn that is an OIDC
 # login through kubelogin, which a batch job cannot renew: log in first (kubectl get pods works on
 # the login node) and keep the run within the token's lifetime.
+#
+# Pods are labelled sandbox-run=harbor-<job id>. Three minutes before the time limit the job stops
+# the run (summary.json keeps the trials that finished, see scripts/harbor/run.py), and at the end
+# it deletes whatever pods and NetworkPolicies with that label are left (a run cut off mid-trial
+# does not clean up after itself). With a SANDBOX_K8S_RUN_LABEL set by hand it only prints the
+# command, since other runs may share that label.
 #
 # Usage:
 #   sbatch [-p debug -t 1:00:00] scripts/harbor/run_harbor_eval.sbatch <run_harbor_eval.sh args...>
@@ -52,8 +59,29 @@ command -v kubectl >/dev/null && kubectl -n "$SANDBOX_K8S_NAMESPACE" auth can-i 
 ARGS=("$@")
 [[ " ${ARGS[*]} " == *" --sandbox "* ]] || ARGS+=(--sandbox k8s)
 
+# In the background so the USR1 trap (--signal above) runs while the run is still going. Not
+# through srun: srun takes SIGTERM as "abort the step" and Slurm then SIGKILLs it after KillWait
+# (30 s on Clariden), before Harbor has stopped and the runner has written summary.json.
+bash scripts/harbor/run_harbor_eval.sh "${ARGS[@]}" &
+RUN_PID=$!
+# "|| true": the signal can come after the run ended, and set -e must not skip the cleanup below.
+trap 'echo "Time limit near: stopping the run"; kill -TERM "$RUN_PID" 2>/dev/null || true' USR1
 STATUS=0
-srun -n 1 bash scripts/harbor/run_harbor_eval.sh "${ARGS[@]}" || STATUS=$?
-echo "Leftover pods, if the run died: kubectl -n $SANDBOX_K8S_NAMESPACE delete pods -l sandbox-run=$SANDBOX_K8S_RUN_LABEL"
+wait "$RUN_PID" || STATUS=$?
+# wait returns early (status > 128) when the trap fires; wait for the run to finish stopping.
+while kill -0 "$RUN_PID" 2>/dev/null; do wait "$RUN_PID" || STATUS=$?; done
+
+CLEANUP="kubectl -n $SANDBOX_K8S_NAMESPACE delete pods,networkpolicies -l sandbox-run=$SANDBOX_K8S_RUN_LABEL"
+if [[ " ${ARGS[*]} " == *" --sandbox docker "* ]] || ! command -v kubectl >/dev/null; then
+    :
+elif [[ "$SANDBOX_K8S_RUN_LABEL" != "harbor-$SLURM_JOB_ID" ]]; then
+    # A label set by hand may be shared with other runs: their pods must not go with this job.
+    echo "Not cleaning up (custom SANDBOX_K8S_RUN_LABEL); leftover pods, if any: $CLEANUP" >&2
+else
+    # Bounded: with an expired kubelogin token, kubectl waits for a browser login.
+    timeout 120 kubectl -n "$SANDBOX_K8S_NAMESPACE" delete pods,networkpolicies \
+        -l "sandbox-run=$SANDBOX_K8S_RUN_LABEL" --ignore-not-found --wait=false ||
+        echo "warning: could not clean up; run: $CLEANUP" >&2
+fi
 echo "END TIME: $(date)"
 exit $STATUS

@@ -174,7 +174,7 @@ def in_dir(argv: List[str], cwd: Optional[str], env: Dict[str, str]) -> List[str
     return ["sh", "-c", f"cd {shlex.quote(cwd)} && exec {run}"]
 
 
-def network_policy_manifest(name: str, pod: str, policy: NetworkPolicy) -> Dict[str, Any]:
+def network_policy_manifest(name: str, pod: str, policy: NetworkPolicy, run_label: str) -> Dict[str, Any]:
     """Egress for the trial pod under a no-network or allowlist policy."""
     egress: List[Dict[str, Any]] = []
     if policy.network_mode == NetworkMode.ALLOWLIST:
@@ -194,7 +194,10 @@ def network_policy_manifest(name: str, pod: str, policy: NetworkPolicy) -> Dict[
     return {
         "apiVersion": "networking.k8s.io/v1",
         "kind": "NetworkPolicy",
-        "metadata": {"name": name, "labels": {"app.kubernetes.io/managed-by": "evals-post-train-sandbox"}},
+        "metadata": {
+            "name": name,
+            "labels": {"app.kubernetes.io/managed-by": "evals-post-train-sandbox", "sandbox-run": run_label},
+        },
         "spec": {"podSelector": {"matchLabels": {"sandbox-pod": pod}}, "policyTypes": ["Egress"], "egress": egress},
     }
 
@@ -505,7 +508,9 @@ class K8sPodEnvironment(BaseEnvironment):
         from kubernetes import client
 
         api = client.NetworkingV1Api(api_client=client.ApiClient())
-        manifest = network_policy_manifest(self._policy_name, self._pod, network_policy)
+        manifest = network_policy_manifest(
+            self._policy_name, self._pod, network_policy, self._manager._run_label
+        )
         namespace = self._manager._namespace
         if self._has_network_policy:
             await asyncio.to_thread(api.replace_namespaced_network_policy, self._policy_name, namespace, manifest)
