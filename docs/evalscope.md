@@ -18,7 +18,7 @@ SWE-bench is scored by `scripts/evalscope/swe_bench_scoring.py`, not EvalScope's
 Every sample runs in its own sandbox container (`--sandbox`):
 
 - `docker`: EvalScope's own path, using a local Docker daemon.
-- `k8s`: one unprivileged pod per sandbox in the current namespace, via `scripts/common/k8s_sandbox.py`, with no Docker daemon needed. This is the same approach as evals-svc's Terminal-Bench trial pods. The service account needs `create`/`get`/`delete` on `pods` and `create`/`get` on `pods/exec`. The images are linux/amd64, so the pods are pinned to amd64 nodes. Pod settings come from `SANDBOX_K8S_*` env vars (see the module docstring). The runner itself doesn't have to run in the cluster: from a laptop, `--sandbox k8s` uses your current kubeconfig context, and `SANDBOX_K8S_NAMESPACE` picks the namespace (e.g. on Breithorn). Pods started that way have no owner pod, so if the runner dies, delete leftovers with `kubectl delete pods -l sandbox-run=<SANDBOX_K8S_RUN_LABEL>`.
+- `k8s`: one unprivileged pod per sandbox in the current namespace, via `scripts/common/k8s_sandbox.py`, with no Docker daemon needed. The service account needs `create`/`get`/`delete` on `pods` and `create`/`get` on `pods/exec`. The images are linux/amd64, so the pods are pinned to amd64 nodes. Pod settings come from `SANDBOX_K8S_*` env vars (see the module docstring). The runner itself doesn't have to run in the cluster: from a laptop, `--sandbox k8s` uses your current kubeconfig context, and `SANDBOX_K8S_NAMESPACE` picks the namespace (e.g. on Breithorn). Pods started that way have no owner pod, so if the runner dies, delete leftovers with `kubectl delete pods -l sandbox-run=<SANDBOX_K8S_RUN_LABEL>`.
 
 Notes:
 

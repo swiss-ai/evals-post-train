@@ -16,8 +16,7 @@
 # Every sample gets its own sandbox container, so this needs a container runtime:
 #   --sandbox docker  EvalScope's own path, a local Docker daemon (a dev box / docker launcher).
 #   --sandbox k8s     One unprivileged pod per sandbox in the current namespace, through
-#                     scripts/common/k8s_sandbox.py (no Docker daemon needed; same
-#                     approach as evals-svc's Terminal-Bench trial pods). Needs a ServiceAccount
+#                     scripts/common/k8s_sandbox.py (no Docker daemon needed). Needs a ServiceAccount
 #                     that can create/get/delete pods and pods/exec. The images are linux/amd64,
 #                     so the pods are pinned to amd64 nodes (not Clariden's GH200s).
 #   Default: k8s when running in a pod, else docker.

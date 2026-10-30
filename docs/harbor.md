@@ -53,8 +53,6 @@ sbatch -p debug -t 1:25:00 scripts/harbor/run_harbor_eval.sbatch --benchmark swe
   --model RCP-AIaaS/Qwen/Qwen3.6-35B-A3B --api-base-url https://api.swissai.svc.cscs.ch/v1 --limit 1 --no-wandb
 ```
 
-`scripts/aaii/run_terminal_bench.sh` (the same protocol, which evals-svc's Terminal-Bench suite delegates to) is unchanged.
-
 With `--attempts <k>` > 1, `summary.json` also has Harbor's `pass_at_k` per benchmark. Harbor computes it itself and counts every trial without a reward as a failure, including the evaluation errors that `mean_reward` leaves out. Artificial Analysis's Terminal-Bench protocol:
 
 ```bash

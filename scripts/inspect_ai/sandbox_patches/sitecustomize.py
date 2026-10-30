@@ -5,8 +5,8 @@ eval`/`inspect eval-set`, so this patch is live for every run through it,
 not something a task has to opt into.
 
 Patches inspect_ai.util._sandbox.local.LocalSandboxEnvironment.exec (the
-`--sandbox local` provider -- see evals-svc's services/scicode.py for why
-scripts/aaii/scicode defaults to it) to write an oversized `python -c <code>`
+`--sandbox local` provider, used where no Docker daemon is available, e.g.
+for SciCode in CSCS containers) to write an oversized `python -c <code>`
 command to a temp file and run that instead, when the code would risk
 "OSError: [Errno 7] Argument list too long".
 

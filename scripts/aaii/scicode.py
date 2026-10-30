@@ -22,10 +22,9 @@ Mapped onto:
   - Pass@1/sub-problem-level scoring is just how inspect_evals/scicode's own
     verify() scorer already reports -- nothing to configure for it.
 
-Deliberately NOT pinned here, unlike evals-svc's own AAII defaults-injection
-for this task: --sandbox, --timeout, --display, --log-level. Those are
-deployment/infra choices (evals-svc pins `--sandbox local` because its
-k8s/FirecREST launchers can't grant privileged Docker), not part of AA's
+Deliberately NOT pinned here: --sandbox, --timeout, --display, --log-level.
+Those are deployment/infra choices (e.g. `--sandbox local` where privileged
+Docker isn't available, as in CSCS containers), not part of AA's
 protocol -- a direct `inspect eval scripts/aaii/scicode.py` run here gets
 inspect_evals' own native Docker sandbox, same as plain `scicode` and the
 README's GDPval example, and needs a real Docker daemon (true on a login
@@ -43,8 +42,7 @@ overrides them (epochs here is this wrapper's own task-arg, not the native
 relocation for -- since Task.epochs is set from this parameter inside the
 function body, `-T epochs=...` reaches it directly). A no-argument wrapper
 that applies these directly, as an earlier version of this file did,
-silently drops such overrides instead (same mistake caught in scripts/aaii/hle.py,
-confirmed live against evals-svc's own self-grading path for that one).
+silently drops such overrides instead (the same mistake scripts/aaii/hle.py once had).
 """
 
 from inspect_ai import Task, task
