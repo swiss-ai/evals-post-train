@@ -34,6 +34,10 @@ aiohttp
 requests
 tqdm
 tiktoken
+# SentencePiece tokenizers (e.g. cais/HarmBench-Llama-2-13b-cls, loaded by the harmbench task): without
+# sentencepiece transformers falls back to its tiktoken reader and fails to parse tokenizer.model
+sentencepiece
+protobuf
 sympy
 spacy
 math_verify
