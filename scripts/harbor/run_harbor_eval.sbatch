@@ -59,14 +59,16 @@ command -v kubectl >/dev/null && kubectl -n "$SANDBOX_K8S_NAMESPACE" auth can-i 
 ARGS=("$@")
 [[ " ${ARGS[*]} " == *" --sandbox "* ]] || ARGS+=(--sandbox k8s)
 
-# In the background so the USR1 trap (--signal above) runs while the run is still going.
-srun -n 1 bash scripts/harbor/run_harbor_eval.sh "${ARGS[@]}" &
+# In the background so the USR1 trap (--signal above) runs while the run is still going. Not
+# through srun: srun takes SIGTERM as "abort the step" and Slurm then SIGKILLs it after KillWait
+# (30 s on Clariden), before Harbor has stopped and the runner has written summary.json.
+bash scripts/harbor/run_harbor_eval.sh "${ARGS[@]}" &
 RUN_PID=$!
 # "|| true": the signal can come after the run ended, and set -e must not skip the cleanup below.
 trap 'echo "Time limit near: stopping the run"; kill -TERM "$RUN_PID" 2>/dev/null || true' USR1
 STATUS=0
 wait "$RUN_PID" || STATUS=$?
-# wait returns early (status > 128) when the trap fires; wait for srun to finish stopping.
+# wait returns early (status > 128) when the trap fires; wait for the run to finish stopping.
 while kill -0 "$RUN_PID" 2>/dev/null; do wait "$RUN_PID" || STATUS=$?; done
 
 CLEANUP="kubectl -n $SANDBOX_K8S_NAMESPACE delete pods,networkpolicies -l sandbox-run=$SANDBOX_K8S_RUN_LABEL"
