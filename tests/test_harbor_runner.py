@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from scripts.harbor import run
+from scripts.harbor import run, task_patches
 
 HAS_HARBOR = importlib.util.find_spec("harbor") is not None and importlib.util.find_spec("dockerfile_parse") is not None
 if HAS_HARBOR:
@@ -65,6 +65,25 @@ class HarborCommandTest(unittest.TestCase):
         self.assertIn(f"@v{run.HARBOR_VERSION}#subdirectory=adapters/multi-swe-bench", generate[2])
         self.assertEqual(generate[-2:], ["--limit", "3"])
         self.assertEqual(cmd[cmd.index("-p") + 1], str(Path("w/tasks/multi-swe-bench")))
+
+    def test_patched_dataset_is_downloaded_and_run_locally(self):
+        def download(cmd, check):  # harbor download --export: <out>/<dataset name>/<task>/
+            Path(cmd[cmd.index("-o") + 1], "aider-polyglot").mkdir(parents=True)
+
+        patch = mock.Mock()
+        with tempfile.TemporaryDirectory() as w:
+            args = run.parse_args(["--benchmark", "aider_polyglot", "--gold", "--work-dir", w, "--sandbox", "docker",
+                                   "--task", "polyglot_rust_*"])
+            with mock.patch.object(run.subprocess, "run", side_effect=download) as sub, \
+                    mock.patch.dict(run.BENCHMARKS["aider_polyglot"], patch_tasks=patch):
+                cmd = run.harbor_command(args, "aider_polyglot", Path(w, "jobs"))
+        tasks = Path(w, "tasks", "aider_polyglot", "aider-polyglot")
+        self.assertEqual(sub.call_args[0][0][1:3], ["download", "aider-polyglot@1.0"])
+        self.assertIn("--overwrite", sub.call_args[0][0])
+        patch.assert_called_once_with(tasks)
+        self.assertEqual(cmd[cmd.index("-p") + 1], str(tasks))
+        self.assertEqual(cmd[cmd.index("-i") + 1], "polyglot_rust_*")
+        self.assertNotIn("-d", cmd)
 
     def test_model_env(self):
         args = run.parse_args(["--benchmark", "swe_bench", "--model", "m", "--api-base-url", "https://x/v1", "--work-dir", "w",
@@ -134,6 +153,45 @@ class SummaryTest(unittest.TestCase):
             )
             summary = run.summarize_job(Path(job))
         self.assertEqual(summary["pass_at_k"], {"2": 0.5, "3": 0.75})
+
+
+class TaskPatchesTest(unittest.TestCase):
+    CPP_BUILD = 'if cmake .. && make; then\n    run\nelse\n        echo "CMake build failed"\n        exit 1\nfi\n'
+
+    def make_task(self, root, name, test_sh, files=None):
+        tests = Path(root, name, "tests")
+        tests.mkdir(parents=True)
+        (tests / "test.sh").write_text(test_sh)
+        for rel, text in (files or {}).items():
+            Path(tests, rel).parent.mkdir(parents=True, exist_ok=True)
+            Path(tests, rel).write_text(text)
+        return tests
+
+    def test_aider_polyglot_runs_every_test(self):
+        with tempfile.TemporaryDirectory() as d:
+            rust = self.make_task(d, "polyglot_rust_bowling", "    cargo test --verbose\nelse\n")
+            cpp = self.make_task(d, "polyglot_cpp_queen-attack", self.CPP_BUILD)
+            js = self.make_task(d, "polyglot_javascript_grep", "npm test\n", {
+                "grep.spec.js": "test('a', f);\nxtest('b', f);\nxit('c', f);\ntest.skip('slow', f);\n"})
+            java = self.make_task(d, "polyglot_java_forth", "gradle test\n", {"src/test/java/T.java": (
+                'import org.junit.jupiter.api.Disabled;\n@Disabled("Remove to run test")\n@Disabled("Remove to run")\n'
+                "@Disabled\n@Test\n")})
+            go = self.make_task(d, "polyglot_go_bowling", "go test\n")
+            macros = self.make_task(d, "polyglot_rust_macros", "    cargo test --verbose\nelse\n")
+            task_patches.patch_aider_polyglot(Path(d))
+            self.assertIn("cargo test --verbose -- --include-ignored\n", (rust / "test.sh").read_text())
+            self.assertEqual((cpp / "test.sh").read_text(), self.CPP_BUILD.replace(
+                "cmake ..", "cmake -DEXERCISM_RUN_ALL_TESTS=1 ..").replace("exit 1", "false"))
+            self.assertEqual((js / "grep.spec.js").read_text(), "test('a', f);\ntest('b', f);\nit('c', f);\ntest.skip('slow', f);\n")
+            self.assertEqual((java / "src/test/java/T.java").read_text(), "import org.junit.jupiter.api.Disabled;\n\n\n\n@Test\n")
+            self.assertEqual((go / "test.sh").read_text(), "go test\n")
+            self.assertIn("--include-ignored --skip compile_fails_\n", (macros / "test.sh").read_text())
+
+    def test_changed_dataset_fails_loudly(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.make_task(d, "polyglot_rust_bowling", "cargo test --release\n")
+            with self.assertRaisesRegex(ValueError, "found it 0 times"):
+                task_patches.patch_aider_polyglot(Path(d))
 
 
 class MainTest(unittest.TestCase):
