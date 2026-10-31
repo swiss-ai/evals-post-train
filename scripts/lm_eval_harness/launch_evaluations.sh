@@ -78,6 +78,9 @@
 #   --api-endpoint <e>   - 'completions' (default) or 'chat-completions' for the 'openai' backend.
 #                          chat-completions lets the server render the chat template (generative
 #                          tasks only; required by FC tasks such as bfcl_v3_fc).
+#   --chat-format <f>    - 'template' (default) or 'apertus2' (Apertus 2 native format, a thinking
+#                          run; needs --backend openai, --tokenizer, --max-length; see the docs)
+#   --prefill-mode <m>   - apertus2 answer prefills: 'after_think' (default) or 'empty_think'
 #   --chunk-size N       - Tasks per resumable job chunk (default: 8)
 #   --max-parallel N     - Cap concurrent chunks (default: all generated chunks)
 #   --max-retries N      - Retry waves for missing tasks; chunks halve each wave (default: 1)
@@ -86,7 +89,8 @@
 #   --table-metrics <p>  - Main-metrics list for custom mode
 #   --force-tasks <csv>  - Re-run completed tasks matching these substrings
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
-#   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
+#   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch;
+#                          --chat-format apertus2: the commit in requirements/lm-eval-harness.txt)
 #   --reservation <name> - Submit jobs under a SLURM reservation, including an auto-launched judge
 #                          (exported as SBATCH_RESERVATION; ambient SBATCH_RESERVATION is respected
 #                          for evaluation jobs when the flag is absent)
@@ -175,6 +179,8 @@ API_BASE_URL_FLAG=""
 API_MODEL_NAME_FLAG=""
 API_REQUESTS_PER_MINUTE_FLAG=""
 API_ENDPOINT_FLAG=""
+CHAT_FORMAT_FLAG="${CHAT_FORMAT:-}"
+PREFILL_MODE_FLAG=""
 FEWSHOT_FLAG=""
 # Keep an ambient HARNESS_LIMIT (the graceful launcher has no --limit flag, so callers export
 # it); blanking it here would ship the cleared value into the job. --limit still overrides.
@@ -233,6 +239,8 @@ while [[ $# -gt 0 ]]; do
         --api-model-name) API_MODEL_NAME_FLAG="$2";   shift 2 ;;
         --api-requests-per-minute) API_REQUESTS_PER_MINUTE_FLAG="$2"; shift 2 ;;
         --api-endpoint) API_ENDPOINT_FLAG="$2";       shift 2 ;;
+        --chat-format)  CHAT_FORMAT_FLAG="$2";        shift 2 ;;
+        --prefill-mode) PREFILL_MODE_FLAG="$2";       shift 2 ;;
         --megatron-iter) MEGATRON_ITER="$2";            shift 2 ;;
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --max-length) MAX_LENGTH="$2";          shift 2 ;;
@@ -388,6 +396,70 @@ fi
 # Resolve the backend as evaluate.sbatch will, so an ambient LM_EVAL_BACKEND fails here,
 # not after scheduling.
 EFFECTIVE_BACKEND="${BACKEND_FLAG:-${LM_EVAL_BACKEND:-}}"
+
+# apertus2: the harness renders and parses the native format and always reasons, so the
+# template's thinking switches do not apply; the effort sets the thinking level.
+case "${CHAT_FORMAT_FLAG:-template}" in
+    template)
+        if [[ -n "$PREFILL_MODE_FLAG" ]]; then
+            echo "Error: --prefill-mode only applies with --chat-format apertus2"
+            exit 1
+        fi
+        unset CHAT_FORMAT PREFILL_MODE
+        ;;
+    apertus2)
+        if [[ "$EFFECTIVE_BACKEND" != "openai" || -z "${CUSTOM_TOKENIZER:-${TOKENIZER:-}}" || -z "$MAX_LENGTH" ]]; then
+            echo "Error: --chat-format apertus2 needs --backend openai, --tokenizer <the checkpoint's tokenizer> and --max-length <the server's --max-model-len>"
+            exit 1
+        fi
+        if [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
+            echo "Error: --chat-format apertus2 needs a built environment: the prebuilt image has no apertus-common (a private repository); unset EVAL_PREBUILT_ENV"
+            exit 1
+        fi
+        if [[ -n "$BOS_FLAG" || "${BOS:-false}" == "true" ]]; then
+            echo "Error: --chat-format apertus2 renders the BOS token itself; drop --bos (or BOS=true)"
+            exit 1
+        fi
+        if [[ "$CONVERT_TO_HF" == "true" ]]; then
+            echo "Error: --chat-format apertus2 evaluates a served model; convert and serve the checkpoint separately (drop --convert-to-hf)"
+            exit 1
+        fi
+        if [[ "$EVAL_MODE" != "custom" && "$EVAL_MODE" != "single" ]]; then
+            echo "Error: --chat-format apertus2 runs generative tasks only; use custom --task-file configs/apertus/tasks_posttrain_thinking.txt (or single), not the '$EVAL_MODE' suite"
+            exit 1
+        fi
+        if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" || "$CHAT_TEMPLATE_OVERRIDE" == "by-type" \
+              || "${API_ENDPOINT_FLAG:-}" == "chat-completions" \
+              || ( -z "$API_ENDPOINT_FLAG" && "${API_CHAT_ENDPOINT:-false}" == "true" ) ]]; then
+            echo "Error: --chat-format apertus2 renders every task as chat over /v1/completions; drop --no-chat-template, --chat-template-by-type and --api-endpoint chat-completions (or API_CHAT_ENDPOINT=true)"
+            exit 1
+        fi
+        if [[ "$THINKING_UMBRELLA" == "true" || -n "$ENABLE_THINKING_OVERRIDE" || -n "${ENABLE_THINKING:-}" \
+              || -n "$THINK_END_TOKEN" || -n "$THINK_START_TOKEN" \
+              || "$AUTODETECT_THINK_TOKENS" == "true" || -n "$TRACK_THINKING_METRICS" ]]; then
+            echo "Error: --chat-format apertus2 always reasons and separates the reasoning itself; drop --thinking, --enable-thinking/--no-enable-thinking (or ENABLE_THINKING), the think tokens and --track-thinking-metrics"
+            exit 1
+        fi
+        PREFILL_MODE_FLAG="${PREFILL_MODE_FLAG:-${PREFILL_MODE:-after_think}}"
+        if [[ "$PREFILL_MODE_FLAG" != "after_think" && "$PREFILL_MODE_FLAG" != "empty_think" ]]; then
+            echo "Error: --prefill-mode must be 'after_think' or 'empty_think' (got '$PREFILL_MODE_FLAG')"
+            exit 1
+        fi
+        REASONING_EFFORT="${REASONING_EFFORT:-medium}"
+        if [[ ! "$REASONING_EFFORT" =~ ^(low|medium|high)$ ]]; then
+            echo "Error: --chat-format apertus2 takes --reasoning-effort low, medium or high (got '$REASONING_EFFORT')"
+            exit 1
+        fi
+        LOG_LENGTH_METRICS="true"
+        # Built environments follow the harness HEAD unless told otherwise.
+        HARNESS_BRANCH="${HARNESS_BRANCH:-${LM_EVAL_HARNESS_BRANCH:-$(awk '$1 == "swiss-ai/lm-evaluation-harness" {print $2; exit}' requirements/lm-eval-harness.txt)}}"
+        export CHAT_FORMAT=apertus2 PREFILL_MODE="$PREFILL_MODE_FLAG"
+        ;;
+    *)
+        echo "Error: --chat-format must be 'template' or 'apertus2' (got '$CHAT_FORMAT_FLAG')"
+        exit 1
+        ;;
+esac
 
 THINKING_METRICS_ASKED="false"
 if [[ "$THINKING_UMBRELLA" == "true" || "$ENABLE_THINKING_OVERRIDE" == "true" \
@@ -716,6 +788,7 @@ if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
     else
         echo "  API endpoint: completions"
     fi
+    [[ "${CHAT_FORMAT:-}" == "apertus2" ]] && echo "  Chat format: apertus2 (prefill=$PREFILL_MODE)"
 fi
 echo "  Slurm:  partition=${SBATCH_PARTITION:-normal} qos=${SBATCH_QOS:-<default>}${SBATCH_RESERVATION:+ reservation=$SBATCH_RESERVATION}"
 echo "  Judge RPM: ${JUDGE_REQUESTS_PER_MINUTE:-unlimited}"
@@ -759,6 +832,7 @@ if [[ -n "$MODEL_PATH" ]]; then
         if [[ "$THINKING_UMBRELLA" == "true" || "$ENABLE_THINKING_OVERRIDE" == "true" ]]; then
             MODEL_NAME="${MODEL_NAME}-think"
         fi
+        [[ "${CHAT_FORMAT:-}" == "apertus2" ]] && MODEL_NAME="${MODEL_NAME}-apertus2-${PREFILL_MODE}"
         [[ -n "$REASONING_EFFORT" ]] && MODEL_NAME="${MODEL_NAME}-effort-${REASONING_EFFORT}"
     fi
 

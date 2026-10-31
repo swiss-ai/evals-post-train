@@ -1,0 +1,62 @@
+# Generative tasks of tasks_posttrain_final.txt, for --chat-format apertus2 (whose model only
+# generates) and thinking runs of other models on --api-endpoint chat-completions.
+# Dropped (scored by log-likelihood): truthfulqa_mc2, commonsense_qa, hellaswag, mathqa,
+# truthfulqa_multilingual_mc2, xnli, arc_multilingual, blend_sample, cultural_bench, bbq,
+# toxigen, wmdp, and squadv2 (its task class also scores "unanswerable" by log-likelihood).
+# agieval keeps its generative members. bfcl_v3_fc adds native tool calling (the request's
+# tools field) next to the prompt-format bfcl_v3; every other backend or endpoint must drop
+# it, as it fails its whole chunk there.
+# Knowledge
+mmlu_flan_cot_zeroshot
+mmlu_pro
+agieval_gaokao_mathcloze
+agieval_math
+arc_challenge_chat
+# Instruction Following
+ifeval
+multi-if
+# Chat
+alpaca_eval
+arena_hard_v01
+arena_hard_v2
+# Math
+gsm8k_cot
+hendrycks_math
+minerva_math
+gsm8k_platinum_cot_zeroshot
+minerva_math500
+aime24
+aime25
+# Coding
+humaneval_instruct
+mbpp_instruct
+# Reasoning
+bbh
+gpqa_main_cot_zeroshot
+acp_bench
+drop
+# Multilingual
+global_mmlu_gen_0shot
+mgsm_en_cot
+include_base_44_gen_0shot
+include_base_new_45_gen_0shot
+mlogiqa_gen
+# Cultural knowledge
+switzerland_qa_0shot
+# Safety & Bias
+orbench
+harmbench
+polyglotoxicitypromptsllama_small
+realtoxicitypromptsllama_small
+# System Prompt
+# RealGuardrails / SystemCheck: adherence to instructions placed in the system message.
+# NOTE: run the s_rules umbrella task but report the nested realguardrails_s_rules_br group
+# (see the /prompt_level_strict_acc and /passed keys in the *_main_table.txt).
+realguardrails_s_ifeval
+realguardrails_tensortrust
+realguardrails_s_rules
+# Tool Use
+bfcl_v3
+bfcl_v3_fc
+# Charter Alignment
+swiss_ai_charter_alignment
