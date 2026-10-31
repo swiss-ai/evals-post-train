@@ -14,7 +14,10 @@ goes with the generative tasks: the chat template, the launcher's default.
     python -m scripts.lm_eval_harness.task_output_types --tasks a,b,c --output kinds.sh
 
 writes CHAT_TASKS=... and RAW_TASKS=... (comma-separated, input order) for
-the caller to source.
+the caller to source. With ``--require-generative`` (CHAT_FORMAT=apertus2, whose
+model only generates) it instead fails, naming every task, group or tag with a
+log-likelihood member. Only yaml is read: a Python task class can still send
+log-likelihood requests its yaml doesn't declare (squadv2, scrolls).
 """
 
 from __future__ import annotations
@@ -84,18 +87,37 @@ class Classifier:
             (raw if self.kinds(task) == {True} else chat).append(task)
         return chat, raw
 
+    def with_loglikelihood(self, tasks: list[str]) -> list[str]:
+        """Tasks, groups and tags with at least one log-likelihood member."""
+        return [task for task in tasks if True in self.kinds(task)]
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--tasks", required=True, help="comma-separated lm-eval task names")
-    parser.add_argument("--output", type=Path, required=True, help="shell file to write")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--output", type=Path, help="shell file to write")
+    mode.add_argument(
+        "--require-generative",
+        action="store_true",
+        help="fail if any task is scored by log-likelihood",
+    )
     args = parser.parse_args()
 
     from lm_eval.tasks import TaskManager
     from lm_eval.tasks._yaml_loader import load_yaml
 
     tasks = [t.strip() for t in args.tasks.split(",") if t.strip()]
-    chat, raw = Classifier(TaskManager(), load_yaml).split(tasks)
+    classifier = Classifier(TaskManager(), load_yaml)
+    if args.require_generative:
+        refused = classifier.with_loglikelihood(tasks)
+        if refused:
+            raise SystemExit(
+                f"Scored by log-likelihood, which this model cannot do: {','.join(refused)}"
+            )
+        print(f"All {len(tasks)} tasks are generative.")
+        return
+    chat, raw = classifier.split(tasks)
     args.output.write_text(
         f"CHAT_TASKS={shlex.quote(','.join(chat))}\nRAW_TASKS={shlex.quote(','.join(raw))}\n"
     )

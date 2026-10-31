@@ -1,0 +1,9 @@
+# Development check for --chat-format apertus2: math, code (answer prefills), instruction
+# following, reasoning and native tool calling.
+gsm8k_cot
+minerva_math
+humaneval_instruct
+mbpp_instruct
+ifeval
+gpqa_main_cot_zeroshot
+bfcl_v3_fc
