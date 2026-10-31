@@ -11,11 +11,15 @@ set -euo pipefail
 EVAL_HARNESS_REF=${EVAL_HARNESS_REF:-HEAD}
 EVAL_ENV_CACHE_ROOT=${EVAL_ENV_CACHE_ROOT:-${SCRATCH:-/tmp}/eval-envs}
 EVAL_RUNTIME_REQUIREMENTS=${EVAL_RUNTIME_REQUIREMENTS:-${EVAL_REPO_ROOT:-$PWD}/requirements/eval-runtime.txt}
+# requirements/apertus2.txt for CHAT_FORMAT=apertus2 runs only (their own overlay).
+EVAL_APERTUS2_REQUIREMENTS=${EVAL_APERTUS2_REQUIREMENTS:-}
 EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 HARNESS_URL="https://github.com/${EVAL_HARNESS_REPO}.git"
 
 [[ -r "$EVAL_RUNTIME_REQUIREMENTS" ]] \
     || { echo "Runtime requirements are not readable inside the container: $EVAL_RUNTIME_REQUIREMENTS" >&2; exit 1; }
+[[ -z "$EVAL_APERTUS2_REQUIREMENTS" || -r "$EVAL_APERTUS2_REQUIREMENTS" ]] \
+    || { echo "Apertus 2 requirements are not readable inside the container: $EVAL_APERTUS2_REQUIREMENTS" >&2; exit 1; }
 [[ -r "$EVAL_CONTAINER_CONFIG" ]] \
     || { echo "Container configuration is not readable inside the container: $EVAL_CONTAINER_CONFIG" >&2; exit 1; }
 if [[ -n "${EVAL_REPO_ROOT:-}" && ! -d "$EVAL_REPO_ROOT" ]]; then
@@ -74,7 +78,13 @@ BASE_KEY=$(
         cat "$EVAL_CONTAINER_CONFIG"
     } | hash_stream
 )
-OVERLAY_KEY=$(printf '%s\n%s\n%s\n' "$BASE_KEY" "$EVAL_HARNESS_REPO" "$HARNESS_COMMIT" | hash_stream)
+OVERLAY_KEY=$(
+    {
+        printf '%s\n%s\n%s\n' "$BASE_KEY" "$EVAL_HARNESS_REPO" "$HARNESS_COMMIT"
+        [[ -z "$EVAL_APERTUS2_REQUIREMENTS" ]] || cat "$EVAL_APERTUS2_REQUIREMENTS"
+    } | hash_stream
+)
+OVERLAY_IMPORTS="import lm_eval${EVAL_APERTUS2_REQUIREMENTS:+, apertus_common}"
 
 BASE_ENV="$EVAL_ENV_CACHE_ROOT/base/${BASE_KEY:0:20}"
 HARNESS_OVERLAY="$EVAL_ENV_CACHE_ROOT/harness/${OVERLAY_KEY:0:20}"
@@ -88,7 +98,7 @@ base_is_ready() {
 
 overlay_is_ready() {
     [[ -f "$HARNESS_OVERLAY/.complete" ]] || return 1
-    PYTHONPATH="$HARNESS_OVERLAY" "$BASE_ENV/bin/python" -c "import lm_eval" \
+    PYTHONPATH="$HARNESS_OVERLAY" "$BASE_ENV/bin/python" -c "$OVERLAY_IMPORTS" \
         >/dev/null 2>&1
 }
 
@@ -131,7 +141,10 @@ build_overlay() {
         trap 'rm -rf "${tmp_dir:-}"' RETURN
         "$BASE_ENV/bin/python" -m pip install --no-deps --target "$tmp_dir" \
             "git+${HARNESS_URL}@${HARNESS_COMMIT}"
-        PYTHONPATH="$tmp_dir" "$BASE_ENV/bin/python" -c "import lm_eval"
+        [[ -z "$EVAL_APERTUS2_REQUIREMENTS" ]] \
+            || "$BASE_ENV/bin/python" -m pip install --no-deps --ignore-requires-python \
+                --target "$tmp_dir" -r "$EVAL_APERTUS2_REQUIREMENTS"
+        PYTHONPATH="$tmp_dir" "$BASE_ENV/bin/python" -c "$OVERLAY_IMPORTS"
         touch "$tmp_dir/.complete"
         mv "$tmp_dir" "$HARNESS_OVERLAY"
         trap - RETURN

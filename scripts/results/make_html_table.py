@@ -70,9 +70,19 @@ THINKING_COUNT_SUFFIXES = frozenset({
 })
 
 
+# Failure rates: percentages where lower is better, so they never win a "best" badge.
+THINKING_FAILURE_SUFFIXES = frozenset({
+    "generation_truncated", "generation_think_truncated", "generation_parse_failed",
+})
+
+
 def metric_kind(metric_key):
-    """"count" for a raw length metric, "rate" for everything else."""
-    return "count" if metric_key.split("/", 1)[-1] in THINKING_COUNT_SUFFIXES else "rate"
+    """"count" for a raw length metric, "failure" for a failure rate, "rate" for everything
+    else."""
+    suffix = metric_key.split("/", 1)[-1]
+    if suffix in THINKING_COUNT_SUFFIXES:
+        return "count"
+    return "failure" if suffix in THINKING_FAILURE_SUFFIXES else "rate"
 
 
 def thinking_specs(length_unit="tokens", format_detail=False):
@@ -85,6 +95,11 @@ def thinking_specs(length_unit="tokens", format_detail=False):
     specs.append(("Thinking Format Correct (%)", "thinking_format_correct"))
     specs.append((f"Thinking Length ({length_unit})", f"thinking_length_{length_unit}"))
     specs.append((f"Response Length ({length_unit})", f"response_length_{length_unit}"))
+    # Emitted by every API model (truncated) or only by apertus2-completions; empty
+    # columns are dropped.
+    specs.append(("Truncated (%)", "generation_truncated"))
+    specs.append(("Thinking Truncated (%)", "generation_think_truncated"))
+    specs.append(("Parse Failed (%)", "generation_parse_failed"))
     return specs
 
 
@@ -295,11 +310,13 @@ def _value_cell(val, col, kind, indent):
     if kind == "count":
         # Round half up: "{412.5:.0f}" is banker's rounding and yields 412.
         return f'{indent}<div class="cell" data-col="{col}">{math.floor(val + 0.5):.0f}</div>\n'
+    if kind == "failure":
+        return f'{indent}<div class="cell" data-col="{col}">{val * 100:.1f}</div>\n'
     return f'{indent}<div class="cell" data-col="{col}" data-val="{val * 100:.1f}">{val * 100:.1f}</div>\n'
 
 
 def _row_classes(base, kind):
-    return base if kind == "count" else f"{base} score-row"
+    return f"{base} score-row" if kind == "rate" else base
 
 
 def _render_table(html, table_id, models, group_data, overall_avgs, n_models, info_rows=None, flat=False):

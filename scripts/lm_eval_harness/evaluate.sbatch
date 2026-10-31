@@ -73,6 +73,9 @@ usage() {
     echo " TRACK_THINKING_METRICS: 'true'/'false' to force the thinking metrics on/off (default: on iff a close token is known)."
     echo " LOG_LENGTH_METRICS: 'true' to aggregate response_length_*/thinking_length_* (thinking_format_* is always aggregated)."
     echo " REASONING_EFFORT: chat-template argument reasoning_effort (e.g. low/medium/high, read by gpt-oss's template); hf, vllm, sglang and openai."
+    echo " THINK_TEMPERATURE, THINK_TOP_P, THINK_TOP_K, THINK_MIN_P, THINK_REPETITION_PENALTY: sampling of thinking runs (default 0.6 / 0.95; the others unset)."
+    echo " CHAT_FORMAT: 'apertus2' for the Apertus 2 native format (openai backend, harness model apertus2-completions; needs TOKENIZER and MAX_LENGTH). Default: template."
+    echo " PREFILL_MODE: apertus2 answer prefills, 'after_think' (default) or 'empty_think'."
 	echo "For more information see the README: https://github.com/swiss-ai/evals?tab=readme-ov-file."
 }
 die() {
@@ -292,6 +295,30 @@ AUTODETECT_THINK_TOKENS=$(_norm_bool AUTODETECT_THINK_TOKENS "$AUTODETECT_THINK_
 LOG_LENGTH_METRICS=$(_norm_bool LOG_LENGTH_METRICS "$LOG_LENGTH_METRICS")
 [[ -z "$TRACK_THINKING_METRICS" ]] || TRACK_THINKING_METRICS=$(_norm_bool TRACK_THINKING_METRICS "$TRACK_THINKING_METRICS")
 
+# CHAT_FORMAT=apertus2: the Apertus 2 native format, rendered and parsed client-side by
+# apertus2-completions; a thinking run (effort, budget and sampling below).
+CHAT_FORMAT=${CHAT_FORMAT:-template}
+case "$CHAT_FORMAT" in
+    template) ;;
+    apertus2)
+        PREFILL_MODE=${PREFILL_MODE:-after_think}
+        [[ "${EVAL_ENV_KIND:-}" != "prebuilt" ]] \
+            || die "CHAT_FORMAT=apertus2 needs a built environment: the prebuilt image has no apertus-common (a private repository)."
+        [[ -n "${TOKENIZER:-}" ]] || die "CHAT_FORMAT=apertus2 needs TOKENIZER, the checkpoint's tokenizer."
+        [[ "$BOS" != "true" ]] || die "CHAT_FORMAT=apertus2 renders the BOS token itself: unset BOS."
+        [[ "$LM_EVAL_BACKEND" == "openai" && "${API_CHAT_ENDPOINT:-false}" != "true" && $APPLY_CHAT_TEMPLATE = true ]] \
+            || die "CHAT_FORMAT=apertus2 renders every task as chat over /v1/completions (LM_EVAL_BACKEND=openai, API_CHAT_ENDPOINT=false, APPLY_CHAT_TEMPLATE=true)."
+        [[ -n "$MAX_LENGTH" ]] || die "CHAT_FORMAT=apertus2 needs MAX_LENGTH, the server's --max-model-len."
+        [[ "$PREFILL_MODE" == "after_think" || "$PREFILL_MODE" == "empty_think" ]] \
+            || die "PREFILL_MODE must be after_think or empty_think (got '$PREFILL_MODE')."
+        [[ $ENABLE_THINKING_EXPLICIT == 0 && -z "$THINK_END_TOKEN$THINK_START_TOKEN$TRACK_THINKING_METRICS" \
+           && "$AUTODETECT_THINK_TOKENS" == "False" ]] \
+            || die "CHAT_FORMAT=apertus2 always reasons and separates the reasoning itself: unset ENABLE_THINKING, THINK_END_TOKEN, THINK_START_TOKEN, AUTODETECT_THINK_TOKENS and TRACK_THINKING_METRICS."
+        REASONING_EFFORT=${REASONING_EFFORT:-medium}
+        ;;
+    *) die "CHAT_FORMAT must be template or apertus2 (got '$CHAT_FORMAT')." ;;
+esac
+
 # Thinking emits a trace before the answer; raise the budget unless the caller set it. A model
 # given a reasoning effort (gpt-oss) reasons at every level, so it gets the same budget.
 # 32768 is the largest task-local budget (AIME), so the override below lowers no task.
@@ -318,9 +345,10 @@ THINK_ARGS=""
 [[ -n "$TRACK_THINKING_METRICS" ]] && THINK_ARGS="${THINK_ARGS},track_thinking_metrics=${TRACK_THINKING_METRICS}"
 
 # Extra chat-template arguments (hf, vllm and sglang), as a second --model_args token: the harness
-# refuses a first token containing '{' (it must then be all JSON) but reads each further
-# comma-free key=value token with ast.literal_eval, so this one becomes a dict. Needs the
-# `--model_args 'a' 'b'` form: argparse gives `--model_args='a'` exactly one value.
+# refuses a first token containing '{' (it must then be all JSON) but splits each further token
+# with shlex (POSIX, dropping unescaped quotes) and reads its value with ast.literal_eval, so the
+# quotes are escaped. Needs the `--model_args 'a' 'b'` form: argparse gives `--model_args='a'`
+# exactly one value.
 CHAT_TEMPLATE_ARGS=""
 if [[ -n "$REASONING_EFFORT" ]]; then
     [[ "$REASONING_EFFORT" =~ ^[A-Za-z0-9_-]+$ ]] \
@@ -328,7 +356,7 @@ if [[ -n "$REASONING_EFFORT" ]]; then
     [[ "$LM_EVAL_BACKEND" == "vllm" || "$LM_EVAL_BACKEND" == "hf" || "$LM_EVAL_BACKEND" == "sglang" \
        || "$LM_EVAL_BACKEND" == "openai" ]] \
         || die "REASONING_EFFORT is only supported with the hf, vllm, sglang and openai backends (got $LM_EVAL_BACKEND)."
-    CHAT_TEMPLATE_ARGS=" 'chat_template_args={\"reasoning_effort\":\"${REASONING_EFFORT}\"}'"
+    CHAT_TEMPLATE_ARGS=" 'chat_template_args={\\\"reasoning_effort\\\":\\\"${REASONING_EFFORT}\\\"}'"
 fi
 
 if [ -f "$TASKS" ]; then
@@ -366,7 +394,7 @@ printf '%s\n' "MODEL=$MODEL" "NAME=$NAME" "TOKENIZER=$TOKENIZER" "BS=$BS" "REVIS
 	"SIZE=$SIZE" "HARNESS_LIMIT=$HARNESS_LIMIT" "LM_EVAL_HARNESS_BRANCH=$LM_EVAL_HARNESS_BRANCH" \
 	"BOS=$BOS" "TRUST_REMOTE_CODE=$TRUST_REMOTE_CODE" "TASKS=$TASKS" "MAX_LENGTH=$MAX_LENGTH" "WANDB_ENTITY=$WANDB_ENTITY" \
 	"WANDB_PROJECT=$WANDB_PROJECT" "LM_EVAL_BACKEND=$LM_EVAL_BACKEND" "HF_HOME=$HF_HOME" \
-	"API_CHAT_ENDPOINT=${API_CHAT_ENDPOINT:-false}" ""
+	"API_CHAT_ENDPOINT=${API_CHAT_ENDPOINT:-false}" "CHAT_FORMAT=$CHAT_FORMAT" ""
 printf '%s\n' "ENABLE_THINKING=$ENABLE_THINKING (explicit=$ENABLE_THINKING_EXPLICIT)" \
 	"AUTODETECT_THINK_TOKENS=$AUTODETECT_THINK_TOKENS" "THINK_START_TOKEN=$THINK_START_TOKEN" \
 	"THINK_END_TOKEN=$THINK_END_TOKEN" "TRACK_THINKING_METRICS=$TRACK_THINKING_METRICS" \
@@ -556,7 +584,10 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     # client-side via the HF tokenizer. For purely generative suites the server-side
     # template path can be forced with API_CHAT_ENDPOINT=true.
     API_CHAT_ENDPOINT=${API_CHAT_ENDPOINT:-false}
-    if [[ "$API_CHAT_ENDPOINT" == "true" ]]; then
+    if [[ "$CHAT_FORMAT" == "apertus2" ]]; then
+        API_LM_EVAL_MODEL="apertus2-completions"
+        API_ENDPOINT_SUFFIX="completions"
+    elif [[ "$API_CHAT_ENDPOINT" == "true" ]]; then
         [[ $APPLY_CHAT_TEMPLATE = true ]] || die "API_CHAT_ENDPOINT=true requires the chat template (chat/completions takes messages)."
         API_LM_EVAL_MODEL="local-chat-completions"
         API_ENDPOINT_SUFFIX="chat/completions"
@@ -575,7 +606,12 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     if [[ -n "$API_REQUESTS_PER_MINUTE" ]]; then
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,requests_per_minute=$API_REQUESTS_PER_MINUTE"
     fi
-    if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then
+    if [[ $API_LM_EVAL_MODEL == "apertus2-completions" ]]; then
+        # The model reads the effort itself (no chat template); the context goes in as
+        # max_model_len (below).
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer=$TOKENIZER,prefill=$PREFILL_MODE,reasoning_effort=$REASONING_EFFORT${THINKING_DEFAULT_MODEL_ARG}"
+        CHAT_TEMPLATE_ARGS=""
+    elif [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then
         # tokenizer_backend/tokenizer is local bookkeeping only (max context length, decoding,
         # token counts) -- lm_eval still needs it for loglikelihood scoring. tokenized_requests
         # is the separate knob that controls what goes over the wire: with it left at the
@@ -626,15 +662,17 @@ cp "$EVAL_RUN_CONFIG" "$HARNESS_EVAL_DIR/.eval-run-config.json"
 # reasoning-effort runs set max_gen_toks here: task budgets (e.g. mmlu_pro 2048,
 # ifeval 1280) were sized for a direct answer, and the trace counts against them.
 GEN_KWARGS=""
-if [[ "$ENABLE_THINKING" == "True" ]]; then
+if [[ "$ENABLE_THINKING" == "True" || "$CHAT_FORMAT" == "apertus2" ]]; then
     THINK_TEMPERATURE=${THINK_TEMPERATURE:-0.6}
     THINK_TOP_P=${THINK_TOP_P:-0.95}
     GEN_KWARGS="do_sample=true,temperature=${THINK_TEMPERATURE},top_p=${THINK_TOP_P}"
-    # Optional knob for degenerate looping (e.g. 1.05); unset leaves vLLM's default (1.0).
-    if [[ -n "${THINK_REPETITION_PENALTY:-}" ]]; then
-        GEN_KWARGS="${GEN_KWARGS},repetition_penalty=${THINK_REPETITION_PENALTY}"
-    fi
-    echo "Thinking sampling: do_sample=true temperature=$THINK_TEMPERATURE top_p=$THINK_TOP_P repetition_penalty=${THINK_REPETITION_PENALTY:-<unset>} max_gen_toks=$MAX_NEW_TOKENS"
+    # Optional knobs (e.g. repetition_penalty 1.05 against looping); unset ones keep the
+    # backend's default.
+    [[ -z "${THINK_TOP_K:-}" ]] || GEN_KWARGS="${GEN_KWARGS},top_k=${THINK_TOP_K}"
+    [[ -z "${THINK_MIN_P:-}" ]] || GEN_KWARGS="${GEN_KWARGS},min_p=${THINK_MIN_P}"
+    [[ -z "${THINK_REPETITION_PENALTY:-}" ]] \
+        || GEN_KWARGS="${GEN_KWARGS},repetition_penalty=${THINK_REPETITION_PENALTY}"
+    echo "Thinking sampling: do_sample=true temperature=$THINK_TEMPERATURE top_p=$THINK_TOP_P top_k=${THINK_TOP_K:-<unset>} min_p=${THINK_MIN_P:-<unset>} repetition_penalty=${THINK_REPETITION_PENALTY:-<unset>} max_gen_toks=$MAX_NEW_TOKENS"
 elif [[ -n "${NOTHINK_TEMPERATURE:-}" ]]; then
     # Optional no-think sampling (inert unless NOTHINK_TEMPERATURE is set): greedy-vs-sampling ablation.
     NOTHINK_TOP_P=${NOTHINK_TOP_P:-0.95}
@@ -723,7 +761,13 @@ if [[ -n "$BACKEND_MAX_LENGTH" ]]; then
             COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,seq_length=$BACKEND_MAX_LENGTH"
             ;;
         hf|openai)
-            COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_length=$BACKEND_MAX_LENGTH"
+            # apertus2-completions clamps each request's budget to the server's context,
+            # which ruler's detected length does not change.
+            if [[ "$CHAT_FORMAT" == "apertus2" ]]; then
+                COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$MAX_LENGTH"
+            else
+                COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_length=$BACKEND_MAX_LENGTH"
+            fi
             ;;
     esac
     echo "Using $LM_EVAL_BACKEND backend context limit: $BACKEND_MAX_LENGTH"
@@ -764,7 +808,7 @@ eval_env_is_ready() {
         || return 1
     if [[ '$EVAL_VERIFY_ENV_IMPORTS' == 'true' ]]; then
         '$EVAL_BASE_ENV/bin/python' -c 'import accelerate, datasets, transformers, wandb' >/dev/null 2>&1 \
-            && PYTHONPATH='$EVAL_HARNESS_OVERLAY' '$EVAL_BASE_ENV/bin/python' -c 'import lm_eval' >/dev/null 2>&1 \
+            && PYTHONPATH='$EVAL_HARNESS_OVERLAY' '$EVAL_BASE_ENV/bin/python' -c 'import lm_eval${EVAL_APERTUS2_REQUIREMENTS:+, apertus_common}' >/dev/null 2>&1 \
             || return 1
     fi
 }
@@ -843,6 +887,12 @@ esac
 
 echo "Environment manifest: $EVAL_ENV_MANIFEST"
 TIMED_CMD="echo Evaluation process starting: \$(date -Is)"
+if [[ "$CHAT_FORMAT" == "apertus2" ]]; then
+    # apertus2-completions only generates: stop before any request if a task is scored by
+    # log-likelihood (it reads the harness's task index, so it runs in the container).
+    TIMED_CMD="$TIMED_CMD
+cd $PWD && python -m scripts.lm_eval_harness.task_output_types --tasks '$TASKS' --require-generative"
+fi
 if [[ $APPLY_CHAT_TEMPLATE != by-type ]]; then
     make_cmd "$TASKS" "$HARNESS_EVAL_DIR" "$APPLY_CHAT_TEMPLATE"
     TIMED_CMD="$TIMED_CMD
@@ -890,7 +940,9 @@ fi
 START_TIME=$(date +%s)
 echo "Starting evaluation timing: $(date -Is)"
 
-# Cache redirection exports to pass into the container
+# Cache redirection exports to pass into the container. lm-eval keys its request cache by
+# task, few-shot, template flag and tokenizer only, not by the generation or template
+# arguments, so that one stays in the job.
 CACHE_EXPORTS="
 export HF_HOME=$HF_HOME
 export HF_DATASETS_CACHE=$HF_DATASETS_CACHE
@@ -901,6 +953,10 @@ export PYTHONUSERBASE=$PYTHONUSERBASE
 export MPLCONFIGDIR=$MPLCONFIGDIR
 export SPACY_DATA=$SPACY_DATA
 export XDG_CACHE_HOME=$XDG_CACHE_HOME
+cache_root=\${SLURM_TMPDIR:-/tmp}
+[[ -d \"\$cache_root\" && -w \"\$cache_root\" ]] || cache_root=/tmp
+LM_HARNESS_CACHE_PATH=\$(mktemp -d \"\$cache_root/lm-eval-request-cache.XXXXXX\")
+export LM_HARNESS_CACHE_PATH
 mkdir -p $HF_DATASETS_CACHE $NLTK_DATA $TRITON_CACHE_DIR $TIKTOKEN_CACHE_DIR $PYTHONUSERBASE $MPLCONFIGDIR $SPACY_DATA
 "
 

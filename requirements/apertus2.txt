@@ -1,0 +1,5 @@
+# For --chat-format apertus2 runs only: installed into their harness overlay with
+# --no-deps --ignore-requires-python (scripts/lm_eval_harness/build_eval_env.sh); its
+# dependencies come with eval-runtime.txt. Validated on Python 3.12 and tokenizers 0.22,
+# although it declares 3.13 and 0.23. Private repository: needs HTTPS read access.
+apertus-common @ git+https://github.com/swiss-ai/apertus-common.git@e0c158108186946290272715a42127d5771f7d00

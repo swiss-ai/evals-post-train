@@ -120,6 +120,12 @@ _eval_create_run_config() {
     # Only when set: run_config_matches() compares exactly, so an always-present field
     # would make every earlier result look foreign and rerun it.
     [[ -n "${REASONING_EFFORT:-}" ]] && fields+=(--field "reasoning_effort=$REASONING_EFFORT")
+    if [[ "${CHAT_FORMAT:-template}" == "apertus2" ]]; then
+        fields+=(--field "chat_format=apertus2" --field "prefill_mode=${PREFILL_MODE:-after_think}"
+                 --field "apertus_common=$(grep -oE '[0-9a-f]{40}' requirements/apertus2.txt)")
+    fi
+    [[ -n "${THINK_TOP_K:-}" ]] && fields+=(--field "think_top_k=$THINK_TOP_K")
+    [[ -n "${THINK_MIN_P:-}" ]] && fields+=(--field "think_min_p=$THINK_MIN_P")
 
     EVAL_RUN_CONFIG="$state_dir/run_config.json"
     export EVAL_RUN_CONFIG
@@ -307,6 +313,8 @@ _eval_prepare_environment() {
     EVAL_CONTAINER_CONFIG=$(realpath "$EVAL_CONTAINER_CONFIG")
     export EVAL_CONTAINER_CONFIG EVAL_REPO_ROOT="$PWD"
     export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/eval-runtime.txt"
+    [[ "${CHAT_FORMAT:-template}" == "apertus2" ]] \
+        && export EVAL_APERTUS2_REQUIREMENTS="$PWD/requirements/apertus2.txt"
 
     if [[ "${EVAL_DRY_RUN:-false}" == "true" ]]; then
         echo "[DRY RUN] sbatch --parsable scripts/lm_eval_harness/prepare_eval_env.sbatch" >&2
