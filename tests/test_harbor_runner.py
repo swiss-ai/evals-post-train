@@ -236,7 +236,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(summary["terminal_bench_2"]["mean_reward"], 1.0)
 
 
-@unittest.skipUnless(HAS_HARBOR, "harbor not installed (requirements/harbor-runtime.txt)")
+@unittest.skipUnless(HAS_HARBOR, "harbor not installed (requirements/harbor-runtime.lock)")
 class DockerfileReplayTest(unittest.TestCase):
     def test_substitute(self):
         env = {"HOME": "/root", "EMPTY": ""}

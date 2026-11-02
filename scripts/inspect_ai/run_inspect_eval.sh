@@ -78,7 +78,7 @@
 #   grants access (email critpt@artificialanalysis.ai); the run still completes and writes its
 #   submission batch to a local file instead of posting it.
 #   SKIP_INSTALL=1 to skip the runtime pip install of inspect-ai/inspect-evals.
-#   EVAL_INSPECT_VENV -- a virtualenv holding requirements/inspect-runtime.txt; when set, its
+#   EVAL_INSPECT_VENV -- a virtualenv holding requirements/inspect-runtime.lock; when set, its
 #   bin/ goes first on PATH so `inspect`, `python` and `python3` below all run from it. The
 #   prebuilt image sets it: Inspect lives apart from lm-eval-harness there, whose datasets pin
 #   would otherwise hold inspect-evals back.
@@ -225,9 +225,9 @@ if [[ "${SKIP_INSTALL:-0}" != "1" && "${EVAL_PREBUILT_ENV:-0}" != "1" ]]; then
     fi
 
     # requirements/inspect-runtime.txt explains each package; the prebuilt image installs
-    # the same file.
-    "${PIP[@]}" install --no-cache-dir --upgrade \
-        -r "$(dirname "${BASH_SOURCE[0]}")/../../requirements/inspect-runtime.txt" \
+    # the same lock.
+    "${PIP[@]}" install --no-cache-dir \
+        -r "$(dirname "${BASH_SOURCE[0]}")/../../requirements/inspect-runtime.lock" \
         || die "pip install of inspect-ai/inspect-evals failed. Set SKIP_INSTALL=1 if the environment already has them."
 else
     echo "SKIP_INSTALL=1 or EVAL_PREBUILT_ENV=1: using the preinstalled environment (no pip install)"

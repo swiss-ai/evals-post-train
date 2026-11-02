@@ -10,7 +10,7 @@
 #   swe_bench      SWE-bench Verified, 500 tasks (swebench/sweb.eval.x86_64.* images).
 #   swe_bench_pro  SWE-bench Pro v1, 731 tasks (jefzda/sweap-images:<tag>) -- see "v1 vs V2" below.
 #
-# EvalScope lives in its own venv (requirements/evalscope-runtime.txt, pinned exactly): its
+# EvalScope lives in its own venv (requirements/evalscope-runtime.lock, every package pinned): its
 # math-verify pin conflicts with the lm-eval/Inspect environment's antlr4 pin.
 #
 # Every sample gets its own sandbox container, so this needs a container runtime:
@@ -185,7 +185,7 @@ if [[ -z "$CSCS_SERVING_API" && -f ./scripts/cscs_serving_api_key.txt ]]; then
 fi
 export EVALSCOPE_API_KEY="${TARGET_API_KEY:-$CSCS_SERVING_API}"
 
-REQUIREMENTS=requirements/evalscope-runtime.txt
+REQUIREMENTS=requirements/evalscope-runtime.lock
 if [[ "${SKIP_INSTALL:-0}" == "1" ]]; then
     PY=python3
     echo "SKIP_INSTALL=1: running with $(command -v python3) as is (no venv, no install)"

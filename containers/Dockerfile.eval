@@ -9,33 +9,35 @@
 # that same commit. Built from the repository root:
 #   docker build -f containers/Dockerfile.eval .
 
-FROM python:3.12-slim
+# Pinned by digest, and every package below comes from a requirements/*.lock
+# (scripts/common/lock_requirements.sh), so builds of different commits get the
+# same packages unless a lock changed.
+FROM python:3.12-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30
 
 RUN apt-get update -qq \
     && apt-get install -y -qq --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
-# No model is loaded in this image: CPU torch keeps it small, and installing
-# it first stops the requirements below pulling the multi-GB CUDA build.
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-
-COPY requirements/eval-runtime.txt requirements/inspect-runtime.txt /tmp/requirements/
-RUN pip install --no-cache-dir -r /tmp/requirements/eval-runtime.txt
+# No model is loaded in this image, so the lock has CPU torch, from PyTorch's
+# index. The lock's hashes decide which file is accepted, whichever index has it.
+COPY requirements/eval-runtime.lock requirements/inspect-runtime.lock /tmp/requirements/
+RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
+    -r /tmp/requirements/eval-runtime.lock
 
 # Inspect gets its own virtualenv: lm-eval-harness pins datasets==4.0.0, and
 # in one environment pip would resolve inspect-evals to the last release that
 # accepts it (January 2026) instead of the pinned one. run_inspect_eval.sh puts
 # EVAL_INSPECT_VENV/bin first on PATH.
 RUN python -m venv /opt/inspect-venv \
-    && /opt/inspect-venv/bin/pip install --no-cache-dir -r /tmp/requirements/inspect-runtime.txt
+    && /opt/inspect-venv/bin/pip install --no-cache-dir -r /tmp/requirements/inspect-runtime.lock
 
 # EvalScope (SWE-bench Verified and Pro, run_evalscope_eval.sh) in a third one:
 # its math-verify pin conflicts with eval-runtime.txt's antlr4. SWE-bench_Pro-os,
 # which EvalScope would otherwise clone at run time, is checked out at the commit
 # the installed EvalScope pins (EVALSCOPE_SWE_BENCH_PRO_REPO).
-COPY requirements/evalscope-runtime.txt /tmp/requirements/
+COPY requirements/evalscope-runtime.lock /tmp/requirements/
 RUN python -m venv /opt/evalscope-venv \
-    && /opt/evalscope-venv/bin/pip install --no-cache-dir -r /tmp/requirements/evalscope-runtime.txt \
+    && /opt/evalscope-venv/bin/pip install --no-cache-dir -r /tmp/requirements/evalscope-runtime.lock \
     && pro=$(/opt/evalscope-venv/bin/python -c \
         "from evalscope.benchmarks.swe_bench_pro.utils import PRO_REPO_URL, PINNED_COMMIT; print(PRO_REPO_URL, PINNED_COMMIT)") \
     && set -- $pro \
@@ -50,13 +52,11 @@ RUN python -m venv /opt/evalscope-venv \
 # so it is installed here from the same Harbor tag (HARBOR_VERSION in
 # scripts/harbor/run.py, the harbor pin in harbor-runtime.txt), as
 # HARBOR_ADAPTERS_ROOT/<adapter>/bin/<adapter>.
-COPY requirements/harbor-runtime.txt /tmp/requirements/
+COPY requirements/harbor-runtime.lock requirements/harbor-adapters.lock /tmp/requirements/
 RUN python -m venv /opt/harbor-venv \
-    && /opt/harbor-venv/bin/pip install --no-cache-dir -r /tmp/requirements/harbor-runtime.txt \
-    && version=$(/opt/harbor-venv/bin/python -c "from importlib.metadata import version; print(version('harbor'))") \
+    && /opt/harbor-venv/bin/pip install --no-cache-dir -r /tmp/requirements/harbor-runtime.lock \
     && python -m venv /opt/harbor-adapters/multi-swe-bench \
-    && /opt/harbor-adapters/multi-swe-bench/bin/pip install --no-cache-dir \
-        "git+https://github.com/harbor-framework/harbor@v$version#subdirectory=adapters/multi-swe-bench" \
+    && /opt/harbor-adapters/multi-swe-bench/bin/pip install --no-cache-dir -r /tmp/requirements/harbor-adapters.lock \
     && /opt/harbor-adapters/multi-swe-bench/bin/multi-swe-bench --help >/dev/null
 
 # Each pinned harness as its own --no-deps overlay, the same layout

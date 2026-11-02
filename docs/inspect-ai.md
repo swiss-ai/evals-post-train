@@ -22,7 +22,7 @@ sbatch --reservation=my-reservation scripts/inspect_ai/run_inspect_eval.sbatch -
 ```bash
 # run_inspect_eval.sh installs these itself at runtime (SKIP_INSTALL=1 or EVAL_PREBUILT_ENV=1 to skip);
 # to install by hand for local/interactive use:
-pip install "inspect-ai>=0.3.258" inspect-evals openai
+pip install -r requirements/inspect-runtime.lock
 
 # A plain benchmark against a served model (CSCS serving, vllm serve, ...)
 scripts/inspect_ai/run_inspect_eval.sh --task gsm8k --model Qwen/Qwen3-8B --api-base-url http://nid001234:8000

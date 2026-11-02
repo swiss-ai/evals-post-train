@@ -1,5 +1,6 @@
-# Packages run_evalscope_eval.sh installs into its own venv (the prebuilt image,
-# containers/Dockerfile.eval, bakes them into /opt/evalscope-venv) (EvalScope's
+# Input to evalscope-runtime.lock (scripts/common/lock_requirements.sh), which is what
+# run_evalscope_eval.sh installs into its own venv (the prebuilt image,
+# containers/Dockerfile.eval, bakes it into /opt/evalscope-venv) (EvalScope's
 # math-verify==0.9.0[antlr4_13_2] pin conflicts with eval-runtime.txt's
 # antlr4-python3-runtime==4.11, so it cannot share the lm-eval/Inspect env).
 # Pinned exactly: a bump is a deliberate, recorded change.

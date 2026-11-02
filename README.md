@@ -81,7 +81,9 @@ echo -n "wandb_v1_abc123..." > scripts/wandb_api_key.txt
 uv run --all-extras python -m unittest discover -s tests   # what CI's "Offline checks" runs (plus shellcheck, syntax and JSON checks)
 ```
 
-The Harbor tests need Harbor installed (Python >= 3.12): `pip install -r requirements/harbor-runtime.txt`, then `python -m unittest tests.test_harbor_runner tests.test_harbor_wandb`; without it, the Harbor-only tests are skipped.
+The Harbor tests need Harbor installed (Python >= 3.12): `pip install -r requirements/harbor-runtime.lock`, then `python -m unittest tests.test_harbor_runner tests.test_harbor_wandb`; without it, the Harbor-only tests are skipped.
+
+To change a dependency, edit its `requirements/*.txt`, run `scripts/common/lock_requirements.sh` (needs [uv](https://docs.astral.sh/uv/)) and commit both files.
 
 ---
 
@@ -95,11 +97,11 @@ evals-post-train/
 │   ├── harbor/            # run_harbor_eval.sh/.sbatch, run.py (benchmarks), k8s/docker environments, task_patches.py
 │   ├── evalscope/         # run_evalscope_eval.sh/.sbatch, run.py, SWE-bench scorer
 │   ├── aaii/              # Artificial Analysis protocol: Inspect tasks (*.py) and standalone runners (run_*.sh)
-│   ├── common/            # k8s_sandbox.py (task containers as pods: Harbor, EvalScope), wandb.sh (the W&B upload rule)
+│   ├── common/            # k8s_sandbox.py (task containers as pods: Harbor, EvalScope), wandb.sh (the W&B upload rule), lock_requirements.sh
 │   └── results/           # W&B upload, tables, exports
 ├── configs/               # lm-eval task lists, main-table metrics, model registry, export mappings
 ├── containers/            # Enroot/Pyxis configs and the prebuilt evaluation image (Dockerfile.eval)
-├── requirements/          # Pinned dependencies, one file per framework environment
+├── requirements/          # Dependencies per framework environment: .txt (edited) and .lock (generated, installed)
 ├── docs/                  # One doc per framework, plus results.md
 └── tests/
 ```

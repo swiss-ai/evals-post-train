@@ -166,7 +166,7 @@ class ExecHelpersTest(unittest.TestCase):
             self.assertEqual(Path(dst, "sub", "f").read_text(), "x")
 
 
-@unittest.skipUnless(HAS_ENCLAVE, "ms-enclave not installed (requirements/evalscope-runtime.txt)")
+@unittest.skipUnless(HAS_ENCLAVE, "ms-enclave not installed (requirements/evalscope-runtime.lock)")
 class ExecuteToolTest(unittest.TestCase):
     def _manager(self, exec_result, volumes=None):
         """A manager whose pod is a dict of files; exec_result is the user command's
@@ -318,7 +318,7 @@ class ExecuteToolTest(unittest.TestCase):
         )
 
 
-@unittest.skipUnless(HAS_EVALSCOPE, "evalscope not installed (requirements/evalscope-runtime.txt)")
+@unittest.skipUnless(HAS_EVALSCOPE, "evalscope not installed (requirements/evalscope-runtime.lock)")
 class InstallTest(unittest.TestCase):
     def test_docker_engine_routed_to_pods(self):
         from evalscope.api.sandbox import SandboxEngine
