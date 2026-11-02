@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # locked_venv.sh - Source this for locked_venv: the cached venv of a requirements lock.
 #
 #   locked_venv <lock file> <minimum Python>   sets LOCKED_VENV; non-zero on failure
