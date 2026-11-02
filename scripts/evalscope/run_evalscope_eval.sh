@@ -75,8 +75,8 @@
 # Environment:
 #   TARGET_API_KEY   key for --api-base-url (default: scripts/cscs_serving_api_key.txt, the same
 #                    fallback run_inspect_eval.sh uses).
-#   EVALSCOPE_VENV   venv to install into / run from (default: a cache dir keyed by the
-#                    requirements file's hash). SKIP_INSTALL=1 runs with the current python3 as is.
+#   EVALSCOPE_VENV   venv to run from (default: the cached venv of the lock, see
+#                    scripts/common/locked_venv.sh). SKIP_INSTALL=1 runs with the current python3 as is.
 #                    With EVAL_PREBUILT_ENV=1 (the prebuilt image, containers/Dockerfile.eval) it
 #                    must already hold EvalScope: nothing is installed at run time.
 #   EVALSCOPE_SWE_BENCH_PRO_REPO  a SWE-bench_Pro-os checkout at EvalScope's pinned commit, used
@@ -185,7 +185,6 @@ if [[ -z "$CSCS_SERVING_API" && -f ./scripts/cscs_serving_api_key.txt ]]; then
 fi
 export EVALSCOPE_API_KEY="${TARGET_API_KEY:-$CSCS_SERVING_API}"
 
-REQUIREMENTS=requirements/evalscope-runtime.lock
 if [[ "${SKIP_INSTALL:-0}" == "1" ]]; then
     PY=python3
     echo "SKIP_INSTALL=1: running with $(command -v python3) as is (no venv, no install)"
@@ -196,22 +195,15 @@ elif [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
             "this image has no EvalScope environment, and a prebuilt image installs nothing at run time."
     echo "EVAL_PREBUILT_ENV=1: using $EVALSCOPE_VENV (no install)"
 else
-    req_hash=$( (sha256sum "$REQUIREMENTS" 2>/dev/null || shasum -a 256 "$REQUIREMENTS") | cut -c1-12)
-    EVALSCOPE_VENV=${EVALSCOPE_VENV:-"${XDG_CACHE_HOME:-$HOME/.cache}/evals-post-train/evalscope-$req_hash"}
-    PY="$EVALSCOPE_VENV/bin/python"
-    if [[ ! -f "$EVALSCOPE_VENV/.installed-$req_hash" ]]; then
-        echo "Installing $REQUIREMENTS into $EVALSCOPE_VENV"
-        if command -v uv >/dev/null 2>&1; then
-            { uv venv --quiet --allow-existing --python ">=3.11" "$EVALSCOPE_VENV" &&
-                uv pip install --quiet --python "$PY" -r "$REQUIREMENTS"; } ||
-                die "Installing $REQUIREMENTS into $EVALSCOPE_VENV failed."
-        else
-            { python3 -m venv "$EVALSCOPE_VENV" &&
-                "$PY" -m pip install --quiet --no-cache-dir -r "$REQUIREMENTS"; } ||
-                die "Installing $REQUIREMENTS into $EVALSCOPE_VENV failed."
-        fi
-        touch "$EVALSCOPE_VENV/.installed-$req_hash"
+    if [[ -z "${EVALSCOPE_VENV:-}" ]]; then
+        # shellcheck source=scripts/common/locked_venv.sh
+        source scripts/common/locked_venv.sh
+        locked_venv requirements/evalscope-runtime.lock 3.11 ||
+            die "Installing requirements/evalscope-runtime.lock failed."
+        EVALSCOPE_VENV=$LOCKED_VENV
     fi
+    PY="$EVALSCOPE_VENV/bin/python"
+    [[ -x "$PY" ]] || die "EVALSCOPE_VENV=$EVALSCOPE_VENV has no bin/python"
 fi
 
 mkdir -p "$WORK_DIR"

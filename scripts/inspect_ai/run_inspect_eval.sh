@@ -77,10 +77,11 @@
 #   scripts/critpt_api_key.txt. Optional -- unset is the expected state until Artificial Analysis
 #   grants access (email critpt@artificialanalysis.ai); the run still completes and writes its
 #   submission batch to a local file instead of posting it.
-#   SKIP_INSTALL=1 to skip the runtime pip install of inspect-ai/inspect-evals.
-#   EVAL_INSPECT_VENV -- a virtualenv holding requirements/inspect-runtime.lock; when set, its
-#   bin/ goes first on PATH so `inspect`, `python` and `python3` below all run from it. The
-#   prebuilt image sets it: Inspect lives apart from lm-eval-harness there, whose datasets pin
+#   SKIP_INSTALL=1 to run with the current environment as is, instead of the cached venv of
+#   requirements/inspect-runtime.lock (scripts/common/locked_venv.sh).
+#   EVAL_INSPECT_VENV -- a virtualenv holding requirements/inspect-runtime.lock, used instead of
+#   the cached one; its bin/ goes first on PATH so `inspect`, `python` and `python3` below all
+#   run from it. The prebuilt image sets it: Inspect lives apart from lm-eval-harness there, whose datasets pin
 #   would otherwise hold inspect-evals back.
 #
 # Results are NOT viewed at https://inspect.aisi.org.uk/ -- that site is Inspect's
@@ -202,35 +203,20 @@ PRE_RUN_LOGS=$(find "$LOGS_DIR" -name '*.eval' 2>/dev/null | sort)
 # See the patch's own module docstring for the full failure/fix reasoning.
 export PYTHONPATH="$(pwd)/scripts/sandbox_patches${PYTHONPATH:+:$PYTHONPATH}"
 
+# EVAL_PREBUILT_ENV=1 (the prebuilt image, containers/Dockerfile.eval) has the same lock baked in.
+if [[ "${SKIP_INSTALL:-0}" == "1" || "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
+    echo "SKIP_INSTALL=1 or EVAL_PREBUILT_ENV=1: using the preinstalled environment (no install)"
+elif [[ -z "${EVAL_INSPECT_VENV:-}" ]]; then
+    # shellcheck source=scripts/common/locked_venv.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/../common/locked_venv.sh"
+    locked_venv "$(dirname "${BASH_SOURCE[0]}")/../../requirements/inspect-runtime.lock" 3.11 ||
+        die "Installing requirements/inspect-runtime.lock failed. Set SKIP_INSTALL=1 if the environment already has it."
+    EVAL_INSPECT_VENV=$LOCKED_VENV
+fi
+
 if [[ -n "${EVAL_INSPECT_VENV:-}" ]]; then
     [[ -x "$EVAL_INSPECT_VENV/bin/inspect" ]] || die "EVAL_INSPECT_VENV=$EVAL_INSPECT_VENV has no bin/inspect"
     export PATH="$EVAL_INSPECT_VENV/bin:$PATH"
-fi
-
-# EVAL_PREBUILT_ENV=1 (the prebuilt image, containers/Dockerfile.eval) has these baked in too.
-if [[ "${SKIP_INSTALL:-0}" != "1" && "${EVAL_PREBUILT_ENV:-0}" != "1" ]]; then
-    # Unlike run_lm_eval.sbatch (which always runs inside a container image with `pip` on PATH),
-    # this script is also run directly on login/compute nodes (e.g. Clariden) where a bare `pip`
-    # command may not exist even inside an active conda/venv env -- fall back to `python -m pip`.
-    if command -v pip >/dev/null 2>&1; then
-        PIP=(pip)
-    elif command -v python3 >/dev/null 2>&1 && python3 -m pip --version >/dev/null 2>&1; then
-        PIP=(python3 -m pip)
-    elif command -v python >/dev/null 2>&1 && python -m pip --version >/dev/null 2>&1; then
-        PIP=(python -m pip)
-    else
-        die "No working pip found (bare 'pip' not on PATH, and neither 'python3 -m pip' nor" \
-            "'python -m pip' work). Activate an environment with pip, or set SKIP_INSTALL=1" \
-            "if inspect-ai/inspect-evals/openai are already installed."
-    fi
-
-    # requirements/inspect-runtime.txt explains each package; the prebuilt image installs
-    # the same lock.
-    "${PIP[@]}" install --no-cache-dir \
-        -r "$(dirname "${BASH_SOURCE[0]}")/../../requirements/inspect-runtime.lock" \
-        || die "pip install of inspect-ai/inspect-evals failed. Set SKIP_INSTALL=1 if the environment already has them."
-else
-    echo "SKIP_INSTALL=1 or EVAL_PREBUILT_ENV=1: using the preinstalled environment (no pip install)"
 fi
 
 # A --sandbox local run has no Docker image to COPY these into, unlike inspect_evals/

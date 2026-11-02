@@ -86,7 +86,7 @@
 #   --table-metrics <p>  - Main-metrics list for custom mode
 #   --force-tasks <csv>  - Re-run completed tasks matching these substrings
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
-#   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: repo default branch)
+#   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: the commit in requirements/lm-eval-harness.txt)
 #   --reservation <name> - Submit jobs under a SLURM reservation, including an auto-launched judge
 #                          (exported as SBATCH_RESERVATION; ambient SBATCH_RESERVATION is respected
 #                          for evaluation jobs when the flag is absent)

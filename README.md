@@ -97,7 +97,7 @@ evals-post-train/
 │   ├── harbor/            # run_harbor_eval.sh/.sbatch, run.py (benchmarks), k8s/docker environments, task_patches.py
 │   ├── evalscope/         # run_evalscope_eval.sh/.sbatch, run.py, SWE-bench scorer
 │   ├── aaii/              # Artificial Analysis protocol: Inspect tasks (*.py) and standalone runners (run_*.sh)
-│   ├── common/            # k8s_sandbox.py (task containers as pods: Harbor, EvalScope), wandb.sh (the W&B upload rule), lock_requirements.sh
+│   ├── common/            # k8s_sandbox.py (task containers as pods: Harbor, EvalScope), wandb.sh (the W&B upload rule), lock_requirements.sh and locked_venv.sh (dependency locks)
 │   └── results/           # W&B upload, tables, exports
 ├── configs/               # lm-eval task lists, main-table metrics, model registry, export mappings
 ├── containers/            # Enroot/Pyxis configs and the prebuilt evaluation image (Dockerfile.eval)
