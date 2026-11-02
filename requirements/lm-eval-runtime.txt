@@ -1,6 +1,6 @@
 # Stable evaluation dependencies. Backend runtimes (torch, vLLM, SGLang) come
 # from the selected container and are exposed through --system-site-packages.
-# Installed as is by build_eval_env.sh, and as eval-runtime.lock by the prebuilt
+# Installed as is by build_eval_env.sh, and as lm-eval-runtime.lock by the prebuilt
 # image: after a change, run scripts/common/lock_requirements.sh.
 datasets==4.0.0
 hf-transfer>=0.1.9

@@ -309,9 +309,9 @@ _eval_prepare_environment() {
     # The openai backend loads no model, so it gets the same locked packages as the prebuilt
     # image; in-job backends take torch and their server from the container.
     if [[ "${LM_EVAL_BACKEND:-vllm}" == "openai" ]]; then
-        export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/eval-runtime.lock"
+        export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/lm-eval-runtime.lock"
     else
-        export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/eval-runtime.txt"
+        export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/lm-eval-runtime.txt"
     fi
 
     if [[ "${EVAL_DRY_RUN:-false}" == "true" ]]; then

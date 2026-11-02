@@ -10,7 +10,7 @@ set -euo pipefail
 
 EVAL_HARNESS_REF=${EVAL_HARNESS_REF:-HEAD}
 EVAL_ENV_CACHE_ROOT=${EVAL_ENV_CACHE_ROOT:-${SCRATCH:-/tmp}/eval-envs}
-EVAL_RUNTIME_REQUIREMENTS=${EVAL_RUNTIME_REQUIREMENTS:-${EVAL_REPO_ROOT:-$PWD}/requirements/eval-runtime.txt}
+EVAL_RUNTIME_REQUIREMENTS=${EVAL_RUNTIME_REQUIREMENTS:-${EVAL_REPO_ROOT:-$PWD}/requirements/lm-eval-runtime.txt}
 EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 HARNESS_URL="https://github.com/${EVAL_HARNESS_REPO}.git"
 
@@ -105,7 +105,7 @@ build_base() {
         python -m venv --system-site-packages "$BASE_ENV"
         "$BASE_ENV/bin/python" -m pip install --upgrade pip
         local -a index_args=()
-        # eval-runtime.lock has CPU torch, from PyTorch's index. Its hashes decide which file is accepted.
+        # lm-eval-runtime.lock has CPU torch, from PyTorch's index. Its hashes decide which file is accepted.
         [[ "$EVAL_RUNTIME_REQUIREMENTS" == *.lock ]] \
             && index_args=(--extra-index-url https://download.pytorch.org/whl/cpu)
         "$BASE_ENV/bin/python" -m pip install "${index_args[@]}" -r "$EVAL_RUNTIME_REQUIREMENTS"

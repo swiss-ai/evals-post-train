@@ -642,7 +642,7 @@ The pipeline runs inside containers managed by enroot/pyxis on SLURM. The availa
 
 Evaluation dependencies use a shared two-tier cache under `${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}`:
 
-1. A base virtual environment is keyed by backend, Python/container configuration, and its requirements: `requirements/eval-runtime.lock` for the `openai` backend, `requirements/eval-runtime.txt` for in-job backends, which take `torch` and their server from the container.
+1. A base virtual environment is keyed by backend, Python/container configuration, and its requirements: `requirements/lm-eval-runtime.lock` for the `openai` backend, `requirements/lm-eval-runtime.txt` for in-job backends, which take `torch` and their server from the container.
 2. A lightweight harness overlay is keyed by the base environment, harness repository, and resolved commit SHA.
 
 `prepare_eval_env.sbatch` first verifies that the cache and per-run manifest
@@ -696,9 +696,9 @@ unless a lock changed. To change a version, edit the matching
 `requirements/*.txt`, run `scripts/common/lock_requirements.sh` and commit both;
 CI fails if they don't match. A harness bump can need new dependencies that the
 locks don't see, because the harness is installed `--no-deps`: review
-`requirements/eval-runtime.txt` when bumping it. In-job backends are the one
+`requirements/lm-eval-runtime.txt` when bumping it. In-job backends are the one
 exception to the locks: they take `torch` and their server from the container, so
-they install `requirements/eval-runtime.txt`.
+they install `requirements/lm-eval-runtime.txt`.
 
 The image sets `EVAL_PREBUILT_ENV=1`. With it, the launcher submits no
 `prepare_eval_env.sbatch` job and writes the manifest itself;
@@ -739,7 +739,7 @@ The sbatch scripts support `hf`, `vllm`, `sglang`, `megatron_lm`, and `openai` b
 
 1. Add a new `elif` block in `run_lm_eval.sbatch` at the `LM_EVAL_BACKEND` dispatch section
 2. Set appropriate `COMMON_MODEL_ARGS` for the new backend
-3. Add backend-independent Python dependencies to `requirements/eval-runtime.txt` (then run `scripts/common/lock_requirements.sh`); provide backend runtimes through the corresponding container configuration
+3. Add backend-independent Python dependencies to `requirements/lm-eval-runtime.txt` (then run `scripts/common/lock_requirements.sh`); provide backend runtimes through the corresponding container configuration
 4. Include the new backend/container identity in `scripts/lm_eval_harness/build_eval_env.sh` fingerprinting if it needs distinct cached environments
 
 ### Adding a New Task

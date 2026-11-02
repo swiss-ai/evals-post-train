@@ -21,9 +21,9 @@ lock() {
         --custom-compile-command scripts/common/lock_requirements.sh "$@"
 }
 
-# eval-runtime.txt also feeds in-job backends, which take torch from their own images and so install
+# lm-eval-runtime.txt also feeds in-job backends, which take torch from their own images and so install
 # the .txt (build_eval_env.sh). This lock is for the openai backend: no model is loaded, so CPU torch.
-lock eval-runtime 3.11 --generate-hashes --torch-backend cpu "$@"
+lock lm-eval-runtime 3.11 --generate-hashes --torch-backend cpu "$@"
 lock inspect-runtime 3.11 --generate-hashes "$@"
 lock evalscope-runtime 3.11 --generate-hashes "$@"
 lock harbor-runtime 3.12 --generate-hashes "$@"

@@ -2,6 +2,6 @@
 # evaluation image (containers/Dockerfile.eval), and what runs that build their
 # own environment install unless given --harness-branch/LM_EVAL_HARNESS_BRANCH.
 # One "<owner>/<repo> <full commit>" per line; bump a commit here to ship a
-# newer harness, and check requirements/eval-runtime.txt: it is installed
+# newer harness, and check requirements/lm-eval-runtime.txt: it is installed
 # --no-deps, so the locks don't see its dependencies.
 swiss-ai/lm-evaluation-harness 6444db6e9162cfc0476938d0b2f367ee92fcb6cc

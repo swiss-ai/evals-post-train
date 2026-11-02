@@ -88,7 +88,7 @@ srun -n 1 --mpi=pmix -ul --environment=./containers/env_vllm.toml --export=ALL b
     export EVAL_HARNESS_REPO=\${EVAL_HARNESS_REPO:-swiss-ai/lm-evaluation-harness}
     export EVAL_CONTAINER_CONFIG='$PWD/containers/env_vllm.toml'
     export EVAL_REPO_ROOT='$PWD'
-    export EVAL_RUNTIME_REQUIREMENTS='$PWD/requirements/eval-runtime.txt'
+    export EVAL_RUNTIME_REQUIREMENTS='$PWD/requirements/lm-eval-runtime.txt'
     export LM_EVAL_BACKEND=megatron_lm
     bash '$PWD/scripts/lm_eval_harness/build_eval_env.sh'
     source '$EVAL_ENV_MANIFEST'
