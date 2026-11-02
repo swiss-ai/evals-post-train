@@ -8,7 +8,7 @@ accelerate==1.15.0 \
     --hash=sha256:5654f8c5eaa0d4fa68b33e287a97765da6849bf6d51dcac874e73fbbddfb6134 \
     --hash=sha256:97eacca0b73e45cb867dbf8c5d5d4dc32219544300e0c8992c7334dc2ef33cec
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   peft
 aiohappyeyeballs==2.7.1 \
     --hash=sha256:065665c041c42a5938ed220bdcd7230f22527fbec085e1853d2402c8a3615d9d \
@@ -177,7 +177,7 @@ aiohttp==3.14.5 \
     --hash=sha256:fce9523df31cea6284f3e2c479876750d7687cf671d7b25d32b19effc0e86441 \
     --hash=sha256:ff75a7537413a86e7cafe98e0e1d6e3dc4b15c6349896e7d5c6b881bfdb6d550
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   fsspec
 aiosignal==1.4.0 \
     --hash=sha256:053243f8b92b990551949e63930a839ff0cf0b0ebbe0597b0f3fb19e1a0fe82e \
@@ -186,7 +186,7 @@ aiosignal==1.4.0 \
 alpaca-eval==0.6.6 \
     --hash=sha256:8f4f218b8a1d7ef379491222e90f38446ca327930b51416d55306663cf85f28c \
     --hash=sha256:94db28994674800f59de9983a275bab6c543c8f0478a039b421dd9456a9e43de
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 annotated-doc==0.0.5 \
     --hash=sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101 \
     --hash=sha256:c7e58ce09192557605d8bbd92836d7e1d520ac9580096042c0bfd197efacf1bb
@@ -199,7 +199,7 @@ antlr4-python3-runtime==4.11.0 \
     --hash=sha256:6a46d4f6033c8d7e53c8975cee5d83b3ba1b48157f6beb09a4965062dacfe2e0 \
     --hash=sha256:f523f91387283045f129c343b363a8dda3a07eea62721b8eda95f2d8b817b656
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   latex2sympy2-extended
 anyio==4.16.0 \
     --hash=sha256:59bb03251907983d1603d27c3087ddb1e93299ea2163adcdba37899a4fb12ffb \
@@ -711,14 +711,14 @@ datasets==4.0.0 \
     --hash=sha256:7ef95e62025fd122882dbce6cb904c8cd3fbc829de6669a5eb939c77d50e203d \
     --hash=sha256:9657e7140a9050db13443ba21cb5de185af8af944479b00e7ff1e00a61c8dbf1
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   alpaca-eval
     #   evaluate
     #   subset2evaluate
 datasketch==1.10.0 \
     --hash=sha256:303dd90cda0948a21abba3aaefc9f8528fa12b8204edc5e1ae8b1d7b750234e7 \
     --hash=sha256:d23aea80ce4c40790ca7a40795659848be92ecc43db80942be26f21e81d24714
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 defusedxml==0.7.1 \
     --hash=sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69 \
     --hash=sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61
@@ -727,7 +727,7 @@ dill==0.3.8 \
     --hash=sha256:3ebe3c479ad625c4553aca177444d89b486b1d84982eeacded644afc0cf797ca \
     --hash=sha256:c36ca9ffb54365bdd2f8eb3eff7d2a21237f8452b57ace88b1ac615b7e815bd7
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   datasets
     #   evaluate
     #   multiprocess
@@ -738,7 +738,7 @@ distro==1.9.0 \
 evaluate==0.4.6 \
     --hash=sha256:bca85bc294f338377b7ac2f861e21c308b11b2a285f510d7d5394d5df437db29 \
     --hash=sha256:e07036ca12b3c24331f83ab787f21cc2dbf3631813a1631e63e40897c69a3f21
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 filelock==4.2.6 \
     --hash=sha256:ee7af8ede36dcaf12e1016d9f7c3a63ecd5497d46f85dab21b8c779b8f944e97 \
     --hash=sha256:fd7d4fca497bf3e3d0945a13261f8e684f2aef12ce7cf76aef26e13bf7388b88
@@ -995,7 +995,7 @@ hf-transfer==0.1.9 \
     --hash=sha256:e6ac4eddcd99575ed3735ed911ddf9d1697e2bd13aa3f0ad7e3904dd4863842e \
     --hash=sha256:ee8b10afedcb75f71091bcc197c526a6ebf5c58bbbadb34fdeee6160f55f619f \
     --hash=sha256:fc6bd19e1cc177c66bdef15ef8636ad3bde79d5a4f608c158021153b4573509d
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 hf-xet==1.8.0 ; platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64' \
     --hash=sha256:07a06d7481702616726c2d8578cfb00052a5b3f21beed6a674592bc837a10330 \
     --hash=sha256:10ed23b51dacf7917d64f335c25048deb470efa755e9989b218fc0531386138e \
@@ -1042,7 +1042,7 @@ huggingface-hub==1.33.0 \
     --hash=sha256:04e434b06e100eddbce9a6e817d72693a7884b10a79bd67ab48080d5c07eb899 \
     --hash=sha256:367be21a201db9523eddf8aeac7048f2602c1b308691c97640d5e72ed188007e
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   accelerate
     #   alpaca-eval
     #   datasets
@@ -1054,7 +1054,7 @@ huggingface-hub==1.33.0 \
 humming-kernels==0.1.2 \
     --hash=sha256:7894c80061c7866591bef12617da720ac4e925636ffc99464af433a5dcb035eb \
     --hash=sha256:f7434b0424946445ef5ad5682bcabf309d97721818ed5bdc4c6f61de3c6b9d2f
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 idna==3.20 \
     --hash=sha256:a7db850025b95ded1eae8a46181a1a6c56c92c96f0e2b005d9ff8dc0210cab44 \
     --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
@@ -1067,12 +1067,12 @@ idna==3.20 \
 immutabledict==4.3.1 \
     --hash=sha256:c9facdc0ff30fdb8e35bd16532026cac472a549e182c94fa201b51b25e4bf7bf \
     --hash=sha256:f844a669106cfdc73f47b1a9da003782fb17dc955a54c80972e0d93d1c63c514
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 jinja2==3.1.6 \
     --hash=sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d \
     --hash=sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   humming-kernels
     #   spacy
     #   torch
@@ -1206,7 +1206,7 @@ joblib==1.6.0 \
 jsonlines==4.0.0 \
     --hash=sha256:0c6d2c09117550c089995247f605ae4cf77dd1533041d366351f6f298822ea74 \
     --hash=sha256:185b334ff2ca5a91362993f42e83588a360cf95ce4b71a73548502bda52a7c55
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 jsonschema==4.26.0 \
     --hash=sha256:0c26707e2efad8aa1bfc5b7ce170f3fccc2e4918ff85989ba9ffa9facb2be326 \
     --hash=sha256:d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
@@ -1361,12 +1361,12 @@ kiwisolver==1.5.1 \
 langdetect==1.0.9 \
     --hash=sha256:7cbc0746252f19e76f77c0b1690aadf01963be835ef0cd4b56dddf2a8f1dfc2a \
     --hash=sha256:cbc1fef89f8d062739774bd51eda3da3274006b3661d199c2655f6b3f6d605a0
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 latex2sympy2-extended==1.11.0 \
     --hash=sha256:9695657c81b50abba2636638638618db59f4663ed2a4a12d62cef74a40e28fec \
     --hash=sha256:aebb77d52ce269e25028e4bea89ddb14d242ba36bcf7b636496fb5fd9728d234
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   math-verify
 lxml==6.1.3 \
     --hash=sha256:032a0a97eed428bd143c75a11118238546424ceb2fa311cca5f073aa44658dc4 \
@@ -1706,7 +1706,7 @@ markupsafe==3.0.4 \
 math-verify==0.9.0 \
     --hash=sha256:3703e7c4885354027fa84409d762a596a2906d1fd4deb78361876bd905a76194 \
     --hash=sha256:45ac6c61344ba056b9e99a660a4bc8d044ed408f730aed68c60435aa5eec4645
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 matplotlib==3.11.2 \
     --hash=sha256:01dc8eaaab5a9fce9ff615eca82345728f289e4715b186ee10c6d85272fc26bb \
     --hash=sha256:02329432ae5c6af87cf208ee575b701d698bdf0b1a3bb28cc6d53c36e967e575 \
@@ -1776,11 +1776,11 @@ mdurl==0.1.2 \
 mistral-common==1.13.0 \
     --hash=sha256:6304455b69ae9ca02cddb9bb3bb888ab8dcbe3945a3cafe3368897795611993d \
     --hash=sha256:8559b6e22e9b15d4d7445ae34db6d27578f3a6c0e3d74c5fd57b4bf2db543333
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 more-itertools==11.2.1 \
     --hash=sha256:35a7377edd1dd6608dcb2cdf534ded55ea32d49448875ad042cd3f879fb1ded0 \
     --hash=sha256:cbf08fd0af284dc69718b9b76a8e6203df624d70209ea511e4219d350c856f63
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 mpmath==1.3.0 \
     --hash=sha256:7a28eb2a9774d00c7bc92411c19a89209d5da7c4c9a9e227be8330a23a25b91f \
     --hash=sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c
@@ -2046,7 +2046,7 @@ nltk==3.10.4 \
     --hash=sha256:44679f4e9220abfd496d2c8cdb22f8425ccbe557604f9aa5cacb1c44003dabc1 \
     --hash=sha256:769ba5413f265b7d3e87cd163cc28efa01e29eeef8bb6080bc907949d9fcfb51
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   rouge-score
 numpy==2.3.5 ; python_full_version < '3.13' \
     --hash=sha256:00dc4e846108a382c5869e77c6ed514394bdeb3403461d25a829711041217d5b \
@@ -2124,7 +2124,7 @@ numpy==2.3.5 ; python_full_version < '3.13' \
     --hash=sha256:ffe22d2b05504f786c867c8395de703937f934272eb67586817b46188b4ded6d \
     --hash=sha256:fffe29a1ef00883599d1dc2c51aa2e5d80afe49523c261a74933df395c15c520
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   accelerate
     #   blis
     #   contourpy
@@ -2214,7 +2214,7 @@ numpy==2.5.4 ; python_full_version >= '3.13' \
     --hash=sha256:fe4d21ab149f15e4e6043dfb0de87e6e5f34ac176cde83060e9802981fca2ac2 \
     --hash=sha256:ffa6ce09a1c6a08e9667dd9c97aa0b14184e8d18f2a14b78b2a2328c9147f076
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   accelerate
     #   blis
     #   contourpy
@@ -2416,7 +2416,7 @@ patsy==1.0.3 \
 peft==0.21.2 \
     --hash=sha256:106ab6077ff72c54d21577f9af5970e34bac7582cb14209f7b2b511e322a4eae \
     --hash=sha256:b803ccfb3f3f316004d850284306687833a2235ea278fb56abc856203456142e
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 pillow==13.0.0 \
     --hash=sha256:02464da86f561f410e13b061ec37c3068a9cb557a095494157742d07b3c24a27 \
     --hash=sha256:04a63720f79e22fd54d897c233a68314c50ca0603360f54ce2bd5db8f0f43782 \
@@ -2999,7 +2999,7 @@ pyparsing==3.3.3 \
 pytablewriter==1.2.1 \
     --hash=sha256:7bd0f4f397e070e3b8a34edcf1b9257ccbb18305493d8350a5dbc9957fced959 \
     --hash=sha256:e906ff7ff5151d70a5f66e0f7b75642a7f2dce8d893c265b79cc9cf6bc04ddb4
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 python-dateutil==2.9.0.post0 \
     --hash=sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3 \
     --hash=sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
@@ -3243,7 +3243,7 @@ requests==2.34.2 \
     --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
     --hash=sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   datasets
     #   evaluate
     #   mistral-common
@@ -3260,7 +3260,7 @@ rich==15.0.0 \
     # via typer
 rouge-score==0.1.2 \
     --hash=sha256:c7d4da2683e68c9abf0135ef915d63a46643666f848e558a1b9f7ead17ff0f04
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 rpds-py==2026.9.1 \
     --hash=sha256:00ba2d8c7dd4ee537978ddf4b3fbd712bef2d8751603f7f3146b3f4287768e25 \
     --hash=sha256:01445c8d194aa032a08e944f16567672da1c62dbdbefd8b6d0693032e290cf68 \
@@ -3397,7 +3397,7 @@ sacrebleu==2.6.0 \
     --hash=sha256:3edc1531575cfe4ad04ce53491a9307e234af1c3f805a1f491cbec844229a8a8 \
     --hash=sha256:91499b6cd46138d95154fff1e863c2f9be57e82f0c719d8dd718d0006cf6c566
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   subset2evaluate
 safetensors==0.8.0 \
     --hash=sha256:040070828e36dc8e122178bbbd5830ff9e97920affb84cbe0f46442497bed358 \
@@ -3467,7 +3467,7 @@ scikit-learn==1.9.1 \
     --hash=sha256:e5d7b18a5b9dca241a74695f3275fa4c895a9dadc72b3d8df5fa9d1083c9b83e \
     --hash=sha256:ffbcbbbb44202fbe9bc64bced25a145759adb9ef010b3d37a8064958ac13df2a
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   alpaca-eval
     #   sentence-transformers
     #   subset2evaluate
@@ -3541,7 +3541,7 @@ scipy==1.18.1 \
 segtok==1.5.11 \
     --hash=sha256:8ab2dd44245bcbfec25b575dc4618473bbdf2af8c2649698cd5a370f42f3db23 \
     --hash=sha256:910616b76198c3141b2772df530270d3b706e42ae69a5b30ef115c7bd5d1501a
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 sentence-transformers==6.2.0 \
     --hash=sha256:1e3cd8796ab7bcad4cfa2f51e2083d8b37b15d6b68e6fa6b91a147c67380574d \
     --hash=sha256:ffb51ccfef65427cfa61776d0eeeb257600b0099cf0c7533ae9a6856d31e4665
@@ -3624,7 +3624,7 @@ spacy==3.8.18 \
     --hash=sha256:f5c42c4c02eb9ec9c3dfd817ed472aba4b16ca6753af5d3872d30967cb462178 \
     --hash=sha256:f81338f47e6cb03c96713dcdc815de0fcc5b8b8fb65e1e2bb8b874a7ad71a257 \
     --hash=sha256:feba1ee7f17019724f521353c2b98e4c506b368eaf5ef26709904ebb9cdf306e
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 spacy-legacy==3.0.12 \
     --hash=sha256:476e3bd0d05f8c339ed60f40986c07387c0a71479245d6d0f4298dbd52cda55f \
     --hash=sha256:b37d6e0c9b6e1d7ca1cf5bc7152ab64a4c4671f59c85adaf7a3fcb870357a774
@@ -3635,7 +3635,7 @@ spacy-loggers==1.0.5 \
     # via spacy
 sqlitedict==2.1.0 \
     --hash=sha256:03d9cfb96d602996f1d4c2db2856f1224b96a9c431bdd16e78032a72940f9e8c
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 srsly==2.5.5 \
     --hash=sha256:0053e74e1bd8a68e09c851260942c4b9f11888edf7fccb6a82a680a9df2b4c24 \
     --hash=sha256:08567b7af2eae6ec093b1d18a211e69653082f9cc7a65846f8c7160edd221ff3 \
@@ -3717,12 +3717,12 @@ srsly==2.5.5 \
 subset2evaluate==1.0.27 \
     --hash=sha256:2ddbe7c776661a8143aa6fa973cae903c5e7c40b8834d8a9e3774e051cd96775 \
     --hash=sha256:776fb4094faf00c34f34106e70beac97f9b5aa03f90ca55cdf039831545d3f87
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 sympy==1.14.0 \
     --hash=sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517 \
     --hash=sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   latex2sympy2-extended
     #   torch
 tabledata==1.3.5 \
@@ -3742,7 +3742,7 @@ tcolorpy==0.1.7 \
 tenacity==9.2.1 \
     --hash=sha256:9e56f17539296baab7beabb08b92f6ee3d7be92d8be72d763360677c2ad6580e \
     --hash=sha256:a606b5c808d0cded4a359d5b9932d867ff2a6a6b64d37350260fd01bbdf83839
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 termcolor==3.3.0 \
     --hash=sha256:348871ca648ec6a9a983a13ab626c0acce02f515b9e1983332b17af7979521c5 \
     --hash=sha256:cf642efadaf0a8ebbbf4bc7a31cec2f9b5f21a9f726f4ccbb08192c9c26f43a5
@@ -3867,7 +3867,7 @@ tiktoken==0.14.0 \
     --hash=sha256:f5e7665f6624e052e5e7f6a36919ab69279decdc976d7b16b4fa15e1897d0513 \
     --hash=sha256:f702e0aeeb6506e57687e881c59e844ebe8f0a6a097ddafe20e3ab25f387be4e
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   alpaca-eval
     #   mistral-common
 tokenizers==0.22.2 \
@@ -3896,7 +3896,7 @@ tokenizers==0.22.2 \
     --hash=sha256:e10bf9113d209be7cd046d40fbabbaf3278ff6d18eb4da4c500443185dc1896c \
     --hash=sha256:f01a9c019878532f98927d2bacb79bbb404b43d3437455522a00a30718cdedb5
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   sentence-transformers
     #   transformers
 torch==2.15.0 ; sys_platform == 'darwin' \
@@ -3951,7 +3951,7 @@ tqdm==4.70.1 \
     --hash=sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73 \
     --hash=sha256:cefd0eca11b2a37a3aee776544d4f4ae913f02688135b5556b8788dfa474afc4
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   datasets
     #   evaluate
     #   huggingface-hub
@@ -3966,7 +3966,7 @@ transformers==5.12.1 \
     --hash=sha256:2a5e109d2021265df7098ffbb738295acaf5ad256f12cbc586db2ea4dcbb1a8a \
     --hash=sha256:679ee731c8225347889ad4fb3b2c926a62e9da3b7d284e9d12c791da7272466b
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   peft
     #   sentence-transformers
 tree-sitter==0.21.3 \
@@ -4006,7 +4006,7 @@ tree-sitter==0.21.3 \
     --hash=sha256:fae1ee0ff6d85e2fd5cd8ceb9fe4af4012220ee1e4cbe813305a316caf7a6f63 \
     --hash=sha256:fbbd137f7d9a5309fb4cb82e2c3250ba101b0dd08a8abdce815661e6cf2cbc19 \
     --hash=sha256:fc3fd34ed4cd5db445bc448361b5da46a2a781c648328dc5879d768f16a46771
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 tree-sitter-java==0.21.0 \
     --hash=sha256:6534fac27a93160a2b27a0c77f22a7c91f0aee2dba9d4cdbf835bf509ddfbf4f \
     --hash=sha256:696391968cdc467f97e525fbe43790c2d5ba46bf446376eb30d5c20b5c9d795a \
@@ -4015,7 +4015,7 @@ tree-sitter-java==0.21.0 \
     --hash=sha256:d30fb39af6590f6be877ff8d39c7e193f37594375b8fcdda55babd264411616b \
     --hash=sha256:d83ca51b26826550051c53468ec74f5b570b4afb4d4520df0aa2a35b52de2289 \
     --hash=sha256:f9c01f48ec3a3d4b55fb2c56b7cad6ebf94dba568d690b45d966731859485dd4
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 tree-sitter-javascript==0.21.4 \
     --hash=sha256:00ff426e9bb552abb49ce3234b083edb1a6aa73bfeea7d9bf0f6bb3d0256c4cd \
     --hash=sha256:2843b0e81564d8176922ef2b40db128a4de026606d6b1d22a06efb8e8a5c01b8 \
@@ -4025,7 +4025,7 @@ tree-sitter-javascript==0.21.4 \
     --hash=sha256:d45bd39ce931b164f84cfb6a186df504e38c6f91f541e2e60d5a40eb9d574005 \
     --hash=sha256:e0f1d26ec85cc66d56fb25fd41ce499dc5c4a60b478a91754684e2289433daae \
     --hash=sha256:e9172dc9e59649d7598c6509103db1648e7187c2bcb39c34222fc052b9db0ac4
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 triton==3.9.0 \
     --hash=sha256:1622118a038b0c6e16fa4a0305da62c8b3c15904ee1cc4d4e65846a25969e41e \
     --hash=sha256:5542f4328472fd827dbb1ec43873364c2894682cc3f5d1c74a643762900e243e \
@@ -4060,7 +4060,7 @@ typing-extensions==4.16.0 \
     --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8 \
     --hash=sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5
     # via
-    #   -r requirements/eval-runtime.txt
+    #   -r requirements/lm-eval-runtime.txt
     #   aiohttp
     #   aiosignal
     #   anyio
@@ -4102,7 +4102,7 @@ wandb==0.31.0 \
     --hash=sha256:d155662ab444ab0cd12afa87943a147193e9b9301134b0b34e8c97c68a4bbba5 \
     --hash=sha256:dcdaa635576ff17b18a757b39fc22b0db3d1c6e01d5ce090fe80f6adc776028d \
     --hash=sha256:df16a46cd6468e6580783b02560c79991c181f63a4691949020fff1b4ac87072
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 wasabi==1.1.3 \
     --hash=sha256:4bb3008f003809db0c3e28b4daf20906ea871a2bb43f9914197d540f4f2e0878 \
     --hash=sha256:f76e16e8f7e79f8c4c8be49b4024ac725713ab10cd7f19350ad18a8e3f71728c
@@ -4117,10 +4117,10 @@ weasel==1.0.1 \
 wonderwords==3.0.1 \
     --hash=sha256:4dd66deb6a76ca9e0b0422d1d3e111f9b910d7c16922d42de733ee8def98f8d0 \
     --hash=sha256:5ee43ab6f13823a857a7c3d58c7b4db6a1350bd3aa5f914ed379ad49042a1c36
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 word2number==1.1 \
     --hash=sha256:70e27a5d387f67b04c71fbb7621c05930b19bfd26efd6851e6e0f9969dcde7d0
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt
 wrapt==2.5.2 \
     --hash=sha256:01ace38a377198e0b981b027a46cbdb5502d0123bd39c1a0f60a83a5eab7698e \
     --hash=sha256:035cd71e2aadfc0ad366ab4785b49e62093370885ea4b527b61b308b7a92ff14 \
@@ -4693,4 +4693,4 @@ zstandard==0.25.0 \
     --hash=sha256:f67e8f1a324a900e75b5e28ffb152bcac9fbed1cc7b43f99cd90f395c4375344 \
     --hash=sha256:fd7a5004eb1980d3cefe26b2685bcb0b17989901a70a1040d1ac86f1d898c551 \
     --hash=sha256:ffef5a74088f1e09947aecf91011136665152e0b4b359c42be3373897fb39b01
-    # via -r requirements/eval-runtime.txt
+    # via -r requirements/lm-eval-runtime.txt

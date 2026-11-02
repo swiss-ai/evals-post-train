@@ -20,9 +20,9 @@ RUN apt-get update -qq \
 
 # No model is loaded in this image, so the lock has CPU torch, from PyTorch's
 # index. The lock's hashes decide which file is accepted, whichever index has it.
-COPY requirements/eval-runtime.lock requirements/inspect-runtime.lock /tmp/requirements/
+COPY requirements/lm-eval-runtime.lock requirements/inspect-runtime.lock /tmp/requirements/
 RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
-    -r /tmp/requirements/eval-runtime.lock
+    -r /tmp/requirements/lm-eval-runtime.lock
 
 # Inspect gets its own virtualenv: lm-eval-harness pins datasets==4.0.0, and
 # in one environment pip would resolve inspect-evals to the last release that
@@ -32,7 +32,7 @@ RUN python -m venv /opt/inspect-venv \
     && /opt/inspect-venv/bin/pip install --no-cache-dir -r /tmp/requirements/inspect-runtime.lock
 
 # EvalScope (SWE-bench Verified and Pro, run_evalscope_eval.sh) in a third one:
-# its math-verify pin conflicts with eval-runtime.txt's antlr4. SWE-bench_Pro-os,
+# its math-verify pin conflicts with lm-eval-runtime.txt's antlr4. SWE-bench_Pro-os,
 # which EvalScope would otherwise clone at run time, is checked out at the commit
 # the installed EvalScope pins (EVALSCOPE_SWE_BENCH_PRO_REPO).
 COPY requirements/evalscope-runtime.lock /tmp/requirements/

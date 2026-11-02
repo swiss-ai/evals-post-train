@@ -306,7 +306,7 @@ _eval_prepare_environment() {
     EVAL_CONTAINER_CONFIG=$(_eval_container_for_backend)
     EVAL_CONTAINER_CONFIG=$(realpath "$EVAL_CONTAINER_CONFIG")
     export EVAL_CONTAINER_CONFIG EVAL_REPO_ROOT="$PWD"
-    export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/eval-runtime.txt"
+    export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/lm-eval-runtime.txt"
 
     if [[ "${EVAL_DRY_RUN:-false}" == "true" ]]; then
         echo "[DRY RUN] sbatch --parsable scripts/lm_eval_harness/prepare_eval_env.sbatch" >&2
