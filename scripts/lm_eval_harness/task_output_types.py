@@ -1,7 +1,7 @@
 """Sort lm-eval tasks into generative and log-likelihood ones.
 
 For APPLY_CHAT_TEMPLATE=by-type (launch_evaluations.sh --chat-template-by-type):
-evaluate.sbatch runs the generative tasks with the chat template and the
+run_lm_eval.sbatch runs the generative tasks with the chat template and the
 log-likelihood ones (multiple_choice, loglikelihood, loglikelihood_rolling)
 without it, since those score each choice as a raw continuation of the prompt.
 

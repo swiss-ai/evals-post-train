@@ -87,9 +87,9 @@ class LaunchFlowTests(unittest.TestCase):
             "--api-model-name",
             "test-model",
         )
-        self.assertIn("scripts/lm_eval_harness/evaluate_api.sbatch test-model test-model", output)
-        self.assertNotIn("scripts/lm_eval_harness/evaluate.sbatch test-model test-model", output)
-        wrapper = (REPO_ROOT / "scripts/lm_eval_harness/evaluate_api.sbatch").read_text()
+        self.assertIn("scripts/lm_eval_harness/run_lm_eval_api.sbatch test-model test-model", output)
+        self.assertNotIn("scripts/lm_eval_harness/run_lm_eval.sbatch test-model test-model", output)
+        wrapper = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval_api.sbatch").read_text()
         self.assertNotIn("#SBATCH --gres", wrapper)
         self.assertNotIn("#SBATCH --exclusive", wrapper)
 
@@ -109,8 +109,8 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertNotIn("Unknown option", output)
 
     def test_trust_remote_code_reaches_the_model_args(self) -> None:
-        # Runs evaluate.sbatch's own block, so the test follows the script.
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/evaluate.sbatch").read_text()
+        # Runs run_lm_eval.sbatch's own block, so the test follows the script.
+        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
         start = sbatch.index("# Opt-in, for models whose tokenizer is custom code")
         block = sbatch[start: sbatch.index("HARNESS_EVAL_DIR=", start)]
 
@@ -313,7 +313,7 @@ class LaunchFlowTests(unittest.TestCase):
     def test_evaluate_passes_thinking_to_openai_chat_completions(self) -> None:
         # The server renders the template there; the harness sends the template args as
         # chat_template_kwargs and puts the server's reasoning field back between the tokens.
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/evaluate.sbatch").read_text()
+        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
         completions = sbatch[sbatch.index('if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then'):]
         chat = completions[completions.index("    else"): completions.index("    fi")]
         self.assertIn("${THINKING_DEFAULT_MODEL_ARG}${THINK_ARGS}", chat)
@@ -356,7 +356,7 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertIn("no reasoning close token", completed.stdout + completed.stderr)
 
     def test_evaluate_passes_think_args_to_openai_and_raises_the_effort_budget(self) -> None:
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/evaluate.sbatch").read_text()
+        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
         completions = sbatch[sbatch.index('if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then'):]
         completions = completions[: completions.index("    else")]
         self.assertIn("${THINKING_DEFAULT_MODEL_ARG}${THINK_ARGS}", completions)
@@ -370,7 +370,7 @@ class LaunchFlowTests(unittest.TestCase):
     def test_thinking_budget_replaces_task_local_max_gen_toks(self) -> None:
         # The --gen_kwargs value overrides every task's YAML max_gen_toks (mmlu_pro 2048,
         # ifeval 1280); 32768 is AIME's own budget, so no task is lowered.
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/evaluate.sbatch").read_text()
+        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
         self.assertIn("    MAX_NEW_TOKENS=32768\n", sbatch)
         block = sbatch[sbatch.index('GEN_KWARGS=""'): sbatch.index('MAX_BATCH_SIZE=${MAX_BATCH_SIZE:-""}')]
 
@@ -407,7 +407,7 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertIn("drop --no-chat-template", completed.stdout + completed.stderr)
 
     def test_evaluate_passes_template_args_to_openai_completions(self) -> None:
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/evaluate.sbatch").read_text()
+        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
         self.assertIn(
             "python -m lm_eval --model $API_LM_EVAL_MODEL --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ",
             sbatch,
@@ -447,7 +447,7 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertEqual(config["configuration"]["reasoning_effort"], "high")
 
     def test_evaluate_passes_think_args_to_sglang(self) -> None:
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/evaluate.sbatch").read_text()
+        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
         sglang_args = next(
             line for line in sbatch.splitlines()
             if "tokenizer_path=$TOKENIZER" in line and "COMMON_MODEL_ARGS=" in line
@@ -457,7 +457,7 @@ class LaunchFlowTests(unittest.TestCase):
     def test_evaluate_passes_reasoning_effort_as_its_own_model_args_token(self) -> None:
         # The harness refuses a first --model_args token containing '{', and argparse gives
         # `--model_args='...'` exactly one value: the dict must be a second, space-separated token.
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/evaluate.sbatch").read_text()
+        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
         self.assertIn(
             r"""CHAT_TEMPLATE_ARGS=" 'chat_template_args={\"reasoning_effort\":\"${REASONING_EFFORT}\"}'" """.rstrip(),
             sbatch,
@@ -483,7 +483,7 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertIn("Chat:   by-type", output)
 
     def test_evaluate_runs_each_kind_as_its_own_pass(self) -> None:
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/evaluate.sbatch").read_text()
+        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
         self.assertIn("true|false|by-type) ;;", sbatch)
         self.assertIn("python -m scripts.lm_eval_harness.task_output_types --tasks '$TASKS'", sbatch)
         self.assertIn('make_cmd "$CHAT_TASKS" "$PASS_ROOT/chat" true', sbatch)

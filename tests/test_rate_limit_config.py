@@ -6,7 +6,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def test_launcher_passes_api_and_judge_rate_limits():
     launcher = (REPO_ROOT / "scripts" / "lm_eval_harness" / "launch_evaluations.sh").read_text()
-    evaluate = (REPO_ROOT / "scripts" / "lm_eval_harness" / "evaluate.sbatch").read_text()
+    evaluate = (REPO_ROOT / "scripts" / "lm_eval_harness" / "run_lm_eval.sbatch").read_text()
 
     assert "--api-requests-per-minute" in launcher
     assert "--judge-requests-per-minute" in launcher

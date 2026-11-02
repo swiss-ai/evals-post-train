@@ -46,7 +46,7 @@ class ContainerMountTests(unittest.TestCase):
         build_script = (REPO_ROOT / "scripts" / "lm_eval_harness" / "build_eval_env.sh").read_text(
             encoding="utf-8"
         )
-        evaluate_script = (REPO_ROOT / "scripts" / "lm_eval_harness" / "evaluate.sbatch").read_text(
+        evaluate_script = (REPO_ROOT / "scripts" / "lm_eval_harness" / "run_lm_eval.sbatch").read_text(
             encoding="utf-8"
         )
 

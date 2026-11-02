@@ -3,7 +3,7 @@
 # run_inspect_eval.sh - Run any benchmark from Inspect AI (https://inspect.aisi.org.uk/) /
 # inspect_evals (https://github.com/UKGovernmentBEIS/inspect_evals) against a model, as an
 # alternative to the lm-evaluation-harness pipeline driven by launch_evaluations.sh /
-# evaluate.sbatch. Inspect's execution and logging model differs enough from lm-eval-harness's
+# run_lm_eval.sbatch. Inspect's execution and logging model differs enough from lm-eval-harness's
 # (task registry, model roles, .eval log files) that it gets its own script rather than another
 # launch_evaluations.sh backend.
 #
@@ -69,10 +69,10 @@
 # Environment variables (used if the matching flag is not given):
 #   API_BASE_URL, API_MODEL_NAME (defaults to --model) -- endpoint for the model under test.
 #   TARGET_API_KEY -- API key for the --api-base-url endpoint (default: CSCS_SERVING_API from
-#   scripts/cscs_serving_api_key.txt, same fallback as evaluate.sbatch's openai backend).
+#   scripts/cscs_serving_api_key.txt, same fallback as run_lm_eval.sbatch's openai backend).
 #   WANDB_ENTITY, WANDB_PROJECT -- see --wandb-entity/--wandb-project above.
 #   WANDB_API_KEY -- for the W&B upload (default: scripts/wandb_api_key.txt, same fallback as
-#   evaluate.sbatch; without either, no upload).
+#   run_lm_eval.sbatch; without either, no upload).
 #   CRITPT_API_KEY -- grading-server credential for the CritPt task (scripts/aaii/aa_critpt.py); default:
 #   scripts/critpt_api_key.txt. Optional -- unset is the expected state until Artificial Analysis
 #   grants access (email critpt@artificialanalysis.ai); the run still completes and writes its
@@ -153,7 +153,7 @@ LOGS_DIR=${LOGS_DIR:-"logs/inspect/$NAME"}
 if [[ -n "$API_BASE_URL" ]]; then
     PROVIDER_ENV_NAME=$(echo "$PROVIDER_NAME" | tr '[:lower:]-' '[:upper:]_')
 
-    # Normalize to a /v1 root, same as evaluate.sbatch's openai backend (minus the
+    # Normalize to a /v1 root, same as run_lm_eval.sbatch's openai backend (minus the
     # completions-suffix logic: Inspect's openai-api provider wants the /v1 root itself).
     if [[ "$API_BASE_URL" != */v1 && "$API_BASE_URL" != */v1/ ]]; then
         API_BASE_URL="${API_BASE_URL%/}/v1"
@@ -209,7 +209,7 @@ fi
 
 # EVAL_PREBUILT_ENV=1 (the prebuilt image, containers/Dockerfile.eval) has these baked in too.
 if [[ "${SKIP_INSTALL:-0}" != "1" && "${EVAL_PREBUILT_ENV:-0}" != "1" ]]; then
-    # Unlike evaluate.sbatch (which always runs inside a container image with `pip` on PATH),
+    # Unlike run_lm_eval.sbatch (which always runs inside a container image with `pip` on PATH),
     # this script is also run directly on login/compute nodes (e.g. Clariden) where a bare `pip`
     # command may not exist even inside an active conda/venv env -- fall back to `python -m pip`.
     if command -v pip >/dev/null 2>&1; then

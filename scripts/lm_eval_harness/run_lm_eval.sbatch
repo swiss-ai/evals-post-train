@@ -24,7 +24,7 @@
 
 # Aux functions.
 usage() {
-	echo "Usage: sbatch evaluate.sbatch <model> <name>"
+	echo "Usage: sbatch run_lm_eval.sbatch <model> <name>"
 	echo "Runs evaluation of the specified model. The 'model' should a huggingface path/name."
 	echo "The 'name' shall be used as an unique identifier."
 	echo "In addition of these three necessary positional arguments, you can specify the following bash environment variables. Unless explicitly stated, all of these are optional:"

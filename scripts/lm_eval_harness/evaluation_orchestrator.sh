@@ -270,7 +270,7 @@ _eval_pinned_harness_commit() {
 _eval_use_prebuilt_environment() {
     # EVAL_PREBUILT_ENV=1: the container already holds every package and the
     # pinned harness (containers/Dockerfile.eval), so there is nothing to
-    # prepare. Write the manifest directly; evaluate.sbatch checks it against
+    # prepare. Write the manifest directly; run_lm_eval.sbatch checks it against
     # the container instead of building anything.
     local repo="$1" commit
     if [[ -n "${LM_EVAL_HARNESS_BRANCH:-}" ]]; then

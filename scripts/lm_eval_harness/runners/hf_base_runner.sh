@@ -24,8 +24,8 @@ export EVAL_FORCE_TASKS=${EVAL_FORCE_TASKS:-}
 export EVAL_MERGE_ONLY=${EVAL_MERGE_ONLY:-false}
 export EVAL_DRY_RUN=${EVAL_DRY_RUN:-false}
 
-# Allow overriding the sbatch script (e.g. evaluate.sbatch)
-SBATCH_SCRIPT=${SBATCH_SCRIPT:-scripts/lm_eval_harness/evaluate.sbatch}
+# Allow overriding the sbatch script (e.g. run_lm_eval.sbatch)
+SBATCH_SCRIPT=${SBATCH_SCRIPT:-scripts/lm_eval_harness/run_lm_eval.sbatch}
 export SBATCH_SCRIPT
 
 source scripts/lm_eval_harness/evaluation_orchestrator.sh

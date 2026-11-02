@@ -1,7 +1,7 @@
 # Prebuilt evaluation image for the OpenAI-compatible backend: every Python
 # package a run needs, and the pinned lm-evaluation-harness, so nothing is
 # installed at run time. The image sets EVAL_PREBUILT_ENV=1, which makes the
-# launcher skip the environment-preparation job and evaluate.sbatch /
+# launcher skip the environment-preparation job and run_lm_eval.sbatch /
 # run_inspect_eval.sh use this environment as is.
 #
 # CI publishes it for every pushed commit as
@@ -61,7 +61,7 @@ RUN python -m venv /opt/harbor-venv \
 
 # Each pinned harness as its own --no-deps overlay, the same layout
 # build_eval_env.sh produces, so several forks (all the lm_eval package)
-# could live side by side. evaluate.sbatch checks .commit against the pin
+# could live side by side. run_lm_eval.sbatch checks .commit against the pin
 # in the checkout it runs from.
 COPY requirements/lm-eval-harness.txt /tmp/requirements/
 RUN grep -Ev '^[[:space:]]*(#|$)' /tmp/requirements/lm-eval-harness.txt \

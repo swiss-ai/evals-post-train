@@ -295,7 +295,7 @@ elif [[ -n "$SINGLE_TASK" ]]; then
 fi
 
 # --- Validate run name ---
-# The name is part of the run's output path, and evaluate.sbatch builds its
+# The name is part of the run's output path, and run_lm_eval.sbatch builds its
 # lm-eval command as one string run through `bash -lc`, so whitespace would
 # split --output_path (lm-eval: unrecognized arguments) only once the run starts.
 if [[ "$MODEL_NAME" =~ [[:space:]] ]]; then
@@ -385,7 +385,7 @@ if [[ "$THINKING_UMBRELLA" == "true" || -n "$ENABLE_THINKING_OVERRIDE" \
     THINKING_TOUCHED="true"
 fi
 
-# Resolve the backend as evaluate.sbatch will, so an ambient LM_EVAL_BACKEND fails here,
+# Resolve the backend as run_lm_eval.sbatch will, so an ambient LM_EVAL_BACKEND fails here,
 # not after scheduling.
 EFFECTIVE_BACKEND="${BACKEND_FLAG:-${LM_EVAL_BACKEND:-}}"
 
@@ -447,7 +447,7 @@ if [[ "$EFFECTIVE_BACKEND" == "openai" && -z "${API_BASE_URL_FLAG:-${API_BASE_UR
     echo "Error: --backend openai requires --api-base-url <url> (or an exported API_BASE_URL)"
     exit 1
 fi
-# --model defaults API_MODEL_NAME (evaluate.sbatch) to its own, possibly catalog-prefixed
+# --model defaults API_MODEL_NAME (run_lm_eval.sbatch) to its own, possibly catalog-prefixed
 # value, which the gateway may not recognize -- require the caller to say explicitly what
 # the server should see rather than relying on that default.
 if [[ "$EFFECTIVE_BACKEND" == "openai" && -z "${API_MODEL_NAME_FLAG:-${API_MODEL_NAME:-}}" ]]; then
@@ -561,14 +561,14 @@ export EVAL_FORCE_TASKS="$FORCE_TASKS" EVAL_MERGE_ONLY EVAL_DRY_RUN KEEP_JUDGE
 export JUDGE_MODE JUDGE_EXTRA_ARGS
 if [[ -z "${SBATCH_SCRIPT:-}" ]]; then
     if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
-        SBATCH_SCRIPT=scripts/lm_eval_harness/evaluate_api.sbatch
+        SBATCH_SCRIPT=scripts/lm_eval_harness/run_lm_eval_api.sbatch
     else
-        SBATCH_SCRIPT=scripts/lm_eval_harness/evaluate.sbatch
+        SBATCH_SCRIPT=scripts/lm_eval_harness/run_lm_eval.sbatch
     fi
 fi
 export SBATCH_SCRIPT
 # Global checkpoint iteration override for Megatron checkpoints.
-# Consumed by the runner and forwarded to evaluate.sbatch as CKPT_ITER.
+# Consumed by the runner and forwarded to run_lm_eval.sbatch as CKPT_ITER.
 [[ -n "$MEGATRON_ITER" ]] && export CKPT_ITERATION="$MEGATRON_ITER"
 
 # --- Configure task suite ---

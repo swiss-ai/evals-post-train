@@ -170,7 +170,7 @@ python -m scripts.results.update_wandb_inspect --entity <entity> --project <proj
   --name <name> --eval-log <path-to-run.eval> [--eval-log <path> ...]
 ```
 
-`update_wandb_inspect.py` parses the `.eval` log(s) (task scores, metrics, and a bounded per-sample summary) into the same `ModelEvaluation` structure the harness pipeline uses, and uploads through the same shared `upload_multi_model_results` — so Inspect and lm-eval-harness runs show up in W&B the same way. Auth uses `WANDB_API_KEY` (default: `scripts/wandb_api_key.txt`, same fallback as `evaluate.sbatch`).
+`update_wandb_inspect.py` parses the `.eval` log(s) (task scores, metrics, and a bounded per-sample summary) into the same `ModelEvaluation` structure the harness pipeline uses, and uploads through the same shared `upload_multi_model_results` — so Inspect and lm-eval-harness runs show up in W&B the same way. Auth uses `WANDB_API_KEY` (default: `scripts/wandb_api_key.txt`, same fallback as `run_lm_eval.sbatch`).
 
 ---
 
