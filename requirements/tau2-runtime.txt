@@ -1,0 +1,6 @@
+# Input to tau2-runtime.lock (scripts/common/lock_requirements.sh), which the prebuilt image
+# installs into its own venv for run_tau2_bench.sh (tau2-bench needs Python >= 3.12 and pins
+# its own dependency set). tau2-bench is not on PyPI: pinned to the commit of the tag
+# Artificial Analysis scores with (v1.0.1). The image also checks its data directory out at
+# this commit (TAU2_DATA_DIR); run_tau2_bench.sh refuses a --git-ref that resolves elsewhere.
+tau2[knowledge] @ git+https://github.com/sierra-research/tau2-bench@fc0055dc4e0a316c3f83133267fbd6faaa770992

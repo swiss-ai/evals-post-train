@@ -121,8 +121,18 @@ if [[ "$NO_GRADE" = 1 ]]; then
     unset GDPVAL_JUDGE_OPENAI_API_KEY GDPVAL_JUDGE_GOOGLE_API_KEY GDPVAL_JUDGE_ANTHROPIC_API_KEY
 fi
 
-python3 -c "import stirrup.tools.code_backends.e2b" >/dev/null 2>&1 || \
-    pip install --no-cache-dir -q "stirrup[e2b]" datasets huggingface_hub openai anthropic "google-genai" 1>&2
+if [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
+    # The prebuilt image (containers/Dockerfile.eval): requirements/gdpval-runtime.lock in its
+    # own venv. Nothing is installed.
+    [[ -x "${GDPVAL_VENV:-}/bin/python" ]] ||
+        die "EVAL_PREBUILT_ENV=1 but GDPVAL_VENV (${GDPVAL_VENV:-unset}) has no bin/python." \
+            "Use the image built from this commit (containers/Dockerfile.eval)."
+    export PATH="$GDPVAL_VENV/bin:$PATH"
+    echo "EVAL_PREBUILT_ENV=1: using $GDPVAL_VENV (no install)"
+else
+    python3 -c "import stirrup.tools.code_backends.e2b" >/dev/null 2>&1 || \
+        pip install --no-cache-dir -q -r requirements/gdpval-runtime.txt 1>&2
+fi
 
 EVAL_MODEL="$MODEL" EVAL_API_BASE_URL="$API_BASE_URL" EVAL_WORKDIR="$WORKDIR" \
 GDPVAL_NUM_TASKS="$NUM_TASKS" GDPVAL_TASK_IDS="$TASK_IDS" GDPVAL_MAX_TURNS="$MAX_TURNS" \
