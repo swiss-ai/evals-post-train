@@ -130,7 +130,6 @@ if n:
     print(f'deleted {n} leftover OpenSandbox sandbox(es) of run {os.environ[\"OPENSANDBOX_RUN_LABEL\"]}')
 " || echo "WARNING: could not delete leftover sandboxes of run $OPENSANDBOX_RUN_LABEL" >&2
     }
-    trap cleanup_sandboxes EXIT
 fi
 if [[ "$SANDBOX_BACKEND" == "e2b" && -z "${E2B_API_KEY:-}" ]]; then
     die "--sandbox-backend e2b needs E2B_API_KEY (or pass --sandbox-backend local for the free," \
@@ -153,19 +152,23 @@ if [[ "$NO_GRADE" = 1 ]]; then
     unset GDPVAL_JUDGE_OPENAI_API_KEY GDPVAL_JUDGE_GOOGLE_API_KEY GDPVAL_JUDGE_ANTHROPIC_API_KEY
 fi
 
+# Stirrup and the rest come from requirements/gdpval-runtime.lock: in the prebuilt image
+# (containers/Dockerfile.eval) its venv is GDPVAL_VENV; elsewhere the lock's cached venv is built
+# here (scripts/common/locked_venv.sh), as run_inspect_eval.sh does. VIRTUAL_ENV too: with
+# --sandbox-backend local the agent's own code and its `uv pip install`s run in this venv.
 if [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
-    # The prebuilt image (containers/Dockerfile.eval): requirements/gdpval-runtime.lock in its
-    # own venv. Nothing is installed. VIRTUAL_ENV too: with --sandbox-backend local the agent's
-    # own code and its `uv pip install`s run in this venv.
     [[ -x "${GDPVAL_VENV:-}/bin/python" ]] ||
         die "EVAL_PREBUILT_ENV=1 but GDPVAL_VENV (${GDPVAL_VENV:-unset}) has no bin/python." \
             "Use the image built from this commit (containers/Dockerfile.eval)."
-    export PATH="$GDPVAL_VENV/bin:$PATH" VIRTUAL_ENV="$GDPVAL_VENV"
     echo "EVAL_PREBUILT_ENV=1: using $GDPVAL_VENV (no install)"
 else
-    python3 -c "import stirrup.tools.code_backends.e2b, opensandbox" >/dev/null 2>&1 || \
-        pip install --no-cache-dir -q -r requirements/gdpval-runtime.txt 1>&2
+    # shellcheck source=scripts/common/locked_venv.sh
+    source scripts/common/locked_venv.sh
+    locked_venv requirements/gdpval-runtime.lock 3.12 || die "Installing requirements/gdpval-runtime.lock failed."
+    GDPVAL_VENV=$LOCKED_VENV
 fi
+export PATH="$GDPVAL_VENV/bin:$PATH" VIRTUAL_ENV="$GDPVAL_VENV"
+[[ "$SANDBOX_BACKEND" == opensandbox ]] && trap cleanup_sandboxes EXIT
 
 EVAL_MODEL="$MODEL" EVAL_API_BASE_URL="$API_BASE_URL" EVAL_WORKDIR="$WORKDIR" \
 GDPVAL_NUM_TASKS="$NUM_TASKS" GDPVAL_TASK_IDS="$TASK_IDS" GDPVAL_MAX_TURNS="$MAX_TURNS" \
@@ -449,4 +452,6 @@ async def main():
 
 asyncio.run(main())
 PY
+STATUS=$?
 echo "deliverables: $WORKDIR/gdpval_runs/"
+exit "$STATUS"
