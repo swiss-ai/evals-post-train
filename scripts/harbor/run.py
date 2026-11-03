@@ -22,6 +22,7 @@ document tasks whose reference solution does not, e.g. flaky tests).
 from __future__ import annotations
 
 import argparse
+import asyncio
 import glob
 import json
 import os
@@ -29,6 +30,7 @@ import platform
 import signal
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -39,6 +41,10 @@ HARBOR_VERSION = "0.25.0"
 K8S_ENVIRONMENT = "scripts.harbor.k8s_environment:K8sPodEnvironment"
 # Harbor's Docker environment, with the network-allowlist sidecar built for DOCKER_DEFAULT_PLATFORM.
 DOCKER_ENVIRONMENT = "scripts.harbor.docker_environment:PlatformDockerEnvironment"
+OPENSANDBOX_ENVIRONMENT = "scripts.harbor.opensandbox_environment:KataSandboxEnvironment"
+ENVIRONMENTS = {"docker": DOCKER_ENVIRONMENT, "k8s": K8S_ENVIRONMENT, "opensandbox": OPENSANDBOX_ENVIRONMENT}
+# Breithorn's Kata endpoint; the default (gVisor) one cannot enforce network policies.
+OPENSANDBOX_KATA_DOMAIN = "opensandbox-kata.breithorn.svc.cscs.ch"
 
 # Our benchmark names -> the Harbor dataset. Registry datasets are pinned: legacy-registry
 # ones by version, Harbor Hub packages by content digest (what @latest resolved to when pinned).
@@ -100,7 +106,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--gold", action="store_true", help="Harbor's oracle agent instead of a model.")
     p.add_argument("--agent", default="terminus-2", help="Harbor agent (default: terminus-2).")
     p.add_argument("--work-dir", required=True)
-    p.add_argument("--sandbox", choices=("docker", "k8s"), required=True)
+    p.add_argument("--sandbox", choices=tuple(ENVIRONMENTS), required=True)
     p.add_argument("--limit", type=int, help="First n tasks per benchmark.")
     p.add_argument("--task", action="append", default=[], help="Task name (glob) to include; repeatable.")
     p.add_argument("--max-concurrency", type=int, default=4)
@@ -116,6 +122,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         for name in names:
             if BENCHMARKS[name].get("docker_only"):
                 p.error(f"{name} needs --sandbox docker: {BENCHMARKS[name]['docker_only']}")
+    if args.sandbox == "opensandbox" and not os.environ.get("OPENSANDBOX_API_KEY"):
+        p.error("--sandbox opensandbox needs OPENSANDBOX_API_KEY")
     if not args.gold and not (args.model and args.api_base_url):
         p.error("--model and --api-base-url are required (or --gold)")
     args.benchmarks = names
@@ -201,13 +209,13 @@ def harbor_command(args: argparse.Namespace, name: str, jobs_dir: Path) -> List[
     cmd += ["-n", str(args.max_concurrency), "-k", str(args.attempts), "--timeout-multiplier", str(args.timeout_multiplier)]
     for kv in args.agent_kwarg:
         cmd += ["--ak", kv]
-    cmd += ["--env", K8S_ENVIRONMENT if args.sandbox == "k8s" else DOCKER_ENVIRONMENT]
+    cmd += ["--env", ENVIRONMENTS[args.sandbox]]
     return cmd
 
 
 def harbor_env(args: argparse.Namespace) -> Dict[str, str]:
     env = dict(os.environ)
-    # The k8s environment is imported by module path from this repo.
+    # Our environments are imported by module path from this repo.
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(REPO_ROOT), env.get("PYTHONPATH")]))
     if not args.gold:
         # litellm's openai provider (terminus-2, mini-swe-agent, ...): openai/<model> at this endpoint.
@@ -217,7 +225,28 @@ def harbor_env(args: argparse.Namespace) -> Dict[str, str]:
         # The task images are linux/amd64; Docker on an arm64 host would build for arm64 and
         # find no matching base image.
         env.setdefault("DOCKER_DEFAULT_PLATFORM", "linux/amd64")
+    if args.sandbox == "opensandbox":
+        env.setdefault("OPENSANDBOX_DOMAIN", OPENSANDBOX_KATA_DOMAIN)
+        # Unique to this run: the cleanup after it must not touch another run's sandboxes.
+        env["OPENSANDBOX_RUN_LABEL"] = f"harbor-{uuid.uuid4().hex[:12]}"
     return env
+
+
+def delete_leftover_sandboxes(env: Dict[str, str]) -> None:
+    """A run that is stopped can leave sandboxes behind. Never fails the run: its scores stand, and
+    a leftover ends at the sandbox's own timeout."""
+    label = env["OPENSANDBOX_RUN_LABEL"]
+    try:
+        from scripts.harbor.opensandbox_environment import delete_run_sandboxes
+
+        deleted = asyncio.run(
+            asyncio.wait_for(delete_run_sandboxes(label, env["OPENSANDBOX_DOMAIN"], env["OPENSANDBOX_API_KEY"]), 120)
+        )
+    except Exception as exc:
+        print(f"warning: could not delete sandboxes with sandbox-run={label}: {exc!r}", file=sys.stderr)
+        return
+    if deleted:
+        print(f"Deleted {deleted} leftover sandboxes (sandbox-run={label})", flush=True)
 
 
 def summarize_job(job_dir: Path, missing_reward_is_zero: bool = False) -> Dict[str, Any]:
@@ -300,6 +329,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         "agent": "oracle" if args.gold else args.agent,
         "api_base_url": None if args.gold else args.api_base_url,
         "sandbox": args.sandbox,
+        # The server decides the runtime (Kata or not), so where the trials ran is part of the record.
+        "sandbox_endpoint": env["OPENSANDBOX_DOMAIN"] if args.sandbox == "opensandbox" else None,
         "limit": args.limit,
         "attempts": args.attempts,
         "benchmarks": results,
@@ -336,6 +367,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         # After each benchmark, so a run that is stopped still leaves the finished ones' scores.
         with open(work_dir / "summary.json", "w") as f:
             json.dump(summary, f, indent=2)
+    if args.sandbox == "opensandbox":
+        delete_leftover_sandboxes(env)
     print(json.dumps(summary, indent=2))
     if stopped:
         print(f"Stopped: {work_dir}/summary.json has the trials that finished.", file=sys.stderr)
