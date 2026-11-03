@@ -81,10 +81,14 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
     "senior_swe_bench": {
         "dataset": "snorkel-ai/senior-swe-bench-v2026.06@sha256:fdfbce8953be56c009a773140adccc53e24f92d8682e1bf8b2f785506a51f15d",
         "about": "Senior SWE-bench v2026.06, 50 public tasks",
-        "docker_only": (
+        "not_on_k8s": (
             "its agent network allowlists name wildcard hostnames (*.pythonhosted.org, ...), which a "
-            "Kubernetes NetworkPolicy cannot express (Harbor's Docker environment enforces them with an egress proxy)"
+            "Kubernetes NetworkPolicy cannot express (Harbor's Docker environment enforces them with an "
+            "egress proxy, OpenSandbox with its egress sidecar)"
         ),
+        # Its verifier's LLM judges (part of the reward) need one of these. Without any, it skips
+        # them and scores the tests alone: a number that isn't Senior SWE-bench's score.
+        "grader_keys": ("ANTHROPIC_API_KEY", "PORTKEY_API_KEY"),
     },
     "aider_polyglot": {
         "dataset": "aider-polyglot@1.0",
@@ -120,8 +124,17 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         p.error(f"unknown --benchmark {', '.join(unknown)} (choose from {', '.join(BENCHMARKS)})")
     if args.sandbox == "k8s":
         for name in names:
-            if BENCHMARKS[name].get("docker_only"):
-                p.error(f"{name} needs --sandbox docker: {BENCHMARKS[name]['docker_only']}")
+            if BENCHMARKS[name].get("not_on_k8s"):
+                p.error(f"{name} needs --sandbox docker or opensandbox: {BENCHMARKS[name]['not_on_k8s']}")
+    if not args.gold:
+        # --gold checks the environments and tests; it needs no judges.
+        for name in names:
+            keys = BENCHMARKS[name].get("grader_keys", ())
+            if keys and not any(os.environ.get(key) for key in keys):
+                p.error(
+                    f"{name}'s LLM graders need {' or '.join(keys)}: without one, the verifier "
+                    "skips them and scores the tests alone, which is not the benchmark's score"
+                )
     if args.sandbox == "opensandbox" and not os.environ.get("OPENSANDBOX_API_KEY"):
         p.error("--sandbox opensandbox needs OPENSANDBOX_API_KEY")
     if not args.gold and not (args.model and args.api_base_url):
