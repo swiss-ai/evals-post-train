@@ -104,7 +104,11 @@ build_base() {
         fi
         python -m venv --system-site-packages "$BASE_ENV"
         "$BASE_ENV/bin/python" -m pip install --upgrade pip
-        "$BASE_ENV/bin/python" -m pip install -r "$EVAL_RUNTIME_REQUIREMENTS"
+        local -a index_args=()
+        # lm-eval-runtime.lock has CPU torch, from PyTorch's index. Its hashes decide which file is accepted.
+        [[ "$EVAL_RUNTIME_REQUIREMENTS" == *.lock ]] \
+            && index_args=(--extra-index-url https://download.pytorch.org/whl/cpu)
+        "$BASE_ENV/bin/python" -m pip install "${index_args[@]}" -r "$EVAL_RUNTIME_REQUIREMENTS"
         if [[ "$EVAL_BACKEND" == "megatron_lm" ]]; then
             "$BASE_ENV/bin/python" -m pip install --no-deps megatron-core
         fi

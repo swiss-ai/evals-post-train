@@ -59,7 +59,7 @@ usage() {
     echo " LM_EVAL_RATE_LIMIT_STATE_DIR: Shared coordination directory for rate-limited Slurm workers (set by launcher)."
     echo " OPENAI_API_KEY: Bearer token for the endpoint (default: CSCS_SERVING_API)."
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
-    echo " LM_EVAL_HARNESS_BRANCH: Branch/ref resolved once by the environment-preparation job."
+    echo " LM_EVAL_HARNESS_BRANCH: Branch/ref resolved once by the environment-preparation job (default: the commit in requirements/lm-eval-harness.txt)."
     echo " EVAL_ENV_MANIFEST: Prepared base environment and harness overlay (required; set by launcher)."
     echo " EVAL_PREBUILT_ENV: '1' when running in the prebuilt image (containers/Dockerfile.eval): nothing is installed; the launcher writes the manifest."
     echo " EVAL_RUN_CONFIG: Normalized result provenance file used for safe resume (required; set by launcher)."

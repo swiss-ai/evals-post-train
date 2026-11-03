@@ -88,7 +88,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--megatron-iter <iter>` | For Megatron-LM checkpoints, the iteration to evaluate (e.g. `8926`); defaults to `latest`. Exported as `CKPT_ITERATION`. |
 | `--convert-to-hf` | Convert the Megatron checkpoint at `--model` to HF first, then evaluate the result (needs `--megatron-iter`). See [Megatron checkpoints](#megatron-checkpoints). |
 | `--hf-output-dir <path>` | Where `--convert-to-hf` writes the converted checkpoint. |
-| `--harness-branch B` | Resolve lm-evaluation-harness from a branch, tag, or full commit SHA in the task-selected repository (default: repository HEAD); the resolved commit is shared by every chunk |
+| `--harness-branch B` | Resolve lm-evaluation-harness from a branch, tag, or full commit SHA in the task-selected repository (default: the commit in `requirements/lm-eval-harness.txt`); the resolved commit is shared by every chunk |
 | `--reservation <name>` | Submit evaluation jobs and any automatically launched judge under this SLURM reservation. |
 | `--qos <name>` | Submit every job, including any automatically launched judge, under this SLURM QOS (e.g. `highprio`). Exported as `SBATCH_QOS`. |
 | `--partition <name>` | Submit every job, including any automatically launched judge, to this SLURM partition (e.g. `highprio`; default: `normal`). Exported as `SBATCH_PARTITION`. |
@@ -562,7 +562,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `LM_EVAL_JUDGE_MODEL_DISCOVERY_TIMEOUT` | `10` | Timeout in seconds for hosted judge-model discovery |
 | `LM_EVAL_RATE_LIMIT_STATE_DIR` | per-launch controller directory | Shared request-slot state used to coordinate threads, processes, and Slurm nodes; point independent launches at the same directory to share budgets |
 | `OPENAI_API_KEY` | `scripts/openai_api_key.txt`, then `CSCS_SERVING_API` | OpenAI GPT judge or `openai` backend bearer token |
-| `LM_EVAL_HARNESS_BRANCH` | repository HEAD | Branch, tag, or commit installed from the task-selected harness repository (not allowed with `EVAL_PREBUILT_ENV=1`, which uses `requirements/lm-eval-harness.txt`) |
+| `LM_EVAL_HARNESS_BRANCH` | commit in `requirements/lm-eval-harness.txt` | Branch, tag, or commit installed from the task-selected harness repository (not allowed with `EVAL_PREBUILT_ENV=1`) |
 | `APPLY_CHAT_TEMPLATE` | `true` | Apply chat template for instruct models |
 | `TOKENIZER` | same as model | Custom tokenizer path |
 | `BOS` | `false` | Prepend BOS token |
@@ -642,7 +642,7 @@ The pipeline runs inside containers managed by enroot/pyxis on SLURM. The availa
 
 Evaluation dependencies use a shared two-tier cache under `${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}`:
 
-1. A base virtual environment is keyed by backend, Python/container configuration, and `requirements/lm-eval-runtime.txt`.
+1. A base virtual environment is keyed by backend, Python/container configuration, and its requirements: `requirements/lm-eval-runtime.lock` for the `openai` backend, `requirements/lm-eval-runtime.txt` for in-job backends, which take `torch` and their server from the container.
 2. A lightweight harness overlay is keyed by the base environment, harness repository, and resolved commit SHA.
 
 `prepare_eval_env.sbatch` first verifies that the cache and per-run manifest
@@ -696,10 +696,9 @@ unless a lock changed. To change a version, edit the matching
 `requirements/*.txt`, run `scripts/common/lock_requirements.sh` and commit both;
 CI fails if they don't match. A harness bump can need new dependencies that the
 locks don't see, because the harness is installed `--no-deps`: review
-`requirements/lm-eval-runtime.txt` when bumping it. Environments built by
-`build_eval_env.sh` (in-job backends, and `openai` outside the image) take
-`torch` and their server from the container, so they install
-`requirements/lm-eval-runtime.txt` directly and are not locked.
+`requirements/lm-eval-runtime.txt` when bumping it. In-job backends are the one
+exception to the locks: they take `torch` and their server from the container, so
+they install `requirements/lm-eval-runtime.txt`.
 
 The image sets `EVAL_PREBUILT_ENV=1`. With it, the launcher submits no
 `prepare_eval_env.sbatch` job and writes the manifest itself;
@@ -708,13 +707,13 @@ in the checkout and that the packages import, then runs, never installing
 anything. `run_inspect_eval.sh` skips its install the same way. A mismatch
 (the scripts come from a different commit than the image) fails the job with
 a message naming both commits, so run the image with the scripts from the
-commit it was built from, or use the environment-building path when no image
-exists for a commit yet.
+commit it was built from. This repo's own scripts don't start the image: its
+launcher has to already be running inside it. Runs started on Clariden use the
+environment-building path, with the same locks.
 
-The harness is pinned, not the moving `HEAD` the building path follows: to
-ship a newer harness, bump its commit in `requirements/lm-eval-harness.txt`.
-`--harness-branch`/`LM_EVAL_HARNESS_BRANCH` is refused with
-`EVAL_PREBUILT_ENV=1`.
+To ship a newer harness, bump its commit in `requirements/lm-eval-harness.txt`:
+all runs use that commit. `--harness-branch`/`LM_EVAL_HARNESS_BRANCH` overrides it
+for one run, and is refused with `EVAL_PREBUILT_ENV=1`.
 
 ```bash
 docker build -f containers/Dockerfile.eval -t evals-post-train-eval .

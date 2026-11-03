@@ -20,8 +20,9 @@ sbatch --reservation=my-reservation scripts/inspect_ai/run_inspect_eval.sbatch -
 ```
 
 ```bash
-# run_inspect_eval.sh installs these itself at runtime (SKIP_INSTALL=1 or EVAL_PREBUILT_ENV=1 to skip);
-# to install by hand for local/interactive use:
+# run_inspect_eval.sh runs from a cached venv of requirements/inspect-runtime.lock, built on first
+# use (SKIP_INSTALL=1 runs with the current environment as is). To install by hand for
+# local/interactive use:
 pip install -r requirements/inspect-runtime.lock
 
 # A plain benchmark against a served model (CSCS serving, vllm serve, ...)

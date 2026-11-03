@@ -87,7 +87,7 @@ _eval_create_run_config() {
         --field "revision=${REVISION:-}"
         --field "tokenizer=${TOKENIZER:-}"
         --field "harness_repo=$repo"
-        --field "harness_ref=${LM_EVAL_HARNESS_BRANCH:-HEAD}"
+        --field "harness_ref=${LM_EVAL_HARNESS_BRANCH:-$(_eval_pinned_harness_commit "$repo")}"
         --field "apply_chat_template=${APPLY_CHAT_TEMPLATE:-true}"
         --field "bos=${BOS:-false}"
         --field "limit=${HARNESS_LIMIT:-}"
@@ -302,11 +302,17 @@ _eval_prepare_environment() {
         _eval_use_prebuilt_environment "$repo"
         return
     fi
-    export EVAL_HARNESS_REF="${LM_EVAL_HARNESS_BRANCH:-HEAD}"
+    export EVAL_HARNESS_REF="${LM_EVAL_HARNESS_BRANCH:-$(_eval_pinned_harness_commit "$repo")}"
     EVAL_CONTAINER_CONFIG=$(_eval_container_for_backend)
     EVAL_CONTAINER_CONFIG=$(realpath "$EVAL_CONTAINER_CONFIG")
     export EVAL_CONTAINER_CONFIG EVAL_REPO_ROOT="$PWD"
-    export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/lm-eval-runtime.txt"
+    # The openai backend loads no model, so it gets the same locked packages as the prebuilt
+    # image; in-job backends take torch and their server from the container.
+    if [[ "${LM_EVAL_BACKEND:-vllm}" == "openai" ]]; then
+        export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/lm-eval-runtime.lock"
+    else
+        export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/lm-eval-runtime.txt"
+    fi
 
     if [[ "${EVAL_DRY_RUN:-false}" == "true" ]]; then
         echo "[DRY RUN] sbatch --parsable scripts/lm_eval_harness/prepare_eval_env.sbatch" >&2
