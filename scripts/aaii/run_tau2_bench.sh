@@ -197,6 +197,17 @@ if [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
     export PATH="$TAU2_VENV/bin:$PATH"
     echo "EVAL_PREBUILT_ENV=1: tau2-bench@$INSTALLED_TAU ($TAU_GIT_REF) from $TAU2_VENV, no install" \
          "(data: $TAU2_DATA_DIR)"
+    if [[ ! -w "$TAU2_DATA_DIR" ]]; then
+        # A read-only image (Clariden's Container Engine mounts it as squashfs), but tau2 writes
+        # its results to <data dir>/simulations: a writable view of the data in the workdir.
+        VIEW="$WORKDIR/tau2-data"
+        mkdir -p "$VIEW/simulations"
+        for entry in "$TAU2_DATA_DIR"/* "$TAU2_DATA_DIR"/.[!.]*; do
+            [[ -e "$entry" && "$(basename "$entry")" != simulations ]] && ln -sfn "$entry" "$VIEW/"
+        done
+        export TAU2_DATA_DIR="$VIEW"
+        echo "read-only data dir: running from a writable view, $VIEW"
+    fi
 elif python3 -c "import tau2" >/dev/null 2>&1 && [[ -n "${TAU2_DATA_DIR:-}" && -d "$TAU2_DATA_DIR" ]]; then
     # An environment someone provisioned by hand: its version is not checked against --git-ref.
     echo "provisioned tau2-bench $(python3 -c 'import importlib.metadata as m; print(m.version("tau2"))')" \
