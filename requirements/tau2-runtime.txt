@@ -4,3 +4,7 @@
 # Artificial Analysis scores with (v1.0.1). The image also checks its data directory out at
 # this commit (TAU2_DATA_DIR); run_tau2_bench.sh refuses a --git-ref that resolves elsewhere.
 tau2[knowledge] @ git+https://github.com/sierra-research/tau2-bench@fc0055dc4e0a316c3f83133267fbd6faaa770992
+# tau2-bench imports audioop (voice preprocessing, imported even for text runs), which Python 3.13
+# removed from the standard library; audioop-lts is its drop-in for 3.13+ (the lock's venv takes
+# the newest Python >= 3.12 the machine has).
+audioop-lts; python_version >= "3.13"

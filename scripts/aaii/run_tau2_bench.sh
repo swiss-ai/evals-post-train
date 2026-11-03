@@ -60,13 +60,15 @@
 #   --num-tasks <n>            Restrict to the first n tasks (useful for smoke-testing).
 #   --seed <n>                 Random seed (default: 300).
 #   --max-concurrency <n>      Parallel trials (default: 4).
-#   --git-ref <ref>            tau2-bench ref to clone (default: v1.0.1, AA's protocol). In the
-#                               prebuilt image (EVAL_PREBUILT_ENV=1) it must name the installed
-#                               commit (requirements/tau2-runtime.txt); anything else is refused.
-#   --repo <url>                tau2-bench repo to clone (default: the upstream GitHub repo).
+#   --git-ref <ref>            tau2-bench ref (default: v1.0.1, AA's protocol). It must name the
+#                               commit requirements/tau2-runtime.lock pins, which is what runs
+#                               (the prebuilt image's install, or the lock's cached venv
+#                               elsewhere); anything else is refused. Another version: bump
+#                               requirements/tau2-runtime.txt and relock.
+#   --repo <url>                tau2-bench repo --git-ref is looked up in (default: upstream).
 #   --save-to <name>           tau2's own run-name, used as the results subdirectory (default:
 #                               evalspt).
-#   --workdir <path>           Scratch dir for the tau2-bench checkout + its own data dir
+#   --workdir <path>           Scratch dir for tau2-bench's data dir (checked out at the pinned commit)
 #                               (default: a temp dir under /tmp).
 #   -- <extra args>             Forwarded verbatim to `tau2 run`.
 #
@@ -178,21 +180,24 @@ resolve_tau_ref() {
     [[ -n "$sha" ]] && echo "$sha"
 }
 
+# --git-ref must name the commit that runs: the lock's pin (requirements/tau2-runtime.txt).
+check_tau_ref() {
+    local pinned=$1 where=$2 wanted
+    wanted=$(resolve_tau_ref "$TAU_GIT_REF") || die "--git-ref $TAU_GIT_REF: not found in $TAU_REPO"
+    [[ "$wanted" == "$pinned" ]] ||
+        die "--git-ref $TAU_GIT_REF is tau2-bench@$wanted, but $where has tau2-bench@$pinned." \
+            "Bump requirements/tau2-runtime.txt and relock (scripts/common/lock_requirements.sh)."
+}
+
 if [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
     # The prebuilt image (containers/Dockerfile.eval): tau2-bench in its own venv, its data at
-    # the commit requirements/tau2-runtime.txt pins. Nothing is installed; a --git-ref that
-    # names another commit is refused rather than silently run on the installed one.
+    # the commit requirements/tau2-runtime.txt pins. Nothing is installed.
     [[ -x "${TAU2_VENV:-}/bin/tau2" && -d "${TAU2_DATA_DIR:-}" && -f "${TAU2_COMMIT_FILE:-}" ]] ||
         die "EVAL_PREBUILT_ENV=1 but this image has no tau2-bench (TAU2_VENV=${TAU2_VENV:-unset}," \
             "TAU2_DATA_DIR=${TAU2_DATA_DIR:-unset}, TAU2_COMMIT_FILE=${TAU2_COMMIT_FILE:-unset})." \
             "Use the image built from this commit (containers/Dockerfile.eval)."
     INSTALLED_TAU=$(tr -d '[:space:]' < "$TAU2_COMMIT_FILE")
-    WANTED_TAU=$(resolve_tau_ref "$TAU_GIT_REF") ||
-        die "--git-ref $TAU_GIT_REF: not found in $TAU_REPO"
-    [[ "$WANTED_TAU" == "$INSTALLED_TAU" ]] ||
-        die "--git-ref $TAU_GIT_REF is tau2-bench@$WANTED_TAU, but this image has" \
-            "tau2-bench@$INSTALLED_TAU. Bump requirements/tau2-runtime.txt, or run outside the" \
-            "prebuilt image (EVAL_PREBUILT_ENV unset) to install that ref."
+    check_tau_ref "$INSTALLED_TAU" "this image"
     export PATH="$TAU2_VENV/bin:$PATH"
     echo "EVAL_PREBUILT_ENV=1: tau2-bench@$INSTALLED_TAU ($TAU_GIT_REF) from $TAU2_VENV, no install" \
          "(data: $TAU2_DATA_DIR)"
@@ -212,9 +217,20 @@ elif python3 -c "import tau2" >/dev/null 2>&1 && [[ -n "${TAU2_DATA_DIR:-}" && -
     echo "provisioned tau2-bench $(python3 -c 'import importlib.metadata as m; print(m.version("tau2"))')" \
          "(data: $TAU2_DATA_DIR; --git-ref $TAU_GIT_REF is not checked against it)"
 else
-    git clone --depth 1 --branch "$TAU_GIT_REF" "$TAU_REPO" "$WORKDIR/tau2-bench"
-    pip install --no-cache-dir -q "$WORKDIR/tau2-bench[knowledge]" 1>&2
+    # As the image does it: the lock's cached venv (scripts/common/locked_venv.sh) and the data
+    # directory checked out at the commit the lock pins.
+    PINNED_TAU=$(grep -oE 'tau2-bench@[0-9a-f]{40}' requirements/tau2-runtime.lock | head -1 | cut -d@ -f2)
+    [[ -n "$PINNED_TAU" ]] || die "requirements/tau2-runtime.lock pins no tau2-bench commit"
+    check_tau_ref "$PINNED_TAU" "requirements/tau2-runtime.lock"
+    # shellcheck source=scripts/common/locked_venv.sh
+    source scripts/common/locked_venv.sh
+    locked_venv requirements/tau2-runtime.lock 3.12 || die "Installing requirements/tau2-runtime.lock failed."
+    export PATH="$LOCKED_VENV/bin:$PATH"
+    git init --quiet "$WORKDIR/tau2-bench"
+    git -C "$WORKDIR/tau2-bench" fetch --quiet --depth 1 "$TAU_REPO" "$PINNED_TAU"
+    git -C "$WORKDIR/tau2-bench" checkout --quiet FETCH_HEAD
     export TAU2_DATA_DIR="$WORKDIR/tau2-bench/data"
+    echo "tau2-bench@$PINNED_TAU ($TAU_GIT_REF) from $LOCKED_VENV (data: $TAU2_DATA_DIR)"
 fi
 
 ARGS=(run --domain "$DOMAIN"

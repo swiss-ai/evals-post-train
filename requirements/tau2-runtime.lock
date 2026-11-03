@@ -25,6 +25,8 @@ attrs==26.1.0
     #   aiohttp
     #   jsonschema
     #   referencing
+audioop-lts==0.2.2 ; python_full_version >= '3.13'
+    # via -r requirements/tau2-runtime.txt
 cachebox==5.2.3
     # via deepdiff
 certifi==2026.10.23
