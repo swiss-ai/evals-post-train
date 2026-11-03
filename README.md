@@ -83,18 +83,6 @@ Every runner reads it (`scripts/common/secrets.sh`). A variable already set in t
 | `CRITPT_API_KEY` | `run_inspect_eval.sh` | Optional: grading for CritPt (`scripts/aaii/aa_critpt.py`); ask critpt@artificialanalysis.ai for access. Without it, the submissions are written to a local file. |
 | `OPENSANDBOX_API_KEY` | `run_harbor_eval.sh`, `run_evalscope_eval.sh` | Optional: `--sandbox opensandbox`. |
 
-Moving from the old per-key files (`scripts/*_api_key.txt`, `scripts/hf_token.txt`), once, from the repo root:
-
-```bash
-for pair in CSCS_SERVING_API:cscs_serving_api_key WANDB_API_KEY:wandb_api_key HF_TOKEN:hf_token \
-    OPENAI_API_KEY:openai_api_key CRITPT_API_KEY:critpt_api_key OPENSANDBOX_API_KEY:opensandbox_api_key; do
-    f="scripts/${pair#*:}.txt"
-    [ -f "$f" ] && printf '%s=%s\n' "${pair%%:*}" "$(tr -d '\r\n' < "$f")" >> scripts/secrets.env
-done
-```
-
-Check `scripts/secrets.env`, then delete the old files.
-
 ---
 
 ## Contributing
