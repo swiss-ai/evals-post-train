@@ -405,15 +405,10 @@ def main() -> None:
         asyncio.run(cancel_job(args.cancel_job_id))
         return
 
-    # in sbatch, we can run export CSCS_SERVING_API="${CSCS_SERVING_API:-$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)} - also try to read from file
-
+    # launch_evaluations.sh exports CSCS_SERVING_API (environment, else scripts/secrets.env).
     api_key = os.environ.get("CSCS_SERVING_API")
-    if not api_key:
-        key_path = Path(__file__).parents[1].joinpath("cscs_serving_api_key.txt")
-        if key_path.is_file():
-            api_key = key_path.read_text().strip()
     if not api_key and not args.dry_run:
-        _log("ERROR: CSCS_SERVING_API environment variable not set.")
+        _log("ERROR: CSCS_SERVING_API is set neither in the environment nor in scripts/secrets.env.")
         sys.exit(1)
 
     # Determine which presets to launch

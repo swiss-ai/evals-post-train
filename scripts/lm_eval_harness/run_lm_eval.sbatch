@@ -227,13 +227,10 @@ API_REQUEST_TIMEOUT=${API_REQUEST_TIMEOUT:-3600}
 export JUDGE_REQUESTS_PER_MINUTE=${JUDGE_REQUESTS_PER_MINUTE:-""}
 export JUDGE_MODEL_PREFIX=${JUDGE_MODEL_PREFIX:-${USER:-}}
 
-export HF_TOKEN="${HF_TOKEN:-$(tr -d '\r\n' < ./scripts/hf_token.txt)}"
-export WANDB_API_KEY="${WANDB_API_KEY:-$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)}"
-export CSCS_SERVING_API="${CSCS_SERVING_API:-$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)}"
-if [[ -z "${OPENAI_API_KEY:-}" && -f ./scripts/openai_api_key.txt ]]; then
-    export OPENAI_API_KEY="$(tr -d '\r\n' < ./scripts/openai_api_key.txt)"
-fi
-export OPENAI_API_KEY="${OPENAI_API_KEY:-${CSCS_SERVING_API:-}}"
+# shellcheck source=scripts/common/secrets.sh
+source scripts/common/secrets.sh
+export HF_TOKEN="${HF_TOKEN:-}" WANDB_API_KEY="${WANDB_API_KEY:-}" CSCS_SERVING_API="${CSCS_SERVING_API:-}"
+export OPENAI_API_KEY="${OPENAI_API_KEY:-$CSCS_SERVING_API}"
 
 warn_if_empty() {
   local var="$1"

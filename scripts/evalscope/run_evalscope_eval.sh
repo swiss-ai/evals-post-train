@@ -72,9 +72,8 @@
 #                               0: the accuracy is then too low); not for --gold runs.
 #   --no-wandb                  Don't upload (also WANDB_MODE=disabled).
 #
-# Environment:
-#   TARGET_API_KEY   key for --api-base-url (default: scripts/cscs_serving_api_key.txt, the same
-#                    fallback run_inspect_eval.sh uses).
+# Environment (keys also from scripts/secrets.env, see scripts/common/secrets.sh):
+#   TARGET_API_KEY   key for --api-base-url (default: CSCS_SERVING_API, as in run_inspect_eval.sh).
 #   EVALSCOPE_VENV   venv to run from (default: the cached venv of the lock, see
 #                    scripts/common/locked_venv.sh). SKIP_INSTALL=1 runs with the current python3 as is.
 #                    With EVAL_PREBUILT_ENV=1 (the prebuilt image, containers/Dockerfile.eval) it
@@ -84,8 +83,7 @@
 #   SANDBOX_K8S_*  --sandbox k8s pod settings (namespace, tolerations, owner pod, pull secret,
 #                    ready timeout): see scripts/common/k8s_sandbox.py.
 #   HF_TOKEN         if the dataset download needs one.
-#   WANDB_API_KEY    for the W&B upload (default: scripts/wandb_api_key.txt; without either, no
-#                    upload).
+#   WANDB_API_KEY    for the W&B upload (without it, no upload).
 #
 # SWE-bench_Pro also clones scaleapi/SWE-bench_Pro-os (pinned by EvalScope to ca10a60) for each
 # instance's run script and parser, into ~/.cache/evalscope; it needs git and network access.
@@ -153,6 +151,8 @@ else
     [[ -n "$API_BASE_URL" ]] || die "Missing --api-base-url. See --help."
 fi
 
+# shellcheck source=scripts/common/secrets.sh
+source scripts/common/secrets.sh
 # shellcheck source=scripts/common/wandb.sh
 source scripts/common/wandb.sh
 if (( NO_WANDB )); then
@@ -179,11 +179,7 @@ if [[ "$GOLD" != "1" ]]; then
     MODEL_ARGS=(--model "$MODEL" --api-base-url "${API_BASE_URL%/}")
 fi
 
-CSCS_SERVING_API="${CSCS_SERVING_API:-}"
-if [[ -z "$CSCS_SERVING_API" && -f ./scripts/cscs_serving_api_key.txt ]]; then
-    CSCS_SERVING_API="$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)"
-fi
-export EVALSCOPE_API_KEY="${TARGET_API_KEY:-$CSCS_SERVING_API}"
+export EVALSCOPE_API_KEY="${TARGET_API_KEY:-${CSCS_SERVING_API:-}}"
 
 if [[ "${SKIP_INSTALL:-0}" == "1" ]]; then
     PY=python3

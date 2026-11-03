@@ -38,8 +38,8 @@
 #   --api-base-url <url>       OpenAI-compatible endpoint serving --model (bare host or /v1
 #                               root). Wraps --model through litellm's openai/ provider against
 #                               this endpoint, reading the key from TARGET_API_KEY (default:
-#                               scripts/cscs_serving_api_key.txt, same fallback
-#                               run_inspect_eval.sh uses).
+#                               CSCS_SERVING_API; both also from scripts/secrets.env,
+#                               as in run_inspect_eval.sh).
 #   --agent-llm-args <json>    Override the agent's own litellm kwargs entirely (default: the
 #                               api_base/api_key pair built from --api-base-url/TARGET_API_KEY).
 #   --domain <name>            tau2-bench domain: airline, banking_knowledge (default, AA's
@@ -135,10 +135,9 @@ mkdir -p "$WORKDIR"
 AGENT_LLM_ARGS='{}'
 if [[ -n "$API_BASE_URL" ]]; then
     [[ "$API_BASE_URL" == */v1 || "$API_BASE_URL" == */v1/ ]] || API_BASE_URL="${API_BASE_URL%/}/v1"
-    TARGET_API_KEY="${TARGET_API_KEY:-}"
-    if [[ -z "$TARGET_API_KEY" && -f ./scripts/cscs_serving_api_key.txt ]]; then
-        TARGET_API_KEY="$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)"
-    fi
+    # shellcheck source=scripts/common/secrets.sh
+    source scripts/common/secrets.sh
+    TARGET_API_KEY="${TARGET_API_KEY:-${CSCS_SERVING_API:-}}"
     AGENT_LLM_ARGS=$(python3 -c "import json,sys; print(json.dumps({'api_base': sys.argv[1], 'api_key': sys.argv[2]}))" \
         "$API_BASE_URL" "$TARGET_API_KEY")
     AGENT_LLM="openai/$MODEL"

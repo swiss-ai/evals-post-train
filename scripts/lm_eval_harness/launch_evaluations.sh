@@ -152,6 +152,12 @@
 set -euo pipefail
 mkdir -p logs
 
+# Keys from the environment, else scripts/secrets.env. The judge launcher (launch_judge.py) reads
+# CSCS_SERVING_API; the sbatch jobs read scripts/secrets.env themselves.
+# shellcheck source=scripts/common/secrets.sh
+source scripts/common/secrets.sh
+[[ -n "${CSCS_SERVING_API:-}" ]] && export CSCS_SERVING_API
+
 # --- Argument parsing ---
 EVAL_MODE=posttrain
 if (( $# > 0 )) && [[ "$1" != --* ]]; then
@@ -650,8 +656,8 @@ esac
 if [[ "$EVAL_MODE" == "gpt" ]]; then
     echo "WARNING: gpt mode is experimental; no judge-type flag is passed to lm-eval yet." >&2
     echo "         It requires the corresponding GPT-judge support to exist in the Swiss-AI harness." >&2
-    if [[ -z "${OPENAI_API_KEY:-}" && ! -f ./scripts/openai_api_key.txt ]]; then
-        echo "WARNING: neither OPENAI_API_KEY nor scripts/openai_api_key.txt is available." >&2
+    if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+        echo "WARNING: OPENAI_API_KEY is set neither in the environment nor in scripts/secrets.env." >&2
     fi
 fi
 

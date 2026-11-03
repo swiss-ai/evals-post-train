@@ -135,7 +135,7 @@ python3 -m pip install -e ./model-launch
 python3 -c "import swiss_ai_model_launch"
 ```
 
-`CSCS_SERVING_API` must also be exported or stored in `scripts/cscs_serving_api_key.txt` so the launcher can verify that the judge is healthy.
+`CSCS_SERVING_API` must also be exported or set in `scripts/secrets.env` so the launcher can verify that the judge is healthy.
 
 CSCS exposes hosted models with a host scope, for example `<user>/cais/HarmBench-Llama-2-13b-cls`. The launcher defaults `JUDGE_MODEL_PREFIX` to `$USER`; the harness prefers `$JUDGE_MODEL_PREFIX/<model>` and checks `/v1/models` for a `CSCS-Inference/<model>` provider name or another unique matching scope. Unscoped hosted IDs are not accepted. Set `JUDGE_MODEL_PREFIX` explicitly when the desired host differs from the submitting user. Fully scoped task-specific judge-model overrides are preserved.
 
@@ -170,7 +170,7 @@ bash scripts/lm_eval_harness/launch_evaluations.sh gpt \
   --model /capstor/store/.../checkpoint
 ```
 
-The key may instead be stored in the ignored `scripts/openai_api_key.txt` file.
+The key may instead be set in `scripts/secrets.env`.
 This is experimental scaffolding: the launcher deliberately does not pass a
 speculative `--judge-type` (or similar) flag yet. Until the corresponding
 Swiss-AI harness support lands, the mode prints a warning and is not expected
@@ -561,7 +561,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `LM_EVAL_JUDGE_MODEL_DISCOVERY` | `1` | Query the judge endpoint's `/models` list and fall back to another matching hosted scope; set to `0` to disable |
 | `LM_EVAL_JUDGE_MODEL_DISCOVERY_TIMEOUT` | `10` | Timeout in seconds for hosted judge-model discovery |
 | `LM_EVAL_RATE_LIMIT_STATE_DIR` | per-launch controller directory | Shared request-slot state used to coordinate threads, processes, and Slurm nodes; point independent launches at the same directory to share budgets |
-| `OPENAI_API_KEY` | `scripts/openai_api_key.txt`, then `CSCS_SERVING_API` | OpenAI GPT judge or `openai` backend bearer token |
+| `OPENAI_API_KEY` | `scripts/secrets.env`, then `CSCS_SERVING_API` | OpenAI GPT judge or `openai` backend bearer token |
 | `LM_EVAL_HARNESS_BRANCH` | commit in `requirements/lm-eval-harness.txt` | Branch, tag, or commit installed from the task-selected harness repository (not allowed with `EVAL_PREBUILT_ENV=1`) |
 | `APPLY_CHAT_TEMPLATE` | `true` | Apply chat template for instruct models |
 | `TOKENIZER` | same as model | Custom tokenizer path |

@@ -29,7 +29,7 @@ Every runner except the in-job lm-eval backends can also run from the prebuilt i
 
 ## Quick Start
 
-The CSCS serving key is read from `scripts/cscs_serving_api_key.txt` (see [Credentials](#credentials)).
+The CSCS serving key is read from `scripts/secrets.env` (see [Credentials](#credentials)).
 
 **lm-evaluation-harness**: serves the model in the job and runs the default task suite, 10 samples per task.
 
@@ -66,19 +66,34 @@ The examples above are smoke tests, hence `--no-wandb`. Otherwise all four frame
 
 ## Credentials
 
-Set each credential as an environment variable, or as a file at the given path containing only the key; the scripts under "File read by" read the file, elsewhere export the variable. The variable wins over the file. The files are in `.gitignore`.
+All keys go in one file, `scripts/secrets.env` (in `.gitignore`), one `NAME=value` per line; fill in the ones you have:
 
 ```bash
-echo -n "wandb_v1_abc123..." > scripts/wandb_api_key.txt
+cp scripts/secrets.env.example scripts/secrets.env
 ```
 
-| Env var | File | File read by | Required for |
-|---|---|---|---|
-| `HF_TOKEN` | `scripts/hf_token.txt` | lm-eval jobs, `run_inspect_eval.sbatch` | Gated/rate-limited Hugging Face datasets and models (most task suites). |
-| `CSCS_SERVING_API` | `scripts/cscs_serving_api_key.txt` | all four frameworks | LLM-as-a-judge evals (e.g. AlpacaEval) and any `--api-base-url`/`openai` backend run against CSCS serving. Key can be obtained [here](https://serving.swissai.cscs.ch). |
-| `OPENAI_API_KEY` | `scripts/openai_api_key.txt` | lm-eval jobs, `run_inspect_eval.sbatch` | The optional `gpt` suite (falls back to `CSCS_SERVING_API` in lm-eval jobs), and Inspect `openai/...` model roles. |
-| `WANDB_API_KEY` | `scripts/wandb_api_key.txt` | all four frameworks | Uploading results to Weights & Biases. |
-| `CRITPT_API_KEY` | `scripts/critpt_api_key.txt` | `run_inspect_eval.sh` Optional: grading for CritPt (`scripts/aaii/aa_critpt.py`); ask critpt@artificialanalysis.ai for access. Without it, the submissions are written to a local file. |
+Every runner reads it (`scripts/common/secrets.sh`). A variable already set in the environment wins over the file, e.g. `WANDB_API_KEY=... bash scripts/...` for a one-off.
+
+| Variable | Read by | Required for |
+|---|---|---|
+| `HF_TOKEN` | lm-eval jobs, `run_inspect_eval.sbatch` | Gated/rate-limited Hugging Face datasets and models (most task suites). |
+| `CSCS_SERVING_API` | all four frameworks, the AA scripts | LLM-as-a-judge evals (e.g. AlpacaEval) and any `--api-base-url`/`openai` backend run against CSCS serving. Key can be obtained [here](https://serving.swissai.cscs.ch). |
+| `OPENAI_API_KEY` | lm-eval jobs, `run_inspect_eval.sbatch` | The optional `gpt` suite (falls back to `CSCS_SERVING_API` in lm-eval jobs), and Inspect `openai/...` model roles. |
+| `WANDB_API_KEY` | all four frameworks | Uploading results to Weights & Biases. |
+| `CRITPT_API_KEY` | `run_inspect_eval.sh` | Optional: grading for CritPt (`scripts/aaii/aa_critpt.py`); ask critpt@artificialanalysis.ai for access. Without it, the submissions are written to a local file. |
+| `OPENSANDBOX_API_KEY` | `run_harbor_eval.sh` | Optional: `--sandbox opensandbox`. |
+
+Moving from the old per-key files (`scripts/*_api_key.txt`, `scripts/hf_token.txt`), once, from the repo root:
+
+```bash
+for pair in CSCS_SERVING_API:cscs_serving_api_key WANDB_API_KEY:wandb_api_key HF_TOKEN:hf_token \
+    OPENAI_API_KEY:openai_api_key CRITPT_API_KEY:critpt_api_key OPENSANDBOX_API_KEY:opensandbox_api_key; do
+    f="scripts/${pair#*:}.txt"
+    [ -f "$f" ] && printf '%s=%s\n' "${pair%%:*}" "$(tr -d '\r\n' < "$f")" >> scripts/secrets.env
+done
+```
+
+Check `scripts/secrets.env`, then delete the old files.
 
 ---
 

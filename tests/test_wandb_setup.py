@@ -7,12 +7,9 @@ from pathlib import Path
 HELPER = Path(__file__).resolve().parents[1] / "scripts" / "common" / "wandb.sh"
 
 
-def wandb_setup(*args, env=None, key_file=None):
+def wandb_setup(*args, env=None):
     """Run wandb_setup in a scratch repo root; returns (exit code, stdout, the resulting settings)."""
     with tempfile.TemporaryDirectory() as root:
-        if key_file is not None:
-            Path(root, "scripts").mkdir()
-            Path(root, "scripts", "wandb_api_key.txt").write_text(key_file)
         script = (f'source "{HELPER}"; wandb_setup "$@" || exit $?; '
                   'echo "UPLOAD=$WANDB_UPLOAD ENTITY=${WANDB_ENTITY:-} PROJECT=${WANDB_PROJECT:-} KEY=${WANDB_API_KEY:-}"')
         base = {k: v for k, v in os.environ.items() if not k.startswith("WANDB_")}
@@ -28,10 +25,6 @@ class WandbSetupTest(unittest.TestCase):
         code, _, s = wandb_setup(env={"WANDB_API_KEY": "k"})
         self.assertEqual((code, s["UPLOAD"], s["ENTITY"], s["PROJECT"]),
                          (0, "1", "apertus", "apertus-1.5-post-training-v0.1"))
-
-    def test_key_file(self):
-        code, _, s = wandb_setup(key_file="filekey\n")
-        self.assertEqual((s["UPLOAD"], s["KEY"]), ("1", "filekey"))
 
     def test_given_entity_or_project_overrides_one_default(self):
         _, _, s = wandb_setup(env={"WANDB_API_KEY": "k", "WANDB_PROJECT": "p"})
