@@ -200,7 +200,7 @@ PRE_RUN_LOGS=$(find "$LOGS_DIR" -name '*.eval' 2>/dev/null | sort)
 # SciCode's larger multi-subproblem compositions. Unconditional (not gated behind SKIP_INSTALL):
 # a preinstalled environment needs this safety net just as much as a freshly pip-installed one.
 # See the patch's own module docstring for the full failure/fix reasoning.
-export PYTHONPATH="$(pwd)/scripts/sandbox_patches${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$(pwd)/scripts/inspect_ai/sandbox_patches${PYTHONPATH:+:$PYTHONPATH}"
 
 if [[ -n "${EVAL_INSPECT_VENV:-}" ]]; then
     [[ -x "$EVAL_INSPECT_VENV/bin/inspect" ]] || die "EVAL_INSPECT_VENV=$EVAL_INSPECT_VENV has no bin/inspect"
