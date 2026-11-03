@@ -40,6 +40,17 @@ class RunArgsTest(unittest.TestCase):
             with mock.patch.dict(os.environ, {"OPENSANDBOX_API_KEY": "k"}):
                 run.parse_args(["--benchmark", name, "--gold", "--work-dir", "w", "--sandbox", "opensandbox"])
 
+    def test_senior_swe_bench_model_runs_need_a_grader_key(self):
+        model = ["--benchmark", "senior_swe_bench", "--model", "m", "--api-base-url", "u", "--work-dir", "w", "--sandbox", "docker"]
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                run.parse_args(model)
+            # --gold checks environments and tests, without the judges.
+            run.parse_args(["--benchmark", "senior_swe_bench", "--gold", "--work-dir", "w", "--sandbox", "docker"])
+        for key in ("ANTHROPIC_API_KEY", "PORTKEY_API_KEY"):
+            with mock.patch.dict(os.environ, {key: "k"}, clear=True):
+                run.parse_args(model)
+
     def test_every_dataset_is_pinned(self):
         for name, spec in run.BENCHMARKS.items():
             if "dataset" in spec:

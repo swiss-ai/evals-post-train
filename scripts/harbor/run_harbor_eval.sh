@@ -161,6 +161,10 @@ WORK_DIR=${WORK_DIR:-"logs/harbor/$NAME"}
 if [[ "$SANDBOX" == opensandbox && -n "${OPENSANDBOX_API_KEY:-}" ]]; then
     export OPENSANDBOX_API_KEY
 fi
+# Senior SWE-bench's LLM graders, read by its verifier (scripts/harbor/run.py: grader_keys).
+for key in ANTHROPIC_API_KEY PORTKEY_API_KEY; do
+    if [[ -n "${!key:-}" ]]; then export "${key?}"; fi
+done
 # Not HARBOR_API_KEY: Harbor reads that as its Harbor Hub credential.
 export EVAL_MODEL_API_KEY="${TARGET_API_KEY:-${CSCS_SERVING_API:-}}"
 

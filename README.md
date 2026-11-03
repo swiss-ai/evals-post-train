@@ -82,6 +82,7 @@ Every runner reads it (`scripts/common/secrets.sh`). A variable already set in t
 | `WANDB_API_KEY` | all four frameworks | Uploading results to Weights & Biases. |
 | `CRITPT_API_KEY` | `run_inspect_eval.sh` | Optional: grading for CritPt (`scripts/aaii/aa_critpt.py`); ask critpt@artificialanalysis.ai for access. Without it, the submissions are written to a local file. |
 | `OPENSANDBOX_API_KEY` | `run_harbor_eval.sh`, `run_evalscope_eval.sh`, `run_inspect_eval.sh`, `run_gdpval.sh` | Optional: `--sandbox opensandbox` (`--sandbox-backend opensandbox` for `run_gdpval.sh`). |
+| `ANTHROPIC_API_KEY` or `PORTKEY_API_KEY` | `run_harbor_eval.sh` | Senior SWE-bench model runs: its LLM graders, part of the reward. Without either, the runner refuses such a run (`--gold` needs neither). |
 
 ---
 
