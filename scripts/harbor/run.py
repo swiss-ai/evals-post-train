@@ -44,7 +44,7 @@ DOCKER_ENVIRONMENT = "scripts.harbor.docker_environment:PlatformDockerEnvironmen
 OPENSANDBOX_ENVIRONMENT = "scripts.harbor.opensandbox_environment:KataSandboxEnvironment"
 ENVIRONMENTS = {"docker": DOCKER_ENVIRONMENT, "k8s": K8S_ENVIRONMENT, "opensandbox": OPENSANDBOX_ENVIRONMENT}
 # Breithorn's Kata endpoint; the default (gVisor) one cannot enforce network policies.
-OPENSANDBOX_KATA_DOMAIN = "opensandbox-kata.breithorn.svc.cscs.ch"
+OPENSANDBOX_KATA_DOMAIN = "opensandbox-kata.breithorn.svc.cscs.ch"  # = opensandbox_sandbox.DEFAULT_DOMAIN
 
 # Our benchmark names -> the Harbor dataset. Registry datasets are pinned: legacy-registry
 # ones by version, Harbor Hub packages by content digest (what @latest resolved to when pinned).

@@ -231,6 +231,7 @@ attrs==26.1.0 \
     #   jsonlines
     #   jsonschema
     #   modelscope
+    #   opensandbox
     #   referencing
 beautifulsoup4==4.15.0 \
     --hash=sha256:288e3ca7d54b06f2ac191970bc275c1939cb46d450b255bf6718b04aa37ab4f7 \
@@ -1190,7 +1191,9 @@ hpack==4.2.0 \
 httpcore==1.0.9 \
     --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55 \
     --hash=sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8
-    # via httpx
+    # via
+    #   httpx
+    #   opensandbox
 httpcore2==2.16.0 ; sys_platform != 'emscripten' \
     --hash=sha256:5c4358319f2602d984ad93182c9fee5160f22e9da7babdda870a5e7c4e2dc34f \
     --hash=sha256:c72cd0413563b17e1cd8354677dff887466f8ec2551679759e93126534428643
@@ -1324,6 +1327,11 @@ httpx==0.28.1 \
     #   huggingface-hub
     #   litellm
     #   openai
+    #   opensandbox
+httpx-sse==0.4.3 \
+    --hash=sha256:0ac1c9fe3c0afad2e0ebb25a934a59f4c7823b60792691f779fad2c5568830fc \
+    --hash=sha256:9b1ed0127459a66014aec3c56bebd93da3c1bc8bb6618c8082039a44889a755d
+    # via opensandbox
 httpx2==2.16.0 \
     --hash=sha256:0d54c98128e8f2ff7fbbde0fca8c359e5f032edeaaaac443cdb7f31f685bcd7f \
     --hash=sha256:fd2c5d7909e8d86fe92d53020c310ca0e4e431b838c207c5754b9bbf0308d49a
@@ -2260,11 +2268,16 @@ openai==2.54.0 \
     #   evalscope
     #   litellm
     #   ms-enclave
+opensandbox==1.2.0 \
+    --hash=sha256:15a0f3c3245018afa43b75fb14e892a64c2c8807276a0fdaf2a1a469f5e214ea \
+    --hash=sha256:e7936d0bf3f7defa4e26571b0634089b4c3eb15d023909f6da9d940b95736c54
+    # via -r requirements/evalscope-runtime.txt
 opentelemetry-api==1.45.2 \
     --hash=sha256:2cbd737377e710ee740d261c94e93fa0f08e6d037c18f17513cc0a2d94479a34 \
     --hash=sha256:d7b0008e21e5fd61cbe7a7f34ca3b6905a78ab677d9bc395e299359c75cda6b4
     # via
     #   fastapi
+    #   opensandbox
     #   opentelemetry-exporter-http-transport
     #   opentelemetry-exporter-otlp-proto-http
     #   opentelemetry-sdk
@@ -2737,6 +2750,7 @@ pydantic==2.14.2 \
     #   litellm
     #   ms-enclave
     #   openai
+    #   opensandbox
     #   pydantic-settings
     #   wandb
 pydantic-core==2.50.2 \
@@ -2897,6 +2911,7 @@ python-dateutil==2.9.0.post0 \
     #   botocore
     #   kubernetes
     #   modelscope
+    #   opensandbox
     #   pandas
 python-discovery==1.9.0 \
     --hash=sha256:88beb57e51b919c30f303b053ec41359298ca349192035b0a802c76347ae96d7 \
