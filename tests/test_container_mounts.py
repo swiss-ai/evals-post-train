@@ -56,6 +56,14 @@ class ContainerMountTests(unittest.TestCase):
         self.assertIn("SLURM_TMPDIR", evaluate_script)
         self.assertIn("EVAL_RUNTIME_HARNESS_OVERLAY", evaluate_script)
 
+    def test_environment_build_ignores_the_user_site(self):
+        # Jobs point PYTHONUSERBASE elsewhere, so a package pip found in ~/.local is missing there.
+        build_script = (REPO_ROOT / "scripts" / "lm_eval_harness" / "build_eval_env.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertLess(build_script.index("export PYTHONNOUSERSITE=1"),
+                        build_script.index("python -m venv --system-site-packages"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,6 +3,9 @@
 # Build immutable, shared evaluation environments. This script runs inside the
 # same container used by the evaluation backend.
 set -euo pipefail
+# The base venv includes system site-packages and with them ~/.local, which the jobs do not
+# see: pip must not count packages there as installed.
+export PYTHONNOUSERSITE=1
 
 : "${EVAL_ENV_MANIFEST:?EVAL_ENV_MANIFEST is required}"
 : "${EVAL_HARNESS_REPO:?EVAL_HARNESS_REPO is required}"
