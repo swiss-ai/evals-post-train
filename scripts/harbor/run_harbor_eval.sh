@@ -12,9 +12,9 @@
 #   terminal_bench_4   Terminal-Bench 4.0.0, 66 tasks
 #   deep_swe           DeepSWE v1.1, 113 tasks
 #   slop_code_bench    SlopCodeBench, 36 problems
-#   senior_swe_bench   Senior SWE-bench v2026.06, 50 public tasks (--sandbox docker only: wildcard-
-#                       hostname network allowlists, which a NetworkPolicy cannot express; its
-#                       LLM graders need ANTHROPIC_API_KEY or PORTKEY_API_KEY)
+#   senior_swe_bench   Senior SWE-bench v2026.06, 50 public tasks (--sandbox docker or opensandbox, not
+#                       k8s: wildcard-hostname network allowlists, which a NetworkPolicy cannot
+#                       express; its LLM graders need ANTHROPIC_API_KEY or PORTKEY_API_KEY)
 #   aider_polyglot     Aider Polyglot, 225 exercises
 #
 # The datasets are pinned in scripts/harbor/run.py (BENCHMARKS). Harbor lives in its own

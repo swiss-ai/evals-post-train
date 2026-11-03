@@ -32,11 +32,13 @@ class RunArgsTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             run.parse_args(["--benchmark", "swe_bench_v2", "--gold", "--work-dir", "w", "--sandbox", "docker"])
 
-    def test_docker_only_benchmarks_refuse_k8s(self):
+    def test_wildcard_allowlist_benchmarks_refuse_k8s(self):
         for name in ("senior_swe_bench",):
             with self.assertRaises(SystemExit):
                 run.parse_args(["--benchmark", name, "--gold", "--work-dir", "w", "--sandbox", "k8s"])
             run.parse_args(["--benchmark", name, "--gold", "--work-dir", "w", "--sandbox", "docker"])
+            with mock.patch.dict(os.environ, {"OPENSANDBOX_API_KEY": "k"}):
+                run.parse_args(["--benchmark", name, "--gold", "--work-dir", "w", "--sandbox", "opensandbox"])
 
     def test_every_dataset_is_pinned(self):
         for name, spec in run.BENCHMARKS.items():

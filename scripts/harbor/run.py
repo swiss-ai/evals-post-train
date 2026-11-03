@@ -81,9 +81,10 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
     "senior_swe_bench": {
         "dataset": "snorkel-ai/senior-swe-bench-v2026.06@sha256:fdfbce8953be56c009a773140adccc53e24f92d8682e1bf8b2f785506a51f15d",
         "about": "Senior SWE-bench v2026.06, 50 public tasks",
-        "docker_only": (
+        "not_on_k8s": (
             "its agent network allowlists name wildcard hostnames (*.pythonhosted.org, ...), which a "
-            "Kubernetes NetworkPolicy cannot express (Harbor's Docker environment enforces them with an egress proxy)"
+            "Kubernetes NetworkPolicy cannot express (Harbor's Docker environment enforces them with an "
+            "egress proxy, OpenSandbox with its egress sidecar)"
         ),
     },
     "aider_polyglot": {
@@ -120,8 +121,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         p.error(f"unknown --benchmark {', '.join(unknown)} (choose from {', '.join(BENCHMARKS)})")
     if args.sandbox == "k8s":
         for name in names:
-            if BENCHMARKS[name].get("docker_only"):
-                p.error(f"{name} needs --sandbox docker: {BENCHMARKS[name]['docker_only']}")
+            if BENCHMARKS[name].get("not_on_k8s"):
+                p.error(f"{name} needs --sandbox docker or opensandbox: {BENCHMARKS[name]['not_on_k8s']}")
     if args.sandbox == "opensandbox" and not os.environ.get("OPENSANDBOX_API_KEY"):
         p.error("--sandbox opensandbox needs OPENSANDBOX_API_KEY")
     if not args.gold and not (args.model and args.api_base_url):
