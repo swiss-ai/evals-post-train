@@ -98,7 +98,7 @@
 #
 # Example (smoke test, 2 instances of each):
 #   scripts/evalscope/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --model swiss-ai/Apertus-70B-Instruct-2509 \
-#     --api-base-url https://api.swissai.cscs.ch/v1 --limit 2 --max-concurrency 2
+#     --api-base-url https://api.swissai.svc.cscs.ch/v1 --limit 2 --max-concurrency 2
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."

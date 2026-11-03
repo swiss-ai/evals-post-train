@@ -585,7 +585,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `EVAL_CHUNKS_FILE` | (unset) | One comma-separated task chunk per line; indexed by `SLURM_ARRAY_TASK_ID` |
 | `LOGS_ROOT` | `$SCRATCH/eval_logs_start/` | Root directory for evaluation logs |
 | `WANDB_ENTITY` | `apertus` | W&B entity |
-| `WANDB_PROJECT` | `swissai-evals-test` | W&B project. This is `run_lm_eval.sbatch`'s own default when invoked directly; `launch_evaluations.sh` sets its own default of `apertus-1.5-post-training-v0.0` before the sbatch script ever runs (see [The Launch Script](#the-launch-script)), so export `WANDB_PROJECT` explicitly to keep test/smoke runs out of the production project. |
+| `WANDB_PROJECT` | `swissai-evals-test` | W&B project. This is `run_lm_eval.sbatch`'s own default when invoked directly; `launch_evaluations.sh` sets its own default of `apertus-1.5-post-training-v0.1` before the sbatch script ever runs (see [The Launch Script](#the-launch-script)), so export `WANDB_PROJECT` explicitly to keep test/smoke runs out of the production project. |
 | `ENABLE_THINKING` | *(unset)* | Chat-template argument: whether the model reasons. Emitted for `hf`, `vllm` and `sglang` **only when set explicitly**; unset leaves the template's default. |
 | `AUTODETECT_THINK_TOKENS` | `false` | Read the reasoning open/close tokens from the chat template |
 | `THINK_START_TOKEN` | (unset) | Force the reasoning open token, e.g. `<think>` |
@@ -753,11 +753,9 @@ If you need a custom task:
 2. Register it following the [lm-eval-harness task guide](https://github.com/EleutherAI/lm-evaluation-harness/blob/main/docs/task_guide.md)
 
 If lm-eval-harness (YAML config) isn't a fit -- e.g. the benchmark needs its own scorer/grading
-model, like an LLM-as-judge, rather than a built-in metric -- write it as an Inspect task instead:
-drop a `@task`-decorated Python file in `custom_tasks/` (see `scripts/aaii/aa_omniscience.py` and
-`scripts/aaii/aa_lcr.py` for from-scratch examples with a judge-model scorer -- Artificial Analysis's own
-AAII benchmarks live in `scripts/aaii/` specifically, not `custom_tasks/`, since they're a fixed,
-AAII-branded protocol rather than an arbitrary one-off task) and run it with
-`scripts/inspect_ai/run_inspect_eval.sh --task custom_tasks/your_task.py ...` -- see
-[Alternative: Inspect AI evals](inspect-ai.md#inspect-ai-evals) for the full flag reference and
-runnable examples.
+model, like an LLM-as-judge, rather than a built-in metric -- use Inspect AI instead. If
+inspect_evals has it, pass its name (`--task <name>`); otherwise write a `@task`-decorated Python
+file and pass its path (`--task path/to/your_task.py`). `scripts/aaii/aa_omniscience.py` and
+`scripts/aaii/aa_lcr.py` are from-scratch examples with a judge-model scorer. See
+[CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-benchmark-to-an-existing-framework) and
+[Inspect AI evals](inspect-ai.md#inspect-ai-evals) for the full flag reference and runnable examples.
