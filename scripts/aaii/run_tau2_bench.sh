@@ -52,9 +52,9 @@
 #                               model -- needs OPENAI_API_KEY of your own). A gateway model
 #                               ("openai/<id>", same --api-base-url as --model) needs no
 #                               separate credential -- see above.
-#   --user-llm-args <json>     Override the user-llm's own litellm kwargs entirely (default:
-#                               {"reasoning_effort": "medium"} for a bare model, or the gateway
-#                               api_base/api_key for a gateway one).
+#   --user-llm-args <json>     Extra litellm kwargs for the user-llm, merged over the default
+#                               key by key ({"reasoning_effort": "medium"} for a bare model, or
+#                               the gateway api_base/api_key for a gateway one).
 #   --num-trials <n>           Trials per task (default: 5, AA's protocol).
 #   --max-steps <n>            Max steps per trial (default: 200, AA's protocol).
 #   --num-tasks <n>            Restrict to the first n tasks (useful for smoke-testing).
@@ -147,17 +147,24 @@ if [[ -n "$AGENT_LLM_ARGS_OVERRIDE" ]]; then
     AGENT_LLM_ARGS="$AGENT_LLM_ARGS_OVERRIDE"
 fi
 
-if [[ -n "$USER_LLM_ARGS_OVERRIDE" ]]; then
-    USER_LLM_ARGS="$USER_LLM_ARGS_OVERRIDE"
-elif [[ "$USER_LLM" == openai/* && -n "$API_BASE_URL" ]]; then
+if [[ "$USER_LLM" == openai/* && -n "$API_BASE_URL" ]]; then
     # A gateway user-llm (same convention as run_inspect_eval.sh's tau2 "user" role): route it
     # through the same endpoint/key as the agent, not a real OpenAI credential.
     USER_LLM_ARGS="$AGENT_LLM_ARGS"
 else
     # A bare model name (default: gpt-5.4-mini) is a real OpenAI model -- litellm resolves it
     # via OPENAI_API_KEY directly, no api_base/api_key override here. AA's own protocol default
-    # (reasoning_effort=medium) still applies unless --user-llm-args overrode it above.
+    # is reasoning_effort=medium (gpt-5.4-mini's API default is none).
     USER_LLM_ARGS='{"reasoning_effort": "medium"}'
+fi
+if [[ -n "$USER_LLM_ARGS_OVERRIDE" ]]; then
+    # Merged over the default, key by key: a caller that only passes a credential
+    # ({"api_key": ...}) keeps reasoning_effort=medium; an explicit key still wins.
+    USER_LLM_ARGS=$(python3 -c '
+import json, sys
+merged = json.loads(sys.argv[1])
+merged.update(json.loads(sys.argv[2]))
+print(json.dumps(merged))' "$USER_LLM_ARGS" "$USER_LLM_ARGS_OVERRIDE")
 fi
 
 if python3 -c "import tau2" >/dev/null 2>&1 && [[ -n "${TAU2_DATA_DIR:-}" && -d "$TAU2_DATA_DIR" ]]; then
