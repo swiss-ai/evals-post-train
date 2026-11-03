@@ -562,7 +562,7 @@ bash scripts/lm_eval_harness/launch_evaluations.sh custom \
 - **Generative tasks only:** `custom` or `single` runs; the job stops if a task (or a group or tag
   member) is scored by log-likelihood in its yaml (Python task classes such as `squadv2` are not
   seen). `configs/apertus/tasks_posttrain_thinking.txt` holds the suite's generative tasks plus
-  `bfcl_v3_fc` (Apertus 2 and chat-completions runs only); `tasks_apertus2_dev.txt` is a quick check.
+  `bfcl_v3_fc` (Apertus 2 and chat-completions runs only).
 - **Refused:** `--thinking`, `--(no-)enable-thinking`, think tokens, `--track-thinking-metrics`,
   `--no-chat-template`, `--chat-template-by-type`, `--api-endpoint chat-completions`, `--bos`,
   `--convert-to-hf`.
