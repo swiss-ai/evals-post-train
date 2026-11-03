@@ -14,7 +14,7 @@ from scripts.harbor import run, task_patches
 
 HAS_HARBOR = importlib.util.find_spec("harbor") is not None and importlib.util.find_spec("dockerfile_parse") is not None
 if HAS_HARBOR:
-    from scripts.harbor import dockerfile_replay as replay
+    from scripts.common import dockerfile_replay as replay
     from scripts.harbor import k8s_environment as k8s_env
 HAS_OPENSANDBOX = HAS_HARBOR and importlib.util.find_spec("opensandbox") is not None
 if HAS_OPENSANDBOX:

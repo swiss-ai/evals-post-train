@@ -36,9 +36,15 @@
 #   --max-turns <n>              Max agent turns per task (default: 250, AA's protocol).
 #   --max-concurrency <n>        Parallel tasks (default: 4).
 #   --sandbox-backend <name>    "e2b" (default here -- AA's real protocol; isolated, real
-#                               per-second cost, needs E2B_API_KEY) or "local" (free plain
-#                               subprocess, NOT isolated from the agent's own generated code).
+#                               per-second cost, needs E2B_API_KEY), "opensandbox" (a Kata
+#                               microVM per task on an OpenSandbox server, isolated, needs
+#                               OPENSANDBOX_API_KEY; scripts/aaii/gdpval_opensandbox.py) or "local"
+#                               (free plain subprocess, NOT isolated from the agent's own
+#                               generated code).
 #   --e2b-template <name>       E2B sandbox template (default: code-interpreter-v1).
+#   --opensandbox-image <ref>   Image for --sandbox-backend opensandbox (default: E2B's public
+#                               code-interpreter image, pinned by digest, the same libraries as
+#                               code-interpreter-v1).
 #   --workdir <path>            Scratch dir for generated deliverables (default: a temp dir
 #                               under /tmp).
 #   --no-grade                  Skip pairwise grading even if judge credentials are set --
@@ -46,6 +52,9 @@
 #
 # Environment variables:
 #   E2B_API_KEY                 Required when --sandbox-backend e2b (the default).
+#   OPENSANDBOX_API_KEY          Required when --sandbox-backend opensandbox.
+#   OPENSANDBOX_DOMAIN           --sandbox-backend opensandbox: the server (default: Breithorn's
+#                               Kata endpoint).
 #   BRAVE_API_KEY                Optional: web-search tool. Web-fetch works without it; missing
 #                               this is a tracked protocol deviation, not a refusal.
 #   GDPVAL_JUDGE_OPENAI_MODEL/_API_KEY, GDPVAL_JUDGE_GOOGLE_MODEL/_API_KEY,
@@ -78,6 +87,7 @@ MAX_TURNS=250
 MAX_CONCURRENCY=4
 SANDBOX_BACKEND="e2b"
 E2B_TEMPLATE="code-interpreter-v1"
+OPENSANDBOX_IMAGE=""
 WORKDIR=""
 NO_GRADE=0
 
@@ -91,6 +101,7 @@ while (( $# > 0 )); do
         --max-concurrency) MAX_CONCURRENCY=$2; shift 2 ;;
         --sandbox-backend) SANDBOX_BACKEND=$2; shift 2 ;;
         --e2b-template) E2B_TEMPLATE=$2; shift 2 ;;
+        --opensandbox-image) OPENSANDBOX_IMAGE=$2; shift 2 ;;
         --workdir) WORKDIR=$2; shift 2 ;;
         --no-grade) NO_GRADE=1; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -99,6 +110,28 @@ while (( $# > 0 )); do
 done
 
 [[ -n "$MODEL" ]] || die "Missing --model. See --help."
+[[ "$SANDBOX_BACKEND" == e2b || "$SANDBOX_BACKEND" == opensandbox || "$SANDBOX_BACKEND" == local ]] ||
+    die "--sandbox-backend must be e2b, opensandbox or local, got: $SANDBOX_BACKEND"
+if [[ "$SANDBOX_BACKEND" == opensandbox ]]; then
+    # shellcheck source=scripts/common/secrets.sh
+    source scripts/common/secrets.sh
+    [[ -n "${OPENSANDBOX_API_KEY:-}" ]] ||
+        die "--sandbox-backend opensandbox needs OPENSANDBOX_API_KEY (environment or scripts/secrets.env)"
+    export OPENSANDBOX_API_KEY
+    [[ -n "${OPENSANDBOX_DOMAIN:-}" ]] && export OPENSANDBOX_DOMAIN
+    # Each task's sandbox is killed as the task ends; this deletes whatever a crash left behind.
+    export OPENSANDBOX_RUN_LABEL=${OPENSANDBOX_RUN_LABEL:-gdpval-$(head -c 6 /dev/urandom | od -An -tx1 | tr -d ' \n')}
+    cleanup_sandboxes() {
+        python3 -c "
+import asyncio, os
+from scripts.common.opensandbox_sandbox import delete_run_sandboxes
+n = asyncio.run(delete_run_sandboxes(os.environ['OPENSANDBOX_RUN_LABEL']))
+if n:
+    print(f'deleted {n} leftover OpenSandbox sandbox(es) of run {os.environ[\"OPENSANDBOX_RUN_LABEL\"]}')
+" || echo "WARNING: could not delete leftover sandboxes of run $OPENSANDBOX_RUN_LABEL" >&2
+    }
+    trap cleanup_sandboxes EXIT
+fi
 if [[ "$SANDBOX_BACKEND" == "e2b" && -z "${E2B_API_KEY:-}" ]]; then
     die "--sandbox-backend e2b needs E2B_API_KEY (or pass --sandbox-backend local for the free," \
         "non-isolated subprocess backend)."
@@ -130,14 +163,14 @@ if [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
     export PATH="$GDPVAL_VENV/bin:$PATH" VIRTUAL_ENV="$GDPVAL_VENV"
     echo "EVAL_PREBUILT_ENV=1: using $GDPVAL_VENV (no install)"
 else
-    python3 -c "import stirrup.tools.code_backends.e2b" >/dev/null 2>&1 || \
+    python3 -c "import stirrup.tools.code_backends.e2b, opensandbox" >/dev/null 2>&1 || \
         pip install --no-cache-dir -q -r requirements/gdpval-runtime.txt 1>&2
 fi
 
 EVAL_MODEL="$MODEL" EVAL_API_BASE_URL="$API_BASE_URL" EVAL_WORKDIR="$WORKDIR" \
 GDPVAL_NUM_TASKS="$NUM_TASKS" GDPVAL_TASK_IDS="$TASK_IDS" GDPVAL_MAX_TURNS="$MAX_TURNS" \
 GDPVAL_MAX_CONCURRENCY="$MAX_CONCURRENCY" GDPVAL_SANDBOX_BACKEND="$SANDBOX_BACKEND" \
-GDPVAL_E2B_TEMPLATE="$E2B_TEMPLATE" \
+GDPVAL_E2B_TEMPLATE="$E2B_TEMPLATE" GDPVAL_OPENSANDBOX_IMAGE="$OPENSANDBOX_IMAGE" \
 python3 - <<'PY'
 import asyncio
 import json
@@ -199,6 +232,11 @@ def build_model_client():
 def build_code_exec_provider(sandbox_backend, e2b_template):
     if sandbox_backend == "e2b":
         return E2BCodeExecToolProvider(template=e2b_template)
+    if sandbox_backend == "opensandbox":
+        # Run from the repository root (`python3 -`), so scripts.* imports.
+        from scripts.aaii.gdpval_opensandbox import DEFAULT_IMAGE, OpenSandboxCodeExecToolProvider
+
+        return OpenSandboxCodeExecToolProvider(image=os.environ.get("GDPVAL_OPENSANDBOX_IMAGE") or DEFAULT_IMAGE)
     return LocalCodeExecToolProvider()
 
 

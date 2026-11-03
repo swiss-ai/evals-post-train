@@ -80,8 +80,10 @@ scripts/inspect_ai/run_inspect_eval.sh --task scripts/aaii/hle.py \
 # provide_scientific_background=True and --epochs 3 (AA's protocol; plain scicode below keeps
 # inspect_evals' own background-free, --epochs 1 defaults) directly in the task. Needs a real
 # Docker daemon for its sandboxed code execution (true on a login node or inside the sbatch
-# container). Without one (e.g. in CSCS containers), pass --sandbox local; that is a deployment
-# choice, NOT part of the AA protocol, so it is deliberately not baked in here:
+# container). Without one (e.g. in CSCS containers), pass --sandbox opensandbox (a Kata microVM
+# per sample, isolated; see "Sandboxes on OpenSandbox" below) or --sandbox local (a plain,
+# non-isolated subprocess); that is a deployment choice, NOT part of the AA protocol, so it is
+# deliberately not baked in here:
 scripts/inspect_ai/run_inspect_eval.sh --task scripts/aaii/scicode.py \
   --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --limit 2
@@ -175,6 +177,21 @@ python -m scripts.results.update_wandb_inspect --entity <entity> --project <proj
 
 ---
 
+## Sandboxes on OpenSandbox
+
+Tasks that run code in a Docker sandbox (SciCode, HumanEval, MBPP, BigCodeBench, the `inspect_evals` GDPval port, ...) can run each sample's sandbox as a Kata microVM on an OpenSandbox server instead: `run_inspect_eval.sh --sandbox opensandbox` (`scripts/inspect_ai/opensandbox_sandbox.py`). No Docker daemon and no Kubernetes access are needed, only `OPENSANDBOX_API_KEY` (environment or `scripts/secrets.env`; the server is `OPENSANDBOX_DOMAIN`, default Breithorn's Kata endpoint).
+
+- **The task's own file is kept.** A task's Dockerfile or compose file is used as it would be under Docker, within one microVM per sample: one service only (a compose file with several services, such as a CTF's victim containers, is refused: use `--sandbox docker`); `image:` runs as is; a Dockerfile (or `build:`) is replayed in the sandbox from its `FROM` image (`scripts/common/dockerfile_replay.py`, the same replay as Harbor's), helper stages included; `working_dir`, `environment`, `user`, `cpus`/`mem_limit` (default 2 CPUs, 4g) and `network_mode: none` apply.
+- **A replay runs per sample.** A Docker build is cached, a replay isn't: a task whose Dockerfile installs a lot (the `inspect_evals` GDPval port's apt packages and LibreOffice) pays that at every sample's start.
+- **Output** comes back line by line, so non-empty command output always ends with a newline.
+- **Clean-up:** a sample's sandbox is killed when it ends; whatever a crash leaves is deleted at the end of the run (by its run label, `OPENSANDBOX_RUN_LABEL`), and every sandbox expires after 12 hours anyway. `OPENSANDBOX_MAX_SANDBOXES` caps how many run at once (default 16).
+
+```bash
+scripts/inspect_ai/run_inspect_eval.sh --task scripts/aaii/scicode.py --sandbox opensandbox \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --limit 2
+```
+
 ## Standalone Artificial Analysis runners: tau2-bench / GDPval-AA v2
 
 Two more Artificial-Analysis-aligned benchmarks, each its own standalone script rather than an Inspect AI task — neither goes through `run_inspect_eval.sh` or `inspect_evals` at all. This repo already documents *different*, narrower `inspect_evals` ports of tau2-bench and GDPval above (in the Inspect AI section) — those are independent implementations, not the same code as the scripts below, and don't necessarily match Artificial Analysis's real protocol values. Terminal-Bench with Artificial Analysis's protocol runs through the [Harbor runner](harbor.md): `--benchmark terminal_bench_2_1 --attempts 3`.
@@ -192,7 +209,10 @@ scripts/aaii/run_tau2_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
   --user-llm openai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --num-tasks 2 --num-trials 1
 
 # GDPval-AA v2 (Stirrup, the full 220-task openai/gdpval gold set, up to 250 turns, E2B sandbox
-# by default -- needs E2B_API_KEY; pass --sandbox-backend local for the free, non-isolated
+# by default -- needs E2B_API_KEY; pass --sandbox-backend opensandbox for a Kata microVM per task
+# on OpenSandbox instead (needs OPENSANDBOX_API_KEY; E2B's own public code-interpreter image,
+# pinned, so the agent sees the same libraries; scripts/aaii/gdpval_opensandbox.py), or
+# --sandbox-backend local for the free, non-isolated
 # subprocess backend instead). Grading needs at least one of
 # GDPVAL_JUDGE_{OPENAI,GOOGLE,ANTHROPIC}_API_KEY set -- ungraded deliverables are still
 # written. Smoke test, free sandbox, no grading:

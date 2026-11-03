@@ -29,3 +29,8 @@ h5py
 # scripts.results.update_wandb_inspect (the W&B upload) runs from this
 # environment too.
 wandb>=0.20.1
+# --sandbox opensandbox: scripts/inspect_ai/opensandbox_sandbox.py (the same version as Harbor's
+# and EvalScope's).
+opensandbox==1.2.0
+# Its Dockerfile replay (scripts/common/dockerfile_replay.py), at Harbor's version.
+dockerfile-parse==2.0.1

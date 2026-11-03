@@ -78,3 +78,21 @@ async def _patched_exec(self, cmd, *args, **kwargs):
 
 
 _local_sandbox.LocalSandboxEnvironment.exec = _patched_exec
+
+
+# The "opensandbox" sandbox provider (Kata microVMs through an OpenSandbox server,
+# scripts/inspect_ai/opensandbox_sandbox.py): importing it registers it with Inspect, so
+# `--sandbox opensandbox` resolves. The repository root goes on sys.path for its `scripts.`
+# imports (appended: nothing installed is shadowed). The OpenSandbox SDK itself is only imported
+# when a sandbox is used.
+import sys as _sys
+from pathlib import Path as _Path
+
+_repo_root = str(_Path(__file__).resolve().parents[3])
+if _repo_root not in _sys.path:
+    _sys.path.append(_repo_root)
+try:
+    import scripts.inspect_ai.opensandbox_sandbox  # noqa: E402,F401
+except Exception as _exc:  # never break an interpreter that doesn't use the provider
+    if os.environ.get("OPENSANDBOX_RUN_LABEL"):  # set by run_inspect_eval.sh --sandbox opensandbox
+        print(f"WARNING: the opensandbox sandbox provider did not load: {_exc!r}", file=_sys.stderr)

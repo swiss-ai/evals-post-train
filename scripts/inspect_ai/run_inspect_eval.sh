@@ -58,6 +58,14 @@
 #                              <mode>` to override (e.g. --display none).
 #   --name <name>              Run name, used for the log directory (default: derived from --model).
 #   --logs-dir <path>          Where Inspect writes .eval log files (default: logs/inspect/<name>).
+#   --sandbox <type>           Override the tasks' sandbox (Inspect's --sandbox): docker, local or
+#                              opensandbox. opensandbox runs each sample's sandbox as a Kata
+#                              microVM through an OpenSandbox server
+#                              (scripts/inspect_ai/opensandbox_sandbox.py): no Docker daemon or
+#                              Kubernetes access, needs OPENSANDBOX_API_KEY. The task's own
+#                              Dockerfile or one-service compose file is kept (a Dockerfile is
+#                              replayed in the sandbox, as for Harbor). Leftover sandboxes of
+#                              the run are deleted at the end.
 #   --wandb-entity <entity>    W&B entity and project to upload the results to (also WANDB_ENTITY,
 #   --wandb-project <project>  WANDB_PROJECT; default apertus/apertus-1.5-post-training-v0.1).
 #                              Uploaded whenever a W&B key is available, like lm-eval-harness runs.
@@ -115,6 +123,7 @@ NO_WANDB=0
 MODEL_ROLES=()
 TASK_ARGS=()
 EXTRA_ARGS=()
+SANDBOX=""
 
 while (( $# > 0 )); do
     case "$1" in
@@ -127,6 +136,7 @@ while (( $# > 0 )); do
         --limit) LIMIT=$2; shift 2 ;;
         --eval-set) EVAL_SET=1; shift ;;
         --logs-dir) LOGS_DIR=$2; shift 2 ;;
+        --sandbox) SANDBOX=$2; shift 2 ;;
         --api-base-url) API_BASE_URL=$2; shift 2 ;;
         --wandb-entity) WANDB_ENTITY=$2; shift 2 ;;
         --wandb-project) WANDB_PROJECT=$2; shift 2 ;;
@@ -139,8 +149,18 @@ done
 
 [[ -n "$TASKS" ]] || die "Missing --task. See --help."
 [[ -n "$MODEL" ]] || die "Missing --model. See --help."
+[[ -z "$SANDBOX" || "$SANDBOX" == docker || "$SANDBOX" == local || "$SANDBOX" == opensandbox ]] ||
+    die "--sandbox must be docker, local or opensandbox, got: $SANDBOX"
 # shellcheck source=scripts/common/secrets.sh
 source scripts/common/secrets.sh
+if [[ "$SANDBOX" == opensandbox ]]; then
+    [[ -n "${OPENSANDBOX_API_KEY:-}" ]] || die "--sandbox opensandbox needs OPENSANDBOX_API_KEY (environment or scripts/secrets.env)"
+    export OPENSANDBOX_API_KEY
+    [[ -n "${OPENSANDBOX_DOMAIN:-}" ]] && export OPENSANDBOX_DOMAIN
+    # Every sandbox of this run carries the label; whatever is left of them is deleted on exit
+    # (a sample's own are deleted as it ends, the rest by Inspect's task cleanup, this is the net).
+    export OPENSANDBOX_RUN_LABEL=${OPENSANDBOX_RUN_LABEL:-inspect-$(head -c 6 /dev/urandom | od -An -tx1 | tr -d ' \n')}
+fi
 # shellcheck source=scripts/common/wandb.sh
 source scripts/common/wandb.sh
 if (( NO_WANDB )); then
@@ -240,6 +260,7 @@ COMMON_ARGS=(--model "$TASK_MODEL" --log-dir "$LOGS_DIR")
 for role in ${MODEL_ROLES[@]+"${MODEL_ROLES[@]}"}; do COMMON_ARGS+=(--model-role "$role"); done
 for arg in ${TASK_ARGS[@]+"${TASK_ARGS[@]}"}; do COMMON_ARGS+=(-T "$arg"); done
 [[ -n "$LIMIT" ]] && COMMON_ARGS+=(--limit "$LIMIT")
+[[ -n "$SANDBOX" ]] && COMMON_ARGS+=(--sandbox "$SANDBOX")
 
 # Default to a plain-text display when not attached to a terminal (see --eval-set note above) --
 # an explicit --display in EXTRA_ARGS is appended after this and wins (Inspect keeps the last
@@ -251,7 +272,20 @@ COMMON_ARGS+=(${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"})
 echo "Configuration set:"
 printf '%s\n' "TASKS=${RESOLVED_TASKS[*]}" "MODEL=$MODEL" "TASK_MODEL=$TASK_MODEL" "NAME=$NAME" \
     "LOGS_DIR=$LOGS_DIR" "LIMIT=${LIMIT:-<none>}" "MODEL_ROLES=${MODEL_ROLES[*]:-<none>}" \
-    "TASK_ARGS=${TASK_ARGS[*]:-<none>}" ""
+    "TASK_ARGS=${TASK_ARGS[*]:-<none>}" "SANDBOX=${SANDBOX:-<task default>}" ""
+
+if [[ "$SANDBOX" == opensandbox ]]; then
+    cleanup_sandboxes() {
+        python3 -c "
+import asyncio, os
+from scripts.common.opensandbox_sandbox import delete_run_sandboxes
+n = asyncio.run(delete_run_sandboxes(os.environ['OPENSANDBOX_RUN_LABEL']))
+if n:
+    print(f'deleted {n} leftover OpenSandbox sandbox(es) of run {os.environ[\"OPENSANDBOX_RUN_LABEL\"]}')
+" || echo "WARNING: could not delete leftover sandboxes of run $OPENSANDBOX_RUN_LABEL" >&2
+    }
+    trap cleanup_sandboxes EXIT
+fi
 
 if (( EVAL_SET )); then
     CMD=(inspect eval-set "${RESOLVED_TASKS[@]}" "${COMMON_ARGS[@]}")
