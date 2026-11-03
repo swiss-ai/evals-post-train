@@ -547,10 +547,67 @@ class KataSandboxEnvironmentTest(unittest.TestCase):
         self.assertIn("overcommit_memory", exec_.await_args.args[0])
         self.assertEqual(exec_.await_args.kwargs["user"], "root")
         self.assertEqual(env._resolve_image_spec({}), "ubuntu:24.04")
-        # The replay installs packages: a restricted task can't have it.
+        self.assertEqual(env._build_network_policy({}).default_action, "allow")
+        # The replay installs packages: a restricted task is created public and restricted after it.
         restricted = self.environment(NetworkPolicy(network_mode=NetworkMode.NO_NETWORK), docker_image=None)
-        with self.assertRaisesRegex(RuntimeError, "needs network"):
+        with mock.patch.object(osb_env.OpenSandboxEnvironment, "start", mock.AsyncMock()), \
+                mock.patch.object(restricted, "exec", mock.AsyncMock(return_value=mock.Mock(return_code=0))), \
+                mock.patch.object(restricted, "_apply_network_policy", mock.AsyncMock()) as apply, \
+                mock.patch.object(osb_env.DockerfileReplay, "replay", mock.AsyncMock(return_value=osb_env.ImageConfig())):
             asyncio.run(restricted.start(force_build=False))
+            self.assertEqual(restricted._build_network_policy({}).default_action, "allow")
+        apply.assert_awaited_once_with(NetworkPolicy(network_mode=NetworkMode.NO_NETWORK))
+        # A prebuilt image is created with the task's policy and needs no change.
+        prebuilt = self.environment(NetworkPolicy(network_mode=NetworkMode.NO_NETWORK))
+        with mock.patch.object(osb_env.OpenSandboxEnvironment, "start", mock.AsyncMock()), \
+                mock.patch.object(prebuilt, "exec", mock.AsyncMock(return_value=mock.Mock(return_code=0))), \
+                mock.patch.object(prebuilt, "_apply_network_policy", mock.AsyncMock()) as apply:
+            asyncio.run(prebuilt.start(force_build=False))
+        self.assertEqual(prebuilt._build_network_policy({}).default_action, "deny")
+        apply.assert_not_awaited()
+
+    def policy_switch(self, read_back):
+        import httpx
+        from harbor.models.task.config import NetworkMode, NetworkPolicy
+        from opensandbox.config import ConnectionConfig
+        from opensandbox.models.sandboxes import SandboxEndpoint
+
+        requests = []
+
+        def handler(request):
+            requests.append(request)
+            return httpx.Response(200, json={"status": "ok"})
+
+        config = ConnectionConfig(domain="d", api_key="k", protocol="https", use_server_proxy=True, transport=httpx.MockTransport(handler))
+        env = self.environment()
+        env._sandbox = mock.Mock(
+            id="s1",
+            connection_config=config,
+            get_endpoint=mock.AsyncMock(return_value=SandboxEndpoint(endpoint="d/sandboxes/s1/proxy/18080", headers={"X-Access": "t"})),
+            get_egress_policy=mock.AsyncMock(return_value=read_back),
+        )
+        policy = NetworkPolicy(network_mode=NetworkMode.ALLOWLIST, allowed_hosts=["pypi.org"])
+        return env, policy, requests
+
+    def test_network_policy_is_replaced_and_read_back(self):
+        from harbor.models.task.config import NetworkMode, NetworkPolicy
+
+        allow_pypi = osb_env.sandbox_network_policy(NetworkPolicy(network_mode=NetworkMode.ALLOWLIST, allowed_hosts=["pypi.org"]))
+        env, policy, requests = self.policy_switch(allow_pypi)
+        self.assertTrue(env.capabilities.dynamic_network_policy)
+        asyncio.run(env._apply_network_policy(policy))
+        (request,) = requests
+        self.assertEqual((request.method, str(request.url)), ("PUT", "https://d/sandboxes/s1/proxy/18080/policy"))
+        self.assertEqual(json.loads(request.content), {"defaultAction": "deny", "egress": [{"action": "allow", "target": "pypi.org"}]})
+        # The endpoint's access header (secure_access) and the key (server proxy) go with it.
+        self.assertEqual((request.headers["X-Access"], request.headers["OPEN-SANDBOX-API-KEY"]), ("t", "k"))
+
+    def test_network_policy_that_did_not_take_effect_fails(self):
+        from harbor.models.task.config import NetworkPolicy
+
+        env, policy, _ = self.policy_switch(osb_env.sandbox_network_policy(NetworkPolicy()))
+        with self.assertRaisesRegex(RuntimeError, "egress policy is"):
+            asyncio.run(env._apply_network_policy(policy))
 
     def test_exec_uses_the_replayed_image_config(self):
         from opensandbox.models.execd import Execution, ExecutionComplete
