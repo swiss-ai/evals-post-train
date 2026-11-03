@@ -12,7 +12,9 @@ What the Docker manager does and how it maps here (as in scripts/common/k8s_sand
   and memory_limit, on its platform ("linux/amd64"). Created with secure_access, which
   Breithorn's server requires, an explicit public network policy (a sandbox created without one
   has open internet anyway; SWE-bench's tests may install packages), and the sandbox-run=<run
-  label> metadata. "localhost" is made IPv4-only in /etc/hosts, as under Docker. Bind-mount
+  label> metadata. vm.overcommit_memory is set to 1: the microVM's RAM is only the sandbox's
+  memory limit, so the kernel's default would refuse any single allocation above it, which a
+  container on a large node gets. "localhost" is made IPv4-only in /etc/hosts, as under Docker. Bind-mount
   volumes ({host_dir: {"bind": path, "mode": ...}}, SWE-bench_Pro's evaluation step) are
   emulated: the host dir is copied in once the sandbox is ready, and copied back out after
   every command for "rw" ones.
@@ -65,6 +67,8 @@ HEALTH_POLL_SEC = 2
 # backstop above it, and covers commands given without one.
 REQUEST_SLACK_SEC = 60
 DEFAULT_COMMAND_TIMEOUT_SEC = 3600
+# Run as root in every new sandbox (Harbor's and EvalScope's): see the module docstring.
+OVERCOMMIT_COMMAND = "echo 1 > /proc/sys/vm/overcommit_memory"
 
 
 def domain() -> str:
@@ -172,6 +176,7 @@ class OpenSandboxSandboxManager:
                 # the server refuses a command whose working directory doesn't exist (SWE-bench
                 # Pro's /sandbox).
                 await self._checked(box, f"mkdir -p {shlex.quote(box.working_dir)}", "create working dir", cwd="/")
+            await self._checked(box, OVERCOMMIT_COMMAND, "set vm.overcommit_memory", cwd="/", uid=0)
             code, _, err = await self._run(box, ["sh", "-c", _HOSTS_LOCALHOST_IPV4_ONLY], 60, cwd="/")
             if code != 0:
                 _logger().warning(
@@ -198,16 +203,24 @@ class OpenSandboxSandboxManager:
     # --- commands -----------------------------------------------------------
 
     async def _run(
-        self, box: _Box, command: Union[str, List[str]], timeout: Optional[float], cwd: Optional[str] = None
+        self,
+        box: _Box,
+        command: Union[str, List[str]],
+        timeout: Optional[float],
+        cwd: Optional[str] = None,
+        uid: Optional[int] = None,
     ) -> tuple[int, str, str]:
-        """The command under GNU timeout (argv, no shell), in cwd (default: the sandbox's working_dir)."""
+        """The command under GNU timeout (argv, no shell), in cwd (default: the sandbox's working_dir),
+        as uid (default: the image's user)."""
         from opensandbox.models.execd import RunCommandOpts
 
         limit = float(timeout) if timeout and float(timeout) > 0 else DEFAULT_COMMAND_TIMEOUT_SEC
         execution = await box.sandbox.commands.run(
             timeout_argv(command, timeout),
             opts=RunCommandOpts(
-                working_directory=cwd or box.working_dir, timeout=timedelta(seconds=limit + REQUEST_SLACK_SEC)
+                working_directory=cwd or box.working_dir,
+                timeout=timedelta(seconds=limit + REQUEST_SLACK_SEC),
+                uid=uid,
             ),
         )
         code = execution.exit_code
@@ -219,8 +232,8 @@ class OpenSandboxSandboxManager:
             stderr = stderr or f"{execution.error}"
         return code, joined_lines(execution.logs.stdout), stderr
 
-    async def _checked(self, box: _Box, script: str, what: str, cwd: Optional[str] = None) -> str:
-        code, out, err = await self._run(box, ["sh", "-c", script], 600, cwd=cwd)
+    async def _checked(self, box: _Box, script: str, what: str, cwd: Optional[str] = None, uid: Optional[int] = None) -> str:
+        code, out, err = await self._run(box, ["sh", "-c", script], 600, cwd=cwd, uid=uid)
         if code != 0:
             raise RuntimeError(f"{what} in sandbox {box.sandbox.id} failed (exit {code}): {err.strip()[:500]}")
         return out

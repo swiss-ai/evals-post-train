@@ -136,7 +136,7 @@ class CreateSandboxTest(unittest.TestCase):
         calls = []
 
         async def run_command(argv, opts=None):
-            calls.append((argv, opts.working_directory))
+            calls.append((argv, opts.working_directory, opts.uid))
             return SimpleNamespace(exit_code=0, logs=SimpleNamespace(stdout=[], stderr=[]), error=None)
 
         sandbox = SimpleNamespace(id="sb-1", commands=SimpleNamespace(run=run_command))
@@ -153,8 +153,10 @@ class CreateSandboxTest(unittest.TestCase):
             manager = opensandbox_sandbox.OpenSandboxSandboxManager()
             sandbox_id = asyncio.run(manager.create_sandbox(config=config))
         self.assertIn(sandbox_id, manager._boxes)
-        self.assertEqual(calls[0], (["timeout", "-s", "TERM", "-k", "5s", "600.0s", "sh", "-c", "mkdir -p /sandbox"], "/"))
-        self.assertEqual(calls[1][1], "/")
+        self.assertEqual(calls[0][:2], (["timeout", "-s", "TERM", "-k", "5s", "600.0s", "sh", "-c", "mkdir -p /sandbox"], "/"))
+        # The microVM's RAM is its memory limit: allocations behave as on a large node, set as root.
+        self.assertEqual((calls[1][0][-1], calls[1][2]), ("echo 1 > /proc/sys/vm/overcommit_memory", 0))
+        self.assertEqual(calls[2][1], "/")
         self.assertTrue(created["secure_access"])
         self.assertEqual(created["metadata"]["sandbox-run"], "run1")
         self.assertEqual(created["resource"], {"cpu": "2.0", "memory": "8Gi"})

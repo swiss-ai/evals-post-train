@@ -47,7 +47,13 @@ from opensandbox.models.sandboxes import NetworkPolicy as SandboxNetworkPolicy
 from opensandbox.models.sandboxes import NetworkRule
 
 # delete_run_sandboxes: shared with the EvalScope runner, imported from here by run.py.
-from scripts.common.opensandbox_sandbox import RUN_LABEL_ENV, RUN_LABEL_KEY, delete_run_sandboxes  # noqa: F401
+from scripts.common.opensandbox_sandbox import (  # noqa: F401
+    OVERCOMMIT_COMMAND,
+    RUN_LABEL_ENV,
+    RUN_LABEL_KEY,
+    delete_run_sandboxes,
+    joined_lines,
+)
 from scripts.harbor.dockerfile_replay import DockerfileReplay, ImageConfig
 
 # Clients outside the cluster (a Clariden job, a laptop) reach sandboxes through the server.
@@ -63,13 +69,6 @@ def sandbox_network_policy(policy: NetworkPolicy) -> SandboxNetworkPolicy:
         return SandboxNetworkPolicy(defaultAction="allow", egress=[])
     rules = [NetworkRule(action="allow", target=str(host)) for host in policy.allowed_hosts]
     return SandboxNetworkPolicy(defaultAction="deny", egress=rules)
-
-
-def joined_lines(messages: list[Any]) -> str:
-    """A command's output from its stream messages: the server sends one per line, without the
-    newline (an empty line as "\n"), and Harbor's own exec joins them with nothing."""
-    lines = [message.text.rstrip("\n") for message in messages]
-    return "\n".join(lines) + "\n" if lines else ""
 
 
 class SecureSandbox(Sandbox):
@@ -132,7 +131,7 @@ class KataSandboxEnvironment(OpenSandboxEnvironment):
         # refuses any single allocation above it (malloc returns NULL), where a container on a
         # large node gets it. gpt2-codegolf's reference solution mallocs several GB and touches
         # far less. Always overcommitting, as such a node effectively does, keeps them alike.
-        result = await self.exec("echo 1 > /proc/sys/vm/overcommit_memory", cwd="/", user="root", timeout_sec=60)
+        result = await self.exec(OVERCOMMIT_COMMAND, cwd="/", user="root", timeout_sec=60)
         if result.return_code != 0:
             raise RuntimeError(f"sandbox {self.session_id}: setting vm.overcommit_memory failed: {result.stderr.strip()}")
 

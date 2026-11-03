@@ -665,7 +665,7 @@ class KataSandboxEnvironmentTest(unittest.TestCase):
             kill_sandbox=mock.AsyncMock(),
             close=mock.AsyncMock(),
         )
-        with mock.patch.object(osb_env.SandboxManager, "create", mock.AsyncMock(return_value=manager)) as create:
+        with mock.patch("opensandbox.manager.SandboxManager.create", mock.AsyncMock(return_value=manager)) as create:
             self.assertEqual(asyncio.run(osb_env.delete_run_sandboxes("run-1", "d", "k")), 2)
         self.assertEqual(create.await_args.args[0].get_base_url(), "https://d/v1")
         self.assertEqual(sorted(call.args[0] for call in manager.kill_sandbox.await_args_list), ["a", "c"])
