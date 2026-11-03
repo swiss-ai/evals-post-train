@@ -29,3 +29,6 @@ lock evalscope-runtime 3.11 --generate-hashes "$@"
 lock harbor-runtime 3.12 --generate-hashes "$@"
 # No hashes: the adapter is a git install, which cannot be hashed. The lock pins its commit instead.
 lock harbor-adapters 3.12 "$@"
+# No hashes either: tau2-bench is a git install (not on PyPI); the lock pins its commit.
+lock tau2-runtime 3.12 "$@"
+lock gdpval-runtime 3.12 --generate-hashes "$@"

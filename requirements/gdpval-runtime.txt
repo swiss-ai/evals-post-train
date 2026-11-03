@@ -1,0 +1,10 @@
+# Input to gdpval-runtime.lock (scripts/common/lock_requirements.sh), which the prebuilt image
+# installs into its own venv for run_gdpval.sh: the Stirrup agent and its E2B/local code
+# backends, the GDPval dataset download, and the three judge-panel clients. Pinned exactly: a
+# bump is a deliberate, recorded change.
+stirrup[e2b]==0.2.1
+datasets==5.1.0
+huggingface_hub==2.4.0
+openai==3.42.1
+anthropic==2.4.0
+google-genai==2.34.0

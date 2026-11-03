@@ -179,7 +179,7 @@ python -m scripts.results.update_wandb_inspect --entity <entity> --project <proj
 
 Two more Artificial-Analysis-aligned benchmarks, each its own standalone script rather than an Inspect AI task — neither goes through `run_inspect_eval.sh` or `inspect_evals` at all. This repo already documents *different*, narrower `inspect_evals` ports of tau2-bench and GDPval above (in the Inspect AI section) — those are independent implementations, not the same code as the scripts below, and don't necessarily match Artificial Analysis's real protocol values. Terminal-Bench with Artificial Analysis's protocol runs through the [Harbor runner](harbor.md): `--benchmark terminal_bench_2_1 --attempts 3`.
 
-Each script installs its own dependencies at runtime (tau2-bench/Stirrup), takes `--model`/`--api-base-url` the same way `run_inspect_eval.sh` does (falling back to `scripts/cscs_serving_api_key.txt` for the serving key), bakes in Artificial Analysis's protocol defaults, and writes results to a local scratch dir. See each script's own `--help` for full options.
+In the prebuilt image (`containers/Dockerfile.eval`, `EVAL_PREBUILT_ENV=1`) each script runs from its own locked venv (`requirements/tau2-runtime.lock`, `requirements/gdpval-runtime.lock`) and installs nothing; elsewhere it installs its dependencies at runtime (tau2-bench/Stirrup). Each script takes `--model`/`--api-base-url` the same way `run_inspect_eval.sh` does (falling back to `scripts/cscs_serving_api_key.txt` for the serving key), bakes in Artificial Analysis's protocol defaults, and writes results to a local scratch dir. See each script's own `--help` for full options.
 
 ```bash
 # tau2-bench (tau2-bench v1.0.1, banking_knowledge domain, bm25_grep retrieval, 5 trials, 200

@@ -59,6 +59,29 @@ RUN python -m venv /opt/harbor-venv \
     && /opt/harbor-adapters/multi-swe-bench/bin/pip install --no-cache-dir -r /tmp/requirements/harbor-adapters.lock \
     && /opt/harbor-adapters/multi-swe-bench/bin/multi-swe-bench --help >/dev/null
 
+# tau2-bench (tau-bench, run_tau2_bench.sh) in a fifth: Python >= 3.12 and its own
+# dependency set. It is not on PyPI and reads its tasks from a data directory next to
+# the code, so that directory is checked out at the commit the lock pins
+# (TAU2_DATA_DIR); run_tau2_bench.sh compares --git-ref against TAU2_COMMIT_FILE.
+COPY requirements/tau2-runtime.lock /tmp/requirements/
+RUN python -m venv /opt/tau2-venv \
+    && /opt/tau2-venv/bin/pip install --no-cache-dir -r /tmp/requirements/tau2-runtime.lock \
+    && commit=$(grep -oE 'tau2-bench@[0-9a-f]{40}' /tmp/requirements/tau2-runtime.lock | cut -d@ -f2) \
+    && test -n "$commit" \
+    && git init --quiet /opt/tau2-bench \
+    && git -C /opt/tau2-bench fetch --quiet --depth 1 https://github.com/sierra-research/tau2-bench.git "$commit" \
+    && git -C /opt/tau2-bench checkout --quiet FETCH_HEAD \
+    && printf '%s\n' "$commit" > /opt/tau2-bench.commit \
+    && rm -rf /opt/tau2-bench/.git \
+    && TAU2_DATA_DIR=/opt/tau2-bench/data /opt/tau2-venv/bin/python -c "import tau2"
+
+# GDPval-AA (run_gdpval.sh) in a sixth: the Stirrup agent, the dataset download and
+# the judge-panel clients.
+COPY requirements/gdpval-runtime.lock /tmp/requirements/
+RUN python -m venv /opt/gdpval-venv \
+    && /opt/gdpval-venv/bin/pip install --no-cache-dir -r /tmp/requirements/gdpval-runtime.lock \
+    && /opt/gdpval-venv/bin/python -c "import stirrup.tools.code_backends.e2b"
+
 # Each pinned harness as its own --no-deps overlay, the same layout
 # build_eval_env.sh produces, so several forks (all the lm_eval package)
 # could live side by side. run_lm_eval.sbatch checks .commit against the pin
@@ -80,6 +103,10 @@ ENV EVAL_PREBUILT_ENV=1 \
     EVALSCOPE_VENV=/opt/evalscope-venv \
     EVALSCOPE_SWE_BENCH_PRO_REPO=/opt/swe-bench-pro-os \
     HARBOR_VENV=/opt/harbor-venv \
-    HARBOR_ADAPTERS_ROOT=/opt/harbor-adapters
+    HARBOR_ADAPTERS_ROOT=/opt/harbor-adapters \
+    TAU2_VENV=/opt/tau2-venv \
+    TAU2_DATA_DIR=/opt/tau2-bench/data \
+    TAU2_COMMIT_FILE=/opt/tau2-bench.commit \
+    GDPVAL_VENV=/opt/gdpval-venv
 
 WORKDIR /work
