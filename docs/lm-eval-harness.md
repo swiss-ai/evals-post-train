@@ -36,7 +36,7 @@ The launcher selects a benchmark suite from its optional first positional argume
 | `olmo-longcontext` | 1 task | Long-Context: RULER (8192 tokens) |
 | `olmo-complete` | 24 tasks | Curated combined suite (excludes long-context; see the task file for intentionally omitted tasks) |
 
-Each mode maps to a task list and a metric config (`*_main_table.txt`) in the same directory. OLMo3 modes log to a per-mode W&B project (the base `WANDB_PROJECT` with a `-olmo-<suite>` suffix, e.g. `<project>-olmo-easy`); the `single` mode appends `-single`. The launcher defaults `WANDB_PROJECT` to `apertus-1.5-post-training-v0.0` (not `evaluate.sbatch`'s own `swissai-evals-test` default — see [SBATCH Scripts](#sbatch-scripts)); export `WANDB_PROJECT` yourself for test/smoke runs to avoid logging into the production project.
+Each mode maps to a task list and a metric config (`*_main_table.txt`) in the same directory. OLMo3 modes log to a per-mode W&B project (the base `WANDB_PROJECT` with a `-olmo-<suite>` suffix, e.g. `<project>-olmo-easy`); the `single` mode appends `-single`. The launcher defaults `WANDB_PROJECT` to `apertus-1.5-post-training-v0.0` (not `run_lm_eval.sbatch`'s own `swissai-evals-test` default — see [SBATCH Scripts](#sbatch-scripts)); export `WANDB_PROJECT` yourself for test/smoke runs to avoid logging into the production project.
 
 ### Model Selection Modes
 
@@ -106,7 +106,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--reasoning-effort <level>` | Chat-template argument `reasoning_effort` (e.g. `low`/`medium`/`high`) for models whose template reads it, such as gpt-oss. hf, vllm, sglang and openai backends. See [Reasoning effort](#reasoning-effort). |
 
 > [!TIP]
-> Inference hyperparameters such as batch size (`BS`) and `MAX_NEW_TOKENS` are not exposed as launcher flags (`MAX_LENGTH` is: `--max-length`) — set them as environment variables consumed by `evaluate.sbatch` (see [SBATCH Scripts](#sbatch-scripts)). `SIZE` is retained as informational/legacy metadata. vLLM keeps the compatible TP=4/DP=1 topology unless the model name unambiguously identifies a model below 30B, in which case it uses TP=1/DP=4; explicit topology variables always win.
+> Inference hyperparameters such as batch size (`BS`) and `MAX_NEW_TOKENS` are not exposed as launcher flags (`MAX_LENGTH` is: `--max-length`) — set them as environment variables consumed by `run_lm_eval.sbatch` (see [SBATCH Scripts](#sbatch-scripts)). `SIZE` is retained as informational/legacy metadata. vLLM keeps the compatible TP=4/DP=1 topology unless the model name unambiguously identifies a model below 30B, in which case it uses TP=1/DP=4; explicit topology variables always win.
 
 ### Judge Model Launching
 
@@ -536,11 +536,11 @@ Behaviour specific to `--thinking`:
 
 ## SBATCH Scripts
 
-### `scripts/lm_eval_harness/evaluate.sbatch`
+### `scripts/lm_eval_harness/run_lm_eval.sbatch`
 
 Primary SLURM job script for HuggingFace-compatible model evaluation.
 
-**Resources**: local-model backends use `evaluate.sbatch` with 1 node, 4 GPUs, 200 CPUs, 460GB memory, and an 11h59m limit. The `openai` backend is selected automatically through the CPU-only `evaluate_api.sbatch` wrapper with 16 CPUs and 64GB memory.
+**Resources**: local-model backends use `run_lm_eval.sbatch` with 1 node, 4 GPUs, 200 CPUs, 460GB memory, and an 11h59m limit. The `openai` backend is selected automatically through the CPU-only `run_lm_eval_api.sbatch` wrapper with 16 CPUs and 64GB memory.
 
 **Positional arguments**: `<model_path> <name>`
 
@@ -585,7 +585,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `EVAL_CHUNKS_FILE` | (unset) | One comma-separated task chunk per line; indexed by `SLURM_ARRAY_TASK_ID` |
 | `LOGS_ROOT` | `$SCRATCH/eval_logs_start/` | Root directory for evaluation logs |
 | `WANDB_ENTITY` | `apertus` | W&B entity |
-| `WANDB_PROJECT` | `swissai-evals-test` | W&B project. This is `evaluate.sbatch`'s own default when invoked directly; `launch_evaluations.sh` sets its own default of `apertus-1.5-post-training-v0.0` before the sbatch script ever runs (see [The Launch Script](#the-launch-script)), so export `WANDB_PROJECT` explicitly to keep test/smoke runs out of the production project. |
+| `WANDB_PROJECT` | `swissai-evals-test` | W&B project. This is `run_lm_eval.sbatch`'s own default when invoked directly; `launch_evaluations.sh` sets its own default of `apertus-1.5-post-training-v0.0` before the sbatch script ever runs (see [The Launch Script](#the-launch-script)), so export `WANDB_PROJECT` explicitly to keep test/smoke runs out of the production project. |
 | `ENABLE_THINKING` | *(unset)* | Chat-template argument: whether the model reasons. Emitted for `hf`, `vllm` and `sglang` **only when set explicitly**; unset leaves the template's default. |
 | `AUTODETECT_THINK_TOKENS` | `false` | Read the reasoning open/close tokens from the chat template |
 | `THINK_START_TOKEN` | (unset) | Force the reasoning open token, e.g. `<think>` |
@@ -642,7 +642,7 @@ The pipeline runs inside containers managed by enroot/pyxis on SLURM. The availa
 
 Evaluation dependencies use a shared two-tier cache under `${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}`:
 
-1. A base virtual environment is keyed by backend, Python/container configuration, and `requirements/eval-runtime.txt`.
+1. A base virtual environment is keyed by backend, Python/container configuration, and `requirements/lm-eval-runtime.txt`.
 2. A lightweight harness overlay is keyed by the base environment, harness repository, and resolved commit SHA.
 
 `prepare_eval_env.sbatch` first verifies that the cache and per-run manifest
@@ -684,16 +684,26 @@ used entries remain active under age-based scratch retention policies.
 ### Prebuilt evaluation image (no installs at run time)
 
 `containers/Dockerfile.eval` bakes everything an OpenAI-compatible-backend run
-needs into one image: CPU PyTorch, `requirements/eval-runtime.txt`,
-`requirements/inspect-runtime.txt`, and each lm-evaluation-harness fork at the
-commit pinned in `requirements/lm-eval-harness.txt` (as `--no-deps` overlays
-under `/opt/lm-eval-harness/<owner>/<repo>`, the same layout `build_eval_env.sh`
+needs into one image: one environment per framework, each installed from its
+`requirements/*.lock`, and each lm-evaluation-harness fork at the commit pinned
+in `requirements/lm-eval-harness.txt` (as `--no-deps` overlays under
+`/opt/lm-eval-harness/<owner>/<repo>`, the same layout `build_eval_env.sh`
 produces). CI (`.github/workflows/eval-image.yml`) publishes it for every
 pushed commit as `ghcr.io/swiss-ai/evals-post-train-eval:<commit>`.
 
+The locks pin every package and dependency, so two builds get the same versions
+unless a lock changed. To change a version, edit the matching
+`requirements/*.txt`, run `scripts/common/lock_requirements.sh` and commit both;
+CI fails if they don't match. A harness bump can need new dependencies that the
+locks don't see, because the harness is installed `--no-deps`: review
+`requirements/lm-eval-runtime.txt` when bumping it. Environments built by
+`build_eval_env.sh` (in-job backends, and `openai` outside the image) take
+`torch` and their server from the container, so they install
+`requirements/lm-eval-runtime.txt` directly and are not locked.
+
 The image sets `EVAL_PREBUILT_ENV=1`. With it, the launcher submits no
 `prepare_eval_env.sbatch` job and writes the manifest itself;
-`evaluate.sbatch` checks that the container's harness commit matches the pin
+`run_lm_eval.sbatch` checks that the container's harness commit matches the pin
 in the checkout and that the packages import, then runs, never installing
 anything. `run_inspect_eval.sh` skips its install the same way. A mismatch
 (the scripts come from a different commit than the image) fails the job with
@@ -716,7 +726,7 @@ docker build -f containers/Dockerfile.eval -t evals-post-train-eval .
 
 > [!NOTE]
 > **vLLM vs HF inference**: Generation task results (gsm8k, squadv2) may differ slightly between backends (for instruction-tuned models). Only compare results across models using the same backend. We recommend performing all evaluations with the `vllm` backend (default) to ensure reproducibility.
-- **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). With the chat template on, the harness renders the model's template client-side via the HF tokenizer — so the tokenizer must be resolvable (use `--tokenizer` when the served model name is not a pullable HF repo). `--api-endpoint chat-completions` (or `API_CHAT_ENDPOINT=true`) switches to `/v1/chat/completions` (server-side template; generative tasks ONLY, so not with `--no-chat-template`/`--chat-template-by-type`; required by FC tasks such as `bfcl_v3_fc`, which send the functions in the request's `tools` field). The run records it as `api_chat_endpoint`. Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Use `--api-requests-per-minute 30` when the endpoint is rate limited; all chunks in the launch coordinate that budget. The launcher automatically submits this backend through the CPU-only `evaluate_api.sbatch` wrapper.
+- **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). With the chat template on, the harness renders the model's template client-side via the HF tokenizer — so the tokenizer must be resolvable (use `--tokenizer` when the served model name is not a pullable HF repo). `--api-endpoint chat-completions` (or `API_CHAT_ENDPOINT=true`) switches to `/v1/chat/completions` (server-side template; generative tasks ONLY, so not with `--no-chat-template`/`--chat-template-by-type`; required by FC tasks such as `bfcl_v3_fc`, which send the functions in the request's `tools` field). The run records it as `api_chat_endpoint`. Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Use `--api-requests-per-minute 30` when the endpoint is rate limited; all chunks in the launch coordinate that budget. The launcher automatically submits this backend through the CPU-only `run_lm_eval_api.sbatch` wrapper.
 - **Megatron-LM**: To run Megatron-LM models natively, clone the [NVIDIA Megatron-LM repository](https://github.com/NVIDIA/Megatron-LM) into the evals-post-train directory (or change the location via the launch script).
 - **Time limits**: The default 11h59m SLURM limit applies to each chunk. Adjust `--chunk-size` to keep individual jobs below it and `--max-parallel` to control concurrent nodes.
 
@@ -728,9 +738,9 @@ docker build -f containers/Dockerfile.eval -t evals-post-train-eval .
 
 The sbatch scripts support `hf`, `vllm`, `sglang`, `megatron_lm`, and `openai` backends. To add a new one:
 
-1. Add a new `elif` block in `evaluate.sbatch` at the `LM_EVAL_BACKEND` dispatch section
+1. Add a new `elif` block in `run_lm_eval.sbatch` at the `LM_EVAL_BACKEND` dispatch section
 2. Set appropriate `COMMON_MODEL_ARGS` for the new backend
-3. Add backend-independent Python dependencies to `requirements/eval-runtime.txt`; provide backend runtimes through the corresponding container configuration
+3. Add backend-independent Python dependencies to `requirements/lm-eval-runtime.txt` (then run `scripts/common/lock_requirements.sh`); provide backend runtimes through the corresponding container configuration
 4. Include the new backend/container identity in `scripts/lm_eval_harness/build_eval_env.sh` fingerprinting if it needs distinct cached environments
 
 ### Adding a New Task

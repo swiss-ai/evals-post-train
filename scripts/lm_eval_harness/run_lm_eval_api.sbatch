@@ -16,8 +16,8 @@
 set -euo pipefail
 
 if [[ "${LM_EVAL_BACKEND:-}" != "openai" ]]; then
-    echo "scripts/lm_eval_harness/evaluate_api.sbatch requires LM_EVAL_BACKEND=openai" >&2
+    echo "scripts/lm_eval_harness/run_lm_eval_api.sbatch requires LM_EVAL_BACKEND=openai" >&2
     exit 2
 fi
 
-bash scripts/lm_eval_harness/evaluate.sbatch "$@"
+bash scripts/lm_eval_harness/run_lm_eval.sbatch "$@"

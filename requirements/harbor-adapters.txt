@@ -1,0 +1,5 @@
+# Input to harbor-adapters.lock (scripts/common/lock_requirements.sh), which the prebuilt image
+# installs. Multi-SWE-bench has no published Harbor dataset, only this adapter that generates the
+# tasks. Keep its tag in step with the harbor pin in harbor-runtime.txt and HARBOR_VERSION in
+# scripts/harbor/run.py.
+harbor-multi-swe-bench-adapter @ git+https://github.com/harbor-framework/harbor@v0.25.0#subdirectory=adapters/multi-swe-bench

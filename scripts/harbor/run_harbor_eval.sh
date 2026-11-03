@@ -18,7 +18,7 @@
 #   aider_polyglot     Aider Polyglot, 225 exercises
 #
 # The datasets are pinned in scripts/harbor/run.py (BENCHMARKS). Harbor lives in its own
-# venv (requirements/harbor-runtime.txt, pinned exactly; Python >= 3.12).
+# venv (requirements/harbor-runtime.lock, every package pinned; Python >= 3.12).
 #
 # Where the task containers run (--sandbox):
 #   docker  Harbor's own Docker environment: a local Docker daemon (a laptop, a docker launcher).
@@ -160,7 +160,7 @@ export EVAL_MODEL_API_KEY="${TARGET_API_KEY:-$CSCS_SERVING_API}"
 # Harbor and the Multi-SWE-bench adapter are installed with uv (Harbor needs Python >= 3.12,
 # which uv fetches where the system has none, e.g. Clariden's 3.6).
 export PATH="$HOME/.local/bin:$PATH"
-REQUIREMENTS=requirements/harbor-runtime.txt
+REQUIREMENTS=requirements/harbor-runtime.lock
 if [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
     PY="${HARBOR_VENV:-}/bin/python"
     [[ -n "${HARBOR_VENV:-}" && -x "$PY" ]] ||

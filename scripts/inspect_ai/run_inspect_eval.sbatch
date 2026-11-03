@@ -14,7 +14,7 @@
 #
 # The benchmarks run_inspect_eval.sh targets evaluate an already-running served endpoint
 # (CSCS serving, `vllm serve`, ...) or a hosted API model -- no model is loaded in this job, so
-# it requests CPU-only resources, unlike evaluate.sbatch's GPU allocation for the
+# it requests CPU-only resources, unlike run_lm_eval.sbatch's GPU allocation for the
 # lm-eval-harness backends. If a future benchmark needs Inspect to load a model in-job (its own
 # hf/vllm provider), bump --cpus-per-task/--mem and add a --gres=gpu request above.
 #
@@ -25,7 +25,7 @@
 #   sbatch scripts/inspect_ai/run_inspect_eval.sbatch --task tau2_retail --model Qwen/Qwen3-8B \
 #     --api-base-url http://nid001234:8000 --model-role user=openai/gpt-4.1-2025-04-14
 #
-# Credentials are read the same way evaluate.sbatch reads them: from the environment, else
+# Credentials are read the same way run_lm_eval.sbatch reads them: from the environment, else
 # scripts/<name>_key.txt. HF_TOKEN/CSCS_SERVING_API/WANDB_API_KEY fall back to their key files;
 # other provider keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, TARGET_API_KEY, ...) must already be
 # exported -- there's no fixed set of providers to special-case here, unlike the harness's single

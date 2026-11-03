@@ -22,7 +22,7 @@ sbatch --reservation=my-reservation scripts/inspect_ai/run_inspect_eval.sbatch -
 ```bash
 # run_inspect_eval.sh installs these itself at runtime (SKIP_INSTALL=1 or EVAL_PREBUILT_ENV=1 to skip);
 # to install by hand for local/interactive use:
-pip install "inspect-ai>=0.3.258" inspect-evals openai
+pip install -r requirements/inspect-runtime.lock
 
 # A plain benchmark against a served model (CSCS serving, vllm serve, ...)
 scripts/inspect_ai/run_inspect_eval.sh --task gsm8k --model Qwen/Qwen3-8B --api-base-url http://nid001234:8000
@@ -170,7 +170,7 @@ python -m scripts.results.update_wandb_inspect --entity <entity> --project <proj
   --name <name> --eval-log <path-to-run.eval> [--eval-log <path> ...]
 ```
 
-`update_wandb_inspect.py` parses the `.eval` log(s) (task scores, metrics, and a bounded per-sample summary) into the same `ModelEvaluation` structure the harness pipeline uses, and uploads through the same shared `upload_multi_model_results` — so Inspect and lm-eval-harness runs show up in W&B the same way. Auth uses `WANDB_API_KEY` (default: `scripts/wandb_api_key.txt`, same fallback as `evaluate.sbatch`).
+`update_wandb_inspect.py` parses the `.eval` log(s) (task scores, metrics, and a bounded per-sample summary) into the same `ModelEvaluation` structure the harness pipeline uses, and uploads through the same shared `upload_multi_model_results` — so Inspect and lm-eval-harness runs show up in W&B the same way. Auth uses `WANDB_API_KEY` (default: `scripts/wandb_api_key.txt`, same fallback as `run_lm_eval.sbatch`).
 
 ---
 

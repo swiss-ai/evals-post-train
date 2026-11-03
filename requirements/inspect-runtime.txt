@@ -1,6 +1,6 @@
-# Packages run_inspect_eval.sh installs at run time (unless SKIP_INSTALL=1 or
-# EVAL_PREBUILT_ENV=1), and that the prebuilt image (containers/Dockerfile.eval)
-# bakes in.
+# Input to inspect-runtime.lock (scripts/common/lock_requirements.sh), which is
+# what run_inspect_eval.sh installs at run time (unless SKIP_INSTALL=1 or
+# EVAL_PREBUILT_ENV=1) and the prebuilt image (containers/Dockerfile.eval) bakes in.
 # Exact pins: an unpinned inspect-evals silently changes benchmarks (the image
 # had 0.3.105, whose bfcl is V1 exec_simple only). 0.19.0 is the newest release
 # whose gpqa_diamond still takes epochs and whose hle takes judge_prompt and
