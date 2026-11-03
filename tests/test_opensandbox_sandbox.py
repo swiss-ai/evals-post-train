@@ -42,6 +42,17 @@ class HelpersTest(unittest.TestCase):
 
 
 class RunnerTest(unittest.TestCase):
+    def test_sigterm_becomes_a_normal_exit_so_the_cleanup_runs(self):
+        import signal
+
+        with self.assertRaises(SystemExit) as stopped:
+            try:
+                run.exit_on_sigterm(signal.SIGTERM, None)
+            finally:
+                cleaned = True
+        self.assertTrue(cleaned)
+        self.assertEqual(stopped.exception.code, 128 + signal.SIGTERM)
+
     def test_opensandbox_needs_a_key(self):
         with mock.patch.dict(os.environ, {}, clear=True), self.assertRaises(SystemExit):
             run.parse_args(["--benchmark", "swe_bench", "--gold", "--work-dir", "w", "--sandbox", "opensandbox"])

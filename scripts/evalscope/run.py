@@ -23,6 +23,7 @@ import argparse
 import glob
 import json
 import os
+import signal
 import sys
 import uuid
 from typing import Any, Dict, List, Optional
@@ -265,6 +266,13 @@ def delete_leftover_sandboxes() -> None:
         print(f"Deleted {n} leftover sandbox(es) of sandbox-run={label}", file=sys.stderr)
 
 
+def exit_on_sigterm(signum: int, frame: Any) -> None:
+    """SIGTERM (a cancelled or timed-out job, the sbatch's time limit) as a normal exit, so the
+    finally around run_task still deletes the run's OpenSandbox sandboxes; Python's default
+    would end the process on the spot and leave them until their timeout."""
+    raise SystemExit(128 + signum)
+
+
 def install_gold() -> None:
     """Make the SWE-bench agentic adapters predict each sample's reference patch, with no agent loop."""
     from evalscope.api.model import ModelOutput
@@ -299,6 +307,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         # One label for the whole run, so its leftovers can be deleted at the end.
         os.environ.setdefault(opensandbox_sandbox.RUN_LABEL_ENV, f"evalscope-{uuid.uuid4().hex[:12]}")
         opensandbox_sandbox.install()
+        signal.signal(signal.SIGTERM, exit_on_sigterm)
     if args.gold:
         install_gold()
 
