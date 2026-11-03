@@ -123,11 +123,12 @@ fi
 
 if [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
     # The prebuilt image (containers/Dockerfile.eval): requirements/gdpval-runtime.lock in its
-    # own venv. Nothing is installed.
+    # own venv. Nothing is installed. VIRTUAL_ENV too: with --sandbox-backend local the agent's
+    # own code and its `uv pip install`s run in this venv.
     [[ -x "${GDPVAL_VENV:-}/bin/python" ]] ||
         die "EVAL_PREBUILT_ENV=1 but GDPVAL_VENV (${GDPVAL_VENV:-unset}) has no bin/python." \
             "Use the image built from this commit (containers/Dockerfile.eval)."
-    export PATH="$GDPVAL_VENV/bin:$PATH"
+    export PATH="$GDPVAL_VENV/bin:$PATH" VIRTUAL_ENV="$GDPVAL_VENV"
     echo "EVAL_PREBUILT_ENV=1: using $GDPVAL_VENV (no install)"
 else
     python3 -c "import stirrup.tools.code_backends.e2b" >/dev/null 2>&1 || \
