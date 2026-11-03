@@ -6,8 +6,9 @@ Harbor's OpenSandboxEnvironment does the sandbox lifecycle, exec and file transf
   internet whatever the task asked for. The task's policy is what is sent: public is
   defaultAction allow, no-network is deny, and an allowlist is deny plus an allow rule per entry.
   Hostnames and wildcard hostnames are enforced by the egress sidecar, which a NetworkPolicy
-  cannot do. The policy is fixed at creation (the SDK can patch rules, not defaultAction), so
-  Harbor refuses a task that is set up with public networking and then narrowed for its agent.
+  cannot do. Harbor changes the policy between phases (a task set up with network, then cut off
+  for its agent and verifier): the whole policy is replaced at the sidecar (the SDK can only
+  patch rules, not defaultAction) and read back. Connections opened before a change outlive it.
 - vm.overcommit_memory is 1 in the microVM, whose RAM is only the task's memory limit: memory
   allocations then behave as in a container on a large node (see _allow_overcommit).
 - A command's output is rebuilt from its lines (the server streams one message per line, without
@@ -21,8 +22,8 @@ Harbor's OpenSandboxEnvironment does the sandbox lifecycle, exec and file transf
 
 OpenSandbox cannot build images: a task without [environment].docker_image has its Dockerfile
 replayed in the sandbox (scripts/harbor/dockerfile_replay.py, as for --sandbox k8s), and later
-commands get the replayed ENV, WORKDIR and USER. The replay needs network, so it only runs for
-tasks whose policy is public.
+commands get the replayed ENV, WORKDIR and USER. The replay needs network: the sandbox is created
+public and gets the task's policy once the replay is done.
 
 The server is OPENSANDBOX_DOMAIN with OPENSANDBOX_API_KEY. It decides the container runtime, so
 this must be a Kata endpoint: a gVisor one rejects every network policy with HTTP 400.
@@ -40,10 +41,13 @@ from harbor.environments.base import ExecResult
 from harbor.environments.capabilities import EnvironmentCapabilities
 from harbor.environments.definition import effective_exec_cwd
 from harbor.environments.opensandbox import OpenSandboxEnvironment
-from harbor.models.task.config import NetworkMode
+import httpx
+from harbor.models.task.config import NetworkMode, NetworkPolicy
 from opensandbox import Sandbox
 from opensandbox.config import ConnectionConfig
+from opensandbox.constants import DEFAULT_EGRESS_PORT
 from opensandbox.manager import SandboxManager
+from opensandbox.models.sandboxes import NetworkPolicy as SandboxNetworkPolicy
 from opensandbox.models.sandboxes import NetworkRule, SandboxFilter
 
 from scripts.harbor.dockerfile_replay import DockerfileReplay, ImageConfig
@@ -55,6 +59,14 @@ USE_SERVER_PROXY = True
 # Creating a sandbox can wait on a pull of a several-GB image (the SDK's default request is 30 s).
 REQUEST_TIMEOUT_SEC = 300
 READY_TIMEOUT_SEC = 1800
+
+
+def sandbox_network_policy(policy: NetworkPolicy) -> SandboxNetworkPolicy:
+    """Public is defaultAction allow; no-network is deny; an allowlist is deny plus allow rules."""
+    if policy.network_mode == NetworkMode.PUBLIC:
+        return SandboxNetworkPolicy(defaultAction="allow", egress=[])
+    rules = [NetworkRule(action="allow", target=str(host)) for host in policy.allowed_hosts]
+    return SandboxNetworkPolicy(defaultAction="deny", egress=rules)
 
 
 def joined_lines(messages: list[Any]) -> str:
@@ -81,6 +93,7 @@ class KataSandboxEnvironment(OpenSandboxEnvironment):
         self._image_ref: str | None = None
         self._image = ImageConfig()
         self._image_uid: int | None = None
+        self._creation_policy: NetworkPolicy | None = None
         super().__init__(*args, **kwargs)
 
     def _load_opensandbox(self) -> dict[str, Any]:
@@ -100,21 +113,23 @@ class KataSandboxEnvironment(OpenSandboxEnvironment):
                 "network_allowlist_wildcard_hostnames": True,
                 "network_allowlist_ipv4_addresses": True,
                 "network_allowlist_ipv4_cidrs": True,
+                "dynamic_network_policy": True,
             }
         )
 
     async def start(self, force_build: bool) -> None:
         replay = DockerfileReplay(self, force_build)
-        if replay.stages and self.network_policy.network_mode != NetworkMode.PUBLIC:
-            # The policy is fixed at creation and the replay installs packages.
-            raise RuntimeError(f"{self.session_id}: a Dockerfile replay needs network, but the task's policy is not public")
         exports = await replay.export_stages()
         self._image_ref = replay.image
+        # The replay installs packages: it runs with network, as a Docker build does.
+        self._creation_policy = NetworkPolicy() if replay.stages else self.network_policy
         await super().start(force_build)
         await self._allow_overcommit()
         self._image = await replay.replay(exports)
         if self._image.user:
             self._image_uid = await self._uid(self._image.user)
+        if self._creation_policy != self.network_policy:
+            await self._apply_network_policy(self.network_policy)
 
     async def _allow_overcommit(self) -> None:
         # The microVM's RAM is the task's memory limit, so Linux's default overcommit heuristic
@@ -146,11 +161,23 @@ class KataSandboxEnvironment(OpenSandboxEnvironment):
         return effective_exec_cwd(cwd, self.task_env_config.workdir, self._image.workdir)
 
     def _build_network_policy(self, sdk: dict[str, Any]) -> Any:
-        policy = self.network_policy
-        if policy.network_mode == NetworkMode.PUBLIC:
-            return sdk["NetworkPolicy"](defaultAction="allow", egress=[])
-        rules = [NetworkRule(action="allow", target=str(host)) for host in policy.allowed_hosts]
-        return sdk["NetworkPolicy"](defaultAction="deny", egress=rules)
+        return sandbox_network_policy(self._creation_policy or self.network_policy)
+
+    async def _apply_network_policy(self, network_policy: NetworkPolicy) -> None:
+        """Replaces the sandbox's whole egress policy at its sidecar, then reads it back: a policy
+        that did not take effect fails the trial rather than leaving the network as it was."""
+        wanted = sandbox_network_policy(network_policy).model_dump(by_alias=True, exclude_none=True)
+        config = self._sandbox.connection_config
+        endpoint = await self._sandbox.get_endpoint(DEFAULT_EGRESS_PORT)
+        async with httpx.AsyncClient(
+            headers=endpoint.build_request_headers(config), timeout=60, transport=config.transport
+        ) as client:
+            response = await client.put(f"{config.protocol}://{endpoint.endpoint}/policy", json=wanted)
+        if response.is_error:
+            raise RuntimeError(f"sandbox {self._sandbox.id}: replacing the egress policy failed: HTTP {response.status_code} {response.text[:300]}")
+        applied = (await self._sandbox.get_egress_policy()).model_dump(by_alias=True, exclude_none=True)
+        if applied != wanted:
+            raise RuntimeError(f"sandbox {self._sandbox.id}: egress policy is {applied}, not {wanted}")
 
     async def exec(
         self,
