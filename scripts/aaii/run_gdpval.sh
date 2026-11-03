@@ -448,6 +448,9 @@ async def main():
         print(json.dumps(metrics, indent=2))
     elif not pool:
         print("no judge credentials configured (GDPVAL_JUDGE_*_MODEL/_API_KEY) -- deliverables written, not graded")
+    if status == "failed":
+        # Every task failed (an unreachable or rate-limited model): the run exits non-zero.
+        raise SystemExit(payload["error"])
 
 
 asyncio.run(main())
