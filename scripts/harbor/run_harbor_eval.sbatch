@@ -35,6 +35,9 @@
 #   sbatch -p debug -t 1:00:00 scripts/harbor/run_harbor_eval.sbatch --benchmark swe_bench,terminal_bench_2 --gold --limit 1
 # Defaults here: SANDBOX_K8S_NAMESPACE=rob-poc, memory request 4g, CPU request 1 (see below);
 # other SANDBOX_K8S_* settings pass through.
+#
+# With --sandbox opensandbox the trials run as Kata microVMs: no kubeconfig, only
+# OPENSANDBOX_API_KEY, and the runner itself deletes what the run leaves behind.
 
 set -e
 
@@ -53,11 +56,13 @@ export SANDBOX_K8S_RUN_LABEL="${SANDBOX_K8S_RUN_LABEL:-harbor-$SLURM_JOB_ID}"
 # tasks' limits so their pods schedule (they can still use up to the limit).
 export SANDBOX_K8S_MEMORY_REQUEST="${SANDBOX_K8S_MEMORY_REQUEST:-4g}"
 export SANDBOX_K8S_CPU_REQUEST="${SANDBOX_K8S_CPU_REQUEST:-1}"
-command -v kubectl >/dev/null && kubectl -n "$SANDBOX_K8S_NAMESPACE" auth can-i create pods >/dev/null ||
-    echo "warning: cannot confirm pod access in $SANDBOX_K8S_NAMESPACE (expired kubelogin token?)" >&2
 
 ARGS=("$@")
 [[ " ${ARGS[*]} " == *" --sandbox "* ]] || ARGS+=(--sandbox k8s)
+if [[ " ${ARGS[*]} " == *" --sandbox k8s "* ]]; then
+    command -v kubectl >/dev/null && kubectl -n "$SANDBOX_K8S_NAMESPACE" auth can-i create pods >/dev/null ||
+        echo "warning: cannot confirm pod access in $SANDBOX_K8S_NAMESPACE (expired kubelogin token?)" >&2
+fi
 
 # In the background so the USR1 trap (--signal above) runs while the run is still going. Not
 # through srun: srun takes SIGTERM as "abort the step" and Slurm then SIGKILLs it after KillWait
@@ -72,7 +77,7 @@ wait "$RUN_PID" || STATUS=$?
 while kill -0 "$RUN_PID" 2>/dev/null; do wait "$RUN_PID" || STATUS=$?; done
 
 CLEANUP="kubectl -n $SANDBOX_K8S_NAMESPACE delete pods,networkpolicies -l sandbox-run=$SANDBOX_K8S_RUN_LABEL"
-if [[ " ${ARGS[*]} " == *" --sandbox docker "* ]] || ! command -v kubectl >/dev/null; then
+if [[ " ${ARGS[*]} " != *" --sandbox k8s "* ]] || ! command -v kubectl >/dev/null; then
     :
 elif [[ "$SANDBOX_K8S_RUN_LABEL" != "harbor-$SLURM_JOB_ID" ]]; then
     # A label set by hand may be shared with other runs: their pods must not go with this job.

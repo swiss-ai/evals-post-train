@@ -202,6 +202,7 @@ attrs==26.1.0 \
     # via
     #   aiohttp
     #   jsonschema
+    #   opensandbox
     #   referencing
     #   scantree
 boto3==1.43.123 \
@@ -876,7 +877,9 @@ hpack==4.2.0 \
 httpcore==1.0.9 \
     --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55 \
     --hash=sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8
-    # via httpx
+    # via
+    #   httpx
+    #   opensandbox
 httpx==0.28.1 \
     --hash=sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc \
     --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
@@ -886,11 +889,16 @@ httpx==0.28.1 \
     #   huggingface-hub
     #   litellm
     #   openai
+    #   opensandbox
     #   postgrest
     #   storage3
     #   supabase
     #   supabase-auth
     #   supabase-functions
+httpx-sse==0.4.3 \
+    --hash=sha256:0ac1c9fe3c0afad2e0ebb25a934a59f4c7823b60792691f779fad2c5568830fc \
+    --hash=sha256:9b1ed0127459a66014aec3c56bebd93da3c1bc8bb6618c8082039a44889a755d
+    # via opensandbox
 huggingface-hub==1.33.0 \
     --hash=sha256:04e434b06e100eddbce9a6e817d72693a7884b10a79bd67ab48080d5c07eb899 \
     --hash=sha256:367be21a201db9523eddf8aeac7048f2602c1b308691c97640d5e72ed188007e
@@ -1395,11 +1403,16 @@ openai==2.54.0 \
     --hash=sha256:89089789197ccdb87f173a03145ed1598d00795220c93e96cf712b1cbf5e5f2b \
     --hash=sha256:e3e6f8bc1ba30ddf381ace1a14340eed381cb984a1a59bd0f34b5be3b5d49cfa
     # via litellm
+opensandbox==1.2.0 \
+    --hash=sha256:15a0f3c3245018afa43b75fb14e892a64c2c8807276a0fdaf2a1a469f5e214ea \
+    --hash=sha256:e7936d0bf3f7defa4e26571b0634089b4c3eb15d023909f6da9d940b95736c54
+    # via -r requirements/harbor-runtime.txt
 opentelemetry-api==1.45.2 \
     --hash=sha256:2cbd737377e710ee740d261c94e93fa0f08e6d037c18f17513cc0a2d94479a34 \
     --hash=sha256:d7b0008e21e5fd61cbe7a7f34ca3b6905a78ab677d9bc395e299359c75cda6b4
     # via
     #   fastapi
+    #   opensandbox
     #   opentelemetry-exporter-http-transport
     #   opentelemetry-exporter-otlp-proto-http
     #   opentelemetry-sdk
@@ -1632,6 +1645,7 @@ pydantic==2.14.2 \
     #   kubernetes
     #   litellm
     #   openai
+    #   opensandbox
     #   postgrest
     #   pydantic-settings
     #   realtime
@@ -1801,6 +1815,7 @@ python-dateutil==2.9.0.post0 \
     # via
     #   botocore
     #   kubernetes
+    #   opensandbox
 python-dotenv==1.2.4 \
     --hash=sha256:42269a8a5b3fd54ffa6f3d84b18abed50064717576b4ecf03dc4a55d8aa04fdc \
     --hash=sha256:f0d53e69935a851c0dcc78f3ab7aaccd8cabef0b92382b576b824212902873c0

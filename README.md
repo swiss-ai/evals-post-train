@@ -18,7 +18,7 @@ Evaluation infrastructure for LLMs on CSCS Alps (Clariden), with results in W&B.
 | lm-eval-harness | loaded in the job: `--backend vllm` (default), `sglang`, `hf`, `megatron_lm` | Clariden GPU job, in a CSCS container (`containers/env*.toml`) | — |
 | lm-eval-harness | `--backend openai`: an OpenAI-compatible endpoint¹ (`completions` or `chat-completions`) | Clariden CPU job (`run_lm_eval_api.sbatch`) | — |
 | Inspect AI | an OpenAI-compatible endpoint¹ (`--api-base-url`), or an Inspect provider (`--model anthropic/...`) | local machine, or Clariden CPU job in a CSCS container (`run_inspect_eval.sbatch`) | local Docker, or `--sandbox local` without Docker |
-| Harbor | an OpenAI-compatible endpoint¹; `--gold`: no model | local machine, Clariden CPU job (`run_harbor_eval.sbatch`), or a Kubernetes pod | local Docker, or Kubernetes pods (`--sandbox k8s`; Breithorn from Clariden) |
+| Harbor | an OpenAI-compatible endpoint¹; `--gold`: no model | local machine, Clariden CPU job (`run_harbor_eval.sbatch`), or a Kubernetes pod | local Docker, Kubernetes pods (`--sandbox k8s`; Breithorn from Clariden), or Kata microVMs through OpenSandbox (`--sandbox opensandbox`) |
 | EvalScope | an OpenAI-compatible endpoint¹ (tool calling for the default agent); `--gold`: no model | local machine, Clariden CPU job (`run_evalscope_eval.sbatch`), or a Kubernetes pod | local Docker, or Kubernetes pods (`--sandbox k8s`; Breithorn from Clariden) |
 
 ¹ The CSCS serving API (`https://api.swissai.svc.cscs.ch/v1`), which serves only models launched and registered there, or a server you start yourself, e.g. `vllm serve <checkpoint>` on a Clariden node, passed by its own URL (no registration).
@@ -95,7 +95,7 @@ evals-post-train/
 ├── scripts/
 │   ├── lm_eval_harness/   # launch_evaluations.sh: Slurm jobs that serve the model and run lm-eval, in resumable chunks; judges, Megatron conversion
 │   ├── inspect_ai/        # run_inspect_eval.sh/.sbatch, sandbox_patches/
-│   ├── harbor/            # run_harbor_eval.sh/.sbatch, run.py (benchmarks), k8s/docker environments, task_patches.py
+│   ├── harbor/            # run_harbor_eval.sh/.sbatch, run.py (benchmarks), k8s/docker/opensandbox environments, task_patches.py
 │   ├── evalscope/         # run_evalscope_eval.sh/.sbatch, run.py, SWE-bench scorer
 │   ├── aaii/              # Artificial Analysis protocol: Inspect tasks (*.py) and standalone runners (run_*.sh)
 │   ├── common/            # k8s_sandbox.py (task containers as pods: Harbor, EvalScope), wandb.sh (the W&B upload rule), lock_requirements.sh and locked_venv.sh (dependency locks)

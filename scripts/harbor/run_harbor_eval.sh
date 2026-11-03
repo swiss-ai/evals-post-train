@@ -29,6 +29,10 @@
 #           account); needs create/get/delete on pods and networkpolicies, create on pods/exec.
 #           Tasks without a prebuilt image have their Dockerfile replayed in the pod; no-network
 #           and allowlist tasks get a NetworkPolicy.
+#   opensandbox  One Kata microVM per trial through an OpenSandbox server, see
+#           scripts/harbor/opensandbox_environment.py. Needs OPENSANDBOX_API_KEY, no Kubernetes
+#           access. Tasks without a prebuilt image have their Dockerfile replayed in the sandbox, as
+#           with k8s; network policies are enforced by hostname.
 #   Default: k8s when running in a pod, else docker.
 #
 # Usage:
@@ -48,7 +52,7 @@
 #   --name <name>              Run name (default: derived from --model).
 #   --work-dir <path>          Output dir (default: logs/harbor/<name>): jobs/<benchmark>/ (Harbor's
 #                               trials) and summary.json.
-#   --sandbox docker|k8s       See above.
+#   --sandbox docker|k8s|opensandbox  See above.
 #   --limit <n>                 First n tasks per benchmark (smoke tests).
 #   --task <glob>               Only tasks matching this name (repeatable).
 #   --max-concurrency <n>       Trials in flight at once = containers alive at once (default: 4).
@@ -76,6 +80,9 @@
 #                    (SANDBOX_K8S_NAMESPACE), node arch, tolerations, memory request, run label
 #                    (pods are labelled sandbox-run=<label>), pull secret, ready timeout. See
 #                    scripts/common/k8s_sandbox.py.
+#   OPENSANDBOX_API_KEY  --sandbox opensandbox: key for the OpenSandbox server (default:
+#                    scripts/opensandbox_api_key.txt).
+#   OPENSANDBOX_DOMAIN   --sandbox opensandbox: the server (default: Breithorn's Kata endpoint).
 #
 # The run exits non-zero when any trial ended without a verifier reward (an infrastructure
 # failure, listed under evaluation_errors in summary.json): its benchmark's score is incomplete.
@@ -145,7 +152,8 @@ fi
 if [[ -z "$SANDBOX" ]]; then
     [[ -f /var/run/secrets/kubernetes.io/serviceaccount/token ]] && SANDBOX=k8s || SANDBOX=docker
 fi
-[[ "$SANDBOX" == docker || "$SANDBOX" == k8s ]] || die "--sandbox must be docker or k8s, got: $SANDBOX"
+[[ "$SANDBOX" == docker || "$SANDBOX" == k8s || "$SANDBOX" == opensandbox ]] ||
+    die "--sandbox must be docker, k8s or opensandbox, got: $SANDBOX"
 
 NAME=${NAME:-$(echo "${MODEL:-gold}" | tr '/: ' '---')}
 WORK_DIR=${WORK_DIR:-"logs/harbor/$NAME"}
@@ -153,6 +161,10 @@ WORK_DIR=${WORK_DIR:-"logs/harbor/$NAME"}
 CSCS_SERVING_API="${CSCS_SERVING_API:-}"
 if [[ -z "$CSCS_SERVING_API" && -f ./scripts/cscs_serving_api_key.txt ]]; then
     CSCS_SERVING_API="$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)"
+fi
+if [[ "$SANDBOX" == opensandbox && -z "${OPENSANDBOX_API_KEY:-}" && -f ./scripts/opensandbox_api_key.txt ]]; then
+    OPENSANDBOX_API_KEY="$(tr -d '\r\n' < ./scripts/opensandbox_api_key.txt)"
+    export OPENSANDBOX_API_KEY
 fi
 # Not HARBOR_API_KEY: Harbor reads that as its Harbor Hub credential.
 export EVAL_MODEL_API_KEY="${TARGET_API_KEY:-$CSCS_SERVING_API}"
