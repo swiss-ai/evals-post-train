@@ -19,6 +19,9 @@
 #                     scripts/common/k8s_sandbox.py (no Docker daemon needed). Needs a ServiceAccount
 #                     that can create/get/delete pods and pods/exec. The images are linux/amd64,
 #                     so the pods are pinned to amd64 nodes (not Clariden's GH200s).
+#   --sandbox opensandbox  One Kata microVM per sandbox through an OpenSandbox server, see
+#                     scripts/common/opensandbox_sandbox.py. Needs OPENSANDBOX_API_KEY, no Docker
+#                     daemon and no Kubernetes access.
 #   Default: k8s when running in a pod, else docker.
 #
 # Usage:
@@ -38,11 +41,12 @@
 #   --name <name>              Run name for the work dir (default: derived from --model).
 #   --work-dir <path>          Output dir (default: logs/evalscope/<name>). Holds EvalScope's own
 #                               outputs (predictions/, reviews/, reports/, logs/) plus summary.json.
-#   --sandbox docker|k8s       See above.
+#   --sandbox docker|k8s|opensandbox  See above.
 #   --sandbox-config <json>    Merged into every sandbox's config, e.g.
 #                               '{"memory_limit": "16g", "cpu_limit": 4}' (default 2 CPUs per sandbox;
-#                               memory 4g with docker, and with k8s an 8g limit over a 4g request,
-#                               since 4g OOM-kills some SWE-bench Pro tests -- see run.py).
+#                               memory 4g with docker, with k8s an 8g limit over a 4g request, and
+#                               8g with opensandbox, since 4g OOM-kills some SWE-bench Pro tests --
+#                               see run.py).
 #   --limit <n>                 First n samples per benchmark (smoke tests); a fraction < 1 is a
 #                               share of the dataset.
 #   --shuffle                   Shuffle each dataset (EvalScope's seed 42) before --limit, so a small
@@ -82,6 +86,8 @@
 #                    instead of cloning one into ~/.cache/evalscope (the prebuilt image has one).
 #   SANDBOX_K8S_*  --sandbox k8s pod settings (namespace, tolerations, owner pod, pull secret,
 #                    ready timeout): see scripts/common/k8s_sandbox.py.
+#   OPENSANDBOX_API_KEY  --sandbox opensandbox: key for the OpenSandbox server.
+#   OPENSANDBOX_DOMAIN   --sandbox opensandbox: the server (default: Breithorn's Kata endpoint).
 #   HF_TOKEN         if the dataset download needs one.
 #   WANDB_API_KEY    for the W&B upload (without it, no upload).
 #
@@ -166,7 +172,12 @@ fi
 if [[ -z "$SANDBOX" ]]; then
     [[ -f /var/run/secrets/kubernetes.io/serviceaccount/token ]] && SANDBOX=k8s || SANDBOX=docker
 fi
-[[ "$SANDBOX" == docker || "$SANDBOX" == k8s ]] || die "--sandbox must be docker or k8s, got: $SANDBOX"
+[[ "$SANDBOX" == docker || "$SANDBOX" == k8s || "$SANDBOX" == opensandbox ]] ||
+    die "--sandbox must be docker, k8s or opensandbox, got: $SANDBOX"
+if [[ "$SANDBOX" == opensandbox ]]; then
+    [[ -n "${OPENSANDBOX_API_KEY:-}" ]] || die "--sandbox opensandbox needs OPENSANDBOX_API_KEY (environment or scripts/secrets.env)"
+    export OPENSANDBOX_API_KEY
+fi
 
 NAME=${NAME:-$(echo "${MODEL:-gold}" | tr '/: ' '---')}
 WORK_DIR=${WORK_DIR:-"logs/evalscope/$NAME"}

@@ -18,7 +18,7 @@ Harbor's OpenSandboxEnvironment does the sandbox lifecycle, exec and file transf
 - Sandboxes are created with secure_access (per-sandbox access credentials, which the SDK sends
   with each call): Breithorn's server refuses sandboxes without it.
 - Sandboxes carry the sandbox-run=<OPENSANDBOX_RUN_LABEL> metadata (set per run by run.py), and
-  delete_run_sandboxes removes what a run left behind.
+  delete_run_sandboxes (scripts/common/opensandbox_sandbox.py) removes what a run left behind.
 
 OpenSandbox cannot build images: a task without [environment].docker_image has its Dockerfile
 replayed in the sandbox (scripts/harbor/dockerfile_replay.py, as for --sandbox k8s), and later
@@ -31,10 +31,8 @@ this must be a Kata endpoint: a gVisor one rejects every network policy with HTT
 
 from __future__ import annotations
 
-import asyncio
 import os
 import shlex
-from datetime import timedelta
 from typing import Any
 
 from harbor.environments.base import ExecResult
@@ -44,16 +42,20 @@ from harbor.environments.opensandbox import OpenSandboxEnvironment
 import httpx
 from harbor.models.task.config import NetworkMode, NetworkPolicy
 from opensandbox import Sandbox
-from opensandbox.config import ConnectionConfig
 from opensandbox.constants import DEFAULT_EGRESS_PORT
-from opensandbox.manager import SandboxManager
 from opensandbox.models.sandboxes import NetworkPolicy as SandboxNetworkPolicy
-from opensandbox.models.sandboxes import NetworkRule, SandboxFilter
+from opensandbox.models.sandboxes import NetworkRule
 
+# delete_run_sandboxes: shared with the EvalScope runner, imported from here by run.py.
+from scripts.common.opensandbox_sandbox import (  # noqa: F401
+    OVERCOMMIT_COMMAND,
+    RUN_LABEL_ENV,
+    RUN_LABEL_KEY,
+    delete_run_sandboxes,
+    joined_lines,
+)
 from scripts.harbor.dockerfile_replay import DockerfileReplay, ImageConfig
 
-RUN_LABEL_ENV = "OPENSANDBOX_RUN_LABEL"
-RUN_LABEL_KEY = "sandbox-run"
 # Clients outside the cluster (a Clariden job, a laptop) reach sandboxes through the server.
 USE_SERVER_PROXY = True
 # Creating a sandbox can wait on a pull of a several-GB image (the SDK's default request is 30 s).
@@ -67,13 +69,6 @@ def sandbox_network_policy(policy: NetworkPolicy) -> SandboxNetworkPolicy:
         return SandboxNetworkPolicy(defaultAction="allow", egress=[])
     rules = [NetworkRule(action="allow", target=str(host)) for host in policy.allowed_hosts]
     return SandboxNetworkPolicy(defaultAction="deny", egress=rules)
-
-
-def joined_lines(messages: list[Any]) -> str:
-    """A command's output from its stream messages: the server sends one per line, without the
-    newline (an empty line as "\n"), and Harbor's own exec joins them with nothing."""
-    lines = [message.text.rstrip("\n") for message in messages]
-    return "\n".join(lines) + "\n" if lines else ""
 
 
 class SecureSandbox(Sandbox):
@@ -136,7 +131,7 @@ class KataSandboxEnvironment(OpenSandboxEnvironment):
         # refuses any single allocation above it (malloc returns NULL), where a container on a
         # large node gets it. gpt2-codegolf's reference solution mallocs several GB and touches
         # far less. Always overcommitting, as such a node effectively does, keeps them alike.
-        result = await self.exec("echo 1 > /proc/sys/vm/overcommit_memory", cwd="/", user="root", timeout_sec=60)
+        result = await self.exec(OVERCOMMIT_COMMAND, cwd="/", user="root", timeout_sec=60)
         if result.return_code != 0:
             raise RuntimeError(f"sandbox {self.session_id}: setting vm.overcommit_memory failed: {result.stderr.strip()}")
 
@@ -206,25 +201,3 @@ class KataSandboxEnvironment(OpenSandboxEnvironment):
             return_code=return_code,
         )
 
-
-async def delete_run_sandboxes(run_label: str, domain: str, api_key: str) -> int:
-    """Kills every sandbox of the run; returns how many. Lists all pages before the first kill,
-    which would shift them."""
-    # The SDK's default protocol is http; Harbor's environment (and the server) use https.
-    config = ConnectionConfig(domain=domain, api_key=api_key, protocol="https", request_timeout=timedelta(seconds=60))
-    manager = await SandboxManager.create(config)
-    try:
-        live: list[str] = []
-        page_number = 1
-        while True:
-            page = await manager.list_sandbox_infos(
-                SandboxFilter(metadata={RUN_LABEL_KEY: run_label}, page_size=100, page=page_number)
-            )
-            live += [info.id for info in page.sandbox_infos if info.status.state not in ("Failed", "Terminated")]
-            if not page.pagination.has_next_page:
-                break
-            page_number += 1
-        await asyncio.gather(*(manager.kill_sandbox(sandbox_id) for sandbox_id in live))
-        return len(live)
-    finally:
-        await manager.close()

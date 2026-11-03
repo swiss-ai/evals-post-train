@@ -2,7 +2,8 @@
 
 Builds an EvalScope TaskConfig from the flags, routes SWE-bench's scoring through
 the sandbox service (swe_bench_scoring.install()) and, with --sandbox k8s, every
-sandbox to a Kubernetes pod (scripts/common/k8s_sandbox.py: install()), runs it, and writes
+sandbox to a Kubernetes pod (scripts/common/k8s_sandbox.py: install()), or with --sandbox
+opensandbox to a Kata microVM (scripts/common/opensandbox_sandbox.py: install()), runs it, and writes
 <work-dir>/summary.json: the scores plus everything needed to reproduce the run
 (evalscope version, dataset revisions, SWE-bench_Pro-os commit, sandbox engine).
 
@@ -23,6 +24,7 @@ import glob
 import json
 import os
 import sys
+import uuid
 from typing import Any, Dict, List, Optional
 
 # Our benchmark names -> the EvalScope benchmark, its pinned Hugging Face dataset revision
@@ -57,6 +59,8 @@ DEFAULT_GENERATION_CONFIG: Dict[str, Any] = {"temperature": 0.0}
 # limit is 8g and the request (SANDBOX_K8S_MEMORY_REQUEST) 4g, unless memory_limit is given.
 K8S_SANDBOX_DEFAULTS: Dict[str, Any] = {"memory_limit": "8g"}
 K8S_MEMORY_REQUEST = "4g"
+# --sandbox opensandbox: the same 8g, as the microVM's memory (there is no separate request).
+OPENSANDBOX_SANDBOX_DEFAULTS: Dict[str, Any] = {"memory_limit": "8g"}
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -66,7 +70,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--api-base-url", default=None, help="OpenAI-compatible /v1 root (not with --gold).")
     p.add_argument("--gold", action="store_true", help="Score the reference patches instead of running a model.")
     p.add_argument("--work-dir", required=True)
-    p.add_argument("--sandbox", choices=("docker", "k8s"), default="docker")
+    p.add_argument("--sandbox", choices=("docker", "k8s", "opensandbox"), default="docker")
     p.add_argument("--sandbox-config", default="{}", help="JSON merged into every sandbox's config.")
     p.add_argument("--limit", type=float, default=None)
     p.add_argument("--shuffle", action="store_true", help="Shuffle (seed 42) before --limit.")
@@ -81,6 +85,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     args = p.parse_args(argv)
     if not args.gold and not (args.model and args.api_base_url):
         p.error("--model and --api-base-url are required (unless --gold)")
+    if args.sandbox == "opensandbox" and not os.environ.get("OPENSANDBOX_API_KEY"):
+        p.error("--sandbox opensandbox needs OPENSANDBOX_API_KEY")
     return args
 
 
@@ -114,9 +120,10 @@ def resolved_revisions(names: List[str], overrides: List[str]) -> Dict[str, str]
 
 
 def sandbox_config(args: argparse.Namespace) -> Dict[str, Any]:
-    """--sandbox-config, over K8S_SANDBOX_DEFAULTS for --sandbox k8s."""
+    """--sandbox-config, over the --sandbox k8s or opensandbox defaults."""
     given = json.loads(args.sandbox_config)
-    return {**K8S_SANDBOX_DEFAULTS, **given} if args.sandbox == "k8s" else given
+    defaults = {"k8s": K8S_SANDBOX_DEFAULTS, "opensandbox": OPENSANDBOX_SANDBOX_DEFAULTS}.get(args.sandbox, {})
+    return {**defaults, **given}
 
 
 def environment_extra_params(name: str) -> Dict[str, Any]:
@@ -167,7 +174,7 @@ def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dic
         "work_dir": args.work_dir,
         "no_timestamp": True,
         # Every sandbox (agent loop and scorer) reads this; the engine stays "docker"
-        # either way -- with --sandbox k8s, the Docker manager itself is swapped out.
+        # either way -- with --sandbox k8s or opensandbox, the Docker manager itself is swapped out.
         "sandbox": {"enabled": True, "engine": "docker", "default_config": sandbox_config(args)},
     }
     if agent:
@@ -236,6 +243,28 @@ def swe_bench_pro_os_commit() -> Optional[str]:
     return PINNED_COMMIT
 
 
+def opensandbox_endpoint() -> str:
+    from scripts.common import opensandbox_sandbox
+
+    return opensandbox_sandbox.domain()
+
+
+def delete_leftover_sandboxes() -> None:
+    """Kill the sandboxes the run left (a sample whose cleanup failed, a stopped run)."""
+    import asyncio
+
+    from scripts.common import opensandbox_sandbox
+
+    label = os.environ[opensandbox_sandbox.RUN_LABEL_ENV]
+    try:
+        n = asyncio.run(asyncio.wait_for(opensandbox_sandbox.delete_run_sandboxes(label), 120))
+    except Exception as exc:  # noqa: BLE001 -- best effort: they time out on their own
+        print(f"Could not delete leftover sandboxes (sandbox-run={label}): {exc}", file=sys.stderr)
+        return
+    if n:
+        print(f"Deleted {n} leftover sandbox(es) of sandbox-run={label}", file=sys.stderr)
+
+
 def install_gold() -> None:
     """Make the SWE-bench agentic adapters predict each sample's reference patch, with no agent loop."""
     from evalscope.api.model import ModelOutput
@@ -264,6 +293,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         if "memory_limit" not in json.loads(args.sandbox_config) and not k8s_sandbox.setting("MEMORY_REQUEST"):
             os.environ["SANDBOX_K8S_MEMORY_REQUEST"] = K8S_MEMORY_REQUEST
         k8s_sandbox.install()
+    elif args.sandbox == "opensandbox":
+        from scripts.common import opensandbox_sandbox
+
+        # One label for the whole run, so its leftovers can be deleted at the end.
+        os.environ.setdefault(opensandbox_sandbox.RUN_LABEL_ENV, f"evalscope-{uuid.uuid4().hex[:12]}")
+        opensandbox_sandbox.install()
     if args.gold:
         install_gold()
 
@@ -274,7 +309,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     printable = {k: v for k, v in cfg.items() if k != "api_key"}
     print("EvalScope task config:", json.dumps(printable, indent=2), flush=True)
 
-    run_task(cfg)
+    try:
+        run_task(cfg)
+    finally:
+        if args.sandbox == "opensandbox":
+            delete_leftover_sandboxes()
 
     summary = {
         "evalscope_version": evalscope.__version__,
@@ -282,6 +321,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "model": "gold (reference patches)" if args.gold else args.model,
         "api_base_url": args.api_base_url,
         "sandbox": args.sandbox,
+        **({"opensandbox_endpoint": opensandbox_endpoint()} if args.sandbox == "opensandbox" else {}),
         "dataset_revisions": revisions,
         "limit": cfg.get("limit"),
         "reports": collect_reports(args.work_dir),
