@@ -1,4 +1,6 @@
-"""Dockerfile replay for Harbor environments that cannot build images (--sandbox k8s, opensandbox).
+"""Dockerfile replay for sandboxes that cannot build images: Harbor's --sandbox k8s/opensandbox
+environments, and Inspect's opensandbox provider (scripts/inspect_ai/opensandbox_sandbox.py,
+through an adapter with the same exec/upload_file surface).
 
 A task with only environment/Dockerfile (SWE-bench's FROM <prebuilt image> plus a few setup
 lines, or a from-scratch toolchain) is started from its FROM image, and the Dockerfile's steps are
@@ -35,9 +37,10 @@ import tempfile
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, List, Optional, Tuple
 
-from harbor.environments.base import BaseEnvironment
+if TYPE_CHECKING:  # only for annotations: Inspect's OpenSandbox provider has no Harbor installed
+    from harbor.environments.base import BaseEnvironment
 
 # Instructions that only describe the image (ports, labels, the default process): a replay has
 # nothing to do for them.
@@ -233,6 +236,11 @@ class DockerfileReplay:
         self.image = from_image(self.stages[-1]["steps"], self.dockerfile) if self.stages else image
         self.timeout = int(environment.task_env_config.build_timeout_sec or 1800)
 
+    def stage_environment(self, image: str) -> contextlib.AbstractAsyncContextManager:
+        """A started environment running image as is, deleted on exit (a helper stage's own):
+        one of the same Harbor type by default; Inspect's provider overrides it."""
+        return stage_environment(self.environment, image)
+
     async def export_stages(self) -> Dict[int, bytes]:
         """The last stage's COPY --from paths, packed by step index."""
         return await self._export(self.stages[-1]["steps"], self.stages[:-1]) if self.stages else {}
@@ -392,7 +400,7 @@ class DockerfileReplay:
             stage_steps = earlier[number]["steps"] if number is not None else []
             inner = await self._export(stage_steps, earlier[:number]) if stage_steps else {}
             image = from_image(stage_steps, self.dockerfile) if stage_steps else ref
-            async with stage_environment(self.environment, image) as stage:
+            async with self.stage_environment(image) as stage:
                 workdir = (await self._replay(stage, stage_steps, inner)).workdir if stage_steps else None
                 for index, sources, dest in items:
                     exports[index] = await self._pack(stage, workdir, sources, dest, steps[index])

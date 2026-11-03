@@ -3,6 +3,8 @@
 # backends, the GDPval dataset download, and the three judge-panel clients. Pinned exactly: a
 # bump is a deliberate, recorded change.
 stirrup[e2b]==0.2.1
+# --sandbox-backend opensandbox: scripts/aaii/gdpval_opensandbox.py (the same version as Harbor's).
+opensandbox==1.2.0
 datasets==5.1.0
 huggingface_hub==2.4.0
 openai==3.42.1

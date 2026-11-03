@@ -213,6 +213,7 @@ attrs==26.1.0 \
     #   aiohttp
     #   jsonlines
     #   jsonschema
+    #   opensandbox
     #   referencing
 backoff==2.2.1 \
     --hash=sha256:03f829f5bb1923180821643f8753b0502c3b682293992485b0eef2807afa5cba \
@@ -478,6 +479,10 @@ distro==1.9.0 \
     --hash=sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed \
     --hash=sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2
     # via cwevals
+dockerfile-parse==2.0.1 \
+    --hash=sha256:3184ccdc513221983e503ac00e1aa504a2aa8f84e5de673c46b0b6eee99ec7bc \
+    --hash=sha256:bdffd126d2eb26acf1066acb54cb2e336682e1d72b974a40894fac76a4df17f6
+    # via -r requirements/inspect-runtime.txt
 docstring-parser==0.18.0 \
     --hash=sha256:292510982205c12b1248696f44959db3cdd1740237a968ea1e2e7a900eeb2015 \
     --hash=sha256:b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b
@@ -725,7 +730,9 @@ hf-xet==1.8.0 \
 httpcore==1.0.9 \
     --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55 \
     --hash=sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8
-    # via httpx
+    # via
+    #   httpx
+    #   opensandbox
 httpcore2==2.16.0 ; sys_platform != 'emscripten' \
     --hash=sha256:5c4358319f2602d984ad93182c9fee5160f22e9da7babdda870a5e7c4e2dc34f \
     --hash=sha256:c72cd0413563b17e1cd8354677dff887466f8ec2551679759e93126534428643
@@ -736,6 +743,11 @@ httpx==0.28.1 \
     # via
     #   cwevals
     #   inspect-ai
+    #   opensandbox
+httpx-sse==0.4.3 \
+    --hash=sha256:0ac1c9fe3c0afad2e0ebb25a934a59f4c7823b60792691f779fad2c5568830fc \
+    --hash=sha256:9b1ed0127459a66014aec3c56bebd93da3c1bc8bb6618c8082039a44889a755d
+    # via opensandbox
 httpx2==2.16.0 \
     --hash=sha256:0d54c98128e8f2ff7fbbde0fca8c359e5f032edeaaaac443cdb7f31f685bcd7f \
     --hash=sha256:fd2c5d7909e8d86fe92d53020c310ca0e4e431b838c207c5754b9bbf0308d49a
@@ -1713,11 +1725,16 @@ openai==3.42.1 \
     --hash=sha256:4222d919374648ff572753626e942f26eb1ece8a5e0e9a2708c9be4d560f070f \
     --hash=sha256:c1959518a8e26f81a3564357082cb684540be639a21fece35ac5619415a3eadc
     # via -r requirements/inspect-runtime.txt
+opensandbox==1.2.0 \
+    --hash=sha256:15a0f3c3245018afa43b75fb14e892a64c2c8807276a0fdaf2a1a469f5e214ea \
+    --hash=sha256:e7936d0bf3f7defa4e26571b0634089b4c3eb15d023909f6da9d940b95736c54
+    # via -r requirements/inspect-runtime.txt
 opentelemetry-api==1.45.2 \
     --hash=sha256:2cbd737377e710ee740d261c94e93fa0f08e6d037c18f17513cc0a2d94479a34 \
     --hash=sha256:d7b0008e21e5fd61cbe7a7f34ca3b6905a78ab677d9bc395e299359c75cda6b4
     # via
     #   fastapi
+    #   opensandbox
     #   opentelemetry-exporter-http-transport
     #   opentelemetry-exporter-otlp-proto-http
     #   opentelemetry-sdk
@@ -2159,6 +2176,7 @@ pydantic==2.14.2 \
     #   inspect-ai
     #   inspect-evals
     #   openai
+    #   opensandbox
     #   wandb
 pydantic-core==2.50.2 \
     --hash=sha256:01eb0282d0b3a065d55956d1be9ce398c46db3dd6d277a6cb2358c8aa8c53179 \
@@ -2320,6 +2338,7 @@ python-dateutil==2.9.0.post0 \
     # via
     #   aiobotocore
     #   botocore
+    #   opensandbox
     #   pandas
 python-dotenv==1.2.4 \
     --hash=sha256:42269a8a5b3fd54ffa6f3d84b18abed50064717576b4ecf03dc4a55d8aa04fdc \

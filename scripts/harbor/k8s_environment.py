@@ -11,7 +11,7 @@ Its SANDBOX_K8S_* settings (namespace, node arch, tolerations, memory request, r
 pull secret, ready timeout) apply here too.
 
 The trial's image: [environment].docker_image runs as is (Terminal-Bench, DeepSWE); otherwise
-the task's Dockerfile is replayed in the pod (scripts/harbor/dockerfile_replay.py), since pods
+the task's Dockerfile is replayed in the pod (scripts/common/dockerfile_replay.py), since pods
 cannot build images.
 
 Network policy (agent and verifier phases): no-network and allowlist are enforced with a
@@ -37,7 +37,7 @@ from harbor.models.task.config import NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import EnvironmentPaths
 
 from scripts.common.k8s_sandbox import K8sPodSandboxManager
-from scripts.harbor.dockerfile_replay import DockerfileReplay, ImageConfig, as_user, in_dir
+from scripts.common.dockerfile_replay import DockerfileReplay, ImageConfig, as_user, in_dir
 
 ENVIRONMENT_TYPE = "evals-k8s"
 

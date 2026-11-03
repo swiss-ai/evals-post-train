@@ -342,6 +342,28 @@ def install() -> None:
     SandboxService._construct_manager = _construct_manager
 
 
+async def replace_egress_policy(sandbox: Any, policy: Any) -> None:
+    """Replaces a running sandbox's whole egress policy (an SDK NetworkPolicy) at its sidecar,
+    then reads it back: a policy that did not take effect raises rather than leaving the network
+    as it was. Shared by Harbor (a task set up with network, then cut off) and Inspect
+    (network_mode: none after a Dockerfile replay)."""
+    import httpx
+    from opensandbox.constants import DEFAULT_EGRESS_PORT
+
+    wanted = policy.model_dump(by_alias=True, exclude_none=True)
+    config = sandbox.connection_config
+    endpoint = await sandbox.get_endpoint(DEFAULT_EGRESS_PORT)
+    async with httpx.AsyncClient(
+        headers=endpoint.build_request_headers(config), timeout=60, transport=config.transport
+    ) as client:
+        response = await client.put(f"{config.protocol}://{endpoint.endpoint}/policy", json=wanted)
+    if response.is_error:
+        raise RuntimeError(f"sandbox {sandbox.id}: replacing the egress policy failed: HTTP {response.status_code} {response.text[:300]}")
+    applied = (await sandbox.get_egress_policy()).model_dump(by_alias=True, exclude_none=True)
+    if applied != wanted:
+        raise RuntimeError(f"sandbox {sandbox.id}: egress policy is {applied}, not {wanted}")
+
+
 async def delete_run_sandboxes(run_label: str, server: Optional[str] = None, api_key: Optional[str] = None) -> int:
     """Kills every sandbox of the run; returns how many. Lists all pages before the first kill,
     which would shift them."""

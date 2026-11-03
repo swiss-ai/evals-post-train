@@ -21,7 +21,7 @@ Harbor's OpenSandboxEnvironment does the sandbox lifecycle, exec and file transf
   delete_run_sandboxes (scripts/common/opensandbox_sandbox.py) removes what a run left behind.
 
 OpenSandbox cannot build images: a task without [environment].docker_image has its Dockerfile
-replayed in the sandbox (scripts/harbor/dockerfile_replay.py, as for --sandbox k8s), and later
+replayed in the sandbox (scripts/common/dockerfile_replay.py, as for --sandbox k8s), and later
 commands get the replayed ENV, WORKDIR and USER. The replay needs network: the sandbox is created
 public and gets the task's policy once the replay is done.
 
@@ -39,10 +39,8 @@ from harbor.environments.base import ExecResult
 from harbor.environments.capabilities import EnvironmentCapabilities
 from harbor.environments.definition import effective_exec_cwd
 from harbor.environments.opensandbox import OpenSandboxEnvironment
-import httpx
 from harbor.models.task.config import NetworkMode, NetworkPolicy
 from opensandbox import Sandbox
-from opensandbox.constants import DEFAULT_EGRESS_PORT
 from opensandbox.models.sandboxes import NetworkPolicy as SandboxNetworkPolicy
 from opensandbox.models.sandboxes import NetworkRule
 
@@ -53,8 +51,9 @@ from scripts.common.opensandbox_sandbox import (  # noqa: F401
     RUN_LABEL_KEY,
     delete_run_sandboxes,
     joined_lines,
+    replace_egress_policy,
 )
-from scripts.harbor.dockerfile_replay import DockerfileReplay, ImageConfig
+from scripts.common.dockerfile_replay import DockerfileReplay, ImageConfig
 
 # Clients outside the cluster (a Clariden job, a laptop) reach sandboxes through the server.
 USE_SERVER_PROXY = True
@@ -159,20 +158,7 @@ class KataSandboxEnvironment(OpenSandboxEnvironment):
         return sandbox_network_policy(self._creation_policy or self.network_policy)
 
     async def _apply_network_policy(self, network_policy: NetworkPolicy) -> None:
-        """Replaces the sandbox's whole egress policy at its sidecar, then reads it back: a policy
-        that did not take effect fails the trial rather than leaving the network as it was."""
-        wanted = sandbox_network_policy(network_policy).model_dump(by_alias=True, exclude_none=True)
-        config = self._sandbox.connection_config
-        endpoint = await self._sandbox.get_endpoint(DEFAULT_EGRESS_PORT)
-        async with httpx.AsyncClient(
-            headers=endpoint.build_request_headers(config), timeout=60, transport=config.transport
-        ) as client:
-            response = await client.put(f"{config.protocol}://{endpoint.endpoint}/policy", json=wanted)
-        if response.is_error:
-            raise RuntimeError(f"sandbox {self._sandbox.id}: replacing the egress policy failed: HTTP {response.status_code} {response.text[:300]}")
-        applied = (await self._sandbox.get_egress_policy()).model_dump(by_alias=True, exclude_none=True)
-        if applied != wanted:
-            raise RuntimeError(f"sandbox {self._sandbox.id}: egress policy is {applied}, not {wanted}")
+        await replace_egress_policy(self._sandbox, sandbox_network_policy(network_policy))
 
     async def exec(
         self,
