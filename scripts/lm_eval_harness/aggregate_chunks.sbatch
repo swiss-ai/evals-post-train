@@ -31,7 +31,9 @@ TABLE_METRICS=${TABLE_METRICS:-""}
 : "${EVAL_DIRS_FILE:?EVAL_DIRS_FILE is required}"
 EVAL_INCOMPLETE_TASKS_FILE=${EVAL_INCOMPLETE_TASKS_FILE:-""}
 
-export WANDB_API_KEY=${WANDB_API_KEY:-$(cat ./scripts/wandb_api_key.txt)}
+# shellcheck source=scripts/common/secrets.sh
+source scripts/common/secrets.sh
+export WANDB_API_KEY="${WANDB_API_KEY:-}"
 export HF_HOME=${HF_HOME:-/iopsstor/scratch/cscs/$USER/huggingface}
 
 if [ -f "$TABLE_METRICS" ]; then

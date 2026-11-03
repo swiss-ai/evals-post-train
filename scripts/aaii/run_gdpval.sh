@@ -27,8 +27,8 @@
 #
 # Options:
 #   --api-base-url <url>        OpenAI-compatible endpoint serving --model. Reads the key from
-#                               TARGET_API_KEY (default: scripts/cscs_serving_api_key.txt, same
-#                               fallback run_inspect_eval.sh uses).
+#                               TARGET_API_KEY (default: CSCS_SERVING_API; both also from
+#                               scripts/secrets.env, as in run_inspect_eval.sh).
 #   --num-tasks <n>              Restrict to the first n tasks (default: 220, AA's full set;
 #                               smoke-test with a small number). Ignored when --task-ids is given.
 #   --task-ids <id1 id2 ...>    Exactly these space-separated openai/gdpval task_ids, instead of
@@ -108,10 +108,9 @@ mkdir -p "$WORKDIR"
 
 if [[ -n "$API_BASE_URL" ]]; then
     [[ "$API_BASE_URL" == */v1 || "$API_BASE_URL" == */v1/ ]] || API_BASE_URL="${API_BASE_URL%/}/v1"
-    TARGET_API_KEY="${TARGET_API_KEY:-}"
-    if [[ -z "$TARGET_API_KEY" && -f ./scripts/cscs_serving_api_key.txt ]]; then
-        TARGET_API_KEY="$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)"
-    fi
+    # shellcheck source=scripts/common/secrets.sh
+    source scripts/common/secrets.sh
+    TARGET_API_KEY="${TARGET_API_KEY:-${CSCS_SERVING_API:-}}"
     export CSCS_SERVING_API="$TARGET_API_KEY"
 else
     API_BASE_URL="https://api.openai.com/v1"

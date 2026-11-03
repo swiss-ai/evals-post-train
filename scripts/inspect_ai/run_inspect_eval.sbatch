@@ -26,10 +26,10 @@
 #     --api-base-url http://nid001234:8000 --model-role user=openai/gpt-4.1-2025-04-14
 #
 # Credentials are read the same way run_lm_eval.sbatch reads them: from the environment, else
-# scripts/<name>_key.txt. HF_TOKEN/CSCS_SERVING_API/WANDB_API_KEY fall back to their key files;
-# other provider keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, TARGET_API_KEY, ...) must already be
-# exported -- there's no fixed set of providers to special-case here, unlike the harness's single
-# backend. With a WANDB_API_KEY the results are uploaded to W&B (see run_inspect_eval.sh's
+# scripts/secrets.env (scripts/common/secrets.sh). HF_TOKEN, CSCS_SERVING_API, OPENAI_API_KEY and
+# WANDB_API_KEY are exported to the job; other provider keys (ANTHROPIC_API_KEY, TARGET_API_KEY,
+# ...) must already be exported -- there's no fixed set of providers to special-case here, unlike
+# the harness's single backend. With a WANDB_API_KEY the results are uploaded to W&B (see run_inspect_eval.sh's
 # --wandb-entity/--wandb-project; --no-wandb to skip).
 
 set -e
@@ -49,14 +49,11 @@ fi
 echo "START TIME: $(date)"
 echo "Using nodes: $SLURM_JOB_NODELIST"
 
-export HF_TOKEN="${HF_TOKEN:-$(tr -d '\r\n' < ./scripts/hf_token.txt)}"
-export CSCS_SERVING_API="${CSCS_SERVING_API:-$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)}"
-if [[ -z "${OPENAI_API_KEY:-}" && -f ./scripts/openai_api_key.txt ]]; then
-    export OPENAI_API_KEY="$(tr -d '\r\n' < ./scripts/openai_api_key.txt)"
-fi
-if [[ -z "${WANDB_API_KEY:-}" && -f ./scripts/wandb_api_key.txt ]]; then
-    export WANDB_API_KEY="$(tr -d '\r\n' < ./scripts/wandb_api_key.txt)"
-fi
+# shellcheck source=scripts/common/secrets.sh
+source scripts/common/secrets.sh
+export HF_TOKEN="${HF_TOKEN:-}" CSCS_SERVING_API="${CSCS_SERVING_API:-}"
+[[ -n "${OPENAI_API_KEY:-}" ]] && export OPENAI_API_KEY
+[[ -n "${WANDB_API_KEY:-}" ]] && export WANDB_API_KEY
 
 # Forward whatever the caller already exported for other providers/roles (e.g.
 # ANTHROPIC_API_KEY for a --model-role grader=anthropic/... , or TARGET_API_KEY for

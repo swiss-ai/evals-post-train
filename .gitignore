@@ -23,12 +23,10 @@ swiss-ai-Megatron-LM/
 
 .DS_Store
 
-scripts/cscs_serving_api_key.txt
+scripts/secrets.env
+# The per-key files that scripts/secrets.env replaced: kept out of git until they are deleted.
+scripts/*_api_key.txt
 scripts/hf_token.txt
-scripts/wandb_api_key.txt
-scripts/openai_api_key.txt
-scripts/critpt_api_key.txt
-scripts/opensandbox_api_key.txt
 eval_output/
 
 # Copied into the repo root by scripts/inspect_ai/run_inspect_eval.sh (inspect_evals' SciCode helpers)

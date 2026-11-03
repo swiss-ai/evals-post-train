@@ -157,7 +157,7 @@ Results are **not** viewed at inspect.aisi.org.uk — that's Inspect's documenta
 
 #### W&B upload
 
-Like every framework here, it uploads whenever a W&B key is available (`WANDB_API_KEY` or `scripts/wandb_api_key.txt`), by default to `apertus/apertus-1.5-post-training-v0.1`; `--wandb-entity`/`--wandb-project` change that, and `--no-wandb` (or `WANDB_MODE=disabled`) skips the upload, e.g. for a smoke test.
+Like every framework here, it uploads whenever `WANDB_API_KEY` is set (in the environment or `scripts/secrets.env`), by default to `apertus/apertus-1.5-post-training-v0.1`; `--wandb-entity`/`--wandb-project` change that, and `--no-wandb` (or `WANDB_MODE=disabled`) skips the upload, e.g. for a smoke test.
 
 ```bash
 scripts/inspect_ai/run_inspect_eval.sh --task tau2_retail --model Qwen/Qwen3-8B \
@@ -171,7 +171,7 @@ python -m scripts.results.update_wandb_inspect --entity <entity> --project <proj
   --name <name> --eval-log <path-to-run.eval> [--eval-log <path> ...]
 ```
 
-`update_wandb_inspect.py` parses the `.eval` log(s) (task scores, metrics, and a bounded per-sample summary) into the same `ModelEvaluation` structure the harness pipeline uses, and uploads through the same shared `upload_multi_model_results` — so Inspect and lm-eval-harness runs show up in W&B the same way. Auth uses `WANDB_API_KEY` (default: `scripts/wandb_api_key.txt`, same fallback as `run_lm_eval.sbatch`).
+`update_wandb_inspect.py` parses the `.eval` log(s) (task scores, metrics, and a bounded per-sample summary) into the same `ModelEvaluation` structure the harness pipeline uses, and uploads through the same shared `upload_multi_model_results` — so Inspect and lm-eval-harness runs show up in W&B the same way. Auth uses `WANDB_API_KEY` (environment or `scripts/secrets.env`, as for `run_lm_eval.sbatch`).
 
 ---
 
@@ -179,7 +179,7 @@ python -m scripts.results.update_wandb_inspect --entity <entity> --project <proj
 
 Two more Artificial-Analysis-aligned benchmarks, each its own standalone script rather than an Inspect AI task — neither goes through `run_inspect_eval.sh` or `inspect_evals` at all. This repo already documents *different*, narrower `inspect_evals` ports of tau2-bench and GDPval above (in the Inspect AI section) — those are independent implementations, not the same code as the scripts below, and don't necessarily match Artificial Analysis's real protocol values. Terminal-Bench with Artificial Analysis's protocol runs through the [Harbor runner](harbor.md): `--benchmark terminal_bench_2_1 --attempts 3`.
 
-In the prebuilt image (`containers/Dockerfile.eval`, `EVAL_PREBUILT_ENV=1`) each script runs from its own locked venv (`requirements/tau2-runtime.lock`, `requirements/gdpval-runtime.lock`) and installs nothing; elsewhere it installs its dependencies at runtime (tau2-bench/Stirrup). Each script takes `--model`/`--api-base-url` the same way `run_inspect_eval.sh` does (falling back to `scripts/cscs_serving_api_key.txt` for the serving key), bakes in Artificial Analysis's protocol defaults, and writes results to a local scratch dir. See each script's own `--help` for full options.
+In the prebuilt image (`containers/Dockerfile.eval`, `EVAL_PREBUILT_ENV=1`) each script runs from its own locked venv (`requirements/tau2-runtime.lock`, `requirements/gdpval-runtime.lock`) and installs nothing; elsewhere it installs its dependencies at runtime (tau2-bench/Stirrup). Each script takes `--model`/`--api-base-url` the same way `run_inspect_eval.sh` does (falling back to `CSCS_SERVING_API` for the serving key), bakes in Artificial Analysis's protocol defaults, and writes results to a local scratch dir. See each script's own `--help` for full options.
 
 ```bash
 # tau2-bench (tau2-bench v1.0.1, banking_knowledge domain, bm25_grep retrieval, 5 trials, 200

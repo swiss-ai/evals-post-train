@@ -34,7 +34,7 @@ EvalScope covers only SWE-bench Verified and Pro. Results are uploaded by the fr
 
 Follow the layout of the existing four:
 
-- [ ] `scripts/<framework>/run_<framework>_eval.sh` and `.sbatch` (Clariden), taking `--model`, `--api-base-url`, `--name`, `--limit`, reading `TARGET_API_KEY` (default `scripts/cscs_serving_api_key.txt`), and honoring `EVAL_PREBUILT_ENV=1` (no install at run time).
+- [ ] `scripts/<framework>/run_<framework>_eval.sh` and `.sbatch` (Clariden), taking `--model`, `--api-base-url`, `--name`, `--limit`, reading `TARGET_API_KEY` (default `CSCS_SERVING_API`; keys come from the environment or `scripts/secrets.env` via `scripts/common/secrets.sh`), and honoring `EVAL_PREBUILT_ENV=1` (no install at run time).
 - [ ] W&B through `scripts/common/wandb.sh`, with an uploader `scripts/results/update_wandb_<framework>.py`.
 - [ ] `requirements/<framework>-runtime.txt`, locked by `scripts/common/lock_requirements.sh`, installed through `scripts/common/locked_venv.sh` and in `containers/Dockerfile.eval`.
 - [ ] `scripts/common/k8s_sandbox.py` for `--sandbox k8s`, if tasks run in containers.

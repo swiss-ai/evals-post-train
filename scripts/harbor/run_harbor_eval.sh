@@ -66,22 +66,20 @@
 #                               (n_errors > 0); not for --gold runs.
 #   --no-wandb                  Don't upload (also WANDB_MODE=disabled).
 #
-# Environment:
-#   TARGET_API_KEY   key for --api-base-url (default: scripts/cscs_serving_api_key.txt).
+# Environment (keys also from scripts/secrets.env, see scripts/common/secrets.sh):
+#   TARGET_API_KEY   key for --api-base-url (default: CSCS_SERVING_API).
 #   HARBOR_VENV      venv to run from (default: the cached venv of the lock, see
 #                    scripts/common/locked_venv.sh). With EVAL_PREBUILT_ENV=1 (the prebuilt image,
 #                    containers/Dockerfile.eval) it must already hold Harbor: nothing is
 #                    installed at run time.
 #   HARBOR_ADAPTERS_ROOT  installed Harbor adapters (<root>/<adapter>/bin/<adapter>), used instead
 #                    of fetching them with uvx (the prebuilt image has Multi-SWE-bench's).
-#   WANDB_API_KEY    for the W&B upload (default: scripts/wandb_api_key.txt; without either, no
-#                    upload).
+#   WANDB_API_KEY    for the W&B upload (without it, no upload).
 #   SANDBOX_K8S_*  --sandbox k8s pod settings, shared with the EvalScope runner: namespace
 #                    (SANDBOX_K8S_NAMESPACE), node arch, tolerations, memory request, run label
 #                    (pods are labelled sandbox-run=<label>), pull secret, ready timeout. See
 #                    scripts/common/k8s_sandbox.py.
-#   OPENSANDBOX_API_KEY  --sandbox opensandbox: key for the OpenSandbox server (default:
-#                    scripts/opensandbox_api_key.txt).
+#   OPENSANDBOX_API_KEY  --sandbox opensandbox: key for the OpenSandbox server.
 #   OPENSANDBOX_DOMAIN   --sandbox opensandbox: the server (default: Breithorn's Kata endpoint).
 #
 # The run exits non-zero when any trial ended without a verifier reward (an infrastructure
@@ -139,6 +137,8 @@ else
     MODEL_ARGS=(--model "$MODEL" --api-base-url "${API_BASE_URL%/}")
 fi
 
+# shellcheck source=scripts/common/secrets.sh
+source scripts/common/secrets.sh
 # shellcheck source=scripts/common/wandb.sh
 source scripts/common/wandb.sh
 if (( NO_WANDB )); then
@@ -158,16 +158,11 @@ fi
 NAME=${NAME:-$(echo "${MODEL:-gold}" | tr '/: ' '---')}
 WORK_DIR=${WORK_DIR:-"logs/harbor/$NAME"}
 
-CSCS_SERVING_API="${CSCS_SERVING_API:-}"
-if [[ -z "$CSCS_SERVING_API" && -f ./scripts/cscs_serving_api_key.txt ]]; then
-    CSCS_SERVING_API="$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)"
-fi
-if [[ "$SANDBOX" == opensandbox && -z "${OPENSANDBOX_API_KEY:-}" && -f ./scripts/opensandbox_api_key.txt ]]; then
-    OPENSANDBOX_API_KEY="$(tr -d '\r\n' < ./scripts/opensandbox_api_key.txt)"
+if [[ "$SANDBOX" == opensandbox && -n "${OPENSANDBOX_API_KEY:-}" ]]; then
     export OPENSANDBOX_API_KEY
 fi
 # Not HARBOR_API_KEY: Harbor reads that as its Harbor Hub credential.
-export EVAL_MODEL_API_KEY="${TARGET_API_KEY:-$CSCS_SERVING_API}"
+export EVAL_MODEL_API_KEY="${TARGET_API_KEY:-${CSCS_SERVING_API:-}}"
 
 # Harbor and the Multi-SWE-bench adapter are installed with uv (Harbor needs Python >= 3.12,
 # which uv fetches where the system has none, e.g. Clariden's 3.6).

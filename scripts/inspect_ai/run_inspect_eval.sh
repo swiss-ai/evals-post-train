@@ -66,15 +66,15 @@
 #                              `inspect eval`/`inspect eval-set` (e.g. -- --temperature 0.5
 #                              --max-connections 10).
 #
-# Environment variables (used if the matching flag is not given):
+# Environment variables (used if the matching flag is not given; keys also from
+# scripts/secrets.env, see scripts/common/secrets.sh):
 #   API_BASE_URL, API_MODEL_NAME (defaults to --model) -- endpoint for the model under test.
-#   TARGET_API_KEY -- API key for the --api-base-url endpoint (default: CSCS_SERVING_API from
-#   scripts/cscs_serving_api_key.txt, same fallback as run_lm_eval.sbatch's openai backend).
+#   TARGET_API_KEY -- API key for the --api-base-url endpoint (default: CSCS_SERVING_API, same
+#   fallback as run_lm_eval.sbatch's openai backend).
 #   WANDB_ENTITY, WANDB_PROJECT -- see --wandb-entity/--wandb-project above.
-#   WANDB_API_KEY -- for the W&B upload (default: scripts/wandb_api_key.txt, same fallback as
-#   run_lm_eval.sbatch; without either, no upload).
-#   CRITPT_API_KEY -- grading-server credential for the CritPt task (scripts/aaii/aa_critpt.py); default:
-#   scripts/critpt_api_key.txt. Optional -- unset is the expected state until Artificial Analysis
+#   WANDB_API_KEY -- for the W&B upload (without it, no upload).
+#   CRITPT_API_KEY -- grading-server credential for the CritPt task (scripts/aaii/aa_critpt.py).
+#   Optional -- unset is the expected state until Artificial Analysis
 #   grants access (email critpt@artificialanalysis.ai); the run still completes and writes its
 #   submission batch to a local file instead of posting it.
 #   SKIP_INSTALL=1 to run with the current environment as is, instead of the cached venv of
@@ -139,6 +139,8 @@ done
 
 [[ -n "$TASKS" ]] || die "Missing --task. See --help."
 [[ -n "$MODEL" ]] || die "Missing --model. See --help."
+# shellcheck source=scripts/common/secrets.sh
+source scripts/common/secrets.sh
 # shellcheck source=scripts/common/wandb.sh
 source scripts/common/wandb.sh
 if (( NO_WANDB )); then
@@ -160,11 +162,7 @@ if [[ -n "$API_BASE_URL" ]]; then
         API_BASE_URL="${API_BASE_URL%/}/v1"
     fi
 
-    CSCS_SERVING_API="${CSCS_SERVING_API:-}"
-    if [[ -z "$CSCS_SERVING_API" && -f ./scripts/cscs_serving_api_key.txt ]]; then
-        CSCS_SERVING_API="$(tr -d '\r\n' < ./scripts/cscs_serving_api_key.txt)"
-    fi
-    TARGET_API_KEY="${TARGET_API_KEY:-$CSCS_SERVING_API}"
+    TARGET_API_KEY="${TARGET_API_KEY:-${CSCS_SERVING_API:-}}"
     key_var="${PROVIDER_ENV_NAME}_API_KEY"
     export "${key_var}"="${!key_var:-$TARGET_API_KEY}"
     export "${PROVIDER_ENV_NAME}_BASE_URL"="$API_BASE_URL"
@@ -183,11 +181,7 @@ fi
 # directly from the environment) -- unconditional, like CSCS_SERVING_API above, since it's
 # harmless to export for tasks that never look at it. Optional: unset just means that Hook
 # writes its submission batch to a local file instead of posting it.
-CRITPT_API_KEY="${CRITPT_API_KEY:-}"
-if [[ -z "$CRITPT_API_KEY" && -f ./scripts/critpt_api_key.txt ]]; then
-    CRITPT_API_KEY="$(tr -d '\r\n' < ./scripts/critpt_api_key.txt)"
-fi
-[[ -n "$CRITPT_API_KEY" ]] && export CRITPT_API_KEY
+[[ -n "${CRITPT_API_KEY:-}" ]] && export CRITPT_API_KEY
 
 mkdir -p "$LOGS_DIR"
 
