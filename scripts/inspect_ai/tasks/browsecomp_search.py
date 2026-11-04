@@ -11,12 +11,15 @@ exports it for browse_comp tasks).
 Without `scorer_model`, the model under test grades its own answers.
 """
 
+import logging
 from textwrap import dedent
 
 from inspect_ai import Task, task
 from inspect_ai.agent import react, run
 from inspect_ai.solver import Generate, Solver, TaskState, solver
 from inspect_ai.tool import web_search
+
+logger = logging.getLogger(__name__)
 
 
 @solver
@@ -38,6 +41,18 @@ def tavily_browsing_solver() -> Solver:
             web_surfer, QUERY_TEMPLATE.format(Question=state.input_text)
         )
         state.output.completion = agent_state.output.completion  # type: ignore[attr-defined]
+        # The run log shows no tool activity, so report it: a search that fails (bad
+        # key, rate limit) otherwise looks like a model that simply got the answer wrong.
+        tool_msgs = [m for m in agent_state.messages if getattr(m, "role", "") == "tool"]
+        failed = [m for m in tool_msgs if getattr(m, "error", None)]
+        logger.warning(
+            "browsecomp_search sample=%s search_calls=%d tool_errors=%d",
+            state.sample_id,
+            len(tool_msgs),
+            len(failed),
+        )
+        for m in (failed or tool_msgs)[:2]:
+            logger.warning("browsecomp_search sample=%s tool_result=%.200r", state.sample_id, m.text)
         return state
 
     return solve
