@@ -1023,6 +1023,32 @@ class EvalExportTests(unittest.TestCase):
                 )
             )
 
+    def test_shared_repeat_export_selects_mean_and_preserves_attempts(self):
+        raw = fixture_results()
+        task = "gsm8k_cot"
+        raw["results"] = {task: {"exact_match_mean_repeats,strict-match": .5,
+                                 "exact_match_pass@2,strict-match": 1.0}}
+        raw["configs"][task].update({"repeats": 2, "repeat_filter": "strict-match",
+            "repeat_scoring": {"enabled": True, "mean": True, "pass_at_k": {"exact_match": [2]}}})
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = root / "results_repeat.json"
+            results.write_text(json.dumps(raw))
+            sample = fixture_sample()
+            sample.update({"filter": "strict-match", "repeat_indices": [0, 1],
+                           "metrics": ["exact_match"], "exact_match": [1.0, 0.0],
+                           "resps": [["42", "wrong"]], "filtered_resps": [["42", "wrong"]]})
+            (root / f"samples_{task}_repeat.jsonl").write_text(json.dumps(sample) + "\n")
+            manifest = export_results(results, root / "export", retrieved_timestamp="1770000000.0", include_samples=True)
+            record = json.loads((root / "export" / manifest["records"][0]["eee_record"]).read_text())
+            exported = record["evaluation_results"]
+            self.assertEqual([r["score_details"]["score"] for r in exported], [.5])
+            self.assertEqual(exported[0]["generation_config"]["additional_details"]["repeats"], "2")
+            samples, _, count = _load_samples(root / f"samples_{task}_repeat.jsonl", "eval", "model", "gsm8k", ["exact_match_mean_repeats,strict-match"], None)
+            self.assertEqual(count, 2)
+            self.assertEqual([r["evaluation"]["score"] for r in samples], [1., 0.])
+            self.assertNotEqual(samples[0]["sample_id"], samples[1]["sample_id"])
+
     def test_self_consistency_suffix_uses_mean_at_logged_repeats(self):
         raw = fixture_results()
         task_name = "gsm8k_cot_zeroshot_self_consistency"

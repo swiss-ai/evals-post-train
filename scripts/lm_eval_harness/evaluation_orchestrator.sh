@@ -127,6 +127,14 @@ _eval_create_run_config() {
     [[ -n "${THINK_TOP_K:-}" ]] && fields+=(--field "think_top_k=$THINK_TOP_K")
     [[ -n "${THINK_MIN_P:-}" ]] && fields+=(--field "think_min_p=$THINK_MIN_P")
 
+    if [[ -n "${EVAL_REPEAT_CONFIG:-}" ]]; then
+        local repeat_policy
+        repeat_policy=$(python3 -m scripts.lm_eval_harness.repeat_config \
+            --policy "$EVAL_REPEAT_CONFIG" --output "$state_dir/repeat_policy.json") || return 1
+        export EVAL_REPEAT_CONFIG="$state_dir/repeat_policy.json"
+        export EVAL_REPEAT_TASKS="$state_dir/expected_tasks.txt"
+        fields+=(--field "repeat_policy=$repeat_policy")
+    fi
     EVAL_RUN_CONFIG="$state_dir/run_config.json"
     export EVAL_RUN_CONFIG
     EVAL_RUN_SIGNATURE=$(python3 -m scripts.lm_eval_harness.eval_state config \

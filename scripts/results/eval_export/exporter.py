@@ -502,7 +502,20 @@ def _metric_candidates(
     if not candidates:
         return None
 
-    repeats = _task_config(raw, task_name).get("repeats")
+    task_config = _task_config(raw, task_name)
+    policy = task_config.get("repeat_scoring") or {}
+    if policy.get("enabled"):
+        candidates = target_mapping.get("metric_candidates", candidates)
+        converted = []
+        for candidate in candidates:
+            base, sep, filter_name = candidate.partition(",")
+            if "_mean_repeats" not in base and "_pass@" not in base:
+                base += "_mean_repeats"
+            if task_config.get("repeat_filter"):
+                sep, filter_name = ",", task_config["repeat_filter"]
+            converted.append(base + (sep + filter_name if sep else ""))
+        candidates = converted
+    repeats = task_config.get("repeats")
     expanded: list[str] = []
     for candidate in candidates:
         if "{repeats}" not in candidate:
@@ -624,7 +637,12 @@ def _numeric_metrics(results: dict[str, Any]) -> Iterable[tuple[str, float]]:
 
 def _task_config(raw: dict[str, Any], task_name: str) -> dict[str, Any]:
     value = raw.get("configs", {}).get(task_name, {})
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        value = {}
+    protocol = raw.get("repeat_protocols", {}).get(task_name)
+    if protocol:
+        value = {"repeats": protocol["repeats"], "repeat_scoring": protocol["policy"], **value}
+    return value
 
 
 def _generation_config(
@@ -699,7 +717,14 @@ def _generation_config(
     repeats = task_config.get("repeats")
     if isinstance(repeats, int) and repeats > 0:
         details["repeats"] = str(repeats)
-    if task_name.endswith(SELF_CONSISTENCY_SUFFIX):
+    policy = task_config.get("repeat_scoring") or {}
+    if policy.get("enabled"):
+        details["repeat_scoring"] = json.dumps(policy, sort_keys=True)
+        details["evaluation_variant"] = "repeat-scoring-v1"
+        protocol = raw.get("repeat_protocols", {}).get(task_name)
+        if protocol:
+            details["repeat_protocol"] = json.dumps(protocol, sort_keys=True)
+    elif task_name.endswith(SELF_CONSISTENCY_SUFFIX):
         details["evaluation_variant"] = "self_consistency"
     limit = raw.get("config", {}).get("limit")
     if limit is not None:
@@ -944,7 +969,7 @@ def _sample_score(
         metric_name, separator, result_filter = result_key.partition(",")
         if separator and result_filter != sample_filter:
             continue
-        value = sample.get(metric_name)
+        value = sample.get(metric_name.removesuffix("_mean_repeats"))
         if isinstance(value, bool):
             return float(value), value
         if isinstance(value, (int, float)) and math.isfinite(value):
@@ -1005,6 +1030,7 @@ def _convert_sample(
             "prompt_hash": str(sample.get("prompt_hash", "")),
             "target_hash": str(sample.get("target_hash", "")),
             "filter": filter_name,
+            **({"repeat_index": str(sample["repeat_index"])} if "repeat_index" in sample else {}),
         },
     }
 
@@ -1035,6 +1061,22 @@ def _sample_priority(record: dict[str, Any]) -> int:
     return int.from_bytes(digest, byteorder="big")
 
 
+def _attempt_samples(sample):
+    indices = sample.get("repeat_indices")
+    if indices is None:
+        yield sample
+        return
+    for index in indices:
+        attempt = dict(sample)
+        attempt["doc_id"] = f"{sample['doc_id']}/repeat-{index}"
+        attempt["repeat_index"] = index
+        for key in sample.get("metrics", []):
+            attempt[key] = sample[key][index]
+        for key in ("resps", "filtered_resps"):
+            attempt[key] = [[request[index]] for request in sample.get(key, [])]
+        yield attempt
+
+
 def _load_samples(
     sample_path: Path,
     evaluation_id: str,
@@ -1058,25 +1100,26 @@ def _load_samples(
                 sample = json.loads(line)
             except json.JSONDecodeError as exc:
                 raise ExportError(f"{sample_path}:{line_number}: {exc}") from exc
-            converted = _convert_sample(
-                sample,
-                evaluation_id,
-                model_id,
-                canonical_name,
-                metric_keys,
-            )
-            if converted is None:
-                continue
-            scorable_rows += 1
-            if max_samples is None:
-                rows.append(converted)
-                continue
-            priority = _sample_priority(converted)
-            item = (-priority, -line_number, line_number, converted)
-            if len(heap) < max_samples:
-                heapq.heappush(heap, item)
-            elif item > heap[0]:
-                heapq.heapreplace(heap, item)
+            for attempt in _attempt_samples(sample):
+                converted = _convert_sample(
+                    attempt,
+                    evaluation_id,
+                    model_id,
+                    canonical_name,
+                    metric_keys,
+                )
+                if converted is None:
+                    continue
+                scorable_rows += 1
+                if max_samples is None:
+                    rows.append(converted)
+                    continue
+                priority = _sample_priority(converted)
+                item = (-priority, -scorable_rows, scorable_rows, converted)
+                if len(heap) < max_samples:
+                    heapq.heappush(heap, item)
+                elif item > heap[0]:
+                    heapq.heapreplace(heap, item)
     if max_samples is not None:
         rows = [item[3] for item in sorted(heap, key=lambda item: item[2])]
     return rows, source_rows, scorable_rows
@@ -1360,6 +1403,8 @@ def export_results(
             resolved_task_aliases[task_name] = str(mapped_task_name)
         candidates = _metric_candidates(raw, task_name, task_mapping["eee"])
         if candidates and _hf_metric(task_results, candidates) is None:
+            if (_task_config(raw, task_name).get("repeat_scoring") or {}).get("enabled"):
+                raise ExportError(f"{task_name}: repeated results do not contain configured headline metrics {candidates}; available: {available_metrics}")
             metric_mismatches[task_name] = (
                 available_metrics,
                 list(candidates),

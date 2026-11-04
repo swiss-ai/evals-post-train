@@ -63,6 +63,7 @@
 #                          code in the repo (e.g. Kimi-K2's tokenization_kimi.py).
 #                          hf, vllm and openai backends.
 #   --bos                - Prepend BOS token
+#   --repeat-config <json> - Repeat policy: repeats, repeat_scoring, task_overrides.
 #   --num-fewshot N      - Override num_fewshot for all tasks (default: use task YAML defaults)
 #                          Note: tasks with num_fewshot=0 in YAML are never overridden.
 #                          OLMo3 uses 5-shot for most MC tasks; pass --num-fewshot 5 to match.
@@ -279,6 +280,7 @@ while [[ $# -gt 0 ]]; do
         --wandb-project) WANDB_PROJECT_FLAG="$2";       shift 2 ;;
         --no-wandb)      export WANDB_MODE=disabled;    shift ;;
         --account)       SBATCH_ACCOUNT_FLAG="$2";      shift 2 ;;
+        --repeat-config) export EVAL_REPEAT_CONFIG="$2"; shift 2 ;;
         --force-tasks)   FORCE_TASKS="$2";              shift 2 ;;
         --merge-only)    EVAL_MERGE_ONLY="true";        shift ;;
         --debug)         EVAL_DRY_RUN="true";           shift ;;

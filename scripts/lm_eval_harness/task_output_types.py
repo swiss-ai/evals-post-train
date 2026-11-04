@@ -80,6 +80,20 @@ class Classifier:
         self._cache[name] = found
         return found
 
+    def leaves(self, name: str, seen: frozenset[str] = frozenset()) -> set[str]:
+        entry = self._index.get(name)
+        if entry is None or name in seen:
+            raise ValueError(f"Unknown or cyclic task specification: {name}")
+        kind = getattr(entry.kind, "name", str(entry.kind)).upper()
+        if kind == "TAG":
+            members = self._tag_members.get(name, [])
+        elif kind == "GROUP":
+            members = []
+            _members(self._config(entry).get("task"), members)
+        else:
+            return {name}
+        return set().union(*(self.leaves(member, seen | {name}) for member in members))
+
     def split(self, tasks: list[str]) -> tuple[list[str], list[str]]:
         chat: list[str] = []
         raw: list[str] = []
