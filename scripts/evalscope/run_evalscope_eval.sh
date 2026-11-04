@@ -47,6 +47,11 @@
 #                               memory 4g with docker, with k8s an 8g limit over a 4g request, and
 #                               8g with opensandbox, since 4g OOM-kills some SWE-bench Pro tests --
 #                               see run.py).
+#   --agent-network allowlist|public  With --sandbox opensandbox, the agent loop's sandboxes reach
+#                               only package indexes (allowlist, the default), not GitHub and the
+#                               other hosts that have each task's fix, as SWE-bench's leaderboard
+#                               checklist asks; public is open internet. Scoring keeps its network
+#                               (scripts/common/swe_bench_egress.py).
 #   --limit <n>                 First n samples per benchmark (smoke tests); a fraction < 1 is a
 #                               share of the dataset.
 #   --shuffle                   Shuffle each dataset (EvalScope's seed 42) before --limit, so a small
@@ -137,7 +142,7 @@ while (( $# > 0 )); do
         --no-wandb) NO_WANDB=1; shift ;;
         --shuffle) RUN_ARGS+=("$1"); shift ;;
         --sandbox-config|--limit|--max-concurrency|--max-steps|--strategy|--command-timeout|\
-        --generation-config|--dataset-revision|--extra-param|--api-timeout)
+        --generation-config|--dataset-revision|--extra-param|--api-timeout|--agent-network)
             RUN_ARGS+=("$1" "$2"); shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "Unknown argument: $1 (see --help)" ;;

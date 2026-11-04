@@ -58,6 +58,11 @@
 #   --max-concurrency <n>       Trials in flight at once = containers alive at once (default: 4).
 #   --attempts <n>              Attempts per task (default: 1; more add Harbor's pass@k to summary.json).
 #   --timeout-multiplier <f>    Multiplies every task's timeouts (default: 1.0).
+#   --agent-network allowlist|public  SWE-bench Verified/Pro: during the agent phase the sandbox
+#                               reaches only package indexes (allowlist, the default), not GitHub
+#                               and the other hosts that have each task's fix, as SWE-bench's
+#                               leaderboard checklist asks; public is the published tasks' open
+#                               internet (scripts/common/swe_bench_egress.py).
 #   --wandb-entity <entity>     W&B entity and project to upload the results to (also WANDB_ENTITY,
 #   --wandb-project <project>   WANDB_PROJECT; default apertus/apertus-1.5-post-training-v0.1): one
 #                               run named --name, per benchmark its reward (or verifier metrics),
@@ -120,7 +125,7 @@ while (( $# > 0 )); do
         --wandb-entity) WANDB_ENTITY=$2; shift 2 ;;
         --wandb-project) WANDB_PROJECT=$2; shift 2 ;;
         --no-wandb) NO_WANDB=1; shift ;;
-        --benchmark|--agent|--agent-kwarg|--limit|--task|--max-concurrency|--attempts|--timeout-multiplier)
+        --benchmark|--agent|--agent-kwarg|--agent-network|--limit|--task|--max-concurrency|--attempts|--timeout-multiplier)
             RUN_ARGS+=("$1" "$2"); shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "Unknown argument: $1 (see --help)" ;;
