@@ -66,3 +66,10 @@ class RepeatPolicyTests(unittest.TestCase):
         self.assertEqual(summary[key], .25)
         self.assertEqual(score_label(summary, "code/pass@1"), "mean@4")
         self.assertEqual(score_label(summary, "code/pass@1_pass@2"), "pass@2 (m=4)")
+        summary["repeat_protocols"]["code"]["sampling_enabled"] = False
+        self.assertEqual(score_label(summary, "code/pass@1"), "mean@4 (greedy)")
+        summary["group/pass@1_pass@2,none"] = .5
+        summary["repeat_protocols"]["group"] = {
+            "repeats": 4, "per_task_repeats": {"code": 4},
+            "metric_tasks": {"pass@1_pass@2,none": ["code"]}}
+        self.assertEqual(score_label(summary, "group/pass@1_pass@2"), "pass@2 (m=4) (greedy)")
