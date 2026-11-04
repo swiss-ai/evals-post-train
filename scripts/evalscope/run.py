@@ -99,6 +99,22 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return args
 
 
+def agent_allowed_hosts(args: argparse.Namespace) -> Optional[tuple]:
+    """What the agent loop's sandboxes may reach with --sandbox opensandbox (None: everything):
+    package indexes (scripts/common/swe_bench_egress.py) and, as Harbor adds it, the model
+    endpoint's host, for an agent that runs inside the sandbox and calls the model from there
+    (EvalScope's external runners; they also install themselves from other hosts, so they need
+    --agent-network public). The default strategies call the model from this process."""
+    if args.agent_network != "allowlist":
+        return None
+    from urllib.parse import urlsplit
+
+    from scripts.common.swe_bench_egress import AGENT_ALLOWED_HOSTS
+
+    host = urlsplit(args.api_base_url).hostname if args.api_base_url else None
+    return AGENT_ALLOWED_HOSTS + ((host,) if host and host not in AGENT_ALLOWED_HOSTS else ())
+
+
 def parse_pairs(pairs: List[str], flag: str, as_json: bool) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     for pair in pairs:
@@ -314,9 +330,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         # One label for the whole run, so its leftovers can be deleted at the end.
         os.environ.setdefault(opensandbox_sandbox.RUN_LABEL_ENV, f"evalscope-{uuid.uuid4().hex[:12]}")
-        from scripts.common.swe_bench_egress import AGENT_ALLOWED_HOSTS
-
-        opensandbox_sandbox.install(AGENT_ALLOWED_HOSTS if args.agent_network == "allowlist" else None)
+        opensandbox_sandbox.install(agent_allowed_hosts(args))
         signal.signal(signal.SIGTERM, exit_on_sigterm)
     if args.gold:
         install_gold()
