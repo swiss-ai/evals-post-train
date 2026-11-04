@@ -34,7 +34,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from scripts.harbor.task_patches import patch_aider_polyglot
+from scripts.harbor.task_patches import patch_aider_polyglot, patch_swe_bench_agent_egress
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HARBOR_VERSION = "0.25.0"
@@ -49,8 +49,14 @@ OPENSANDBOX_KATA_DOMAIN = "opensandbox-kata.breithorn.svc.cscs.ch"  # = opensand
 # Our benchmark names -> the Harbor dataset. Registry datasets are pinned: legacy-registry
 # ones by version, Harbor Hub packages by content digest (what @latest resolved to when pinned).
 BENCHMARKS: Dict[str, Dict[str, Any]] = {
-    "swe_bench": {"dataset": "swebench-verified@1.0", "about": "SWE-bench Verified, 500 tasks"},
-    "swe_bench_pro": {"dataset": "swebenchpro@1.0", "about": "SWE-bench Pro v1 (public test split), 731 tasks"},
+    # agent_allowlist: the agent phase only reaches package indexes, not the code hosts with the
+    # fix (patch_swe_bench_agent_egress; --agent-network public turns it off).
+    "swe_bench": {"dataset": "swebench-verified@1.0", "about": "SWE-bench Verified, 500 tasks", "agent_allowlist": True},
+    "swe_bench_pro": {
+        "dataset": "swebenchpro@1.0",
+        "about": "SWE-bench Pro v1 (public test split), 731 tasks",
+        "agent_allowlist": True,
+    },
     "multi_swe_bench": {
         "adapter": "multi-swe-bench",
         # The adapter reads the dataset's main branch unless given local files: pinned here (the
@@ -117,6 +123,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--attempts", type=int, default=1, help="Attempts per task (Harbor's -k).")
     p.add_argument("--timeout-multiplier", type=float, default=1.0)
     p.add_argument("--agent-kwarg", action="append", default=[], help="Harbor --ak key=value; repeatable.")
+    p.add_argument(
+        "--agent-network",
+        choices=("allowlist", "public"),
+        default="allowlist",
+        help="SWE-bench Verified/Pro: the agent phase reaches only package indexes (allowlist, "
+        "the default; scripts/common/swe_bench_egress.py) or the whole internet (public, as the "
+        "published tasks have it). Other benchmarks keep their own policies.",
+    )
     args = p.parse_args(argv)
     names = [n.strip() for n in args.benchmark.split(",") if n.strip()]
     unknown = [n for n in names if n not in BENCHMARKS]
@@ -200,6 +214,15 @@ def patched_tasks(dataset: str, patch: Callable[[Path], None], out: Path) -> Pat
     return tasks
 
 
+def task_patches(args: argparse.Namespace, name: str) -> List[Callable[[Path], None]]:
+    """The patches a benchmark's downloaded tasks get before the run (scripts/harbor/task_patches.py)."""
+    spec = BENCHMARKS[name]
+    patches = [spec["patch_tasks"]] if "patch_tasks" in spec else []
+    if spec.get("agent_allowlist") and args.agent_network == "allowlist":
+        patches.append(patch_swe_bench_agent_egress)
+    return patches
+
+
 def harbor_command(args: argparse.Namespace, name: str, jobs_dir: Path) -> List[str]:
     spec = BENCHMARKS[name]
     cmd = [harbor_bin(), "run", "-o", str(jobs_dir), "--job-name", name, "-y", "-q"]
@@ -207,8 +230,14 @@ def harbor_command(args: argparse.Namespace, name: str, jobs_dir: Path) -> List[
         dataset = download_dataset(*spec["hf_dataset"]) if "hf_dataset" in spec else None
         cmd += ["-p", str(generate_adapter_tasks(spec["adapter"], Path(args.work_dir), args.limit, args.task, dataset))]
     else:
-        if "patch_tasks" in spec:
-            cmd += ["-p", str(patched_tasks(spec["dataset"], spec["patch_tasks"], Path(args.work_dir) / "tasks" / name))]
+        patches = task_patches(args, name)
+        if patches:
+
+            def patch(tasks: Path) -> None:
+                for one in patches:
+                    one(tasks)
+
+            cmd += ["-p", str(patched_tasks(spec["dataset"], patch, Path(args.work_dir) / "tasks" / name))]
         else:
             cmd += ["-d", spec["dataset"]]
         for pattern in args.task:
@@ -370,8 +399,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             proc.terminate()
         code = proc.wait()
         results[name] = {"dataset": BENCHMARKS[name].get("dataset") or f"adapter:{BENCHMARKS[name]['adapter']}"}
-        if "patch_tasks" in BENCHMARKS[name]:
-            results[name]["patched_with"] = BENCHMARKS[name]["patch_tasks"].__name__
+        patches = task_patches(args, name)
+        if patches:
+            results[name]["patched_with"] = ", ".join(one.__name__ for one in patches)
+        if BENCHMARKS[name].get("agent_allowlist"):
+            results[name]["agent_network"] = args.agent_network
         results[name].update(summarize_job(jobs_dir / name, BENCHMARKS[name].get("missing_reward_is_zero", False)))
         if stopped:
             results[name]["interrupted"] = True
