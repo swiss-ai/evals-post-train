@@ -1000,6 +1000,8 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     unset SSL_CERT_FILE
     export HF_DATASETS_TRUST_REMOTE_CODE=1
     $CACHE_EXPORTS
+    # The locked environment's torch must not load the container's torch libraries.
+    export LD_LIBRARY_PATH=\$(tr ':' '\n' <<< \"\${LD_LIBRARY_PATH:-}\" | { grep -vx '.*/torch/lib' || true; } | paste -sd: -)
 
     $LOAD_ENV_CMD
 

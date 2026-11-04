@@ -18,6 +18,15 @@ EVAL_RUNTIME_REQUIREMENTS=${EVAL_RUNTIME_REQUIREMENTS:-${EVAL_REPO_ROOT:-$PWD}/r
 EVAL_APERTUS2_REQUIREMENTS=${EVAL_APERTUS2_REQUIREMENTS:-}
 EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 HARNESS_URL="https://github.com/${EVAL_HARNESS_REPO}.git"
+BASE_VENV_ARGS=(--system-site-packages)
+# The lock is complete, as in the prebuilt image: its venv leaves out the container's packages
+# (their torchvision is built for the container's torch). The container also lists its torch's
+# libraries on LD_LIBRARY_PATH, ahead of the lock's: torch would load its older libtorch_python.
+if [[ "$EVAL_RUNTIME_REQUIREMENTS" == *.lock ]]; then
+    BASE_VENV_ARGS=()
+    LD_LIBRARY_PATH=$(tr ':' '\n' <<< "${LD_LIBRARY_PATH:-}" | { grep -vx '.*/torch/lib' || true; } | paste -sd: -)
+    export LD_LIBRARY_PATH
+fi
 
 [[ -r "$EVAL_RUNTIME_REQUIREMENTS" ]] \
     || { echo "Runtime requirements are not readable inside the container: $EVAL_RUNTIME_REQUIREMENTS" >&2; exit 1; }
@@ -79,6 +88,7 @@ BASE_KEY=$(
         cat "$EVAL_RUNTIME_REQUIREMENTS"
         printf '%s\n' "--- container ---"
         cat "$EVAL_CONTAINER_CONFIG"
+        (( ${#BASE_VENV_ARGS[@]} )) || printf '%s\n' "--- isolated venv ---"
     } | hash_stream
 )
 OVERLAY_KEY=$(
@@ -115,7 +125,7 @@ build_base() {
         if [[ -e "$BASE_ENV" ]]; then
             mv "$BASE_ENV" "${BASE_ENV}.incomplete.$(date +%s).$$"
         fi
-        python -m venv --system-site-packages "$BASE_ENV"
+        python -m venv "${BASE_VENV_ARGS[@]}" "$BASE_ENV"
         "$BASE_ENV/bin/python" -m pip install --upgrade pip
         local -a index_args=()
         # lm-eval-runtime.lock has CPU torch, from PyTorch's index. Its hashes decide which file is accepted.
