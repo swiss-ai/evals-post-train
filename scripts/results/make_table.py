@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import os
+from scripts.results.repeat_metrics import mean_key
+
 import argparse
 import wandb
 import pandas as pd
@@ -55,6 +57,10 @@ def get_metric(summary, metric):
     # Split metric into task and metric_name parts for fuzzy matching
     # e.g. "agieval/acc" -> task="agieval", metric_name="acc"
     # e.g. "mmlu_flan_cot_zeroshot/exact_match,ordered-extract" -> task="mmlu_flan_cot_zeroshot", metric_name="exact_match", filter="ordered-extract"
+    repeated = mean_key(summary, metric)
+    if repeated is not None:
+        return summary[repeated]
+
     parts = metric.split("/", 1)
     task = parts[0]
     metric_name = parts[1] if len(parts) > 1 else None
@@ -75,7 +81,7 @@ def get_metric(summary, metric):
     # Search for matching keys in summary
     candidates = []
     for k, v in summary.items():
-        if "stderr" in k:
+        if "stderr" in k or ("_pass@" in k and "_pass@" not in metric):
             continue
         k_lower = k.lower()
         task_lower = task.lower()

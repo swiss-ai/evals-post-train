@@ -24,7 +24,7 @@ mathqa/acc
 mgsm_en_cot_en/exact_match
 minerva_math/math_verify
 # Coding
-humaneval_instruct/pass@10
+humaneval_instruct/pass@1
 mbpp_instruct/pass_at_1
 # Reasoning
 acp_bench/exact_match
