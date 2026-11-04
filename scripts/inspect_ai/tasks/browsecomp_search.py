@@ -19,7 +19,9 @@ from inspect_ai.agent import react, run
 from inspect_ai.solver import Generate, Solver, TaskState, solver
 from inspect_ai.tool import web_search
 
-logger = logging.getLogger(__name__)
+# Inspect only routes loggers under "inspect_ai" to the run output, so use that namespace
+# and also print, which reaches the pod log either way.
+logger = logging.getLogger("inspect_ai.browsecomp_search")
 
 
 @solver
@@ -45,14 +47,13 @@ def tavily_browsing_solver() -> Solver:
         # key, rate limit) otherwise looks like a model that simply got the answer wrong.
         tool_msgs = [m for m in agent_state.messages if getattr(m, "role", "") == "tool"]
         failed = [m for m in tool_msgs if getattr(m, "error", None)]
-        logger.warning(
-            "browsecomp_search sample=%s search_calls=%d tool_errors=%d",
-            state.sample_id,
-            len(tool_msgs),
-            len(failed),
-        )
+        summary = f"browsecomp_search sample={state.sample_id} search_calls={len(tool_msgs)} tool_errors={len(failed)}"
+        logger.warning(summary)
+        print(summary, flush=True)
         for m in (failed or tool_msgs)[:2]:
-            logger.warning("browsecomp_search sample=%s tool_result=%.200r", state.sample_id, m.text)
+            line = f"browsecomp_search sample={state.sample_id} tool_result={m.text[:200]!r}"
+            logger.warning(line)
+            print(line, flush=True)
         return state
 
     return solve
