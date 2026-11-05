@@ -38,6 +38,15 @@ bash scripts/lm_eval_harness/launch_evaluations.sh default --model meta-llama/Ll
   --name Llama-Baseline --limit 10 --no-wandb
 ```
 
+**lm-evaluation-harness, Apertus 2 native format**: a served Apertus 2 checkpoint through the CSCS serving API, 5 samples. `--tokenizer` is a local directory with the checkpoint's verified tokenizer (e.g. `tokenizers/Apertus_2_instruct` from [apertus-omni-tokenizer](https://github.com/swiss-ai/apertus-omni-tokenizer)), `--max-length` is the server's `--max-model-len`. Needs read access to the private `apertus-common` repository ([details](docs/lm-eval-harness.md#apertus-2-native-format)).
+
+```bash
+bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k --limit 5 --no-wandb \
+  --backend openai --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --api-model-name SwissAI-Research/swiss-ai/chonk-lc-16k-v0.1-ep1-iter_0019374 \
+  --chat-format apertus2 --tokenizer <tokenizer dir> --max-length 16384
+```
+
 **Inspect AI**: tau2-bench retail, a served model as the simulated customer.
 
 ```bash
