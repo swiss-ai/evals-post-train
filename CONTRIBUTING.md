@@ -50,4 +50,4 @@ Edit the `requirements/*.txt`, run `scripts/common/lock_requirements.sh` (needs 
 | `inspect-runtime`, `evalscope-runtime`, `harbor-runtime`, `harbor-adapters` | the `.lock` |
 | `lm-eval-runtime` | the `.lock` in the prebuilt image (`openai` backend); the `.txt` by in-job backends, whose containers provide torch |
 | `lm-eval-harness.txt` | no lock: the harness commit, installed `--no-deps` (its dependencies go in `lm-eval-runtime.txt`) |
-| `apertus2.txt` | no lock: the `apertus-common` commit, installed `--no-deps` into the harness overlay (in the prebuilt image, and in built environments for `--chat-format apertus2` runs); its dependencies are in `lm-eval-runtime.lock` |
+| `apertus2.txt` | no lock: the `apertus-common` commit, installed `--no-deps` for `--chat-format apertus2` runs: into the harness overlay of built environments, and at job start on the prebuilt image (not in the image: private repository); its dependencies are in `lm-eval-runtime.lock` |

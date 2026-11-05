@@ -566,8 +566,9 @@ bash scripts/lm_eval_harness/launch_evaluations.sh custom \
 - **Refused:** `--thinking`, `--(no-)enable-thinking`, think tokens, `--track-thinking-metrics`,
   `--no-chat-template`, `--chat-template-by-type`, `--api-endpoint chat-completions`, `--bos`,
   `--convert-to-hf`.
-- **Environment:** `apertus-common` (`requirements/apertus2.txt`) goes into the harness overlay, in
-  the prebuilt image and in built environments alike. Both pins (harness and `apertus-common`)
+- **Environment:** `apertus-common` (`requirements/apertus2.txt`, a private repository, so the
+  job needs git read access) is installed `--no-deps` into a separate harness overlay in built
+  environments, and at job start on the prebuilt image. Both pins (harness and `apertus-common`)
   are in the run config, so bumping one reruns earlier results of the same run name.
 - **Tables:** `make_html_table.py --thinking --length-unit words` (API models report no token
   lengths), with truncation and parse-failure rates.
@@ -730,8 +731,7 @@ in `requirements/lm-eval-harness.txt` (as `--no-deps` overlays under
 `/opt/lm-eval-harness/<owner>/<repo>`, the same layout `build_eval_env.sh`
 produces). lm-eval's own packages live in `/opt/lm-eval-venv` (`LM_EVAL_VENV`),
 which comes first on `PATH`, so the image's `python` is that venv's (Python 3.13, as
-`apertus-common` requires). `apertus-common` is in each overlay too, its pinned commit in
-`.apertus-common`, which `run_lm_eval.sbatch` checks like the harness's `.commit`. CI (`.github/workflows/eval-image.yml`) publishes it for every
+`apertus-common` requires). CI (`.github/workflows/eval-image.yml`) publishes it for every
 pushed commit as `ghcr.io/swiss-ai/evals-post-train-eval:<commit>`.
 
 The locks pin every package and dependency, so two builds get the same versions
