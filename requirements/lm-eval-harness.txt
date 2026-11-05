@@ -4,4 +4,4 @@
 # One "<owner>/<repo> <full commit>" per line; bump a commit here to ship a
 # newer harness, and check requirements/lm-eval-runtime.txt: it is installed
 # --no-deps, so the locks don't see its dependencies.
-swiss-ai/lm-evaluation-harness a5195753b67564fe4f0ca4d4350bc32d7799e7d3
+swiss-ai/lm-evaluation-harness 3fade7cafe9c20112922886c7b52f91cc9b95176
