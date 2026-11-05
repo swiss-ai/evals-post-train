@@ -566,9 +566,13 @@ bash scripts/lm_eval_harness/launch_evaluations.sh custom \
 - **Refused:** `--thinking`, `--(no-)enable-thinking`, think tokens, `--track-thinking-metrics`,
   `--no-chat-template`, `--chat-template-by-type`, `--api-endpoint chat-completions`, `--bos`,
   `--convert-to-hf`.
-- **Environment:** `apertus-common` (`requirements/apertus2.txt`, a private repository, so the
-  job needs git read access) is installed `--no-deps` into a separate harness overlay in built
-  environments, and at job start on the prebuilt image. Both pins (harness and `apertus-common`)
+- **Environment:** `apertus-common` (`requirements/apertus2.txt`, a private repository) is installed
+  `--no-deps` into a separate harness overlay in built environments (the job needs git read access).
+  On the prebuilt image the launcher needs that access instead: `prepare_apertus_common.sh` clones the
+  pinned commit and builds a wheel into `$EVAL_ENV_CACHE_ROOT/apertus-common/<commit>/` (default
+  `$SCRATCH/eval-envs`, once per commit), and the job installs it offline, so the container must mount
+  that directory. Where HTTPS has no credential, rewrite it for git, e.g.
+  `git config --global url."git@github.com:".insteadOf https://github.com/`. Both pins (harness and `apertus-common`)
   are in the run config, so bumping one reruns earlier results of the same run name.
 - **Tables:** `make_html_table.py --thinking --length-unit words` (API models report no token
   lengths), with truncation and parse-failure rates.

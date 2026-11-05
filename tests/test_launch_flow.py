@@ -225,15 +225,26 @@ class LaunchFlowTests(unittest.TestCase):
                     manifest,
                 )
 
-    def test_prebuilt_apertus2_run_installs_the_pinned_apertus_common(self) -> None:
+    def test_prebuilt_apertus2_run_names_the_wheel_of_the_pinned_apertus_common(self) -> None:
+        pin = (REPO_ROOT / "requirements/apertus2.txt").read_text().rsplit("@", 1)[1].strip()
         api = ["single", "--task", "gsm8k", "--backend", "openai", "--api-base-url", "http://localhost:8000",
                "--api-model-name", "test-model"]
-        completed, _ = _prebuilt_dry_run(
-            *api, "--chat-format", "apertus2", "--tokenizer", "/ckpt", "--max-length", "65536",
-        )
-        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
-        # The image has no apertus-common: the job installs what requirements/apertus2.txt pins.
-        self.assertIn("-r '$EVAL_REPO_ROOT/requirements/apertus2.txt'", SBATCH)
+        with tempfile.TemporaryDirectory() as cache:
+            completed, manifest = _prebuilt_dry_run(
+                *api, "--chat-format", "apertus2", "--tokenizer", "/ckpt", "--max-length", "65536",
+                EVAL_ENV_CACHE_ROOT=cache,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            # The image has no apertus-common: the launcher names the wheel it builds for the pin
+            # (a dry run builds nothing), and the job installs that offline.
+            self.assertIn(f"EVAL_APERTUS_COMMON_WHEELS={cache}/apertus-common/{pin}", manifest)
+            self.assertFalse(list(Path(cache).rglob("*.whl")))
+            # Other runs don't need it.
+            completed, manifest = _prebuilt_dry_run(*api, EVAL_ENV_CACHE_ROOT=cache)
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            self.assertNotIn("EVAL_APERTUS_COMMON_WHEELS", manifest)
+        self.assertIn("'$EVAL_APERTUS_COMMON_WHEELS'/*.whl", SBATCH)
+        self.assertIn("--no-index", SBATCH)
 
     def test_prebuilt_environment_refuses_a_harness_branch(self) -> None:
         completed, _ = _prebuilt_dry_run(
