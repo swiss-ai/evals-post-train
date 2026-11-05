@@ -299,8 +299,6 @@ case "$CHAT_FORMAT" in
     template) ;;
     apertus2)
         PREFILL_MODE=${PREFILL_MODE:-after_think}
-        [[ "${EVAL_ENV_KIND:-}" != "prebuilt" ]] \
-            || die "CHAT_FORMAT=apertus2 needs a built environment: the prebuilt image has no apertus-common (a private repository)."
         [[ -n "${TOKENIZER:-}" ]] || die "CHAT_FORMAT=apertus2 needs TOKENIZER, the checkpoint's tokenizer."
         [[ "$BOS" != "true" ]] || die "CHAT_FORMAT=apertus2 renders the BOS token itself: unset BOS."
         [[ "$LM_EVAL_BACKEND" == "openai" && "${API_CHAT_ENDPOINT:-false}" != "true" && $APPLY_CHAT_TEMPLATE = true ]] \
@@ -774,8 +772,22 @@ echo "Using lm-evaluation-harness: $EVAL_RESOLVED_HARNESS_REPO@$EVAL_RESOLVED_HA
 
 if [[ "${EVAL_ENV_KIND:-}" == "prebuilt" ]]; then
 # EVAL_PREBUILT_ENV=1: the container (containers/Dockerfile.eval) already has
-# every package and the pinned harness. Check it, never install: a mismatch
-# means the job runs in an image built from a different commit.
+# every package and the pinned harness. Check it, never install: a mismatch means the job runs
+# in an image built from a different commit. The one exception is apertus-common (a private
+# repository, so not in the image): an apertus2 run installs the commit requirements/apertus2.txt
+# pins, --no-deps like the harness, into a directory of its own ahead of the overlay.
+APERTUS_COMMON_INSTALL=""
+APERTUS_COMMON_IMPORT=""
+if [[ "$CHAT_FORMAT" == "apertus2" ]]; then
+APERTUS_COMMON_IMPORT=", apertus_common"
+APERTUS_COMMON_INSTALL="
+apertus_common_dir=\$(mktemp -d)
+if ! python -m pip install --quiet --no-deps --target \"\$apertus_common_dir\" -r '$EVAL_REPO_ROOT/requirements/apertus2.txt'; then
+    echo 'Installing apertus-common (requirements/apertus2.txt) failed: this needs read access to the repository.' >&2
+    exit 1
+fi
+export PYTHONPATH=\"\$apertus_common_dir\"\${PYTHONPATH:+:\$PYTHONPATH}"
+fi
 LOAD_ENV_CMD="
 echo Container entered: \$(date -Is)
 if [[ ! -f '$EVAL_HARNESS_OVERLAY/.complete' || ! -d '$EVAL_HARNESS_OVERLAY/lm_eval' ]]; then
@@ -788,7 +800,8 @@ if [[ \"\$container_harness_commit\" != '$EVAL_RESOLVED_HARNESS_COMMIT' ]]; then
     exit 1
 fi
 export PYTHONPATH='$EVAL_HARNESS_OVERLAY'\${PYTHONPATH:+:\$PYTHONPATH}
-if ! python -c 'import accelerate, datasets, transformers, wandb, lm_eval'; then
+$APERTUS_COMMON_INSTALL
+if ! python -c 'import accelerate, datasets, transformers, wandb, lm_eval${APERTUS_COMMON_IMPORT}'; then
     echo 'EVAL_PREBUILT_ENV=1, but this container is missing evaluation packages (import check above).' >&2
     exit 1
 fi

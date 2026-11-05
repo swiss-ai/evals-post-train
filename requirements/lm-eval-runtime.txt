@@ -51,3 +51,7 @@ subset2evaluate
 alpaca-eval>=0.6.2
 peft>=0.19.0
 wandb>=0.20.1
+# apertus-common (requirements/apertus2.txt) is installed --no-deps like the harness: these are its
+# dependencies. Its tokenizers floor is the one above, and transformers>=5.16 accepts it.
+jsonschema>=4.26.0
+pydantic>=2.13.4
