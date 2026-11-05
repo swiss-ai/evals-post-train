@@ -21,6 +21,11 @@ What the Docker manager does and how it maps here (as in scripts/common/k8s_sand
 - execute_tool("shell_executor"): the same argv under GNU timeout, in the config's working_dir,
   with the same ToolResult status/output/error shapes ms-enclave's ShellExecutor returns. A
   command whose stream ended without a result is an error, never exit code 0.
+- The network policy: public, except an agent's sandbox when install() was given
+  agent_allowed_hosts (SWE-bench: scripts/common/swe_bench_egress.py): deny by default plus an
+  allow rule per host, enforced by the egress sidecar. The agent's sandboxes are told apart by
+  an environment variable EvalScope's agent environment adds (AGENT_ROLE_ENV, removed again
+  before the sandbox is created); scoring sandboxes keep their network.
 - delete_sandbox: kills the sandbox. A runner that dies leaves its sandboxes until their timeout
   (SANDBOX_TIMEOUT_SEC); the runner deletes leftovers of its run label at the end.
 
@@ -56,6 +61,10 @@ from scripts.common.k8s_sandbox import (
 DEFAULT_DOMAIN = "opensandbox-kata.breithorn.svc.cscs.ch"
 RUN_LABEL_ENV = "OPENSANDBOX_RUN_LABEL"
 RUN_LABEL_KEY = "sandbox-run"
+# Set by install(agent_allowed_hosts=...): what an agent's sandbox may reach (None: everything).
+AGENT_ALLOWED_HOSTS: Optional[tuple] = None
+# Marks an agent's sandbox config (EnclaveAgentEnvironment); never reaches the sandbox.
+AGENT_ROLE_ENV = "EVALS_SANDBOX_ROLE"
 # Creating a sandbox can wait on a pull of a several-GB image (the SDK's default request is 30 s).
 REQUEST_TIMEOUT_SEC = 300
 READY_TIMEOUT_SEC = 1800
@@ -152,18 +161,19 @@ class OpenSandboxSandboxManager:
 
     async def create_sandbox(self, sandbox_type: Any = None, config: Any = None, sandbox_id: Optional[str] = None) -> str:
         from opensandbox import Sandbox
-        from opensandbox.models.sandboxes import NetworkPolicy
 
         sandbox_id = sandbox_id or uuid.uuid4().hex[:12]
+        env = {k: str(v) for k, v in (_cfg(config, "env_vars") or {}).items()}
+        agent = env.pop(AGENT_ROLE_ENV, None) == "agent"
         sandbox = await Sandbox.create(
             _cfg(config, "image"),
             timeout=timedelta(seconds=SANDBOX_TIMEOUT_SEC),
             ready_timeout=timedelta(seconds=READY_TIMEOUT_SEC),
-            env={k: str(v) for k, v in (_cfg(config, "env_vars") or {}).items()} or None,
+            env=env or None,
             metadata={RUN_LABEL_KEY: self._run_label, "sandbox-id": sandbox_id},
             resource=resources(config),
             platform=platform_spec(config),
-            network_policy=NetworkPolicy(defaultAction="allow", egress=[]),
+            network_policy=network_policy(agent),
             secure_access=True,
             connection_config=connection_config(),
             health_check_polling_interval=timedelta(seconds=HEALTH_POLL_SEC),
@@ -323,12 +333,46 @@ class OpenSandboxSandboxManager:
         raise NotImplementedError("the OpenSandbox backend has no pools (per-sample sandboxes only)")
 
 
-def install() -> None:
+def network_policy(agent: bool) -> Any:
+    """Public, or for an agent's sandbox with AGENT_ALLOWED_HOSTS set, deny plus those hosts."""
+    from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule
+
+    if not agent or AGENT_ALLOWED_HOSTS is None:
+        return NetworkPolicy(defaultAction="allow", egress=[])
+    return NetworkPolicy(
+        defaultAction="deny", egress=[NetworkRule(action="allow", target=host) for host in AGENT_ALLOWED_HOSTS]
+    )
+
+
+def _mark_agent_sandboxes() -> None:
+    """Tag the sandbox config of EvalScope's agent environment (the agent loop's sandbox), which
+    scoring sandboxes don't go through, with AGENT_ROLE_ENV."""
+    from evalscope.agent.environments.enclave import EnclaveAgentEnvironment
+
+    original = EnclaveAgentEnvironment.__init__
+    if getattr(original, "_evals_agent_role", False):
+        return
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        original(self, *args, **kwargs)
+        config = self._sandbox_config_dict
+        config["env_vars"] = {**(config.get("env_vars") or {}), AGENT_ROLE_ENV: "agent"}
+
+    __init__._evals_agent_role = True
+    EnclaveAgentEnvironment.__init__ = __init__
+
+
+def install(agent_allowed_hosts: Optional[tuple] = None) -> None:
     """Route EvalScope's Docker sandbox engine to OpenSandboxSandboxManager, process-wide (the
-    same single patch point as k8s_sandbox.install())."""
+    same single patch point as k8s_sandbox.install()). agent_allowed_hosts: what the agent
+    loop's sandboxes may reach (None: everything)."""
     from evalscope.api.sandbox import SandboxEngine
     from evalscope.api.sandbox.service import SandboxService
 
+    global AGENT_ALLOWED_HOSTS
+    AGENT_ALLOWED_HOSTS = tuple(agent_allowed_hosts) if agent_allowed_hosts is not None else None
+    if AGENT_ALLOWED_HOSTS is not None:
+        _mark_agent_sandboxes()
     original = SandboxService._construct_manager
     if getattr(original, "_evals_opensandbox", False):
         return

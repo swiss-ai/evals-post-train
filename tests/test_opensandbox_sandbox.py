@@ -174,8 +174,74 @@ class CreateSandboxTest(unittest.TestCase):
         self.assertEqual(created["network_policy"].default_action, "allow")
 
 
+@unittest.skipUnless(HAS_OPENSANDBOX, "opensandbox not installed (requirements/evalscope-runtime.lock)")
+class AgentNetworkTest(unittest.TestCase):
+    def tearDown(self):
+        opensandbox_sandbox.AGENT_ALLOWED_HOSTS = None
+
+    def _created(self, env_vars):
+        async def run_command(argv, opts=None):
+            return SimpleNamespace(exit_code=0, logs=SimpleNamespace(stdout=[], stderr=[]), error=None)
+
+        created = {}
+
+        async def create(image, **kwargs):
+            created.update(kwargs)
+            return SimpleNamespace(id="sb", commands=SimpleNamespace(run=run_command))
+
+        with mock.patch.dict(os.environ, {"OPENSANDBOX_API_KEY": "k"}), mock.patch(
+            "opensandbox.Sandbox.create", side_effect=create
+        ):
+            asyncio.run(opensandbox_sandbox.OpenSandboxSandboxManager().create_sandbox(
+                config={"image": "img", "env_vars": env_vars}))
+        return created
+
+    def test_only_the_agents_sandbox_is_restricted(self):
+        opensandbox_sandbox.AGENT_ALLOWED_HOSTS = ("pypi.org", "files.pythonhosted.org")
+        agent = self._created({"PAGER": "cat", opensandbox_sandbox.AGENT_ROLE_ENV: "agent"})
+        policy = agent["network_policy"]
+        self.assertEqual(policy.default_action, "deny")
+        self.assertEqual([(r.action, r.target) for r in policy.egress],
+                         [("allow", "pypi.org"), ("allow", "files.pythonhosted.org")])
+        # The marker never reaches the sandbox.
+        self.assertEqual(agent["env"], {"PAGER": "cat"})
+        # Scoring sandboxes keep their network.
+        self.assertEqual(self._created({})["network_policy"].default_action, "allow")
+
+    def test_the_runner_allows_package_indexes_and_the_model_endpoint(self):
+        from scripts.common.swe_bench_egress import AGENT_ALLOWED_HOSTS
+
+        def args(*extra):
+            return run.parse_args(["--benchmark", "swe_bench", "--work-dir", "w", "--model", "m",
+                                   "--api-base-url", "https://api.example.ch/v1", *extra])
+
+        self.assertEqual(run.agent_allowed_hosts(args()), AGENT_ALLOWED_HOSTS + ("api.example.ch",))
+        self.assertIsNone(run.agent_allowed_hosts(args("--agent-network", "public")))
+        gold = run.parse_args(["--benchmark", "swe_bench", "--work-dir", "w", "--gold"])
+        self.assertEqual(run.agent_allowed_hosts(gold), AGENT_ALLOWED_HOSTS)
+
+    def test_public_without_an_allowlist(self):
+        created = self._created({opensandbox_sandbox.AGENT_ROLE_ENV: "agent"})
+        self.assertEqual(created["network_policy"].default_action, "allow")
+        self.assertIsNone(created["env"])
+
+
 @unittest.skipUnless(importlib.util.find_spec("evalscope") is not None, "evalscope not installed")
 class InstallTest(unittest.TestCase):
+    def test_agent_environments_are_marked_once_an_allowlist_is_installed(self):
+        from evalscope.agent.environments.enclave import EnclaveAgentEnvironment
+        from evalscope.api.sandbox.service import SandboxService
+
+        original_init, original_manager = EnclaveAgentEnvironment.__init__, SandboxService._construct_manager
+        try:
+            opensandbox_sandbox.install(("pypi.org",))
+            env = EnclaveAgentEnvironment(engine="docker", sandbox_config={"image": "img", "env_vars": {"A": "1"}})
+            self.assertEqual(env._sandbox_config_dict["env_vars"], {"A": "1", opensandbox_sandbox.AGENT_ROLE_ENV: "agent"})
+            self.assertEqual(opensandbox_sandbox.AGENT_ALLOWED_HOSTS, ("pypi.org",))
+        finally:
+            EnclaveAgentEnvironment.__init__, SandboxService._construct_manager = original_init, original_manager
+            opensandbox_sandbox.AGENT_ALLOWED_HOSTS = None
+
     def test_install_routes_the_docker_engine_to_opensandbox(self):
         from evalscope.api.sandbox import SandboxEngine
         from evalscope.api.sandbox.service import SandboxService

@@ -5,8 +5,11 @@ Each patch checks that the text it replaces is there, so a changed dataset fails
 of running unpatched.
 """
 
+import json
 import re
 from pathlib import Path
+
+from scripts.common.swe_bench_egress import AGENT_ALLOWED_HOSTS
 
 
 def _replace(path: Path, old: str, new: str) -> None:
@@ -56,3 +59,19 @@ def patch_aider_polyglot(dataset_dir: Path) -> None:
             _sub_all((task / "tests").glob("*.spec.js"), r"\bx(test|it)\(", r"\1(")
         elif language == "java":
             _sub_all((task / "tests").rglob("*.java"), r'@Disabled(\("[^"]*"\))?', "")
+
+
+def patch_swe_bench_agent_egress(dataset_dir: Path) -> None:
+    """The agent phase may only reach package indexes (scripts/common/swe_bench_egress.py), not
+    the code hosts that have each task's fix. The published SWE-bench tasks set no network
+    policy, so the agent had open internet; the environment's setup and the verifier keep it.
+    Harbor switches the sandbox's policy around the agent phase (docker, k8s and opensandbox
+    all support that)."""
+    tomls = sorted(dataset_dir.glob("*/task.toml"))
+    if not tomls:
+        raise ValueError(f"no tasks in {dataset_dir}")
+    hosts = ", ".join(json.dumps(host) for host in AGENT_ALLOWED_HOSTS)
+    for toml in tomls:
+        if "network_mode" in toml.read_text():
+            raise ValueError(f"{toml}: already sets a network policy; check it before overriding")
+        _replace(toml, "[agent]\n", f'[agent]\nnetwork_mode = "allowlist"\nallowed_hosts = [{hosts}]\n')

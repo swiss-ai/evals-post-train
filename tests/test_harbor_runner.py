@@ -32,11 +32,24 @@ class RunArgsTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             run.parse_args(["--benchmark", "swe_bench_v2", "--gold", "--work-dir", "w", "--sandbox", "docker"])
 
-    def test_docker_only_benchmarks_refuse_k8s(self):
+    def test_wildcard_allowlist_benchmarks_refuse_k8s(self):
         for name in ("senior_swe_bench",):
             with self.assertRaises(SystemExit):
                 run.parse_args(["--benchmark", name, "--gold", "--work-dir", "w", "--sandbox", "k8s"])
             run.parse_args(["--benchmark", name, "--gold", "--work-dir", "w", "--sandbox", "docker"])
+            with mock.patch.dict(os.environ, {"OPENSANDBOX_API_KEY": "k"}):
+                run.parse_args(["--benchmark", name, "--gold", "--work-dir", "w", "--sandbox", "opensandbox"])
+
+    def test_senior_swe_bench_model_runs_need_a_grader_key(self):
+        model = ["--benchmark", "senior_swe_bench", "--model", "m", "--api-base-url", "u", "--work-dir", "w", "--sandbox", "docker"]
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                run.parse_args(model)
+            # --gold checks environments and tests, without the judges.
+            run.parse_args(["--benchmark", "senior_swe_bench", "--gold", "--work-dir", "w", "--sandbox", "docker"])
+        for key in ("ANTHROPIC_API_KEY", "PORTKEY_API_KEY"):
+            with mock.patch.dict(os.environ, {key: "k"}, clear=True):
+                run.parse_args(model)
 
     def test_every_dataset_is_pinned(self):
         for name, spec in run.BENCHMARKS.items():
@@ -57,8 +70,8 @@ class HarborCommandTest(unittest.TestCase):
             self.assertTrue(any(cmd[i : i + len(flags)] == flags for i in range(len(cmd))), flags)
 
     def test_gold_on_docker(self):
-        args = run.parse_args(["--benchmark", "swe_bench", "--gold", "--work-dir", "w", "--sandbox", "docker"])
-        cmd = run.harbor_command(args, "swe_bench", Path("w/jobs"))
+        args = run.parse_args(["--benchmark", "terminal_bench_2", "--gold", "--work-dir", "w", "--sandbox", "docker"])
+        cmd = run.harbor_command(args, "terminal_bench_2", Path("w/jobs"))
         self.assertIn("oracle", cmd)
         self.assertEqual(cmd[cmd.index("--env") + 1], run.DOCKER_ENVIRONMENT)
         self.assertNotIn("-m", cmd)
@@ -93,6 +106,29 @@ class HarborCommandTest(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("-p") + 1], str(tasks))
         self.assertEqual(cmd[cmd.index("-i") + 1], "polyglot_rust_*")
         self.assertNotIn("-d", cmd)
+
+    def test_swe_bench_agents_get_the_allowlist_unless_asked_for_public(self):
+        def download(cmd, check):
+            Path(cmd[cmd.index("-o") + 1], "swebench-verified").mkdir(parents=True)
+
+        for name in ("swe_bench", "swe_bench_pro"):
+            self.assertTrue(run.BENCHMARKS[name]["agent_allowlist"])
+        with tempfile.TemporaryDirectory() as w:
+            args = run.parse_args(["--benchmark", "swe_bench", "--gold", "--work-dir", w, "--sandbox", "docker"])
+            self.assertEqual(args.agent_network, "allowlist")
+            self.assertEqual(run.task_patches(args, "swe_bench"), [task_patches.patch_swe_bench_agent_egress])
+            with mock.patch.object(run.subprocess, "run", side_effect=download), \
+                    mock.patch.object(run, "patch_swe_bench_agent_egress") as egress:
+                cmd = run.harbor_command(args, "swe_bench", Path(w, "jobs"))
+            egress.assert_called_once_with(Path(w, "tasks", "swe_bench", "swebench-verified"))
+            self.assertNotIn("-d", cmd)
+            public = run.parse_args(["--benchmark", "swe_bench", "--gold", "--work-dir", w, "--sandbox", "docker",
+                                     "--agent-network", "public"])
+            self.assertEqual(run.task_patches(public, "swe_bench"), [])
+            cmd = run.harbor_command(public, "swe_bench", Path(w, "jobs"))
+            self.assertEqual(cmd[cmd.index("-d") + 1], "swebench-verified@1.0")
+        # Other benchmarks keep their own policies.
+        self.assertEqual(run.task_patches(args, "deep_swe"), [])
 
     def test_installed_adapter_is_used(self):
         with tempfile.TemporaryDirectory() as root:
@@ -186,6 +222,40 @@ class TaskPatchesTest(unittest.TestCase):
             Path(tests, rel).parent.mkdir(parents=True, exist_ok=True)
             Path(tests, rel).write_text(text)
         return tests
+
+    def test_swe_bench_agent_phase_is_restricted_to_package_indexes(self):
+        import tomllib
+
+        from scripts.common.swe_bench_egress import AGENT_ALLOWED_HOSTS
+
+        published = (
+            '[metadata]\nauthor_name = "unknown"\n\n[verifier]\ntimeout_sec = 3000\n\n'
+            "[agent]\n# Set to same as verifier\ntimeout_sec = 3000\n\n"
+            "[environment]\nbuild_timeout_sec = 1800.0\ncpus = 1\nmemory = '4G'\n"
+        )
+        with tempfile.TemporaryDirectory() as d:
+            toml = Path(d, "django__django-11099", "task.toml")
+            toml.parent.mkdir()
+            toml.write_text(published)
+            task_patches.patch_swe_bench_agent_egress(Path(d))
+            config = tomllib.loads(toml.read_text())
+            self.assertEqual(config["agent"]["network_mode"], "allowlist")
+            self.assertEqual(config["agent"]["allowed_hosts"], list(AGENT_ALLOWED_HOSTS))
+            self.assertEqual(config["agent"]["timeout_sec"], 3000)
+            # Setup and the verifier keep the published (public) policy.
+            self.assertNotIn("network_mode", config["environment"])
+            self.assertNotIn("network_mode", config["verifier"])
+            if importlib.util.find_spec("harbor") is not None:
+                from harbor.models.task.config import NetworkMode, TaskConfig
+
+                policy = TaskConfig.model_validate(config).agent.explicit_phase_policy()
+                self.assertEqual(policy.network_mode, NetworkMode.ALLOWLIST)
+            # A task that already sets a policy is not overridden blindly.
+            with self.assertRaises(ValueError):
+                task_patches.patch_swe_bench_agent_egress(Path(d))
+        self.assertNotIn("github.com", AGENT_ALLOWED_HOSTS)
+        self.assertNotIn("proxy.golang.org", AGENT_ALLOWED_HOSTS)
+        self.assertFalse(any("*" in host for host in AGENT_ALLOWED_HOSTS))  # k8s NetworkPolicies too
 
     def test_aider_polyglot_runs_every_test(self):
         with tempfile.TemporaryDirectory() as d:

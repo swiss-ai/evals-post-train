@@ -12,9 +12,9 @@
 #   terminal_bench_4   Terminal-Bench 4.0.0, 66 tasks
 #   deep_swe           DeepSWE v1.1, 113 tasks
 #   slop_code_bench    SlopCodeBench, 36 problems
-#   senior_swe_bench   Senior SWE-bench v2026.06, 50 public tasks (--sandbox docker only: wildcard-
-#                       hostname network allowlists, which a NetworkPolicy cannot express; its
-#                       LLM graders need ANTHROPIC_API_KEY or PORTKEY_API_KEY)
+#   senior_swe_bench   Senior SWE-bench v2026.06, 50 public tasks (--sandbox docker or opensandbox, not
+#                       k8s: wildcard-hostname network allowlists, which a NetworkPolicy cannot
+#                       express; its LLM graders need ANTHROPIC_API_KEY or PORTKEY_API_KEY)
 #   aider_polyglot     Aider Polyglot, 225 exercises
 #
 # The datasets are pinned in scripts/harbor/run.py (BENCHMARKS). Harbor lives in its own
@@ -58,6 +58,11 @@
 #   --max-concurrency <n>       Trials in flight at once = containers alive at once (default: 4).
 #   --attempts <n>              Attempts per task (default: 1; more add Harbor's pass@k to summary.json).
 #   --timeout-multiplier <f>    Multiplies every task's timeouts (default: 1.0).
+#   --agent-network allowlist|public  SWE-bench Verified/Pro: during the agent phase the sandbox
+#                               reaches only package indexes (allowlist, the default), not GitHub
+#                               and the other hosts that have each task's fix, as SWE-bench's
+#                               leaderboard checklist asks; public is the published tasks' open
+#                               internet (scripts/common/swe_bench_egress.py).
 #   --wandb-entity <entity>     W&B entity and project to upload the results to (also WANDB_ENTITY,
 #   --wandb-project <project>   WANDB_PROJECT; default apertus/apertus-1.5-post-training-v0.1): one
 #                               run named --name, per benchmark its reward (or verifier metrics),
@@ -120,7 +125,7 @@ while (( $# > 0 )); do
         --wandb-entity) WANDB_ENTITY=$2; shift 2 ;;
         --wandb-project) WANDB_PROJECT=$2; shift 2 ;;
         --no-wandb) NO_WANDB=1; shift ;;
-        --benchmark|--agent|--agent-kwarg|--limit|--task|--max-concurrency|--attempts|--timeout-multiplier)
+        --benchmark|--agent|--agent-kwarg|--agent-network|--limit|--task|--max-concurrency|--attempts|--timeout-multiplier)
             RUN_ARGS+=("$1" "$2"); shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "Unknown argument: $1 (see --help)" ;;
@@ -161,6 +166,10 @@ WORK_DIR=${WORK_DIR:-"logs/harbor/$NAME"}
 if [[ "$SANDBOX" == opensandbox && -n "${OPENSANDBOX_API_KEY:-}" ]]; then
     export OPENSANDBOX_API_KEY
 fi
+# Senior SWE-bench's LLM graders, read by its verifier (scripts/harbor/run.py: grader_keys).
+for key in ANTHROPIC_API_KEY PORTKEY_API_KEY; do
+    if [[ -n "${!key:-}" ]]; then export "${key?}"; fi
+done
 # Not HARBOR_API_KEY: Harbor reads that as its Harbor Hub credential.
 export EVAL_MODEL_API_KEY="${TARGET_API_KEY:-${CSCS_SERVING_API:-}}"
 

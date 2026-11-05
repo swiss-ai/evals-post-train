@@ -73,6 +73,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--work-dir", required=True)
     p.add_argument("--sandbox", choices=("docker", "k8s", "opensandbox"), default="docker")
     p.add_argument("--sandbox-config", default="{}", help="JSON merged into every sandbox's config.")
+    p.add_argument(
+        "--agent-network",
+        choices=("allowlist", "public"),
+        default="allowlist",
+        help="--sandbox opensandbox: the agent loop's sandboxes reach only package indexes "
+        "(allowlist, the default; scripts/common/swe_bench_egress.py) or the whole internet "
+        "(public). Scoring keeps its network. Other sandboxes are always public.",
+    )
     p.add_argument("--limit", type=float, default=None)
     p.add_argument("--shuffle", action="store_true", help="Shuffle (seed 42) before --limit.")
     p.add_argument("--max-concurrency", type=int, default=4)
@@ -89,6 +97,22 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     if args.sandbox == "opensandbox" and not os.environ.get("OPENSANDBOX_API_KEY"):
         p.error("--sandbox opensandbox needs OPENSANDBOX_API_KEY")
     return args
+
+
+def agent_allowed_hosts(args: argparse.Namespace) -> Optional[tuple]:
+    """What the agent loop's sandboxes may reach with --sandbox opensandbox (None: everything):
+    package indexes (scripts/common/swe_bench_egress.py) and, as Harbor adds it, the model
+    endpoint's host, for an agent that runs inside the sandbox and calls the model from there
+    (EvalScope's external runners; they also install themselves from other hosts, so they need
+    --agent-network public). The default strategies call the model from this process."""
+    if args.agent_network != "allowlist":
+        return None
+    from urllib.parse import urlsplit
+
+    from scripts.common.swe_bench_egress import AGENT_ALLOWED_HOSTS
+
+    host = urlsplit(args.api_base_url).hostname if args.api_base_url else None
+    return AGENT_ALLOWED_HOSTS + ((host,) if host and host not in AGENT_ALLOWED_HOSTS else ())
 
 
 def parse_pairs(pairs: List[str], flag: str, as_json: bool) -> Dict[str, Any]:
@@ -306,7 +330,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         # One label for the whole run, so its leftovers can be deleted at the end.
         os.environ.setdefault(opensandbox_sandbox.RUN_LABEL_ENV, f"evalscope-{uuid.uuid4().hex[:12]}")
-        opensandbox_sandbox.install()
+        opensandbox_sandbox.install(agent_allowed_hosts(args))
         signal.signal(signal.SIGTERM, exit_on_sigterm)
     if args.gold:
         install_gold()
@@ -331,6 +355,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         "api_base_url": args.api_base_url,
         "sandbox": args.sandbox,
         **({"opensandbox_endpoint": opensandbox_endpoint()} if args.sandbox == "opensandbox" else {}),
+        # Only enforced on OpenSandbox; docker and k8s sandboxes have open internet.
+        "agent_network": args.agent_network if args.sandbox == "opensandbox" else "public",
         "dataset_revisions": revisions,
         "limit": cfg.get("limit"),
         "reports": collect_reports(args.work_dir),
