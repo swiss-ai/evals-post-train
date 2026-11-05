@@ -813,10 +813,11 @@ evaluate==0.4.6 \
     --hash=sha256:bca85bc294f338377b7ac2f861e21c308b11b2a285f510d7d5394d5df437db29 \
     --hash=sha256:e07036ca12b3c24331f83ab787f21cc2dbf3631813a1631e63e40897c69a3f21
     # via -r requirements/lm-eval-runtime.txt
-filelock==4.2.6 \
-    --hash=sha256:ee7af8ede36dcaf12e1016d9f7c3a63ecd5497d46f85dab21b8c779b8f944e97 \
-    --hash=sha256:fd7d4fca497bf3e3d0945a13261f8e684f2aef12ce7cf76aef26e13bf7388b88
+filelock==3.29.7 \
+    --hash=sha256:5b481979797ae69e72f0b389d89a80bdd585c260c5b3f1fb9c0a5ba9bb3f195d \
+    --hash=sha256:987db6f789a3a2a59f55081801b2b3697cb97e2a736b5f1a9e99b559285fbc51
     # via
+    #   -r requirements/lm-eval-runtime.txt
     #   datasets
     #   huggingface-hub
     #   torch

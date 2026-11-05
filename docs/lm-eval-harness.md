@@ -71,6 +71,8 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--api-base-url <url>` | Endpoint for the `openai` backend (required with it). Accepts a bare host (`http://host:8000`), a `/v1` root, or a full `/v1/(chat/)completions` URL. |
 | `--api-model-name <name>` | `model` field sent in API requests (default: the `--model` value) |
 | `--api-requests-per-minute N` | Endpoint-wide request limit for the benchmarked model when using `--backend openai` (for example, `30`) |
+| `--chat-format <template\|apertus2>` | `apertus2`: the Apertus 2 native format (see [Apertus 2 native format](#apertus-2-native-format)); default `template` |
+| `--prefill-mode <after_think\|empty_think>` | `apertus2` answer prefills (default `after_think`) |
 | `--chunk-size N` | Maximum tasks per resumable Slurm-array element (default: 8) |
 | `--max-parallel N` | Cap concurrently running chunks; omitted means all generated chunks may run |
 | `--max-retries N` | Retry waves for missing tasks (default: 1); retry chunk size is halved |
@@ -534,6 +536,42 @@ Behaviour specific to `--thinking`:
 
 ---
 
+## Apertus 2 native format
+
+Post-trained Apertus 2 checkpoints use a native chat format instead of a Jinja template. With
+`--chat-format apertus2` the harness model `apertus2-completions` renders prompts and parses outputs
+with [`apertus-common`](https://github.com/swiss-ai/apertus-common) and sends text to
+`/v1/completions` (details: the harness's `docs/apertus2.md`).
+
+```bash
+bash scripts/lm_eval_harness/launch_evaluations.sh custom \
+  --task-file configs/apertus/tasks_posttrain_thinking.txt \
+  --table-metrics configs/apertus/tasks_posttrain_thinking_main_table.txt \
+  --backend openai --api-base-url <url> --api-model-name <served name> \
+  --chat-format apertus2 --tokenizer <checkpoint dir> --max-length 65536
+```
+
+- **Thinking run:** effort `medium` (`--reasoning-effort low|medium|high`), a 32768-token budget
+  for every task (`MAX_NEW_TOKENS`), sampling `THINK_TEMPERATURE`/`THINK_TOP_P` (0.6 / 0.95;
+  `THINK_TOP_K`, `THINK_MIN_P`, `THINK_REPETITION_PENALTY` only when set), length metrics.
+- **Context:** `--max-length` is the server's `--max-model-len` (65536 for the 32768 budget); the
+  model lowers the budget of long prompts instead of the server rejecting them.
+- **Answer prefills** (bbh cot, `arc_challenge_chat`, `drop`, `humaneval_instruct`,
+  `mbpp_instruct`): `--prefill-mode after_think` (default; thinks, then continues the prefix) or
+  `empty_think` (no reasoning under a prefix, like other thinking models: cross-model tables).
+- **Generative tasks only:** `custom` or `single` runs; the job stops if a task (or a group or tag
+  member) is scored by log-likelihood in its yaml (Python task classes such as `squadv2` are not
+  seen). `configs/apertus/tasks_posttrain_thinking.txt` holds the suite's generative tasks plus
+  `bfcl_v3_fc` (Apertus 2 and chat-completions runs only).
+- **Refused:** `--thinking`, `--(no-)enable-thinking`, think tokens, `--track-thinking-metrics`,
+  `--no-chat-template`, `--chat-template-by-type`, `--api-endpoint chat-completions`, `--bos`,
+  `--convert-to-hf`.
+- **Environment:** built environments only: `apertus-common` (`requirements/apertus2.txt`, a
+  private repository) goes into a separate harness overlay. Both pins (harness and `apertus-common`)
+  are in the run config, so bumping one reruns earlier results of the same run name.
+- **Tables:** `make_html_table.py --thinking --length-unit words` (API models report no token
+  lengths), with truncation and parse-failure rates.
+
 ## SBATCH Scripts
 
 ### `scripts/lm_eval_harness/run_lm_eval.sbatch`
@@ -576,6 +614,8 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `MEGATRON_MICRO_BATCH_SIZE` | numeric `BS`, otherwise `1` | Megatron micro-batch override. A numeric `BS` is forwarded automatically; `BS=auto:*` cannot be inferred by the adapter and falls back to 1. |
 | `THINK_TEMPERATURE` / `THINK_TOP_P` | `0.6` / `0.95` | Sampling for thinking runs (`do_sample=true` is forced — reasoning degrades under greedy) |
 | `THINK_REPETITION_PENALTY` | (unset) | Optional knob against degenerate looping in thinking runs (e.g. `1.05`) |
+| `THINK_TOP_K` / `THINK_MIN_P` | (unset) | Optional sampling of thinking runs, sent only when set |
+| `CHAT_FORMAT` / `PREFILL_MODE` | `template` / `after_think` | Set by `--chat-format` / `--prefill-mode` |
 | `NOTHINK_TEMPERATURE` / `NOTHINK_TOP_P` | (unset) / `0.95` | Optional sampling for NO-think runs (greedy-vs-sampling ablations); inert unless `NOTHINK_TEMPERATURE` is set |
 | `HARNESS_LIMIT` | (unset) | Limit number of samples per task (set by launcher flag `--limit`) |
 | `NUM_FEWSHOT` | (unset) | Global few-shot override |

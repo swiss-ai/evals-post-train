@@ -1,7 +1,25 @@
+import subprocess
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 from scripts.lm_eval_harness.task_output_types import Classifier
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# A stand-in lm_eval package for the command line: two tasks, one scored by log-likelihood.
+_FAKE_LM_EVAL = {
+    "lm_eval/__init__.py": "",
+    "lm_eval/tasks/_yaml_loader.py": "load_yaml = None\n",
+    "lm_eval/tasks/__init__.py": (
+        "from types import SimpleNamespace as N\n"
+        "class TaskManager:\n"
+        "    task_index = {name: N(kind=N(name='TASK'), yaml_path=None, cfg={'output_type': kind}, tags=())\n"
+        "                  for name, kind in [('gsm8k', 'generate_until'), ('hellaswag', 'multiple_choice')]}\n"
+    ),
+}
 
 
 def _entry(kind, cfg=None, tags=()):
@@ -41,6 +59,36 @@ class ClassifierTests(unittest.TestCase):
         chat, raw = self.classifier.split(["not_a_task", "py_task", "arc_easy"])
         self.assertEqual(chat, ["not_a_task", "py_task"])
         self.assertEqual(raw, ["arc_easy"])
+
+    def test_any_loglikelihood_member_is_reported(self) -> None:
+        # A generative-only model (CHAT_FORMAT=apertus2) cannot run a mixed group either.
+        tasks = ["gsm8k", "ifeval", "mc_group", "mixed_group", "ai2_arc", "wikitext", "not_a_task"]
+        self.assertEqual(
+            self.classifier.with_loglikelihood(tasks),
+            ["mc_group", "mixed_group", "ai2_arc", "wikitext"],
+        )
+
+
+class RequireGenerativeTests(unittest.TestCase):
+    def _run(self, *arguments: str) -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as tmp:
+            for path, text in _FAKE_LM_EVAL.items():
+                (Path(tmp) / path).parent.mkdir(parents=True, exist_ok=True)
+                (Path(tmp) / path).write_text(text)
+            return subprocess.run(
+                [sys.executable, "-m", "scripts.lm_eval_harness.task_output_types", *arguments],
+                cwd=REPO_ROOT, env={"PYTHONPATH": tmp}, capture_output=True, text=True,
+            )
+
+    def test_stops_on_a_loglikelihood_task(self) -> None:
+        refused = self._run("--tasks", "gsm8k,hellaswag", "--require-generative")
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("cannot do: hellaswag", refused.stderr)
+        accepted = self._run("--tasks", "gsm8k", "--require-generative")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+    def test_checking_and_writing_are_exclusive(self) -> None:
+        self.assertEqual(self._run("--tasks", "gsm8k", "--require-generative", "--output", "x").returncode, 2)
 
 
 if __name__ == "__main__":

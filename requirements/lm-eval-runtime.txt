@@ -19,6 +19,9 @@ word2number
 more_itertools
 typing_extensions
 huggingface-hub>=1.3.0,<2.0
+# code_eval (humaneval, mbpp) forks from a thread pool; from 3.30 filelock raises on concurrent forks
+# once a lock was used ("os.fork is unsafe while filelock is changing descriptor ownership").
+filelock<3.30
 transformers==5.12.1
 accelerate>=1.1.0
 antlr4-python3-runtime==4.11
