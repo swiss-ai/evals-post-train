@@ -225,6 +225,27 @@ class LaunchFlowTests(unittest.TestCase):
                     manifest,
                 )
 
+    def test_prebuilt_apertus2_run_names_the_wheel_of_the_pinned_apertus_common(self) -> None:
+        pin = (REPO_ROOT / "requirements/apertus2.txt").read_text().rsplit("@", 1)[1].strip()
+        api = ["single", "--task", "gsm8k", "--backend", "openai", "--api-base-url", "http://localhost:8000",
+               "--api-model-name", "test-model"]
+        with tempfile.TemporaryDirectory() as cache:
+            completed, manifest = _prebuilt_dry_run(
+                *api, "--chat-format", "apertus2", "--tokenizer", "/ckpt", "--max-length", "65536",
+                EVAL_ENV_CACHE_ROOT=cache,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            # The image has no apertus-common: the launcher names the wheel it builds for the pin
+            # (a dry run builds nothing), and the job installs that offline.
+            self.assertIn(f"EVAL_APERTUS_COMMON_WHEELS={cache}/apertus-common/{pin}", manifest)
+            self.assertFalse(list(Path(cache).rglob("*.whl")))
+            # Other runs don't need it.
+            completed, manifest = _prebuilt_dry_run(*api, EVAL_ENV_CACHE_ROOT=cache)
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            self.assertNotIn("EVAL_APERTUS_COMMON_WHEELS", manifest)
+        self.assertIn("'$EVAL_APERTUS_COMMON_WHEELS'/*.whl", SBATCH)
+        self.assertIn("--no-index", SBATCH)
+
     def test_prebuilt_environment_refuses_a_harness_branch(self) -> None:
         completed, _ = _prebuilt_dry_run(
             "single", "--task", "hellaswag", "--model", "test/model",
@@ -617,7 +638,6 @@ class LaunchFlowTests(unittest.TestCase):
             "prefill without apertus2": ([*api, "--prefill-mode", "empty_think"],
                                          "--prefill-mode only applies with --chat-format apertus2"),
             "unknown format": ([*api, "--chat-format", "harmony"], "--chat-format must be"),
-            "prebuilt image": (apertus2, "needs a built environment", {"EVAL_PREBUILT_ENV": "1"}),
             "bos": ([*apertus2, "--bos"], "drop --bos"),
             "ambient bos": (apertus2, "drop --bos", {"BOS": "true"}),
             "convert": ([*apertus2, "--model", "/meg/ckpt", "--convert-to-hf", "--megatron-iter", "1000"],
@@ -640,13 +660,15 @@ class LaunchFlowTests(unittest.TestCase):
     def test_evaluate_checks_apertus2_runs(self) -> None:
         accepted = _chat_format()
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        # The prebuilt image runs this format too (the job installs apertus-common).
+        prebuilt = _chat_format(EVAL_ENV_KIND="prebuilt")
+        self.assertEqual(prebuilt.returncode, 0, prebuilt.stderr)
         refusals = {
             "not openai": ({"LM_EVAL_BACKEND": "vllm"}, "renders every task as chat"),
             "chat endpoint": ({"API_CHAT_ENDPOINT": "true"}, "renders every task as chat"),
             "template off": ({"APPLY_CHAT_TEMPLATE": "false"}, "renders every task as chat"),
             "no context": ({"MAX_LENGTH": ""}, "needs MAX_LENGTH"),
             "no tokenizer": ({"TOKENIZER": ""}, "needs TOKENIZER"),
-            "prebuilt image": ({"EVAL_ENV_KIND": "prebuilt"}, "needs a built environment"),
             "bos": ({"BOS": "true"}, "unset BOS"),
             "prefill mode": ({"PREFILL_MODE": "reject"}, "PREFILL_MODE must be"),
             "thinking switch": ({"ENABLE_THINKING_EXPLICIT": "1"}, "always reasons"),

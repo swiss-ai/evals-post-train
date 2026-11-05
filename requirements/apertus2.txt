@@ -1,5 +1,8 @@
-# For --chat-format apertus2 runs only: installed into their harness overlay with
-# --no-deps --ignore-requires-python (scripts/lm_eval_harness/build_eval_env.sh); its
-# dependencies come with lm-eval-runtime.lock. Validated on Python 3.12 and tokenizers 0.22,
-# although it declares 3.13 and 0.23. Private repository: needs HTTPS read access.
+# For --chat-format apertus2 runs: installed --no-deps into the harness overlay by
+# build_eval_env.sh (with --ignore-requires-python: built environments run the container's Python
+# 3.12). On the prebuilt image (Python 3.13, as it declares) the launcher builds this commit into
+# a wheel (prepare_apertus_common.sh) and the job installs that offline: the repository is private
+# and the image has no credential. Its dependencies come with lm-eval-runtime.lock (jsonschema,
+# pydantic and tokenizers are listed in lm-eval-runtime.txt for that), so a bump here can need a
+# change there.
 apertus-common @ git+https://github.com/swiss-ai/apertus-common.git@60776c406b4264ae9c47ddddfd6757b7c20bd51e

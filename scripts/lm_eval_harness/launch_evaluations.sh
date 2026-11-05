@@ -417,10 +417,6 @@ case "${CHAT_FORMAT_FLAG:-template}" in
             echo "Error: --chat-format apertus2 needs --backend openai, --tokenizer <the checkpoint's tokenizer> and --max-length <the server's --max-model-len>"
             exit 1
         fi
-        if [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
-            echo "Error: --chat-format apertus2 needs a built environment: the prebuilt image has no apertus-common (a private repository); unset EVAL_PREBUILT_ENV"
-            exit 1
-        fi
         if [[ -n "$BOS_FLAG" || "${BOS:-false}" == "true" ]]; then
             echo "Error: --chat-format apertus2 renders the BOS token itself; drop --bos (or BOS=true)"
             exit 1
