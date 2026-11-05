@@ -71,7 +71,7 @@ if [[ -n "$EVAL_INCOMPLETE_TASKS_FILE" && -s "$EVAL_INCOMPLETE_TASKS_FILE" ]]; t
 fi
 echo "Merge command: $MERGE_CMD"
 
-srun -ul --mpi=pmix --environment=./containers/env.toml bash -c "$MERGE_CMD"
+srun -ul --mpi=pmix --environment=${EVAL_PREBUILT_CONTAINER_CONFIG:-./containers/env.toml} bash -c "$MERGE_CMD"
 
 # Sum evaluation-only runtimes from completed chunks. An explicit value remains
 # available for recovery of legacy result directories that predate duration files.
@@ -99,7 +99,7 @@ else
     echo "Uploading merged results to wandb"
     WANDB_CMD="cd $PWD && python -m scripts.results.update_wandb_alignment --entity $WANDB_ENTITY --project $WANDB_PROJECT --logs_root $MERGED_DIR --name $NAME --main_metrics $TABLE_METRICS --eval_duration $DURATION"
     echo "Running: $WANDB_CMD"
-    srun -ul --mpi=pmix --environment=./containers/env.toml bash -c " \
+    srun -ul --mpi=pmix --environment=${EVAL_PREBUILT_CONTAINER_CONFIG:-./containers/env.toml} bash -c " \
         $WANDB_CMD
     "
 fi

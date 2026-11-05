@@ -312,6 +312,16 @@ _eval_prepare_environment() {
     EVAL_ENV_MANIFEST="$state_dir/environment.sh"
     export EVAL_ENV_MANIFEST EVAL_HARNESS_REPO="$repo"
     if [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
+        # Optional: the EDF that starts the prebuilt image on this cluster (it must mount the
+        # directories the job reads, e.g. EVAL_ENV_CACHE_ROOT). Without it the jobs use env.toml.
+        if [[ -n "${EVAL_PREBUILT_CONTAINER_CONFIG:-}" ]]; then
+            if [[ ! -r "$EVAL_PREBUILT_CONTAINER_CONFIG" ]]; then
+                echo "Error: EVAL_PREBUILT_CONTAINER_CONFIG is not a readable file: $EVAL_PREBUILT_CONTAINER_CONFIG" >&2
+                return 1
+            fi
+            EVAL_PREBUILT_CONTAINER_CONFIG=$(realpath "$EVAL_PREBUILT_CONTAINER_CONFIG")
+            export EVAL_PREBUILT_CONTAINER_CONFIG
+        fi
         _eval_use_prebuilt_environment "$repo"
         return
     fi

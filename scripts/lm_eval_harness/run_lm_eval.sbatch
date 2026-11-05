@@ -897,10 +897,14 @@ make_cmd() {
     fi
 }
 
+# The container of the jobs that need no model server. EVAL_PREBUILT_CONTAINER_CONFIG (an EDF, written
+# by the launcher for EVAL_PREBUILT_ENV=1) names the prebuilt image's, for clusters where the NGC image
+# of env.toml does not start.
+BASE_CONTAINER_ENV=${EVAL_PREBUILT_CONTAINER_CONFIG:-./containers/env.toml}
 case "$LM_EVAL_BACKEND" in
     vllm|megatron_lm) CONTAINER_ENV=./containers/env_vllm.toml ;;
     sglang) CONTAINER_ENV=./containers/env_sglang.toml ;;
-    *) CONTAINER_ENV=./containers/env.toml ;;
+    *) CONTAINER_ENV=$BASE_CONTAINER_ENV ;;
 esac
 
 echo "Environment manifest: $EVAL_ENV_MANIFEST"
@@ -1016,7 +1020,7 @@ elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     "
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
   # No model is loaded in-job; the harness only makes HTTP calls against API_BASE_URL.
-  srun -n 1 --mpi=pmix -ul --environment=./containers/env.toml --export=ALL,HF_TOKEN,HF_HOME,WANDB_API_KEY,OPENAI_API_KEY bash -lc "
+  srun -n 1 --mpi=pmix -ul --environment=$BASE_CONTAINER_ENV --export=ALL,HF_TOKEN,HF_HOME,WANDB_API_KEY,OPENAI_API_KEY bash -lc "
     set -euo pipefail
     unset SSL_CERT_FILE
     export HF_DATASETS_TRUST_REMOTE_CODE=1
@@ -1030,7 +1034,7 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     "
 else
   # hf (via accelerate)
-  srun -n 1 --mpi=pmix -ul --environment=./containers/env.toml --export=ALL,HF_TOKEN,HF_HOME,WANDB_API_KEY bash -lc "
+  srun -n 1 --mpi=pmix -ul --environment=$BASE_CONTAINER_ENV --export=ALL,HF_TOKEN,HF_HOME,WANDB_API_KEY bash -lc "
     set -euo pipefail
     unset SSL_CERT_FILE
     export HF_DATASETS_TRUST_REMOTE_CODE=1
@@ -1064,7 +1068,7 @@ else
     WANDB_CMD="cd $PWD && python -m scripts.results.update_wandb_alignment --entity $WANDB_ENTITY --project $WANDB_PROJECT --logs_root $HARNESS_EVAL_DIR --name $NAME --main_metrics $TABLE_METRICS --eval_duration $DURATION"
     echo "Running command to upload results to wandb:"
     echo "$WANDB_CMD"
-    srun -ul --mpi=pmix --environment=./containers/env.toml bash -c " \
+    srun -ul --mpi=pmix --environment=$BASE_CONTAINER_ENV bash -c " \
         $WANDB_CMD
     "
 fi
