@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Build immutable, shared evaluation environments. This script runs inside the
-# same container used by the evaluation backend.
+# Build immutable, shared evaluation environments for the backends that load a model (hf, vllm,
+# sglang, megatron_lm). This script runs inside the same container used by the evaluation backend.
+# The openai backend needs none: it runs in the prebuilt image (containers/Dockerfile.eval).
 set -euo pipefail
 # The base venv includes system site-packages and with them ~/.local, which the jobs do not
 # see: pip must not count packages there as installed.
@@ -14,24 +15,11 @@ export PYTHONNOUSERSITE=1
 EVAL_HARNESS_REF=${EVAL_HARNESS_REF:-HEAD}
 EVAL_ENV_CACHE_ROOT=${EVAL_ENV_CACHE_ROOT:-${SCRATCH:-/tmp}/eval-envs}
 EVAL_RUNTIME_REQUIREMENTS=${EVAL_RUNTIME_REQUIREMENTS:-${EVAL_REPO_ROOT:-$PWD}/requirements/lm-eval-runtime.txt}
-# requirements/apertus2.txt for CHAT_FORMAT=apertus2 runs only (their own overlay).
-EVAL_APERTUS2_REQUIREMENTS=${EVAL_APERTUS2_REQUIREMENTS:-}
 EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 HARNESS_URL="https://github.com/${EVAL_HARNESS_REPO}.git"
-BASE_VENV_ARGS=(--system-site-packages)
-# The lock is complete, as in the prebuilt image: its venv leaves out the container's packages
-# (their torchvision is built for the container's torch). The container also lists its torch's
-# libraries on LD_LIBRARY_PATH, ahead of the lock's: torch would load its older libtorch_python.
-if [[ "$EVAL_RUNTIME_REQUIREMENTS" == *.lock ]]; then
-    BASE_VENV_ARGS=()
-    LD_LIBRARY_PATH=$(tr ':' '\n' <<< "${LD_LIBRARY_PATH:-}" | { grep -vx '.*/torch/lib' || true; } | paste -sd: -)
-    export LD_LIBRARY_PATH
-fi
 
 [[ -r "$EVAL_RUNTIME_REQUIREMENTS" ]] \
     || { echo "Runtime requirements are not readable inside the container: $EVAL_RUNTIME_REQUIREMENTS" >&2; exit 1; }
-[[ -z "$EVAL_APERTUS2_REQUIREMENTS" || -r "$EVAL_APERTUS2_REQUIREMENTS" ]] \
-    || { echo "Apertus 2 requirements are not readable inside the container: $EVAL_APERTUS2_REQUIREMENTS" >&2; exit 1; }
 [[ -r "$EVAL_CONTAINER_CONFIG" ]] \
     || { echo "Container configuration is not readable inside the container: $EVAL_CONTAINER_CONFIG" >&2; exit 1; }
 if [[ -n "${EVAL_REPO_ROOT:-}" && ! -d "$EVAL_REPO_ROOT" ]]; then
@@ -88,16 +76,14 @@ BASE_KEY=$(
         cat "$EVAL_RUNTIME_REQUIREMENTS"
         printf '%s\n' "--- container ---"
         cat "$EVAL_CONTAINER_CONFIG"
-        (( ${#BASE_VENV_ARGS[@]} )) || printf '%s\n' "--- isolated venv ---"
     } | hash_stream
 )
 OVERLAY_KEY=$(
     {
         printf '%s\n%s\n%s\n' "$BASE_KEY" "$EVAL_HARNESS_REPO" "$HARNESS_COMMIT"
-        [[ -z "$EVAL_APERTUS2_REQUIREMENTS" ]] || cat "$EVAL_APERTUS2_REQUIREMENTS"
     } | hash_stream
 )
-OVERLAY_IMPORTS="import lm_eval${EVAL_APERTUS2_REQUIREMENTS:+, apertus_common}"
+OVERLAY_IMPORTS="import lm_eval"
 
 BASE_ENV="$EVAL_ENV_CACHE_ROOT/base/${BASE_KEY:0:20}"
 HARNESS_OVERLAY="$EVAL_ENV_CACHE_ROOT/harness/${OVERLAY_KEY:0:20}"
@@ -125,13 +111,9 @@ build_base() {
         if [[ -e "$BASE_ENV" ]]; then
             mv "$BASE_ENV" "${BASE_ENV}.incomplete.$(date +%s).$$"
         fi
-        python -m venv "${BASE_VENV_ARGS[@]}" "$BASE_ENV"
+        python -m venv --system-site-packages "$BASE_ENV"
         "$BASE_ENV/bin/python" -m pip install --upgrade pip
-        local -a index_args=()
-        # lm-eval-runtime.lock has CPU torch, from PyTorch's index. Its hashes decide which file is accepted.
-        [[ "$EVAL_RUNTIME_REQUIREMENTS" == *.lock ]] \
-            && index_args=(--extra-index-url https://download.pytorch.org/whl/cpu)
-        "$BASE_ENV/bin/python" -m pip install "${index_args[@]}" -r "$EVAL_RUNTIME_REQUIREMENTS"
+        "$BASE_ENV/bin/python" -m pip install -r "$EVAL_RUNTIME_REQUIREMENTS"
         if [[ "$EVAL_BACKEND" == "megatron_lm" ]]; then
             "$BASE_ENV/bin/python" -m pip install --no-deps megatron-core
         fi
@@ -158,9 +140,6 @@ build_overlay() {
         trap 'rm -rf "${tmp_dir:-}"' RETURN
         "$BASE_ENV/bin/python" -m pip install --no-deps --target "$tmp_dir" \
             "git+${HARNESS_URL}@${HARNESS_COMMIT}"
-        [[ -z "$EVAL_APERTUS2_REQUIREMENTS" ]] \
-            || "$BASE_ENV/bin/python" -m pip install --no-deps --ignore-requires-python \
-                --target "$tmp_dir" -r "$EVAL_APERTUS2_REQUIREMENTS"
         PYTHONPATH="$tmp_dir" "$BASE_ENV/bin/python" -c "$OVERLAY_IMPORTS"
         touch "$tmp_dir/.complete"
         mv "$tmp_dir" "$HARNESS_OVERLAY"

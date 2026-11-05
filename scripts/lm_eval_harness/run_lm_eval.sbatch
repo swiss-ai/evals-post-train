@@ -61,7 +61,7 @@ usage() {
     echo " HARNESS_LIMIT: Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit)."
     echo " LM_EVAL_HARNESS_BRANCH: Branch/ref resolved once by the environment-preparation job (default: the commit in requirements/lm-eval-harness.txt)."
     echo " EVAL_ENV_MANIFEST: Prepared base environment and harness overlay (required; set by launcher)."
-    echo " EVAL_PREBUILT_ENV: '1' when running in the prebuilt image (containers/Dockerfile.eval): nothing is installed; the launcher writes the manifest."
+    echo " EVAL_IMAGE_TAG: Tag of the prebuilt evaluation image (containers/env_eval.toml): the openai backend, the result merge and the W&B upload run in it (required; set by launcher)."
     echo " EVAL_RUN_CONFIG: Normalized result provenance file used for safe resume (required; set by launcher)."
     echo " EVAL_VERIFY_ENV_IMPORTS: 'true' to repeat the preparation job's deep Python import checks inside the evaluation job (default: false)."
     echo " EVAL_CHUNKS_FILE: Resumable array chunk manifest (set automatically by launcher)."
@@ -139,6 +139,7 @@ if [[ -n "$EVAL_CHUNKS_FILE" ]]; then
 fi
 
 [[ -n "$EVAL_ENV_MANIFEST" ]] || die "EVAL_ENV_MANIFEST is required; launch through scripts/lm_eval_harness/launch_evaluations.sh"
+[[ -n "${EVAL_IMAGE_TAG:-}" ]] || die "EVAL_IMAGE_TAG is required; launch through scripts/lm_eval_harness/launch_evaluations.sh"
 [[ -f "$EVAL_RUN_CONFIG" ]] || die "EVAL_RUN_CONFIG is required and must be a readable file"
 
 load_prepared_eval_env() {
@@ -157,8 +158,8 @@ load_prepared_eval_env() {
         return 1
     fi
     if [[ "${EVAL_ENV_KIND:-}" == "prebuilt" ]]; then
-        # Written by the launcher for EVAL_PREBUILT_ENV=1: the paths exist only
-        # inside the container, which checks them itself (LOAD_ENV_CMD below).
+        # Written by the launcher for the openai backend: the paths exist only
+        # inside the image, which checks them itself (LOAD_ENV_CMD below).
         [[ -n "${EVAL_HARNESS_OVERLAY:-}" ]] \
             || { EVAL_ENV_CHECK_ERROR="manifest has no EVAL_HARNESS_OVERLAY"; return 1; }
         [[ -n "${EVAL_RESOLVED_HARNESS_REPO:-}" ]] \
@@ -772,9 +773,9 @@ fi
 echo "Using lm-evaluation-harness: $EVAL_RESOLVED_HARNESS_REPO@$EVAL_RESOLVED_HARNESS_COMMIT"
 
 if [[ "${EVAL_ENV_KIND:-}" == "prebuilt" ]]; then
-# EVAL_PREBUILT_ENV=1: the container (containers/Dockerfile.eval) already has
-# every package and the pinned harness. Check it, never install: a mismatch means the job runs
-# in an image built from a different commit. The one exception is apertus-common (a private
+# The openai backend runs in the prebuilt image (containers/env_eval.toml, built from containers/Dockerfile.eval),
+# which already has every package and the pinned harness. Check it, never install: a mismatch means
+# the job runs in an image built from a different commit. The one exception is apertus-common (a private
 # repository, so not in the image): an apertus2 run installs the wheel the launcher built from the
 # commit requirements/apertus2.txt pins (prepare_apertus_common.sh), offline and --no-deps like
 # the harness, into a directory of its own ahead of the overlay.
@@ -796,7 +797,7 @@ fi
 LOAD_ENV_CMD="
 echo Container entered: \$(date -Is)
 if [[ ! -f '$EVAL_HARNESS_OVERLAY/.complete' || ! -d '$EVAL_HARNESS_OVERLAY/lm_eval' ]]; then
-    echo 'EVAL_PREBUILT_ENV=1, but this container has no harness at $EVAL_HARNESS_OVERLAY. Use the image built from this commit (containers/Dockerfile.eval).' >&2
+    echo 'This container has no harness at $EVAL_HARNESS_OVERLAY. Use the image built from this commit (containers/Dockerfile.eval).' >&2
     exit 1
 fi
 container_harness_commit=\$(cat '$EVAL_HARNESS_OVERLAY/.commit' 2>/dev/null || true)
@@ -807,7 +808,7 @@ fi
 export PYTHONPATH='$EVAL_HARNESS_OVERLAY'\${PYTHONPATH:+:\$PYTHONPATH}
 $APERTUS_COMMON_INSTALL
 if ! python -c 'import accelerate, datasets, transformers, wandb, lm_eval${APERTUS_COMMON_IMPORT}'; then
-    echo 'EVAL_PREBUILT_ENV=1, but this container is missing evaluation packages (import check above).' >&2
+    echo 'This container is missing evaluation packages (import check above).' >&2
     exit 1
 fi
 echo Evaluation environment activated: \$(date -Is) prebuilt=true harness_path='$EVAL_HARNESS_OVERLAY'
@@ -823,7 +824,7 @@ eval_env_is_ready() {
         || return 1
     if [[ '$EVAL_VERIFY_ENV_IMPORTS' == 'true' ]]; then
         '$EVAL_BASE_ENV/bin/python' -c 'import accelerate, datasets, transformers, wandb' >/dev/null 2>&1 \
-            && PYTHONPATH='$EVAL_HARNESS_OVERLAY' '$EVAL_BASE_ENV/bin/python' -c 'import lm_eval${EVAL_APERTUS2_REQUIREMENTS:+, apertus_common}' >/dev/null 2>&1 \
+            && PYTHONPATH='$EVAL_HARNESS_OVERLAY' '$EVAL_BASE_ENV/bin/python' -c 'import lm_eval' >/dev/null 2>&1 \
             || return 1
     fi
 }
@@ -894,10 +895,12 @@ make_cmd() {
     fi
 }
 
+# The image runs bash without -l: a login shell resets PATH, which drops the image's venv.
 case "$LM_EVAL_BACKEND" in
-    vllm|megatron_lm) CONTAINER_ENV=./containers/env_vllm.toml ;;
-    sglang) CONTAINER_ENV=./containers/env_sglang.toml ;;
-    *) CONTAINER_ENV=./containers/env.toml ;;
+    vllm|megatron_lm) CONTAINER_ENV=./containers/env_vllm.toml; CONTAINER_SHELL="bash -lc" ;;
+    sglang) CONTAINER_ENV=./containers/env_sglang.toml; CONTAINER_SHELL="bash -lc" ;;
+    openai) CONTAINER_ENV=./containers/env_eval.toml; CONTAINER_SHELL="bash -c" ;;
+    *) CONTAINER_ENV=./containers/env_hf.toml; CONTAINER_SHELL="bash -lc" ;;
 esac
 
 echo "Environment manifest: $EVAL_ENV_MANIFEST"
@@ -918,7 +921,7 @@ else
     # the harness's task index), then run each kind as its own pass and merge the two
     # into $HARNESS_EVAL_DIR, so everything downstream sees one result as usual.
     KINDS_FILE="$HARNESS_EVAL_DIR/.task-kinds.sh"
-    srun -n 1 --mpi=pmix -ul --environment=$CONTAINER_ENV bash -lc "
+    srun -n 1 --mpi=pmix -ul --environment=$CONTAINER_ENV $CONTAINER_SHELL "
     set -euo pipefail
     unset SSL_CERT_FILE
     $LOAD_ENV_CMD
@@ -1013,13 +1016,11 @@ elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
     "
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
   # No model is loaded in-job; the harness only makes HTTP calls against API_BASE_URL.
-  srun -n 1 --mpi=pmix -ul --environment=./containers/env.toml --export=ALL,HF_TOKEN,HF_HOME,WANDB_API_KEY,OPENAI_API_KEY bash -lc "
+  srun -n 1 --mpi=pmix -ul --environment=$CONTAINER_ENV --export=ALL,HF_TOKEN,HF_HOME,WANDB_API_KEY,OPENAI_API_KEY $CONTAINER_SHELL "
     set -euo pipefail
     unset SSL_CERT_FILE
     export HF_DATASETS_TRUST_REMOTE_CODE=1
     $CACHE_EXPORTS
-    # The locked environment's torch must not load the container's torch libraries.
-    export LD_LIBRARY_PATH=\$(tr ':' '\n' <<< \"\${LD_LIBRARY_PATH:-}\" | { grep -vx '.*/torch/lib' || true; } | paste -sd: -)
 
     $LOAD_ENV_CMD
 
@@ -1027,7 +1028,7 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     "
 else
   # hf (via accelerate)
-  srun -n 1 --mpi=pmix -ul --environment=./containers/env.toml --export=ALL,HF_TOKEN,HF_HOME,WANDB_API_KEY bash -lc "
+  srun -n 1 --mpi=pmix -ul --environment=$CONTAINER_ENV --export=ALL,HF_TOKEN,HF_HOME,WANDB_API_KEY $CONTAINER_SHELL "
     set -euo pipefail
     unset SSL_CERT_FILE
     export HF_DATASETS_TRUST_REMOTE_CODE=1
@@ -1061,7 +1062,7 @@ else
     WANDB_CMD="cd $PWD && python -m scripts.results.update_wandb_alignment --entity $WANDB_ENTITY --project $WANDB_PROJECT --logs_root $HARNESS_EVAL_DIR --name $NAME --main_metrics $TABLE_METRICS --eval_duration $DURATION"
     echo "Running command to upload results to wandb:"
     echo "$WANDB_CMD"
-    srun -ul --mpi=pmix --environment=./containers/env.toml bash -c " \
+    srun -ul --mpi=pmix --environment=./containers/env_eval.toml bash -c " \
         $WANDB_CMD
     "
 fi

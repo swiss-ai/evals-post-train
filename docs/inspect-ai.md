@@ -8,7 +8,7 @@ Benchmarks that need their own scorer, a judge or a simulated user: Inspect AI t
 
 Results are uploaded to W&B whenever a W&B key is available (see [W&B upload](#wb-upload)); most examples below are smoke tests (`--limit`), so add `--no-wandb` to keep them out of the shared project.
 
-Run it directly (e.g. on a login node) or, like the rest of this pipeline, as a SLURM job via `scripts/inspect_ai/run_inspect_eval.sbatch`, which forwards all arguments to `run_inspect_eval.sh` inside the same container as the other backends -- but requests CPU-only resources, since these benchmarks evaluate an already-running served endpoint rather than loading a model in-job:
+Run it directly (e.g. on a login node) or, like the rest of this pipeline, as a SLURM job via `scripts/inspect_ai/run_inspect_eval.sbatch`, which forwards all arguments to `run_inspect_eval.sh` inside the prebuilt evaluation image (`containers/env_eval.toml`, tagged with the checkout's commit; the sbatch refuses to start if CI has not published it) -- and requests CPU-only resources, since these benchmarks evaluate an already-running served endpoint rather than loading a model in-job:
 
 ```bash
 # --reservation is a native sbatch flag (run_inspect_eval.sbatch has no --reservation of its

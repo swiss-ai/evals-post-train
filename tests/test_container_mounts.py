@@ -5,7 +5,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONTAINER_CONFIGS = (
-    "env.toml",
+    "env_hf.toml",
+    "env_eval.toml",
     "env_vllm.toml",
     "env_sglang.toml",
 )
@@ -63,19 +64,21 @@ class ContainerMountTests(unittest.TestCase):
         )
         self.assertLess(build_script.index("export PYTHONNOUSERSITE=1"), build_script.index("python -m venv"))
 
-    def test_locked_environment_is_isolated_from_the_container(self):
-        # The container's torchvision and torch libraries are built for its own torch, not the lock's.
+    def test_model_free_work_runs_in_the_prebuilt_image(self):
+        # The openai backend, the result merge and the W&B upload share one image, tagged with the
+        # commit the scripts come from; its venv is on PATH only for a non-login shell.
+        with (REPO_ROOT / "containers" / "env_eval.toml").open("rb") as handle:
+            image = tomllib.load(handle)["image"]
+        self.assertEqual(image, "ghcr.io#swiss-ai/evals-post-train-eval:${EVAL_IMAGE_TAG}")
         scripts = REPO_ROOT / "scripts" / "lm_eval_harness"
-        build_script = (scripts / "build_eval_env.sh").read_text(encoding="utf-8")
-        lock_branch = build_script[build_script.index('if [[ "$EVAL_RUNTIME_REQUIREMENTS" == *.lock ]]'):]
-        lock_branch = lock_branch[:lock_branch.index("\nfi\n")]
-        self.assertIn("BASE_VENV_ARGS=()", lock_branch)
-        self.assertIn("grep -vx '.*/torch/lib'", lock_branch)
-        self.assertIn('python -m venv "${BASE_VENV_ARGS[@]}"', build_script)
-        self.assertIn("isolated venv", build_script[:build_script.index("OVERLAY_KEY=")])
         evaluate_script = (scripts / "run_lm_eval.sbatch").read_text(encoding="utf-8")
-        openai_branch = evaluate_script[evaluate_script.rindex('elif [[ $LM_EVAL_BACKEND == "openai" ]]'):]
-        self.assertLess(openai_branch.index("grep -vx '.*/torch/lib'"), openai_branch.index("$LOAD_ENV_CMD"))
+        self.assertIn('openai) CONTAINER_ENV=./containers/env_eval.toml; CONTAINER_SHELL="bash -c"', evaluate_script)
+        self.assertIn("--environment=./containers/env_eval.toml bash -c", evaluate_script)
+        aggregate_script = (scripts / "aggregate_chunks.sbatch").read_text(encoding="utf-8")
+        self.assertEqual(aggregate_script.count("--environment=./containers/env_eval.toml bash -c"), 2)
+        inspect_script = (REPO_ROOT / "scripts" / "inspect_ai" / "run_inspect_eval.sbatch").read_text(encoding="utf-8")
+        self.assertIn("--environment=./containers/env_eval.toml", inspect_script)
+        self.assertNotIn("env.toml", evaluate_script + aggregate_script + inspect_script)
 
 
 if __name__ == "__main__":

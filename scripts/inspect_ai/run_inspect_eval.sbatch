@@ -49,6 +49,10 @@ fi
 echo "START TIME: $(date)"
 echo "Using nodes: $SLURM_JOB_NODELIST"
 
+# shellcheck source=scripts/common/eval_image.sh
+source scripts/common/eval_image.sh
+require_eval_image
+
 # shellcheck source=scripts/common/secrets.sh
 source scripts/common/secrets.sh
 export HF_TOKEN="${HF_TOKEN:-}" CSCS_SERVING_API="${CSCS_SERVING_API:-}"
@@ -63,7 +67,7 @@ export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 export TARGET_API_KEY="${TARGET_API_KEY:-}"
 export WANDB_API_KEY="${WANDB_API_KEY:-}"
 
-srun -n 1 --mpi=pmix -ul --environment=./containers/env.toml \
+srun -n 1 --mpi=pmix -ul --environment=./containers/env_eval.toml \
     --export=ALL,HF_TOKEN,CSCS_SERVING_API,OPENAI_API_KEY,ANTHROPIC_API_KEY,TARGET_API_KEY,WANDB_API_KEY \
     bash -c '
         set -euo pipefail

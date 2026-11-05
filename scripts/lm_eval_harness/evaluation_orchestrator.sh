@@ -12,8 +12,7 @@ _eval_repo_root() {
 # python3 calls below all run outside any container -- both from
 # launch_evaluations.sh on the login node, and from evaluation_controller.sbatch
 # on a bare compute node (its own #SBATCH directives have no
-# `srun --environment=...`) -- so they can't rely on one of the env_*.toml
-# containers' Python. Clariden's bare `python3` on both node types resolves
+# `srun --environment=...`) -- so they can't rely on one of the containers' Python. Clariden's bare `python3` on both node types resolves
 # to the OS's system Python (confirmed 3.6.15, predating PEP 563 entirely:
 # "SyntaxError: future feature annotations is not defined").
 #
@@ -36,11 +35,16 @@ _eval_prepend_modern_python_path() {
 }
 _eval_prepend_modern_python_path
 
+# shellcheck source=scripts/common/eval_image.sh
+source "$(_eval_repo_root)/scripts/common/eval_image.sh"
+
 _eval_container_for_backend() {
+    # The environment-building path: backends that load a model take torch and their server from
+    # the container. The openai backend loads none, so it runs in the prebuilt image instead.
     case "${LM_EVAL_BACKEND:-vllm}" in
         vllm|megatron_lm) echo "./containers/env_vllm.toml" ;;
         sglang) echo "./containers/env_sglang.toml" ;;
-        hf|openai) echo "./containers/env.toml" ;;
+        hf) echo "./containers/env_hf.toml" ;;
         *) echo "Unsupported LM_EVAL_BACKEND: ${LM_EVAL_BACKEND:-}" >&2; return 1 ;;
     esac
 }
@@ -274,13 +278,13 @@ _eval_pinned_harness_commit() {
 }
 
 _eval_use_prebuilt_environment() {
-    # EVAL_PREBUILT_ENV=1: the container already holds every package and the
-    # pinned harness (containers/Dockerfile.eval), so there is nothing to
-    # prepare. Write the manifest directly; run_lm_eval.sbatch checks it against
-    # the container instead of building anything.
+    # The openai backend runs in the prebuilt image (containers/env_eval.toml), which already holds
+    # every package and the pinned harness (containers/Dockerfile.eval), so there is nothing to
+    # prepare. Write the manifest directly; run_lm_eval.sbatch checks it against the container
+    # instead of building anything.
     local repo="$1" commit
     if [[ -n "${LM_EVAL_HARNESS_BRANCH:-}" ]]; then
-        echo "Error: --harness-branch/LM_EVAL_HARNESS_BRANCH cannot be used with EVAL_PREBUILT_ENV=1;" \
+        echo "Error: --harness-branch/LM_EVAL_HARNESS_BRANCH cannot be used with the openai backend;" \
             "the image pins the harness in requirements/lm-eval-harness.txt" >&2
         return 1
     fi
@@ -311,7 +315,7 @@ _eval_prepare_environment() {
     local state_dir="$1" repo="$2"
     EVAL_ENV_MANIFEST="$state_dir/environment.sh"
     export EVAL_ENV_MANIFEST EVAL_HARNESS_REPO="$repo"
-    if [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
+    if [[ "${LM_EVAL_BACKEND:-vllm}" == "openai" ]]; then
         _eval_use_prebuilt_environment "$repo"
         return
     fi
@@ -319,15 +323,6 @@ _eval_prepare_environment() {
     EVAL_CONTAINER_CONFIG=$(_eval_container_for_backend)
     EVAL_CONTAINER_CONFIG=$(realpath "$EVAL_CONTAINER_CONFIG")
     export EVAL_CONTAINER_CONFIG EVAL_REPO_ROOT="$PWD"
-    # The openai backend loads no model, so it gets the same locked packages as the prebuilt
-    # image; in-job backends take torch and their server from the container.
-    if [[ "${LM_EVAL_BACKEND:-vllm}" == "openai" ]]; then
-        export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/lm-eval-runtime.lock"
-    else
-        export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/lm-eval-runtime.txt"
-    fi
-    [[ "${CHAT_FORMAT:-template}" == "apertus2" ]] \
-        && export EVAL_APERTUS2_REQUIREMENTS="$PWD/requirements/apertus2.txt"
 
     if [[ "${EVAL_DRY_RUN:-false}" == "true" ]]; then
         echo "[DRY RUN] sbatch --parsable scripts/lm_eval_harness/prepare_eval_env.sbatch" >&2
@@ -351,6 +346,7 @@ submit_evaluation() {
     local -a force_patterns=()
     repo_root=$(_eval_repo_root)
     cd "$repo_root"
+    require_eval_image || return 1
 
     logs_root=${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}
     run_root="$logs_root/${WANDB_ENTITY:-apertus}/${WANDB_PROJECT:-swissai-evals-test}/$name"

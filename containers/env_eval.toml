@@ -1,0 +1,20 @@
+# The prebuilt evaluation image (containers/Dockerfile.eval), for everything that loads no model:
+# the OpenAI-compatible backend, Inspect, and the result merge and W&B upload of every backend.
+# The tag is the commit of the checkout the job runs from, so packages and scripts always match;
+# scripts/common/eval_image.sh sets EVAL_IMAGE_TAG after checking that CI published it.
+image = "ghcr.io#swiss-ai/evals-post-train-eval:${EVAL_IMAGE_TAG}"
+
+mounts = [
+    "/users/${USER}",
+    "/capstor/scratch/cscs/${USER}",
+    "/iopsstor/scratch/cscs/${USER}",
+    "/capstor/store/cscs/swissai/infra01"
+]
+
+writable = true
+
+[env]
+PMIX_MCA_psec="native"
+
+[annotations]
+com.hooks.cxi.enabled="false"

@@ -147,8 +147,6 @@ class EvalStateTests(unittest.TestCase):
                 "EVAL_FORCE_TASKS": "",
                 "SBATCH_SCRIPT": "scripts/lm_eval_harness/run_lm_eval.sbatch",
                 "LM_EVAL_BACKEND": "vllm",
-                # The environment-preparation path, even inside the prebuilt image.
-                "EVAL_PREBUILT_ENV": "0",
             }
             completed = subprocess.run(
                 [
@@ -186,6 +184,10 @@ class EvalStateTests(unittest.TestCase):
                 encoding="utf-8",
             )
             fake_sbatch.chmod(0o755)
+            # The launcher checks that CI published the image for this commit.
+            fake_curl = bin_dir / "curl"
+            fake_curl.write_text('#!/bin/bash\necho \'{"token":"t"}\'\n', encoding="utf-8")
+            fake_curl.chmod(0o755)
             task_file = Path(tmp) / "tasks.txt"
             task_file.write_text("a\nb\n", encoding="utf-8")
             env = os.environ | {
@@ -200,7 +202,6 @@ class EvalStateTests(unittest.TestCase):
                 "EVAL_FORCE_TASKS": "",
                 "SBATCH_SCRIPT": "scripts/lm_eval_harness/run_lm_eval.sbatch",
                 "LM_EVAL_BACKEND": "vllm",
-                "EVAL_PREBUILT_ENV": "0",
                 "JUDGE_MODE": "none",
             }
             completed = subprocess.run(

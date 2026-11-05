@@ -1,12 +1,13 @@
-# Prebuilt evaluation image for the OpenAI-compatible backend: every Python
-# package a run needs, and the pinned lm-evaluation-harness, so nothing is
-# installed at run time. The image sets EVAL_PREBUILT_ENV=1, which makes the
-# launcher skip the environment-preparation job and run_lm_eval.sbatch /
-# run_inspect_eval.sh use this environment as is.
+# Prebuilt evaluation image for everything that loads no model (the OpenAI-compatible
+# backend, Inspect, result merge and W&B upload): every Python package a run needs, and
+# the pinned lm-evaluation-harness, so nothing is installed at run time. The image sets
+# EVAL_PREBUILT_ENV=1, which makes run_inspect_eval.sh and the other runners use this
+# environment as is; the lm-eval launcher skips the environment-preparation job for the
+# openai backend.
 #
 # CI publishes it for every pushed commit as
-# ghcr.io/swiss-ai/evals-post-train-eval:<commit>; run it with the scripts from
-# that same commit. Built from the repository root:
+# ghcr.io/swiss-ai/evals-post-train-eval:<commit>; containers/env_eval.toml runs it with the
+# scripts from that same commit. Built from the repository root:
 #   docker build -f containers/Dockerfile.eval .
 
 # Pinned by digest, and every package below comes from a requirements/*.lock

@@ -23,7 +23,7 @@ Evaluation infrastructure for LLMs on CSCS Alps (Clariden), with results in W&B.
 
 ¹ The CSCS serving API (`https://api.swissai.svc.cscs.ch/v1`), which serves only models launched and registered there, or a server you start yourself, e.g. `vllm serve <checkpoint>` on a Clariden node, passed by its own URL (no registration).
 
-Every runner except the in-job lm-eval backends can also run from the prebuilt image (`containers/Dockerfile.eval`, [details](docs/lm-eval-harness.md#prebuilt-evaluation-image-no-installs-at-run-time)), which installs nothing at run time.
+The lm-eval `openai` backend, Inspect, and the result merge and W&B upload of every backend run in the prebuilt image (`containers/Dockerfile.eval`, [details](docs/lm-eval-harness.md#prebuilt-evaluation-image-no-installs-at-run-time)), which installs nothing at run time. The other runners can also run from it.
 
 ---
 

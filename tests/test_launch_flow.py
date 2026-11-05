@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Launcher inputs a caller's shell may export; the dry runs start without them.
 _LAUNCH_INPUTS = {
-    "TOKENIZER", "MAX_LENGTH", "BOS", "CHAT_FORMAT", "PREFILL_MODE", "EVAL_PREBUILT_ENV",
+    "TOKENIZER", "MAX_LENGTH", "BOS", "CHAT_FORMAT", "PREFILL_MODE",
     "LM_EVAL_BACKEND", "LM_EVAL_HARNESS_BRANCH", "API_CHAT_ENDPOINT", "ENABLE_THINKING",
 }
 ENV = {key: value for key, value in os.environ.items() if key not in _LAUNCH_INPUTS}
@@ -39,7 +39,7 @@ def _dry_run(*arguments: str) -> str:
 
 
 def _prebuilt_dry_run(*arguments: str, **extra_env: str) -> tuple[subprocess.CompletedProcess, str]:
-    """A dry run with EVAL_PREBUILT_ENV=1; returns the run and its manifest."""
+    """A dry run of an openai-backend launch, which runs in the prebuilt image; returns the run and its manifest."""
     with tempfile.TemporaryDirectory() as tmp:
         completed = subprocess.run(
             [
@@ -52,7 +52,7 @@ def _prebuilt_dry_run(*arguments: str, **extra_env: str) -> tuple[subprocess.Com
             ],
             cwd=REPO_ROOT,
             env=ENV
-            | {"WANDB_PROJECT": "launcher-test", "EVAL_PREBUILT_ENV": "1"}
+            | {"WANDB_PROJECT": "launcher-test"}
             | extra_env,
             text=True,
             capture_output=True,
@@ -60,6 +60,9 @@ def _prebuilt_dry_run(*arguments: str, **extra_env: str) -> tuple[subprocess.Com
         manifests = list(Path(tmp).rglob("environment.sh"))
         manifest = manifests[0].read_text() if manifests else ""
     return completed, manifest
+
+
+_OPENAI = ["--backend", "openai", "--api-base-url", "http://localhost:8000", "--api-model-name", "test-model"]
 
 
 def _launch(*arguments: str, **env: str) -> subprocess.CompletedProcess:
@@ -207,7 +210,7 @@ class LaunchFlowTests(unittest.TestCase):
         for policy in ("resume", "fail-fast"):
             with self.subTest(policy=policy):
                 completed, manifest = _prebuilt_dry_run(
-                    "single", "--task", "hellaswag", "--model", "test/model",
+                    "single", "--task", "hellaswag", "--model", "test/model", *_OPENAI,
                     "--failure-policy", policy,
                 )
                 output = completed.stdout + completed.stderr
@@ -248,11 +251,16 @@ class LaunchFlowTests(unittest.TestCase):
 
     def test_prebuilt_environment_refuses_a_harness_branch(self) -> None:
         completed, _ = _prebuilt_dry_run(
-            "single", "--task", "hellaswag", "--model", "test/model",
+            "single", "--task", "hellaswag", "--model", "test/model", *_OPENAI,
             LM_EVAL_HARNESS_BRANCH="some-branch",
         )
         self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("cannot be used with EVAL_PREBUILT_ENV=1", completed.stderr)
+        self.assertIn("cannot be used with the openai backend", completed.stderr)
+
+    def test_other_backends_still_prepare_their_environment(self) -> None:
+        output = _dry_run("single", "--task", "hellaswag", "--model", "test/model", "--backend", "vllm")
+        self.assertIn("prepare_eval_env.sbatch", output)
+        self.assertNotIn("(no preparation job)", output)
 
     def test_max_length_reaches_the_run_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -590,8 +598,8 @@ class LaunchFlowTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, output)
             self.assertIn("Chat format: apertus2 (prefill=after_think)", output)
             self.assertIn("Name:   test-model-apertus2-after_think-effort-medium", output)
-            # Built environments get the pinned harness, which has apertus2-completions.
-            self.assertIn(f"(swiss-ai/lm-evaluation-harness@{_harness_pin()})", output)
+            # The image has the pinned harness, which has apertus2-completions.
+            self.assertIn(f"swiss-ai/lm-evaluation-harness@{_harness_pin()} (no preparation job)", output)
             config = _run_config(tmp)["configuration"]
         library = (REPO_ROOT / "requirements/apertus2.txt").read_text().rsplit("@", 1)[1].strip()
         self.assertEqual(
@@ -605,7 +613,9 @@ class LaunchFlowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch("single", "--task", "gsm8k", *apertus2, "--logs-root", tmp,
                                 LM_EVAL_HARNESS_BRANCH="my-branch")
-            self.assertIn("(swiss-ai/lm-evaluation-harness@my-branch)", completed.stdout)
+            # The image pins the harness: a branch is refused rather than silently ignored.
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("cannot be used with the openai backend", completed.stderr)
         # --chat-format template wins over an ambient CHAT_FORMAT, in the job too.
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch("single", "--task", "gsm8k", *apertus2[:6], "--chat-format", "template",
