@@ -246,6 +246,24 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertIn("'$EVAL_APERTUS_COMMON_WHEELS'/*.whl", SBATCH)
         self.assertIn("--no-index", SBATCH)
 
+    def test_prebuilt_container_config_names_the_edf_of_the_jobs(self) -> None:
+        api = ["single", "--task", "gsm8k", "--backend", "openai", "--api-base-url", "http://localhost:8000",
+               "--api-model-name", "test-model"]
+        completed, _ = _prebuilt_dry_run(*api, EVAL_PREBUILT_CONTAINER_CONFIG="/nonexistent/prebuilt.toml")
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("EVAL_PREBUILT_CONTAINER_CONFIG is not a readable file", completed.stderr)
+        with tempfile.NamedTemporaryFile("w", suffix=".toml") as edf:
+            edf.write('image = "ghcr.io#example/prebuilt:tag"\n')
+            edf.flush()
+            completed, _ = _prebuilt_dry_run(*api, EVAL_PREBUILT_CONTAINER_CONFIG=edf.name)
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        # Every job that needs no model server takes its container from that variable (default
+        # env.toml): none may name env.toml itself.
+        for script in ("run_lm_eval.sbatch", "aggregate_chunks.sbatch"):
+            text = (REPO_ROOT / "scripts/lm_eval_harness" / script).read_text()
+            self.assertNotIn("--environment=./containers/env.toml", text, script)
+            self.assertIn("EVAL_PREBUILT_CONTAINER_CONFIG", text, script)
+
     def test_prebuilt_environment_refuses_a_harness_branch(self) -> None:
         completed, _ = _prebuilt_dry_run(
             "single", "--task", "hellaswag", "--model", "test/model",

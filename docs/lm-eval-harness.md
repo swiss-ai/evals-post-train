@@ -738,6 +738,13 @@ which comes first on `PATH`, so the image's `python` is that venv's (Python 3.13
 `apertus-common` requires). CI (`.github/workflows/eval-image.yml`) publishes it for every
 pushed commit as `ghcr.io/swiss-ai/evals-post-train-eval:<commit>`.
 
+On a Slurm cluster, `EVAL_PREBUILT_ENV=1` also needs the EDF that starts that image: set
+`EVAL_PREBUILT_CONTAINER_CONFIG` to a file with `image = "ghcr.io#swiss-ai/evals-post-train-eval:<commit>"`
+and the `mounts` the jobs read (the repository checkout, `EVAL_ENV_CACHE_ROOT`, the logs and tokenizer
+directories); the jobs that need no model server then use it in place of `containers/env.toml`. Use the
+image of the commit you launch from: the job refuses a harness other than the pinned one. On Beverin,
+whose x86 nodes do not start the NGC image, this is the way to run lm-eval in a container.
+
 The locks pin every package and dependency, so two builds get the same versions
 unless a lock changed. To change a version, edit the matching
 `requirements/*.txt`, run `scripts/common/lock_requirements.sh` and commit both;
