@@ -795,6 +795,9 @@ export PYTHONPATH=\"\$apertus_common_dir\"\${PYTHONPATH:+:\$PYTHONPATH}"
 fi
 LOAD_ENV_CMD="
 echo Container entered: \$(date -Is)
+# lm-eval's packages are in the image's venv, first on PATH by the image's ENV. Not every runtime
+# applies that (enroot/pyxis keep the base image's PATH, so python is the image's own, without them).
+export PATH=\"\${LM_EVAL_VENV:-/opt/lm-eval-venv}/bin:\$PATH\"
 if [[ ! -f '$EVAL_HARNESS_OVERLAY/.complete' || ! -d '$EVAL_HARNESS_OVERLAY/lm_eval' ]]; then
     echo 'EVAL_PREBUILT_ENV=1, but this container has no harness at $EVAL_HARNESS_OVERLAY. Use the image built from this commit (containers/Dockerfile.eval).' >&2
     exit 1

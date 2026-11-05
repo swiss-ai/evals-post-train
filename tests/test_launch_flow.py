@@ -246,6 +246,12 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertIn("'$EVAL_APERTUS_COMMON_WHEELS'/*.whl", SBATCH)
         self.assertIn("--no-index", SBATCH)
 
+    def test_prebuilt_job_puts_the_image_venv_on_path_itself(self) -> None:
+        # enroot/pyxis keep the base image's PATH, so the image's ENV PATH is not enough: python
+        # would be the image's own, without lm-eval's packages (nor Python 3.13 for apertus-common).
+        self.assertIn('export PATH=\\"\\${LM_EVAL_VENV:-/opt/lm-eval-venv}/bin:\\$PATH\\"', SBATCH)
+        self.assertIn("LM_EVAL_VENV=/opt/lm-eval-venv", (REPO_ROOT / "containers/Dockerfile.eval").read_text())
+
     def test_prebuilt_environment_refuses_a_harness_branch(self) -> None:
         completed, _ = _prebuilt_dry_run(
             "single", "--task", "hellaswag", "--model", "test/model",
