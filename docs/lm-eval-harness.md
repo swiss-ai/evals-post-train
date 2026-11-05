@@ -728,7 +728,8 @@ needs into one image: one environment per framework, each installed from its
 `requirements/*.lock`, and each lm-evaluation-harness fork at the commit pinned
 in `requirements/lm-eval-harness.txt` (as `--no-deps` overlays under
 `/opt/lm-eval-harness/<owner>/<repo>`, the same layout `build_eval_env.sh`
-produces). CI (`.github/workflows/eval-image.yml`) publishes it for every
+produces). lm-eval's own packages live in `/opt/lm-eval-venv` (`LM_EVAL_VENV`),
+which comes first on `PATH`, so the image's `python` is that venv's (Python 3.13). CI (`.github/workflows/eval-image.yml`) publishes it for every
 pushed commit as `ghcr.io/swiss-ai/evals-post-train-eval:<commit>`.
 
 The locks pin every package and dependency, so two builds get the same versions
