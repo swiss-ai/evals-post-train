@@ -24,7 +24,7 @@ minerva_math500/math_verify
 aime24/exact_match
 aime25/exact_match
 # Coding
-humaneval_instruct/pass@1
+humaneval_instruct/pass@10
 mbpp_instruct/pass_at_1
 # Reasoning
 bbh/exact_match

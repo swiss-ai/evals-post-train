@@ -30,7 +30,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--policy", required=True)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--suite", type=Path)
+    parser.add_argument("--suite", help="suite task list (default: --tasks)")
     parser.add_argument("--tasks")
     args = parser.parse_args()
     policy = read_policy(args.policy)
@@ -43,9 +43,10 @@ def main():
         from lm_eval.tasks._yaml_loader import load_yaml
         from scripts.lm_eval_harness.task_output_types import Classifier
 
-        suite = args.suite.read_text().splitlines()
+        chunk = args.tasks.split(",")
+        suite = Path(args.suite).read_text().splitlines() if args.suite else chunk
         classifier = Classifier(TaskManager(), load_yaml)
-        policy = select_policy(policy, suite, args.tasks.split(","), classifier)
+        policy = select_policy(policy, suite, chunk, classifier)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     serialized = json.dumps(policy, sort_keys=True)
     args.output.write_text(serialized + "\n")

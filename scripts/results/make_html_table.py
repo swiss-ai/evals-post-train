@@ -3,7 +3,10 @@
 import json
 import math
 from html import escape
-from scripts.results.repeat_metrics import mean_key, score_label
+try:
+    from scripts.results.repeat_metrics import compute_mgsm_avg, first_key, mean_key, score_label
+except ModuleNotFoundError:  # run as a file: python scripts/results/make_html_table.py
+    from repeat_metrics import compute_mgsm_avg, first_key, mean_key, score_label
 
 import argparse
 import wandb
@@ -137,17 +140,6 @@ def build_thinking_groups(tasks, specs, label_with_group=False):
     ]
 
 
-def compute_mgsm_avg(summary):
-    vals = []
-    for k, v in summary.items():
-        if "mgsm" in k and k.endswith("exact_match") and "stderr" not in k:
-            try:
-                vals.append(float(v))
-            except (ValueError, TypeError):
-                pass
-    return sum(vals) / len(vals) if vals else None
-
-
 def compute_degeneration_avg(summary):
     """Average all metrics across benchmarks whose key contains '/degeneration'."""
     vals = []
@@ -172,10 +164,10 @@ def compute_mmlu_pro_detail(summary):
     accuracy = None
     subjects = {}
     for k, v in summary.items():
-        if "stderr" in k or "_pass@" in k or mean_key(summary, k):
-            continue
         kl = k.lower()
         if "mmlu_pro" not in kl or "exact_match" not in kl:
+            continue
+        if "stderr" in k or "_pass@" in k or mean_key(summary, k):
             continue
         task = k.split("/", 1)[0]
         try:
@@ -198,6 +190,11 @@ def is_mgsm_aggregate(task, metric_name):
         return False
     task = task.lower()
     return "mgsm" in task and "mgsm_en" not in task
+
+
+def has_scores(model_scores):
+    """Whether a model has any metric; keys starting with _ carry table metadata."""
+    return any(v is not None for k, v in model_scores.items() if not k.startswith("_"))
 
 
 def get_metric(summary, metric, fuzzy=True):
@@ -242,14 +239,7 @@ def get_metric(summary, metric, fuzzy=True):
 
     if not candidates:
         return None
-
-    if "gsm8k" in task.lower():
-        for k, v in candidates:
-            if "strict-match" in k:
-                return float(v)
-
-    candidates.sort(key=lambda x: len(x[0]))
-    return candidates[0][1]
+    return summary[first_key(task, [k for k, _ in candidates])]
 
 
 def normalize_score(val):
@@ -316,12 +306,13 @@ def _value_cell(val, col, kind, indent, label=""):
     if val is None:
         return _na_cell(col, indent)
     suffix = f" <small>{escape(label)}</small>" if label else ""
+    data_label = f' data-label="{escape(label)}"' if label else ""
     if kind == "count":
         # Round half up: "{412.5:.0f}" is banker's rounding and yields 412.
         return f'{indent}<div class="cell" data-col="{col}">{math.floor(val + 0.5):.0f}</div>\n'
     if kind == "failure":
         return f'{indent}<div class="cell" data-col="{col}">{val * 100:.1f}{suffix}</div>\n'
-    return f'{indent}<div class="cell" data-col="{col}" data-val="{val * 100:.1f}">{val * 100:.1f}{suffix}</div>\n'
+    return f'{indent}<div class="cell" data-col="{col}" data-val="{val * 100:.1f}"{data_label}>{val * 100:.1f}{suffix}</div>\n'
 
 
 def _row_classes(base, kind):
@@ -837,11 +828,10 @@ details[open] .arrow {{ transform: rotate(90deg); }}
       }});
       visible.forEach(function(c) {{
         var v = parseFloat(c.getAttribute('data-val'));
-        if (visible.length > 1 && Math.abs(v - maxVal) < 0.01) {{
-          c.innerHTML = '<span class="best-badge">' + v.toFixed(1) + '</span>';
-        }} else {{
-          c.textContent = v.toFixed(1);
-        }}
+        var label = c.getAttribute('data-label');
+        var text = (visible.length > 1 && Math.abs(v - maxVal) < 0.01)
+          ? '<span class="best-badge">' + v.toFixed(1) + '</span>' : v.toFixed(1);
+        c.innerHTML = label ? text + ' <small>' + label + '</small>' : text;
       }});
     }});
   }}
@@ -951,7 +941,7 @@ def fetch_model(api, project_path, run_name, display_name, groups, scores, debug
         print(f"Warning: run '{run_name}' not found in {project_path}")
         return None
 
-    summary = dict(matched[0].summary)
+    summary = dict(matched[0].summary_metrics)
 
     if debug:
         print(f"\n=== Keys for {run_name} ===")
@@ -1097,7 +1087,7 @@ def main():
 
     if args.thinking:
         # Drop a model with no thinking metrics (thinking never enabled) instead of a dash column.
-        keep = [d for d in display_names if any(v is not None for v in scores.get(d, {}).values())]
+        keep = [d for d in display_names if has_scores(scores.get(d, {}))]
         for dropped in [d for d in display_names if d not in keep]:
             print(f"Warning: '{dropped}' has no thinking metrics; dropping its column")
         display_names = keep

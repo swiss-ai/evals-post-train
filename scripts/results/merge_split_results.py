@@ -93,12 +93,15 @@ def merge_split_results(
             if any(_matches_task(key, task) for task in excluded_tasks):
                 values.pop(key)
 
-    if repeats:
-        merged_results["repeat_results"] = [
-            {"repeat_index": index, "results": {task: score for task, score in scores.items()
-             if not any(_matches_task(task, excluded) for excluded in excluded_tasks)}}
-            for index, scores in sorted(repeats.items()) if scores
-        ]
+    repeat_results = []
+    for index, scores in sorted(repeats.items()):
+        kept = {task: score for task, score in scores.items()
+                if not any(_matches_task(task, excluded) for excluded in excluded_tasks)}
+        if kept:
+            repeat_results.append({"repeat_index": index, "results": kept})
+    merged_results.pop("repeat_results", None)
+    if repeat_results:
+        merged_results["repeat_results"] = repeat_results
 
     # Write merged results with a consistent timestamp
     # Use the timestamp from the base results file name

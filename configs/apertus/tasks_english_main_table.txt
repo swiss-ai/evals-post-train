@@ -7,7 +7,7 @@ acp_bench_mcq/exact_match,mcq-extract
 gsm8k_cot/exact_match
 mathqa/acc_norm
 hendrycks_math/math_verify
-humaneval_instruct/pass@1
+humaneval_instruct/pass@10
 mbpp/pass_at_1
 ifeval/prompt_level_loose_acc
 toxigen/acc_norm
