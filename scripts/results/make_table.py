@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 
 import os
-from scripts.results.repeat_metrics import mean_key
+try:
+    from scripts.results.repeat_metrics import compute_mgsm_avg, first_key, mean_key
+except ModuleNotFoundError:  # run as a file: python scripts/results/make_table.py
+    from repeat_metrics import compute_mgsm_avg, first_key, mean_key
 
 import argparse
 import wandb
@@ -27,22 +30,6 @@ def list_models(base_dir):
         d for d in os.listdir(base_dir)
         if os.path.isdir(os.path.join(base_dir, d))
     )
-
-
-def compute_mgsm_avg(summary):
-    vals = []
-    # Strictly target keys ending in 'exact_match' to filter out stderr and ordered-extract
-    for k, v in summary.items():
-        if "mgsm" in k and k.endswith("exact_match"):
-            try:
-                vals.append(float(v))
-            except (ValueError, TypeError):
-                pass
-
-    if not vals:
-        return None
-
-    return sum(vals) / len(vals)
 
 
 def is_mgsm_aggregate(task, metric_name):
@@ -98,16 +85,7 @@ def get_metric(summary, metric):
 
     if not candidates:
         return None
-
-    # Prefer strict-match for gsm8k
-    if "gsm8k" in task.lower():
-        for k, v in candidates:
-            if "strict-match" in k:
-                return float(v)
-
-    # If multiple candidates, prefer the shortest key (most specific match)
-    candidates.sort(key=lambda x: len(x[0]))
-    return candidates[0][1]
+    return summary[first_key(task, [k for k, _ in candidates])]
 
 
 def normalize_score(val):

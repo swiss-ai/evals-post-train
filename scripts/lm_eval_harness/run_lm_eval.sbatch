@@ -861,8 +861,9 @@ make_cmd() {
     local repeat_setup="" repeat_file
     if [[ -n "${EVAL_REPEAT_CONFIG:-}" ]]; then
         printf -v repeat_file '%q' "$2/repeat_config.json"
-        printf -v repeat_setup 'python -m scripts.lm_eval_harness.repeat_config --policy %q --suite %q --tasks %q --output %q && ' \
-            "$EVAL_REPEAT_CONFIG" "$EVAL_REPEAT_TASKS" "$1" "$2/repeat_config.json"
+        # A subshell: scripts.* needs the repository as working directory, lm_eval does not.
+        printf -v repeat_setup '(cd %q && python -m scripts.lm_eval_harness.repeat_config --policy %q --suite %q --tasks %q --output %q)\n' \
+            "$PWD" "$EVAL_REPEAT_CONFIG" "${EVAL_REPEAT_TASKS:-}" "$1" "$2/repeat_config.json"
         eval_args="$eval_args --config $repeat_file"
     fi
     [[ $3 == true ]] && eval_args="$eval_args --apply_chat_template --fewshot_as_multiturn"

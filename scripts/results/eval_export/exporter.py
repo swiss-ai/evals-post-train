@@ -319,7 +319,7 @@ def _format_subtask_split(
     if (
         split != "overall"
         and config.get("configless_split_is_overall")
-        and not _task_config(raw, task_name)
+        and not raw.get("configs", {}).get(task_name)
     ):
         split += "_overall"
     return split
@@ -510,11 +510,15 @@ def _metric_candidates(
         for candidate in candidates:
             base, sep, filter_name = candidate.partition(",")
             if "_mean_repeats" not in base and "_pass@" not in base:
+                if not policy.get("mean", True):
+                    continue
                 base += "_mean_repeats"
             if task_config.get("repeat_filter"):
                 sep, filter_name = ",", task_config["repeat_filter"]
             converted.append(base + (sep + filter_name if sep else ""))
         candidates = converted
+        if not candidates:
+            return None
     repeats = task_config.get("repeats")
     expanded: list[str] = []
     for candidate in candidates:
@@ -803,6 +807,8 @@ def _metric_config(
         ),
         "lower_is_better": not bool(higher),
     }
+    # A repeat mean keeps the identity of the metric it averages.
+    metric = metric.removesuffix("_mean_repeats")
     known = KNOWN_METRICS.get(metric)
     pass_at_match = re.fullmatch(r"pass(?:@|_at_)(\d+)", metric)
     if known is None and pass_at_match:
@@ -969,7 +975,7 @@ def _sample_score(
         metric_name, separator, result_filter = result_key.partition(",")
         if separator and result_filter != sample_filter:
             continue
-        value = sample.get(metric_name.removesuffix("_mean_repeats"))
+        value = sample.get(metric_name.removesuffix("_mean_repeats").partition("_pass@")[0])
         if isinstance(value, bool):
             return float(value), value
         if isinstance(value, (int, float)) and math.isfinite(value):
@@ -1072,8 +1078,8 @@ def _attempt_samples(sample):
         attempt["repeat_index"] = index
         for key in sample.get("metrics", []):
             attempt[key] = sample[key][index]
-        for key in ("resps", "filtered_resps"):
-            attempt[key] = [[request[index]] for request in sample.get(key, [])]
+        attempt["resps"] = [[request[index]] for request in sample.get("resps", [])]
+        attempt["filtered_resps"] = [request[index] for request in sample.get("filtered_resps", [])]
         yield attempt
 
 
@@ -1095,12 +1101,12 @@ def _load_samples(
         for line_number, line in enumerate(handle, start=1):
             if not line.strip():
                 continue
-            source_rows += 1
             try:
                 sample = json.loads(line)
             except json.JSONDecodeError as exc:
                 raise ExportError(f"{sample_path}:{line_number}: {exc}") from exc
             for attempt in _attempt_samples(sample):
+                source_rows += 1
                 converted = _convert_sample(
                     attempt,
                     evaluation_id,
@@ -1142,10 +1148,11 @@ def _selected_metrics(
     task_mapping: dict[str, Any],
 ) -> list[tuple[str, float]]:
     candidates = _metric_candidates(raw, task_name, task_mapping["eee"])
-    if not candidates:
-        return list(_numeric_metrics(task_results))
-    selected = _hf_metric(task_results, candidates)
-    return [selected] if selected else list(_numeric_metrics(task_results))
+    selected = _hf_metric(task_results, candidates) if candidates else None
+    if selected:
+        return [selected]
+    # Derived pass@k scores are exported only when a mapping selects them.
+    return [(k, v) for k, v in _numeric_metrics(task_results) if "_pass@" not in k]
 
 
 def _yaml_string(value: str) -> str:
@@ -1403,8 +1410,6 @@ def export_results(
             resolved_task_aliases[task_name] = str(mapped_task_name)
         candidates = _metric_candidates(raw, task_name, task_mapping["eee"])
         if candidates and _hf_metric(task_results, candidates) is None:
-            if (_task_config(raw, task_name).get("repeat_scoring") or {}).get("enabled"):
-                raise ExportError(f"{task_name}: repeated results do not contain configured headline metrics {candidates}; available: {available_metrics}")
             metric_mismatches[task_name] = (
                 available_metrics,
                 list(candidates),

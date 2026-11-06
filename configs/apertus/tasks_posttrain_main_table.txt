@@ -9,7 +9,7 @@ hendrycks_math/math_verify
 mgsm_en_cot_en/exact_match
 mathqa/acc
 gpqa_main_cot_zeroshot/exact_match,ordered-extract
-humaneval_instruct/pass@1
+humaneval_instruct/pass@10
 mbpp_instruct/pass_at_1
 acp_bench/exact_match
 bbh/exact_match

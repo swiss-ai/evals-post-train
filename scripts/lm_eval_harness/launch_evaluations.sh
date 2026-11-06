@@ -404,6 +404,12 @@ fi
 # not after scheduling.
 EFFECTIVE_BACKEND="${BACKEND_FLAG:-${LM_EVAL_BACKEND:-}}"
 
+# Only the harness's API models send every attempt with its own seed.
+if [[ -n "${EVAL_REPEAT_CONFIG:-}" && "$EFFECTIVE_BACKEND" != "openai" ]]; then
+    echo "Error: --repeat-config needs --backend openai (repeat scoring supports API models only)"
+    exit 1
+fi
+
 # apertus2: the harness renders and parses the native format and always reasons, so the
 # template's thinking switches do not apply; the effort sets the thinking level.
 case "${CHAT_FORMAT_FLAG:-template}" in

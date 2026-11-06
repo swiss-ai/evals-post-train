@@ -23,6 +23,7 @@ log-likelihood requests its yaml doesn't declare (squadv2, scrolls).
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import shlex
 from pathlib import Path
 
@@ -63,36 +64,40 @@ class Classifier:
         entry = self._index.get(name)
         if entry is None or name in seen:
             return set()
-        kind = getattr(entry.kind, "name", str(entry.kind)).upper()
+        members = self._children(name, entry)
         found: set[bool] = set()
-        if kind == "TAG":
-            for member in self._tag_members.get(name, []):
+        if members is not None:
+            for member in members:
                 found |= self.kinds(member, seen | {name})
-        else:
-            cfg = self._config(entry)
-            if kind == "GROUP":
-                members: list = []
-                _members(cfg.get("task"), members)
-                for member in members:
-                    found |= self.kinds(member, seen | {name})
-            elif cfg:
-                found = {cfg.get("output_type", "generate_until") in LOGLIKELIHOOD}
+        elif cfg := self._config(entry):
+            found = {cfg.get("output_type", "generate_until") in LOGLIKELIHOOD}
         self._cache[name] = found
         return found
 
     def leaves(self, name: str, seen: frozenset[str] = frozenset()) -> set[str]:
+        if name in seen:
+            raise ValueError(f"Cyclic task specification: {name}")
         entry = self._index.get(name)
-        if entry is None or name in seen:
-            raise ValueError(f"Unknown or cyclic task specification: {name}")
+        if entry is None and (matches := fnmatch.filter(self._index, name)):
+            return set().union(*(self.leaves(match, seen | {name}) for match in matches))
+        # A path or an unindexed task stays as named: lm_eval resolves it.
+        members = None if entry is None else self._children(name, entry)
+        if members is None:
+            return {name}
+        # lm_eval names a group's inline tasks group::task.
+        members = [m if m in self._index else f"{name}::{m}" for m in members]
+        return set().union(*(self.leaves(member, seen | {name}) for member in members))
+
+    def _children(self, name: str, entry) -> list[str] | None:
+        """Members of a group or tag; None for a task."""
         kind = getattr(entry.kind, "name", str(entry.kind)).upper()
         if kind == "TAG":
-            members = self._tag_members.get(name, [])
-        elif kind == "GROUP":
-            members = []
-            _members(self._config(entry).get("task"), members)
-        else:
-            return {name}
-        return set().union(*(self.leaves(member, seen | {name}) for member in members))
+            return self._tag_members.get(name, [])
+        if kind != "GROUP":
+            return None
+        members: list = []
+        _members(self._config(entry).get("task"), members)
+        return members
 
     def split(self, tasks: list[str]) -> tuple[list[str], list[str]]:
         chat: list[str] = []

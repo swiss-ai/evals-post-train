@@ -1,7 +1,10 @@
 # Repeated evaluation
 
-Use `--repeat-config path.json` with the lm-eval launcher. The JSON accepts only
-`repeats`, `repeat_scoring` and `task_overrides`, using the harness schema.
+Use `--repeat-config path.json` with the lm-eval launcher and `--backend openai`:
+repeat scoring supports API models only (the harness's `local-completions`,
+`local-chat-completions` and `apertus2-completions`), which send every attempt
+with its own seed. The launcher refuses it for other backends. The JSON accepts
+only `repeats`, `repeat_scoring` and `task_overrides`, using the harness schema.
 The harness owns generation repeats and scoring; the pipeline adds no repeat loop.
 
 ```bash
@@ -33,17 +36,26 @@ results. Each chunk resolves the full suite through the harness task index,
 rejects unmatched leaf-task overrides, and forwards only its selected overrides.
 Task defaults and per-task overrides retain the harness's precedence rules.
 Group/tag names can select benchmarks; override keys must be leaf task names.
+The harness applies the run policy only to generative tasks that declare repeat
+support, except the tasks of a group that aggregates over one that does not;
+those are scored once as usual, so mixed suites run. An override can still set
+`enabled` explicitly; the harness refuses a group aggregate that only some of its
+tasks repeat-score.
 
 Results retain the resolved policy and scalar scores per repeat. Chunk merging
 replaces a rerun's entire repeat history, including when m shrinks or the task
 returns to legacy scoring. HTML tables show `mean@m` or `pass@k (m=m)` when
 protocol metadata is available; groups record each leaf's budget and metric
 contributors. W&B stores `repeat_protocols`. Headline mappings prefer means and
-never substitute derived pass@k scores. Explicit mappings can select pass@k.
+never substitute derived pass@k scores. Explicit mappings can select pass@k; a
+policy without means keeps only those.
 
-Exports retain suffixed metric identities and protocol details. Repeated runs
-whose configured headline metric is absent fail export instead of falling back
-to an oracle score. Optional sample export emits separate attempt IDs and scores;
+An exported mean keeps the metric identity and judge metadata of the metric it
+averages; its description keeps the suffix and the generation config carries the
+protocol. A repeated run
+whose configured headline metric is absent exports its other metrics with a
+warning, as legacy runs do, but no derived pass@k score. Optional sample export
+emits separate attempt IDs and scores;
 existing private-dataset logging restrictions continue to apply. Legacy result
 files retain their existing handling. The static table resolves means, while
 per-cell budget labels are available in the HTML table and exported metadata.
