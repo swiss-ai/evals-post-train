@@ -139,12 +139,16 @@ class _Box:
 
 
 class OpenSandboxSandboxManager:
-    """Duck-types the parts of ms-enclave's SandboxManager EvalScope's SandboxService calls for
-    per-sample sandboxes (no pools: neither benchmark uses one)."""
+    """Duck-types the parts of ms-enclave's SandboxManager EvalScope's SandboxService calls: per-sample
+    sandboxes (SWE-bench) and a pool of idle ones that code-execution scorers borrow from (LiveCodeBench:
+    initialize_pool / execute_tool_in_pool, with the python_executor tool on top of shell_executor)."""
 
     def __init__(self, **_: Any) -> None:
         self._run_label = os.environ.get(RUN_LABEL_ENV) or f"evalscope-{uuid.uuid4().hex[:12]}"
         self._boxes: Dict[str, _Box] = {}
+        # EvalScope checks this before it initializes the pool (once, for the whole run).
+        self._pool_initialized = False
+        self._pool: Optional[asyncio.Queue] = None
 
     # --- lifecycle ----------------------------------------------------------
 
@@ -254,17 +258,22 @@ class OpenSandboxSandboxManager:
         box = self._boxes.get(sandbox_id)
         if box is None:
             raise ValueError(f"Sandbox {sandbox_id} not found")
+        if tool_name == "python_executor":
+            return await self._python_executor(box, parameters)
         if tool_name != "shell_executor":
             return ToolResult(
                 tool_name=tool_name,
                 status=ExecutionStatus.ERROR,
                 output="",
-                error=f"{tool_name} is not supported by the OpenSandbox backend (only shell_executor)",
+                error=f"{tool_name} is not supported by the OpenSandbox backend (only shell_executor, python_executor)",
             )
         command = parameters.get("command")
         if not command or (isinstance(command, str) and not command.strip()):
             return ToolResult(tool_name=tool_name, status=ExecutionStatus.ERROR, output="", error="No command provided")
-        timeout = parameters.get("timeout", 30)
+        return await self._shell_tool(box, tool_name, command, parameters.get("timeout", 30))
+
+    async def _shell_tool(self, box: _Box, tool_name: str, command: Union[str, List[str]], timeout: Optional[float]) -> Any:
+        from ms_enclave.sandbox.model import ExecutionStatus, ToolResult
 
         started = time.monotonic()
         try:
@@ -329,8 +338,53 @@ class OpenSandboxSandboxManager:
         await self._upload_dir(box, source_dir, target_dir)
         return True
 
-    async def initialize_pool(self, *_: Any, **__: Any) -> Any:
-        raise NotImplementedError("the OpenSandbox backend has no pools (per-sample sandboxes only)")
+    async def _python_executor(self, box: _Box, parameters: Dict[str, Any]) -> Any:
+        """ms-enclave's python_executor: the code is written to a script file (a command line has a
+        size limit that LiveCodeBench's large test inputs exceed) and run with `python`."""
+        from ms_enclave.sandbox.model import ExecutionStatus, ToolResult
+        from opensandbox.models.filesystem import WriteEntry
+
+        code = parameters.get("code") or ""
+        if not code.strip():
+            return ToolResult(tool_name="python_executor", status=ExecutionStatus.ERROR, output="", error="No code provided")
+        script = f"/tmp/exec_script_{uuid.uuid4().hex}.py"
+        try:
+            await box.sandbox.files.write_files([WriteEntry(path=script, data=code.encode(), mode=644)])
+            result = await self._shell_tool(box, "python_executor", ["python", script], parameters.get("timeout", 30))
+            await self._run(box, ["rm", "-f", script], 60)
+            return result
+        except Exception as exc:
+            return ToolResult(
+                tool_name="python_executor", status=ExecutionStatus.ERROR, output="", error=f"Execution failed: {exc}"
+            )
+
+    # --- pool (code-execution scorers) ----------------------------------------------
+
+    async def initialize_pool(self, pool_size: Optional[int] = None, sandbox_type: Any = None, config: Any = None) -> List[str]:
+        """pool_size sandboxes from the config, created concurrently; execute_tool_in_pool borrows them."""
+        size = int(pool_size or 0)
+        if size <= 0:
+            return []
+        ids = await asyncio.gather(*(self.create_sandbox(sandbox_type, config) for _ in range(size)), return_exceptions=True)
+        failed = [i for i in ids if isinstance(i, BaseException)]
+        if failed:
+            await self.cleanup_all_sandboxes()
+            raise failed[0]
+        self._pool = asyncio.Queue()
+        for sandbox_id in ids:
+            self._pool.put_nowait(sandbox_id)
+        self._pool_initialized = True
+        return list(ids)
+
+    async def execute_tool_in_pool(self, tool_name: str, parameters: Dict[str, Any], timeout: Optional[float] = None) -> Any:
+        """The tool in the next idle pool sandbox (callers wait in line when all are busy)."""
+        if not self._pool_initialized or self._pool is None:
+            raise ValueError("Sandbox pool is empty, call initialize_pool first")
+        sandbox_id = await self._pool.get()
+        try:
+            return await self.execute_tool(sandbox_id, tool_name, parameters)
+        finally:
+            self._pool.put_nowait(sandbox_id)
 
 
 def network_policy(agent: bool) -> Any:

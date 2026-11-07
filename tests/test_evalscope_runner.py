@@ -547,3 +547,73 @@ class ShellWrapperTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LiveCodeBenchTest(unittest.TestCase):
+    def _cfg(self, *extra, benchmark="live_code_bench"):
+        args = run.parse_args(["--benchmark", benchmark, "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", *extra])
+        names = run.selected_benchmarks(benchmark)
+        return run.build_task_config(args, names, run.resolved_revisions(names, args.dataset_revision))
+
+    def test_defaults_to_the_v6_slice_from_modelscope_at_a_pinned_commit(self):
+        cfg = self._cfg()
+        self.assertEqual((cfg["datasets"], cfg["dataset_hub"]), (["live_code_bench"], "modelscope"))
+        args = cfg["dataset_args"]["live_code_bench"]
+        self.assertEqual(args["subset_list"], ["v6"])
+        self.assertEqual(args["dataset_revision"], run.BENCHMARKS["live_code_bench"]["revision"])
+        self.assertNotIn("hf_dataset_revision", args)
+        self.assertRegex(args["dataset_revision"], r"^[0-9a-f]{40}$")
+
+    def test_the_subset_is_selectable(self):
+        cfg = self._cfg("--subset", "release_v6")
+        self.assertEqual(cfg["dataset_args"]["live_code_bench"]["subset_list"], ["release_v6"])
+
+    def test_swe_bench_keeps_its_hugging_face_dataset(self):
+        cfg = self._cfg(benchmark="swe_bench")
+        self.assertEqual(cfg["dataset_hub"], "huggingface")
+        self.assertIn("hf_dataset_revision", cfg["dataset_args"]["swe_bench_verified_agentic"])
+        self.assertNotIn("subset_list", cfg["dataset_args"]["swe_bench_verified_agentic"])
+
+    def test_a_subset_only_exists_for_benchmarks_that_have_them(self):
+        with self.assertRaises(SystemExit):
+            self._cfg("--subset", "x", benchmark="swe_bench")
+
+    def test_benchmarks_on_different_hubs_cannot_share_a_run(self):
+        with self.assertRaises(SystemExit):
+            run.dataset_hub(["swe_bench", "live_code_bench"])
+
+    def test_gold_and_k8s_are_refused(self):
+        base = ["--benchmark", "live_code_bench", "--work-dir", "/w"]
+        with mock.patch.object(run, "swe_bench_scoring", create=True), self.assertRaises(SystemExit) as gold:
+            run.main([*base, "--gold"])
+        self.assertIn("reference solutions", str(gold.exception))
+        with self.assertRaises(SystemExit) as k8s:
+            run.main([*base, "--model", "m", "--api-base-url", "http://x/v1", "--sandbox", "k8s"])
+        self.assertIn("sandbox pool", str(k8s.exception))
+
+
+class CompletionsFlagTest(unittest.TestCase):
+    def _cfg(self, *extra):
+        args = run.parse_args(["--benchmark", "live_code_bench", "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", *extra])
+        return run.build_task_config(args, ["live_code_bench"], run.resolved_revisions(["live_code_bench"], []))
+
+    def test_default_is_the_chat_backend(self):
+        cfg = self._cfg()
+        self.assertEqual(cfg["eval_type"], "openai_api")
+        self.assertNotIn("stop_seqs", cfg["generation_config"])
+
+    def test_completions_selects_the_backend_and_the_official_limits(self):
+        cfg = self._cfg("--completions")
+        self.assertEqual(cfg["eval_type"], "openai_completions")
+        self.assertEqual(cfg["generation_config"]["stop_seqs"], ["###"])
+        self.assertEqual(cfg["generation_config"]["max_tokens"], 2000)
+
+    def test_generation_config_overrides_the_completions_defaults(self):
+        cfg = self._cfg("--completions", "--generation-config", '{"max_tokens": 4096, "stop_seqs": ["###", "\\n\\n\\n"]}')
+        self.assertEqual(cfg["generation_config"]["max_tokens"], 4096)
+        self.assertEqual(cfg["generation_config"]["stop_seqs"], ["###", "\n\n\n"])
+
+    def test_completions_is_refused_for_the_swe_benchmarks(self):
+        with self.assertRaises(SystemExit) as refused:
+            run.main(["--benchmark", "swe_bench", "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", "--completions"])
+        self.assertIn("only live_code_bench", str(refused.exception))

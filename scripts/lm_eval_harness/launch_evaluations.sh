@@ -75,6 +75,9 @@
 #                          unless API_BASE_URL is exported). Bare host, /v1 root, or full endpoint URL.
 #   --api-model-name <n> - 'model' field sent in API requests (default: the --model value)
 #   --api-requests-per-minute N - Endpoint-wide request limit for the benchmarked API model
+#   --api-max-retries N  - 'openai' backend: retries per failed request (default 3; a rate-limited
+#                          endpoint can exhaust 3 and fail the run)
+#   --api-num-concurrent N - 'openai' backend: concurrent requests (default 8)
 #   --api-endpoint <e>   - 'completions' (default) or 'chat-completions' for the 'openai' backend.
 #                          chat-completions lets the server render the chat template (generative
 #                          tasks only; required by FC tasks such as bfcl_v3_fc).
@@ -188,6 +191,8 @@ BACKEND_FLAG=""
 API_BASE_URL_FLAG=""
 API_MODEL_NAME_FLAG=""
 API_REQUESTS_PER_MINUTE_FLAG=""
+API_MAX_RETRIES_FLAG=""
+API_NUM_CONCURRENT_FLAG=""
 API_ENDPOINT_FLAG=""
 CHAT_FORMAT_FLAG="${CHAT_FORMAT:-}"
 PREFILL_MODE_FLAG=""
@@ -251,6 +256,8 @@ while [[ $# -gt 0 ]]; do
         --api-base-url) API_BASE_URL_FLAG="$2";       shift 2 ;;
         --api-model-name) API_MODEL_NAME_FLAG="$2";   shift 2 ;;
         --api-requests-per-minute) API_REQUESTS_PER_MINUTE_FLAG="$2"; shift 2 ;;
+        --api-max-retries) API_MAX_RETRIES_FLAG="$2"; shift 2 ;;
+        --api-num-concurrent) API_NUM_CONCURRENT_FLAG="$2"; shift 2 ;;
         --api-endpoint) API_ENDPOINT_FLAG="$2";       shift 2 ;;
         --chat-format)  CHAT_FORMAT_FLAG="$2";        shift 2 ;;
         --prefill-mode) PREFILL_MODE_FLAG="$2";       shift 2 ;;
@@ -548,6 +555,17 @@ if [[ -n "$API_REQUESTS_PER_MINUTE_FLAG" && "$EFFECTIVE_BACKEND" != "openai" ]];
     echo "Error: --api-requests-per-minute only applies with --backend openai"
     exit 1
 fi
+for _flag_pair in "--api-max-retries:$API_MAX_RETRIES_FLAG" "--api-num-concurrent:$API_NUM_CONCURRENT_FLAG"; do
+    _flag_name="${_flag_pair%%:*}"; _flag_value="${_flag_pair#*:}"
+    if [[ -n "$_flag_value" && "$EFFECTIVE_BACKEND" != "openai" ]]; then
+        echo "Error: $_flag_name only applies with --backend openai"
+        exit 1
+    fi
+    if [[ -n "$_flag_value" && ! "$_flag_value" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Error: $_flag_name must be a positive integer (got '$_flag_value')"
+        exit 1
+    fi
+done
 if [[ -n "$API_ENDPOINT_FLAG" ]]; then
     if [[ "$EFFECTIVE_BACKEND" != "openai" ]]; then
         echo "Error: --api-endpoint only applies with --backend openai"
@@ -569,6 +587,8 @@ if [[ "${API_CHAT_ENDPOINT:-false}" == "true" ]] \
 fi
 
 API_REQUESTS_PER_MINUTE="${API_REQUESTS_PER_MINUTE_FLAG:-${API_REQUESTS_PER_MINUTE:-}}"
+API_MAX_RETRIES="${API_MAX_RETRIES_FLAG:-${API_MAX_RETRIES:-}}"
+API_NUM_CONCURRENT="${API_NUM_CONCURRENT_FLAG:-${API_NUM_CONCURRENT:-}}"
 JUDGE_REQUESTS_PER_MINUTE="${JUDGE_REQUESTS_PER_MINUTE_FLAG:-${JUDGE_REQUESTS_PER_MINUTE:-}}"
 JUDGE_MODEL_PREFIX="${JUDGE_MODEL_PREFIX:-${USER:-}}"
 
@@ -581,6 +601,8 @@ fi
 [[ -n "$API_BASE_URL_FLAG"   ]] && export API_BASE_URL="$API_BASE_URL_FLAG"
 [[ -n "$API_MODEL_NAME_FLAG" ]] && export API_MODEL_NAME="$API_MODEL_NAME_FLAG"
 [[ -n "$API_REQUESTS_PER_MINUTE" ]] && export API_REQUESTS_PER_MINUTE
+[[ -n "$API_MAX_RETRIES" ]] && export API_MAX_RETRIES
+[[ -n "$API_NUM_CONCURRENT" ]] && export API_NUM_CONCURRENT
 [[ -n "$JUDGE_REQUESTS_PER_MINUTE" ]] && export JUDGE_REQUESTS_PER_MINUTE
 [[ -n "$JUDGE_MODEL_PREFIX" ]] && export JUDGE_MODEL_PREFIX
 
@@ -836,6 +858,7 @@ fi
 if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
     echo "  API:    ${API_BASE_URL} (model=${API_MODEL_NAME:-<from --model>})"
     echo "  API RPM: ${API_REQUESTS_PER_MINUTE:-unlimited}"
+    echo "  API max retries: ${API_MAX_RETRIES:-3 (default)}, concurrent requests: ${API_NUM_CONCURRENT:-8 (default)}"
     if [[ "${API_CHAT_ENDPOINT:-false}" == "true" ]]; then
         echo "  API endpoint: chat-completions"
     else
