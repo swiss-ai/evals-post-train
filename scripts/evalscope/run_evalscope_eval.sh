@@ -9,6 +9,9 @@
 #
 #   swe_bench      SWE-bench Verified, 500 tasks (swebench/sweb.eval.x86_64.* images).
 #   swe_bench_pro  SWE-bench Pro v1, 731 tasks (jefzda/sweap-images:<tag>) -- see "v1 vs V2" below.
+#   live_code_bench  LiveCodeBench code generation, the v6 slice by default (--subset): one prompt per
+#                  problem, the code scored in a sandbox pool. Loads from ModelScope, so it cannot
+#                  share a run with the SWE-bench benchmarks; no --gold, no --sandbox k8s.
 #
 # EvalScope lives in its own venv (requirements/evalscope-runtime.lock, every package pinned): its
 # math-verify pin conflicts with the lm-eval/Inspect environment's antlr4 pin.
@@ -29,7 +32,7 @@
 #     --model <served model> --api-base-url <url> [options]
 #
 # Required:
-#   --benchmark <b[,b]>        swe_bench, swe_bench_pro, or both (comma-separated).
+#   --benchmark <b[,b]>        swe_bench, swe_bench_pro (comma-separated for both) or live_code_bench.
 #   --model <name>             Served model name at --api-base-url. The model must serve tool
 #                               calls (vLLM --enable-auto-tool-choice + parser, sglang
 #                               --tool-call-parser) for the default toolcall strategy; else
@@ -69,8 +72,10 @@
 #   --generation-config <json> Merged over the sampling defaults, e.g.
 #                               '{"max_tokens": 8192, "retries": 100, "retry_interval": 60}' (more
 #                               patient retries for a rate-limited endpoint; EvalScope's default is 5).
-#   --dataset-revision <b>=<sha> Hugging Face dataset revision for benchmark <b> (repeatable). Both
-#                               are pinned by default (scripts/evalscope/run.py: BENCHMARKS);
+#   --subset <s[,s]>            live_code_bench: dataset subsets (default v6 = release 6's new
+#                               problems; release_v6 = every problem up to v6).
+#   --dataset-revision <b>=<sha> Dataset revision for benchmark <b> (repeatable; Hugging Face, and
+#                               ModelScope for live_code_bench). All are pinned by default (scripts/evalscope/run.py: BENCHMARKS);
 #                               swe_bench_pro's pin is the last v1 commit, see "v1 vs V2" below.
 #   --extra-param <key=value>   An EvalScope extra_param for the selected benchmark(s) (repeatable),
 #                               e.g. swe_bench_pro's eval_timeout=7200 or swe_bench_pro_repo_path=/path.
@@ -147,7 +152,7 @@ while (( $# > 0 )); do
         --no-wandb) NO_WANDB=1; shift ;;
         --shuffle) RUN_ARGS+=("$1"); shift ;;
         --sandbox-config|--limit|--max-concurrency|--max-steps|--strategy|--command-timeout|\
-        --generation-config|--dataset-revision|--extra-param|--api-timeout|--agent-network|\
+        --generation-config|--dataset-revision|--subset|--extra-param|--api-timeout|--agent-network|\
         --temperature|--top-p|--top-k|--min-p|--repetition-penalty|--sampling-profile|--sampling-config)
             RUN_ARGS+=("$1" "$2"); shift 2 ;;
         -h|--help) usage; exit 0 ;;
@@ -155,10 +160,11 @@ while (( $# > 0 )); do
     esac
 done
 
-[[ -n "$BENCHMARK" ]] || die "Missing --benchmark (swe_bench, swe_bench_pro, or both). See --help."
+[[ -n "$BENCHMARK" ]] || die "Missing --benchmark (swe_bench, swe_bench_pro, live_code_bench). See --help."
 IFS=',' read -ra BENCHMARK_LIST <<< "$BENCHMARK"
 for b in "${BENCHMARK_LIST[@]}"; do
-    [[ "$b" == swe_bench || "$b" == swe_bench_pro ]] || die "Unknown --benchmark '$b' (swe_bench or swe_bench_pro)."
+    [[ "$b" == swe_bench || "$b" == swe_bench_pro || "$b" == live_code_bench ]] \
+        || die "Unknown --benchmark '$b' (swe_bench, swe_bench_pro or live_code_bench)."
 done
 if [[ "$GOLD" == "1" ]]; then
     [[ -z "$MODEL" ]] || die "--gold scores the reference patches; drop --model."

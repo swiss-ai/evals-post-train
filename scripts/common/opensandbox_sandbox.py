@@ -275,7 +275,6 @@ class OpenSandboxSandboxManager:
     async def _shell_tool(self, box: _Box, tool_name: str, command: Union[str, List[str]], timeout: Optional[float]) -> Any:
         from ms_enclave.sandbox.model import ExecutionStatus, ToolResult
 
-
         started = time.monotonic()
         try:
             code, out, err = await self._run(box, command, timeout)
