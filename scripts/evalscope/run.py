@@ -54,8 +54,10 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
     # LiveCodeBench code generation (lite). EvalScope's copy of the dataset lives only on ModelScope
     # (evalscope/livecodebench_code_generation_lite_parquet; not on Hugging Face), pinned to its
     # latest commit as of 2026-11. Its subsets: release_vN = every problem up to release N,
-    # vN = only that release's new problems; "v6" (Feb-Apr 2025) is what papers call
-    # "LiveCodeBench v6". Scoring runs the model's code in the sandbox pool (python_executor).
+    # vN = only that release's new problems; "v6" is 175 problems with contest dates 2025-01-04 to
+    # 2025-04-06 (AtCoder 112, LeetCode 63; 43 easy, 52 medium, 80 hard), identical in ids, dates,
+    # difficulty and platform to the official livecodebench/code_generation_lite test6.jsonl
+    # (checked 2026-11-07). Scoring runs the model's code in the sandbox pool (python_executor).
     "live_code_bench": {
         "evalscope": "live_code_bench",
         "hub": "modelscope",
