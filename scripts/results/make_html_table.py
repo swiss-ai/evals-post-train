@@ -2,6 +2,12 @@
 
 import json
 import math
+from html import escape
+try:
+    from scripts.results.repeat_metrics import compute_mgsm_avg, first_key, mean_key, score_label
+except ModuleNotFoundError:  # run as a file: python scripts/results/make_html_table.py
+    from repeat_metrics import compute_mgsm_avg, first_key, mean_key, score_label
+
 import argparse
 import wandb
 
@@ -134,22 +140,11 @@ def build_thinking_groups(tasks, specs, label_with_group=False):
     ]
 
 
-def compute_mgsm_avg(summary):
-    vals = []
-    for k, v in summary.items():
-        if "mgsm" in k and k.endswith("exact_match") and "stderr" not in k:
-            try:
-                vals.append(float(v))
-            except (ValueError, TypeError):
-                pass
-    return sum(vals) / len(vals) if vals else None
-
-
 def compute_degeneration_avg(summary):
     """Average all metrics across benchmarks whose key contains '/degeneration'."""
     vals = []
     for k, v in summary.items():
-        if "stderr" in k:
+        if "stderr" in k or "_pass@" in k:
             continue
         if "/degeneration" in k.lower():
             nv = normalize_score(v)
@@ -169,10 +164,10 @@ def compute_mmlu_pro_detail(summary):
     accuracy = None
     subjects = {}
     for k, v in summary.items():
-        if "stderr" in k:
-            continue
         kl = k.lower()
         if "mmlu_pro" not in kl or "exact_match" not in kl:
+            continue
+        if "stderr" in k or "_pass@" in k or mean_key(summary, k):
             continue
         task = k.split("/", 1)[0]
         try:
@@ -197,12 +192,21 @@ def is_mgsm_aggregate(task, metric_name):
     return "mgsm" in task and "mgsm_en" not in task
 
 
+def has_scores(model_scores):
+    """Whether a model has any metric; keys starting with _ carry table metadata."""
+    return any(v is not None for k, v in model_scores.items() if not k.startswith("_"))
+
+
 def get_metric(summary, metric, fuzzy=True):
     """Resolve a `task/metric[,filter]` key against a W&B run summary.
 
     Hand-written main-table keys often omit the filter suffix, so fuzzy=True falls back to a
     substring scan. Pass fuzzy=False for synthesized keys, which must match exactly.
     """
+    repeated = mean_key(summary, metric)
+    if repeated is not None:
+        return summary[repeated]
+
     parts = metric.split("/", 1)
     task = parts[0]
     metric_name = parts[1] if len(parts) > 1 else None
@@ -222,7 +226,7 @@ def get_metric(summary, metric, fuzzy=True):
 
     candidates = []
     for k, v in summary.items():
-        if "stderr" in k:
+        if "stderr" in k or ("_pass@" in k and "_pass@" not in metric):
             continue
         k_lower = k.lower()
         if task.lower() not in k_lower:
@@ -235,14 +239,7 @@ def get_metric(summary, metric, fuzzy=True):
 
     if not candidates:
         return None
-
-    if "gsm8k" in task.lower():
-        for k, v in candidates:
-            if "strict-match" in k:
-                return float(v)
-
-    candidates.sort(key=lambda x: len(x[0]))
-    return candidates[0][1]
+    return summary[first_key(task, [k for k, _ in candidates])]
 
 
 def normalize_score(val):
@@ -282,7 +279,8 @@ def _prepare_group_data(groups, models, scores, metric_filter, thinking=False):
                     group_scores[model].append(val)
                     if kind == "rate":
                         all_model_scores[model].append(val)
-            benchmarks.append((display_name, row))
+            labels = {model: scores.get(model, {}).get("_repeat_labels", {}).get(metric_key, "") for model in models}
+            benchmarks.append((display_name, row, labels))
         if thinking and not benchmarks:
             continue
         group_avgs = {}
@@ -302,17 +300,19 @@ def _na_cell(col, indent):
     return f'{indent}<div class="cell na" data-col="{col}">-</div>\n'
 
 
-def _value_cell(val, col, kind, indent):
+def _value_cell(val, col, kind, indent, label=""):
     """One data cell. A count carries no data-val, keeping it out of updateBest()'s sweep:
     raw lengths are never rescaled and never win a "best" badge."""
     if val is None:
         return _na_cell(col, indent)
+    suffix = f" <small>{escape(label)}</small>" if label else ""
+    data_label = f' data-label="{escape(label)}"' if label else ""
     if kind == "count":
         # Round half up: "{412.5:.0f}" is banker's rounding and yields 412.
         return f'{indent}<div class="cell" data-col="{col}">{math.floor(val + 0.5):.0f}</div>\n'
     if kind == "failure":
-        return f'{indent}<div class="cell" data-col="{col}">{val * 100:.1f}</div>\n'
-    return f'{indent}<div class="cell" data-col="{col}" data-val="{val * 100:.1f}">{val * 100:.1f}</div>\n'
+        return f'{indent}<div class="cell" data-col="{col}">{val * 100:.1f}{suffix}</div>\n'
+    return f'{indent}<div class="cell" data-col="{col}" data-val="{val * 100:.1f}"{data_label}>{val * 100:.1f}{suffix}</div>\n'
 
 
 def _row_classes(base, kind):
@@ -331,10 +331,10 @@ def _render_table(html, table_id, models, group_data, overall_avgs, n_models, in
 
     if flat:
         for _, benchmarks, _, kind in group_data:
-            for display_name, row_vals in benchmarks:
+            for display_name, row_vals, labels in benchmarks:
                 html.append(f'  <div class="{_row_classes("bench-row", kind)}">\n    <div class="cell">{display_name}</div>\n')
                 for i, model in enumerate(models):
-                    html.append(_value_cell(row_vals[model], i + 1, kind, "    "))
+                    html.append(_value_cell(row_vals[model], i + 1, kind, "    ", labels.get(model, "")))
                 html.append("  </div>\n")
     else:
         for group_name, benchmarks, group_avgs, kind in group_data:
@@ -352,10 +352,10 @@ def _render_table(html, table_id, models, group_data, overall_avgs, n_models, in
                 html.append(_value_cell(group_avgs[model], i + 1, kind, "    "))
             html.append('  </summary>\n  <div class="bench-rows">\n')
 
-            for display_name, row_vals in benchmarks:
+            for display_name, row_vals, labels in benchmarks:
                 html.append(f'    <div class="{_row_classes("bench-row", kind)}">\n      <div class="cell">{display_name}</div>\n')
                 for i, model in enumerate(models):
-                    html.append(_value_cell(row_vals[model], i + 1, kind, "      "))
+                    html.append(_value_cell(row_vals[model], i + 1, kind, "      ", labels.get(model, "")))
                 html.append("    </div>\n")
 
             html.append("  </div>\n  </details></div>\n")
@@ -828,11 +828,10 @@ details[open] .arrow {{ transform: rotate(90deg); }}
       }});
       visible.forEach(function(c) {{
         var v = parseFloat(c.getAttribute('data-val'));
-        if (visible.length > 1 && Math.abs(v - maxVal) < 0.01) {{
-          c.innerHTML = '<span class="best-badge">' + v.toFixed(1) + '</span>';
-        }} else {{
-          c.textContent = v.toFixed(1);
-        }}
+        var label = c.getAttribute('data-label');
+        var text = (visible.length > 1 && Math.abs(v - maxVal) < 0.01)
+          ? '<span class="best-badge">' + v.toFixed(1) + '</span>' : v.toFixed(1);
+        c.innerHTML = label ? text + ' <small>' + label + '</small>' : text;
       }});
     }});
   }}
@@ -942,14 +941,14 @@ def fetch_model(api, project_path, run_name, display_name, groups, scores, debug
         print(f"Warning: run '{run_name}' not found in {project_path}")
         return None
 
-    summary = dict(matched[0].summary)
+    summary = dict(matched[0].summary_metrics)
 
     if debug:
         print(f"\n=== Keys for {run_name} ===")
         for k in sorted(summary.keys()):
             print(f"  {k}: {summary[k]}")
 
-    model_scores = {}
+    model_scores = {"_repeat_labels": {}}
     for _, metric_list in groups:
         for metric_key, _ in metric_list:
             if thinking:
@@ -959,6 +958,7 @@ def fetch_model(api, project_path, run_name, display_name, groups, scores, debug
             else:
                 val = normalize_score(get_metric(summary, metric_key))
             model_scores[metric_key] = val
+            model_scores["_repeat_labels"][metric_key] = score_label(summary, metric_key)
 
     scores[display_name] = model_scores
     if summaries is not None:
@@ -1087,7 +1087,7 @@ def main():
 
     if args.thinking:
         # Drop a model with no thinking metrics (thinking never enabled) instead of a dash column.
-        keep = [d for d in display_names if any(v is not None for v in scores.get(d, {}).values())]
+        keep = [d for d in display_names if has_scores(scores.get(d, {}))]
         for dropped in [d for d in display_names if d not in keep]:
             print(f"Warning: '{dropped}' has no thinking metrics; dropping its column")
         display_names = keep

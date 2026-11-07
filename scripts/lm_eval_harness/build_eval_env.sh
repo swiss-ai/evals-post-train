@@ -188,6 +188,14 @@ build_overlay() {
 build_base
 build_overlay
 
+# A repeat policy's overrides name leaf tasks: check them against the suite before any eval job.
+if [[ -n "${EVAL_REPEAT_CONFIG:-}" && -n "${EVAL_REPEAT_TASKS:-}" ]]; then
+    (cd "${EVAL_REPO_ROOT:-$PWD}" && PYTHONPATH="$HARNESS_OVERLAY" "$BASE_ENV/bin/python" \
+        -m scripts.lm_eval_harness.repeat_config --policy "$EVAL_REPEAT_CONFIG" \
+        --suite "$EVAL_REPEAT_TASKS" --tasks "$(paste -sd, "$EVAL_REPEAT_TASKS")" \
+        --output /dev/null) >/dev/null
+fi
+
 manifest_tmp="${EVAL_ENV_MANIFEST}.tmp.$$"
 {
     printf 'EVAL_BASE_ENV=%q\n' "$BASE_ENV"

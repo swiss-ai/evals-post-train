@@ -3,7 +3,7 @@ Data structures for evaluation results and samples.
 Contains well-defined classes for organizing evaluation data.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Any
 
 
@@ -45,6 +45,7 @@ class ModelEvaluation:
     """Complete evaluation data for a single model."""
     model_name: str
     tasks: List[Task]
+    repeat_protocols: Dict[str, Any] = field(default_factory=dict)
     
     @property
     def total_metrics_count(self) -> int:

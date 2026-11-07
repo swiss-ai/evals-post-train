@@ -16,6 +16,7 @@ def merge_split_results(
     """Merge results and samples from multiple chunk directories."""
     excluded_tasks = excluded_tasks or set()
     merged_results = None
+    repeats = {}
 
     for split_dir in split_dirs:
         result_files = list(split_dir.glob("**/results_*.json"))
@@ -26,6 +27,14 @@ def merge_split_results(
         result_file = result_files[0]
         with open(result_file) as f:
             split_results = json.load(f)
+
+        # A rerun replaces all previous repeat scores for its tasks, even if m shrank.
+        replaced = set(split_results.get("results", {}))
+        for scores in repeats.values():
+            for task in replaced:
+                scores.pop(task, None)
+        for repeat in split_results.get("repeat_results", []):
+            repeats.setdefault(repeat["repeat_index"], {}).update(repeat["results"])
 
         if merged_results is None:
             # Use the first split as the base
@@ -46,6 +55,10 @@ def merge_split_results(
                 )
             if "n-samples" in split_results:
                 merged_results["n-samples"].update(split_results["n-samples"])
+            for task in replaced:
+                merged_results.get("repeat_protocols", {}).pop(task, None)
+            for section in ("groups", "group_subtasks", "repeat_protocols"):
+                merged_results.setdefault(section, {}).update(split_results.get(section, {}))
 
         # Copy sample files
         for sample_file in split_dir.glob("**/samples_*.jsonl"):
@@ -69,6 +82,9 @@ def merge_split_results(
         "versions",
         "higher_is_better",
         "n-samples",
+        "groups",
+        "group_subtasks",
+        "repeat_protocols",
     ):
         values = merged_results.get(section)
         if not isinstance(values, dict):
@@ -76,6 +92,16 @@ def merge_split_results(
         for key in list(values):
             if any(_matches_task(key, task) for task in excluded_tasks):
                 values.pop(key)
+
+    repeat_results = []
+    for index, scores in sorted(repeats.items()):
+        kept = {task: score for task, score in scores.items()
+                if not any(_matches_task(task, excluded) for excluded in excluded_tasks)}
+        if kept:
+            repeat_results.append({"repeat_index": index, "results": kept})
+    merged_results.pop("repeat_results", None)
+    if repeat_results:
+        merged_results["repeat_results"] = repeat_results
 
     # Write merged results with a consistent timestamp
     # Use the timestamp from the base results file name
