@@ -44,7 +44,7 @@ def base_prompt(question_content: str, starter_code: Optional[str]) -> str:
 def install() -> None:
     """Make EvalScope's live_code_bench adapter use the base-model prompt and extraction.
 
-    Only the prompt (the Sample's input) and the answer extraction change; the dataset, the test
+    Only the prompt (the Sample's input), the system message (dropped) and the answer extraction change; the dataset, the test
     cases and the sandboxed scoring are the adapter's own.
     """
     from evalscope.api.messages.chat_message import ChatMessageUser
@@ -55,6 +55,13 @@ def install() -> None:
         return
     record_to_sample = LiveCodeBenchAdapter.record_to_sample
     extract_answer = LiveCodeBenchAdapter.extract_answer
+    init = LiveCodeBenchAdapter.__init__
+
+    def base_init(self, *args, **kwargs):
+        init(self, *args, **kwargs)
+        # A base model has no system turn. The backend would drop the message anyway; clearing it
+        # keeps the saved predictions equal to what was sent.
+        self.system_prompt = None
 
     def base_record_to_sample(self, record):
         sample = record_to_sample(self, dict(record))
@@ -66,8 +73,9 @@ def install() -> None:
 
     LiveCodeBenchAdapter.record_to_sample = base_record_to_sample
     LiveCodeBenchAdapter.extract_answer = base_extract_answer
+    LiveCodeBenchAdapter.__init__ = base_init
     LiveCodeBenchAdapter._lcb_base_installed = True
-    LiveCodeBenchAdapter._lcb_original = (record_to_sample, extract_answer)
+    LiveCodeBenchAdapter._lcb_original = (record_to_sample, extract_answer, init)
 
 
 def uninstall() -> None:
@@ -75,5 +83,9 @@ def uninstall() -> None:
     from evalscope.benchmarks.live_code_bench.live_code_bench_adapter import LiveCodeBenchAdapter
 
     if getattr(LiveCodeBenchAdapter, "_lcb_base_installed", False):
-        LiveCodeBenchAdapter.record_to_sample, LiveCodeBenchAdapter.extract_answer = LiveCodeBenchAdapter._lcb_original
+        (
+            LiveCodeBenchAdapter.record_to_sample,
+            LiveCodeBenchAdapter.extract_answer,
+            LiveCodeBenchAdapter.__init__,
+        ) = LiveCodeBenchAdapter._lcb_original
         LiveCodeBenchAdapter._lcb_base_installed = False

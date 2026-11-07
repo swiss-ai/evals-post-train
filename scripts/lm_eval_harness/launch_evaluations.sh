@@ -75,6 +75,9 @@
 #                          unless API_BASE_URL is exported). Bare host, /v1 root, or full endpoint URL.
 #   --api-model-name <n> - 'model' field sent in API requests (default: the --model value)
 #   --api-requests-per-minute N - Endpoint-wide request limit for the benchmarked API model
+#   --api-max-retries N  - 'openai' backend: retries per failed request (default 3; a rate-limited
+#                          endpoint can exhaust 3 and fail the run)
+#   --api-num-concurrent N - 'openai' backend: concurrent requests (default 8)
 #   --api-endpoint <e>   - 'completions' (default) or 'chat-completions' for the 'openai' backend.
 #                          chat-completions lets the server render the chat template (generative
 #                          tasks only; required by FC tasks such as bfcl_v3_fc).

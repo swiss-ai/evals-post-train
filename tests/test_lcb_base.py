@@ -57,6 +57,20 @@ class AdapterPatchTest(unittest.TestCase):
         # the chat extractor would return "" for a reply without a fenced block
         self.assertEqual(adapter.extract_answer("  print(1)\n", None), "print(1)")
 
+    def test_the_adapter_has_no_system_prompt(self):
+        from evalscope.benchmarks.live_code_bench.live_code_bench_adapter import LiveCodeBenchAdapter
+
+        self.lcb_base.uninstall()
+
+        def stub_init(self, **kwargs):
+            self._benchmark_meta = SimpleNamespace(system_prompt="You are an expert Python programmer.")
+
+        with mock.patch.object(LiveCodeBenchAdapter, "__init__", stub_init):
+            self.lcb_base.install()
+            adapter = LiveCodeBenchAdapter()
+            self.assertIsNone(adapter.system_prompt)
+            self.lcb_base.uninstall()
+
     def test_install_is_idempotent_and_reversible(self):
         from evalscope.benchmarks.live_code_bench.live_code_bench_adapter import LiveCodeBenchAdapter
 
