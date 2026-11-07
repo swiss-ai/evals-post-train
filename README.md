@@ -9,7 +9,7 @@ Evaluation infrastructure for LLMs on CSCS Alps (Clariden), with results in W&B.
 | [Harbor](https://github.com/harbor-framework/harbor) | Agentic coding and terminal benchmarks (SWE-bench, Terminal-Bench, DeepSWE, Aider Polyglot, ...) | `scripts/harbor/run_harbor_eval.sh` | [docs/harbor.md](docs/harbor.md) |
 | [EvalScope](https://github.com/modelscope/evalscope) | SWE-bench Verified / Pro | `scripts/evalscope/run_evalscope_eval.sh` | [docs/evalscope.md](docs/evalscope.md) |
 
-`scripts/aaii/` has Artificial Analysis's versions of some benchmarks ([docs/inspect-ai.md](docs/inspect-ai.md)). Results: [docs/results.md](docs/results.md) (W&B, tables, Every Eval Ever / Hugging Face exports).
+`scripts/aaii/` has Artificial Analysis's versions of some benchmarks ([docs/inspect-ai.md](docs/inspect-ai.md)). Results: [docs/results.md](docs/results.md) (W&B, tables, Every Eval Ever / Hugging Face exports). Every launcher takes the same sampling flags (`--temperature`, `--top-p`, `--top-k`, `--min-p`, `--repetition-penalty`) over one default policy: [docs/sampling.md](docs/sampling.md).
 
 ### How a run can be set up
 
@@ -116,6 +116,6 @@ evals-post-train/
 ├── configs/               # lm-eval task lists, main-table metrics, model registry, export mappings
 ├── containers/            # Enroot/Pyxis configs and the prebuilt evaluation image (Dockerfile.eval)
 ├── requirements/          # Dependencies per framework environment: .txt (edited) and .lock (generated; see CONTRIBUTING.md for what installs which)
-├── docs/                  # One doc per framework, plus results.md
+├── docs/                  # One doc per framework, plus results.md and sampling.md
 └── tests/
 ```

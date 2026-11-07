@@ -59,6 +59,13 @@
 #   --max-steps <n>            Max steps per trial (default: 200, AA's protocol).
 #   --num-tasks <n>            Restrict to the first n tasks (useful for smoke-testing).
 #   --seed <n>                 Random seed (default: 300).
+#   --temperature V, --top-p V, --top-k V, --min-p V, --repetition-penalty V
+#                              Sampling of the agent model, merged over its litellm args (the flags win over
+#                              --agent-llm-args). Unlike the other frameworks tau2 has no default here: it
+#                              sends no sampling setting unless you pass one (see docs/sampling.md).
+#                              temperature and top-p are litellm kwargs; the rest go in extra_body.
+#   --sampling-profile <name>  A profile of the sampling config (e.g. thinking, greedy);
+#   --sampling-config <file>   another file instead of configs/sampling_defaults.json.
 #   --max-concurrency <n>      Parallel trials (default: 4).
 #   --git-ref <ref>            tau2-bench ref (default: v1.0.1, AA's protocol). It must name the
 #                               commit requirements/tau2-runtime.lock pins, which is what runs
@@ -95,6 +102,9 @@ RETRIEVAL_CONFIG="bm25_grep"
 USER_LLM="gpt-5.4-mini"
 USER_LLM_ARGS_OVERRIDE=""
 AGENT_LLM_ARGS_OVERRIDE=""
+SAMPLING_TEMPERATURE_FLAG=""; SAMPLING_TOP_P_FLAG=""; SAMPLING_TOP_K_FLAG=""
+SAMPLING_MIN_P_FLAG=""; SAMPLING_REPETITION_PENALTY_FLAG=""
+SAMPLING_PROFILE_FLAG=""; SAMPLING_CONFIG_FLAG=""
 NUM_TRIALS=5
 MAX_STEPS=200
 NUM_TASKS=""
@@ -115,6 +125,13 @@ while (( $# > 0 )); do
         --user-llm) USER_LLM=$2; shift 2 ;;
         --user-llm-args) USER_LLM_ARGS_OVERRIDE=$2; shift 2 ;;
         --agent-llm-args) AGENT_LLM_ARGS_OVERRIDE=$2; shift 2 ;;
+        --temperature) SAMPLING_TEMPERATURE_FLAG=$2; shift 2 ;;
+        --top-p) SAMPLING_TOP_P_FLAG=$2; shift 2 ;;
+        --top-k) SAMPLING_TOP_K_FLAG=$2; shift 2 ;;
+        --min-p) SAMPLING_MIN_P_FLAG=$2; shift 2 ;;
+        --repetition-penalty) SAMPLING_REPETITION_PENALTY_FLAG=$2; shift 2 ;;
+        --sampling-profile) SAMPLING_PROFILE_FLAG=$2; shift 2 ;;
+        --sampling-config) SAMPLING_CONFIG_FLAG=$2; shift 2 ;;
         --num-trials) NUM_TRIALS=$2; shift 2 ;;
         --max-steps) MAX_STEPS=$2; shift 2 ;;
         --num-tasks) NUM_TASKS=$2; shift 2 ;;
@@ -149,6 +166,26 @@ fi
 if [[ -n "$AGENT_LLM_ARGS_OVERRIDE" ]]; then
     AGENT_LLM_ARGS="$AGENT_LLM_ARGS_OVERRIDE"
 fi
+
+# Sampling of the agent model (scripts/common/sampling.py), merged over its litellm args key by key
+# (extra_body too); the flags win over --agent-llm-args. tau2's own default stays as it is.
+SAMPLING_ARGS=(--framework tau2 --format litellm --warn-greedy)
+[[ -n "$SAMPLING_CONFIG_FLAG"             ]] && SAMPLING_ARGS+=(--config "$SAMPLING_CONFIG_FLAG")
+[[ -n "$SAMPLING_PROFILE_FLAG"            ]] && SAMPLING_ARGS+=(--profile "$SAMPLING_PROFILE_FLAG")
+[[ -n "$SAMPLING_TEMPERATURE_FLAG"        ]] && SAMPLING_ARGS+=(--temperature "$SAMPLING_TEMPERATURE_FLAG")
+[[ -n "$SAMPLING_TOP_P_FLAG"              ]] && SAMPLING_ARGS+=(--top-p "$SAMPLING_TOP_P_FLAG")
+[[ -n "$SAMPLING_TOP_K_FLAG"              ]] && SAMPLING_ARGS+=(--top-k "$SAMPLING_TOP_K_FLAG")
+[[ -n "$SAMPLING_MIN_P_FLAG"              ]] && SAMPLING_ARGS+=(--min-p "$SAMPLING_MIN_P_FLAG")
+[[ -n "$SAMPLING_REPETITION_PENALTY_FLAG" ]] && SAMPLING_ARGS+=(--repetition-penalty "$SAMPLING_REPETITION_PENALTY_FLAG")
+SAMPLING_LITELLM=$(python3 -m scripts.common.sampling "${SAMPLING_ARGS[@]}") || exit 1
+AGENT_LLM_ARGS=$(python3 -c '
+import json, sys
+args, sampling = json.loads(sys.argv[1]), json.loads(sys.argv[2])
+body = {**args.get("extra_body", {}), **sampling.pop("extra_body", {})}
+args.update(sampling)
+if body:
+    args["extra_body"] = body
+print(json.dumps(args))' "$AGENT_LLM_ARGS" "$SAMPLING_LITELLM")
 
 if [[ "$USER_LLM" == openai/* && -n "$API_BASE_URL" ]]; then
     # A gateway user-llm (same convention as run_inspect_eval.sh's tau2 "user" role): route it

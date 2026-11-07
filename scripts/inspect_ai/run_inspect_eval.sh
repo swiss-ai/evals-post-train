@@ -70,6 +70,13 @@
 #   --wandb-project <project>  WANDB_PROJECT; default apertus/apertus-1.5-post-training-v0.1).
 #                              Uploaded whenever a W&B key is available, like lm-eval-harness runs.
 #   --no-wandb                 Don't upload (also WANDB_MODE=disabled), e.g. for a smoke test.
+#   --temperature V, --top-p V, --top-k V, --min-p V, --repetition-penalty V
+#                              Sampling of the model under test (defaults: configs/sampling_defaults.json,
+#                              0.6 / 0.95; 'none' leaves one out). Passed as Inspect's own --temperature,
+#                              --top-p and --top-k; min-p and repetition-penalty go in --extra-body, which
+#                              an OpenAI-compatible server reads. A literal `-- --temperature ...` still wins.
+#   --sampling-profile <name>  A profile of the sampling config (e.g. greedy); --sampling-config <file>
+#                              reads another file instead of configs/sampling_defaults.json.
 #   -- <extra args>            Everything after a literal -- is forwarded verbatim to
 #                              `inspect eval`/`inspect eval-set` (e.g. -- --temperature 0.5
 #                              --max-connections 10).
@@ -124,6 +131,9 @@ MODEL_ROLES=()
 TASK_ARGS=()
 EXTRA_ARGS=()
 SANDBOX=""
+SAMPLING_TEMPERATURE_FLAG=""; SAMPLING_TOP_P_FLAG=""; SAMPLING_TOP_K_FLAG=""
+SAMPLING_MIN_P_FLAG=""; SAMPLING_REPETITION_PENALTY_FLAG=""
+SAMPLING_PROFILE_FLAG=""; SAMPLING_CONFIG_FLAG=""
 
 while (( $# > 0 )); do
     case "$1" in
@@ -141,6 +151,13 @@ while (( $# > 0 )); do
         --wandb-entity) WANDB_ENTITY=$2; shift 2 ;;
         --wandb-project) WANDB_PROJECT=$2; shift 2 ;;
         --no-wandb) NO_WANDB=1; shift ;;
+        --temperature) SAMPLING_TEMPERATURE_FLAG=$2; shift 2 ;;
+        --top-p) SAMPLING_TOP_P_FLAG=$2; shift 2 ;;
+        --top-k) SAMPLING_TOP_K_FLAG=$2; shift 2 ;;
+        --min-p) SAMPLING_MIN_P_FLAG=$2; shift 2 ;;
+        --repetition-penalty) SAMPLING_REPETITION_PENALTY_FLAG=$2; shift 2 ;;
+        --sampling-profile) SAMPLING_PROFILE_FLAG=$2; shift 2 ;;
+        --sampling-config) SAMPLING_CONFIG_FLAG=$2; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         --) shift; EXTRA_ARGS+=("$@"); break ;;
         *) die "Unknown argument: $1 (see --help)" ;;
@@ -266,6 +283,35 @@ for arg in ${TASK_ARGS[@]+"${TASK_ARGS[@]}"}; do COMMON_ARGS+=(-T "$arg"); done
 # an explicit --display in EXTRA_ARGS is appended after this and wins (Inspect keeps the last
 # occurrence of a repeated option).
 [[ -t 1 ]] || COMMON_ARGS+=(--display plain)
+
+# Sampling of the model under test (scripts/common/sampling.py; defaults in configs/sampling_defaults.json).
+# It goes before EXTRA_ARGS, so a literal `-- --temperature ...` still wins (Inspect keeps the last
+# occurrence). Inspect has no --min-p or --repetition-penalty: those travel in --extra-body.
+SAMPLING_ARGS=(--framework inspect --format shell)
+[[ -n "$SAMPLING_CONFIG_FLAG"             ]] && SAMPLING_ARGS+=(--config "$SAMPLING_CONFIG_FLAG")
+[[ -n "$SAMPLING_PROFILE_FLAG"            ]] && SAMPLING_ARGS+=(--profile "$SAMPLING_PROFILE_FLAG")
+[[ -n "$SAMPLING_TEMPERATURE_FLAG"        ]] && SAMPLING_ARGS+=(--temperature "$SAMPLING_TEMPERATURE_FLAG")
+[[ -n "$SAMPLING_TOP_P_FLAG"              ]] && SAMPLING_ARGS+=(--top-p "$SAMPLING_TOP_P_FLAG")
+[[ -n "$SAMPLING_TOP_K_FLAG"              ]] && SAMPLING_ARGS+=(--top-k "$SAMPLING_TOP_K_FLAG")
+[[ -n "$SAMPLING_MIN_P_FLAG"              ]] && SAMPLING_ARGS+=(--min-p "$SAMPLING_MIN_P_FLAG")
+[[ -n "$SAMPLING_REPETITION_PENALTY_FLAG" ]] && SAMPLING_ARGS+=(--repetition-penalty "$SAMPLING_REPETITION_PENALTY_FLAG")
+[[ -n "$SAMPLING_TEMPERATURE_FLAG$SAMPLING_TOP_P_FLAG$SAMPLING_TOP_K_FLAG$SAMPLING_MIN_P_FLAG$SAMPLING_REPETITION_PENALTY_FLAG$SAMPLING_PROFILE_FLAG$SAMPLING_CONFIG_FLAG" ]] &&
+    SAMPLING_ARGS+=(--warn-greedy)
+SAMPLING_OUT=$(python3 -m scripts.common.sampling "${SAMPLING_ARGS[@]}") || exit 1
+eval "$SAMPLING_OUT"
+[[ -n "$SAMPLING_TEMPERATURE" ]] && COMMON_ARGS+=(--temperature "$SAMPLING_TEMPERATURE")
+[[ -n "$SAMPLING_TOP_P"       ]] && COMMON_ARGS+=(--top-p "$SAMPLING_TOP_P")
+[[ -n "$SAMPLING_TOP_K"       ]] && COMMON_ARGS+=(--top-k "$SAMPLING_TOP_K")
+SAMPLING_EXTRA_BODY=""
+[[ -n "$SAMPLING_MIN_P" ]] && SAMPLING_EXTRA_BODY="\"min_p\": $SAMPLING_MIN_P"
+[[ -n "$SAMPLING_REPETITION_PENALTY" ]] &&
+    SAMPLING_EXTRA_BODY="${SAMPLING_EXTRA_BODY:+$SAMPLING_EXTRA_BODY, }\"repetition_penalty\": $SAMPLING_REPETITION_PENALTY"
+if [[ -n "$SAMPLING_EXTRA_BODY" ]]; then
+    COMMON_ARGS+=(--extra-body "{$SAMPLING_EXTRA_BODY}")
+    for arg in ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}; do
+        [[ "$arg" == --extra-body* ]] && echo "WARNING: your --extra-body replaces the min-p/repetition-penalty sampling settings." >&2
+    done
+fi
 
 COMMON_ARGS+=(${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"})
 

@@ -409,12 +409,32 @@ class TaskConfigTest(unittest.TestCase):
         self.assertNotIn("shuffle", self._cfg("swe_bench")["dataset_args"]["swe_bench_verified_agentic"])
         self.assertTrue(self._cfg("swe_bench", "--shuffle")["dataset_args"]["swe_bench_verified_agentic"]["shuffle"])
 
-    def test_generation_config_keeps_temperature_default(self):
-        self.assertEqual(self._cfg("swe_bench")["generation_config"], {"temperature": 0.0})
+    def test_generation_config_uses_the_sampling_defaults(self):
+        # EvalScope's own default is greedy; ours is configs/sampling_defaults.json.
+        self.assertEqual(self._cfg("swe_bench")["generation_config"], {"temperature": 0.6, "top_p": 0.95})
         cfg = self._cfg("swe_bench", "--generation-config", '{"retries": 100}')
-        self.assertEqual(cfg["generation_config"], {"temperature": 0.0, "retries": 100})
-        cfg = self._cfg("swe_bench", "--generation-config", '{"temperature": 0.6}')
-        self.assertEqual(cfg["generation_config"], {"temperature": 0.6})
+        self.assertEqual(cfg["generation_config"], {"temperature": 0.6, "top_p": 0.95, "retries": 100})
+        cfg = self._cfg("swe_bench", "--generation-config", '{"temperature": 0.3}')
+        self.assertEqual(cfg["generation_config"], {"temperature": 0.3, "top_p": 0.95})
+
+    def test_sampling_flags(self):
+        cfg = self._cfg("swe_bench", "--temperature", "1", "--top-p", "none", "--top-k", "20", "--min-p", "0.05",
+                        "--repetition-penalty", "1.05")
+        self.assertEqual(
+            cfg["generation_config"],
+            {"temperature": 1.0, "top_k": 20, "repetition_penalty": 1.05, "extra_body": {"min_p": 0.05}},
+        )
+        # Flags win over --generation-config; extra_body is merged, not replaced.
+        cfg = self._cfg("swe_bench", "--temperature", "0.9", "--min-p", "0.1", "--generation-config",
+                        '{"temperature": 0.2, "extra_body": {"chat_template_kwargs": {"x": 1}}}')
+        self.assertEqual(
+            cfg["generation_config"],
+            {"temperature": 0.9, "top_p": 0.95, "extra_body": {"chat_template_kwargs": {"x": 1}, "min_p": 0.1}},
+        )
+        cfg = self._cfg("swe_bench", "--sampling-profile", "greedy")
+        self.assertEqual(cfg["generation_config"], {"temperature": 0.0})
+        with self.assertRaises(SystemExit):
+            self._cfg("swe_bench", "--top-p", "3")
 
     def test_evaluation_errors(self):
         def sample(instance_id, completed, error=""):

@@ -73,7 +73,7 @@ usage() {
     echo " TRACK_THINKING_METRICS: 'true'/'false' to force the thinking metrics on/off (default: on iff a close token is known)."
     echo " LOG_LENGTH_METRICS: 'true' to aggregate response_length_*/thinking_length_* (thinking_format_* is always aggregated)."
     echo " REASONING_EFFORT: chat-template argument reasoning_effort (e.g. low/medium/high, read by gpt-oss's template); hf, vllm, sglang and openai."
-    echo " THINK_TEMPERATURE, THINK_TOP_P, THINK_TOP_K, THINK_MIN_P, THINK_REPETITION_PENALTY: sampling of thinking runs (default 0.6 / 0.95; the others unset)."
+    echo " THINK_TEMPERATURE, THINK_TOP_P, THINK_TOP_K, THINK_MIN_P, THINK_REPETITION_PENALTY: sampling of thinking runs (defaults in configs/sampling_defaults.json: 0.6 / 0.95, the others unset; 'none' leaves one out)."
     echo " CHAT_FORMAT: 'apertus2' for the Apertus 2 native format (openai backend, harness model apertus2-completions; needs TOKENIZER and MAX_LENGTH). Default: template."
     echo " PREFILL_MODE: apertus2 answer prefills, 'after_think' (default) or 'empty_think'."
 	echo "For more information see the README: https://github.com/swiss-ai/evals?tab=readme-ov-file."
@@ -658,22 +658,34 @@ cp "$EVAL_RUN_CONFIG" "$HARNESS_EVAL_DIR/.eval-run-config.json"
 # reasoning-effort runs set max_gen_toks here: task budgets (e.g. mmlu_pro 2048,
 # ifeval 1280) were sized for a direct answer, and the trace counts against them.
 GEN_KWARGS=""
+# Sampling comes from scripts/common/sampling.py: the defaults of configs/sampling_defaults.json,
+# overridden one by one by THINK_TEMPERATURE, THINK_TOP_P, THINK_TOP_K, THINK_MIN_P and
+# THINK_REPETITION_PENALTY ("none" leaves one out; the launcher sets them from --temperature etc.).
 if [[ "$ENABLE_THINKING" == "True" || "$CHAT_FORMAT" == "apertus2" ]]; then
-    THINK_TEMPERATURE=${THINK_TEMPERATURE:-0.6}
-    THINK_TOP_P=${THINK_TOP_P:-0.95}
-    GEN_KWARGS="do_sample=true,temperature=${THINK_TEMPERATURE},top_p=${THINK_TOP_P}"
-    # Optional knobs (e.g. repetition_penalty 1.05 against looping); unset ones keep the
-    # backend's default.
-    [[ -z "${THINK_TOP_K:-}" ]] || GEN_KWARGS="${GEN_KWARGS},top_k=${THINK_TOP_K}"
-    [[ -z "${THINK_MIN_P:-}" ]] || GEN_KWARGS="${GEN_KWARGS},min_p=${THINK_MIN_P}"
-    [[ -z "${THINK_REPETITION_PENALTY:-}" ]] \
-        || GEN_KWARGS="${GEN_KWARGS},repetition_penalty=${THINK_REPETITION_PENALTY}"
-    echo "Thinking sampling: do_sample=true temperature=$THINK_TEMPERATURE top_p=$THINK_TOP_P top_k=${THINK_TOP_K:-<unset>} min_p=${THINK_MIN_P:-<unset>} repetition_penalty=${THINK_REPETITION_PENALTY:-<unset>} max_gen_toks=$MAX_NEW_TOKENS"
+    SAMPLING_OUT=$(python3 -m scripts.common.sampling --framework lm_eval --env-prefix THINK_ --format shell) \
+        || die "Invalid sampling settings: THINK_* or configs/sampling_defaults.json (see above)."
+    eval "$SAMPLING_OUT"
+    GEN_KWARGS="do_sample=true"
+    [[ -z "$SAMPLING_TEMPERATURE"        ]] || GEN_KWARGS="${GEN_KWARGS},temperature=${SAMPLING_TEMPERATURE}"
+    [[ -z "$SAMPLING_TOP_P"              ]] || GEN_KWARGS="${GEN_KWARGS},top_p=${SAMPLING_TOP_P}"
+    [[ -z "$SAMPLING_TOP_K"              ]] || GEN_KWARGS="${GEN_KWARGS},top_k=${SAMPLING_TOP_K}"
+    [[ -z "$SAMPLING_MIN_P"              ]] || GEN_KWARGS="${GEN_KWARGS},min_p=${SAMPLING_MIN_P}"
+    [[ -z "$SAMPLING_REPETITION_PENALTY" ]] || GEN_KWARGS="${GEN_KWARGS},repetition_penalty=${SAMPLING_REPETITION_PENALTY}"
+    echo "Thinking sampling: do_sample=true temperature=${SAMPLING_TEMPERATURE:-<unset>} top_p=${SAMPLING_TOP_P:-<unset>} top_k=${SAMPLING_TOP_K:-<unset>} min_p=${SAMPLING_MIN_P:-<unset>} repetition_penalty=${SAMPLING_REPETITION_PENALTY:-<unset>} max_gen_toks=$MAX_NEW_TOKENS"
 elif [[ -n "${NOTHINK_TEMPERATURE:-}" ]]; then
     # Optional no-think sampling (inert unless NOTHINK_TEMPERATURE is set): greedy-vs-sampling ablation.
-    NOTHINK_TOP_P=${NOTHINK_TOP_P:-0.95}
-    GEN_KWARGS="do_sample=true,temperature=${NOTHINK_TEMPERATURE},top_p=${NOTHINK_TOP_P}"
-    echo "No-think sampling: do_sample=true temperature=$NOTHINK_TEMPERATURE top_p=$NOTHINK_TOP_P"
+    # top_p defaults to 0.95 as before ("none" omits it); THINK_TOP_K/MIN_P/REPETITION_PENALTY apply too.
+    SAMPLING_OUT=$(python3 -m scripts.common.sampling --framework lm_eval --no-default --env-prefix THINK_ \
+        --temperature "$NOTHINK_TEMPERATURE" --top-p "${NOTHINK_TOP_P:-0.95}" --format shell) \
+        || die "Invalid sampling settings: NOTHINK_* / THINK_* (see above)."
+    eval "$SAMPLING_OUT"
+    GEN_KWARGS="do_sample=true"
+    [[ -z "$SAMPLING_TEMPERATURE"        ]] || GEN_KWARGS="${GEN_KWARGS},temperature=${SAMPLING_TEMPERATURE}"
+    [[ -z "$SAMPLING_TOP_P"              ]] || GEN_KWARGS="${GEN_KWARGS},top_p=${SAMPLING_TOP_P}"
+    [[ -z "$SAMPLING_TOP_K"              ]] || GEN_KWARGS="${GEN_KWARGS},top_k=${SAMPLING_TOP_K}"
+    [[ -z "$SAMPLING_MIN_P"              ]] || GEN_KWARGS="${GEN_KWARGS},min_p=${SAMPLING_MIN_P}"
+    [[ -z "$SAMPLING_REPETITION_PENALTY" ]] || GEN_KWARGS="${GEN_KWARGS},repetition_penalty=${SAMPLING_REPETITION_PENALTY}"
+    echo "No-think sampling: do_sample=true temperature=${SAMPLING_TEMPERATURE:-<unset>} top_p=${SAMPLING_TOP_P:-<unset>} top_k=${SAMPLING_TOP_K:-<unset>} min_p=${SAMPLING_MIN_P:-<unset>} repetition_penalty=${SAMPLING_REPETITION_PENALTY:-<unset>}"
 fi
 
 if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]]; then

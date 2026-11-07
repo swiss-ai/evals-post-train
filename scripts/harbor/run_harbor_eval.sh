@@ -48,6 +48,11 @@
 #                               model: a check of the environments and verifiers.
 #   --agent <name>              Harbor agent (default: terminus-2; see `harbor run --help`).
 #   --agent-kwarg <k=v>         Harbor --ak, repeatable, e.g. model_info='{"max_input_tokens": 32768}'
+#   --temperature V, --top-p V, --top-k V, --min-p V, --repetition-penalty V
+#                               Sampling of the model (terminus-2 only; defaults: configs/sampling_defaults.json,
+#                               0.6 / 0.95; 'none' leaves one out). Your own --agent-kwarg temperature=... wins
+#                               over the defaults, these flags win over both. --sampling-profile <name> picks a
+#                               profile (e.g. greedy), --sampling-config <file> another config file.
 #                               so terminus-2 knows a served model's context window.
 #   --name <name>              Run name (default: derived from --model).
 #   --work-dir <path>          Output dir (default: logs/harbor/<name>): jobs/<benchmark>/ (Harbor's
@@ -125,7 +130,8 @@ while (( $# > 0 )); do
         --wandb-entity) WANDB_ENTITY=$2; shift 2 ;;
         --wandb-project) WANDB_PROJECT=$2; shift 2 ;;
         --no-wandb) NO_WANDB=1; shift ;;
-        --benchmark|--agent|--agent-kwarg|--agent-network|--limit|--task|--max-concurrency|--attempts|--timeout-multiplier)
+        --benchmark|--agent|--agent-kwarg|--agent-network|--limit|--task|--max-concurrency|--attempts|--timeout-multiplier|\
+        --temperature|--top-p|--top-k|--min-p|--repetition-penalty|--sampling-profile|--sampling-config)
             RUN_ARGS+=("$1" "$2"); shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "Unknown argument: $1 (see --help)" ;;
