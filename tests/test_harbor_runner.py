@@ -69,6 +69,47 @@ class HarborCommandTest(unittest.TestCase):
                       ["--ak", "temperature=0"], ["--env", run.K8S_ENVIRONMENT]):
             self.assertTrue(any(cmd[i : i + len(flags)] == flags for i in range(len(cmd))), flags)
 
+    def _aks(self, *extra):
+        args = run.parse_args(
+            ["--benchmark", "terminal_bench_2", "--model", "org/m", "--api-base-url", "https://x/v1", "--work-dir", "w",
+             "--sandbox", "k8s", *extra]
+        )
+        cmd = run.harbor_command(args, "terminal_bench_2", Path("w/jobs"))
+        return [cmd[i + 1] for i, part in enumerate(cmd) if part == "--ak"]
+
+    def test_model_run_samples_with_the_defaults(self):
+        self.assertEqual(self._aks(), ["temperature=0.6", 'llm_kwargs={"extra_body":{"top_p":0.95}}'])
+
+    def test_sampling_flags(self):
+        self.assertEqual(
+            self._aks("--temperature", "1", "--top-p", "none", "--top-k", "20", "--min-p", "0.05"),
+            ["temperature=1.0", 'llm_kwargs={"extra_body":{"top_k":20,"min_p":0.05}}'],
+        )
+        self.assertEqual(self._aks("--sampling-profile", "greedy"), ["temperature=0.0"])
+
+    def test_own_agent_kwargs_win_over_defaults_but_not_over_flags(self):
+        # Their temperature is kept; the top_p default still lands in extra_body, merged with theirs.
+        aks = self._aks("--agent-kwarg", "temperature=0.2", "--agent-kwarg", 'llm_kwargs={"extra_body":{"x":1}}')
+        self.assertEqual(aks, ["temperature=0.2", 'llm_kwargs={"extra_body":{"x":1,"top_p":0.95}}'])
+        aks = self._aks("--agent-kwarg", "temperature=0.2", "--temperature", "0.9", "--agent-kwarg", "model_info={}")
+        self.assertEqual(aks, ["model_info={}", "temperature=0.9", 'llm_kwargs={"extra_body":{"top_p":0.95}}'])
+
+    def test_other_agents_and_gold_runs_take_no_sampling(self):
+        args = run.parse_args(
+            ["--benchmark", "terminal_bench_2", "--model", "m", "--api-base-url", "https://x/v1", "--work-dir", "w",
+             "--sandbox", "k8s", "--agent", "mini-swe-agent"]
+        )
+        self.assertEqual(run.agent_kwargs(args), [])
+        for extra in (["--agent", "mini-swe-agent", "--temperature", "0.5"], ["--gold", "--temperature", "0.5"]):
+            args = run.parse_args(["--benchmark", "terminal_bench_2", "--model", "m", "--api-base-url", "https://x/v1",
+                                   "--work-dir", "w", "--sandbox", "k8s", *extra])
+            with self.assertRaises(SystemExit):
+                run.agent_kwargs(args)
+
+    def test_invalid_sampling_value(self):
+        with self.assertRaises(SystemExit):
+            self._aks("--top-p", "7")
+
     def test_gold_on_docker(self):
         args = run.parse_args(["--benchmark", "terminal_bench_2", "--gold", "--work-dir", "w", "--sandbox", "docker"])
         cmd = run.harbor_command(args, "terminal_bench_2", Path("w/jobs"))

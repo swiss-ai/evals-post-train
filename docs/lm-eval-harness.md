@@ -617,7 +617,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `VLLM_AUTO_PARALLELISM` | `true` | With no explicit topology, use TP=1/DP=4 only when the model name unambiguously identifies `<30B`; otherwise retain TP=4/DP=1. |
 | `VLLM_MEMORY_FRACTION` | `0.8` | vLLM `gpu_memory_utilization` / SGLang `mem_fraction_static` |
 | `MEGATRON_MICRO_BATCH_SIZE` | numeric `BS`, otherwise `1` | Megatron micro-batch override. A numeric `BS` is forwarded automatically; `BS=auto:*` cannot be inferred by the adapter and falls back to 1. |
-| `THINK_TEMPERATURE` / `THINK_TOP_P` | `0.6` / `0.95` | Sampling for thinking runs (`do_sample=true` is forced — reasoning degrades under greedy) |
+| `THINK_TEMPERATURE` / `THINK_TOP_P` | `0.6` / `0.95` (from `configs/sampling_defaults.json`) | Sampling for thinking runs (`do_sample=true` is forced — reasoning degrades under greedy); `none` leaves one out. The launcher flags `--temperature`, `--top-p`, ... set these ([docs/sampling.md](sampling.md)) |
 | `THINK_REPETITION_PENALTY` | (unset) | Optional knob against degenerate looping in thinking runs (e.g. `1.05`) |
 | `THINK_TOP_K` / `THINK_MIN_P` | (unset) | Optional sampling of thinking runs, sent only when set |
 | `CHAT_FORMAT` / `PREFILL_MODE` | `template` / `after_think` | Set by `--chat-format` / `--prefill-mode` |

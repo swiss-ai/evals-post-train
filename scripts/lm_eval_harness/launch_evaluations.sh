@@ -81,6 +81,11 @@
 #   --chat-format <f>    - 'template' (default) or 'apertus2' (Apertus 2 native format, a thinking
 #                          run; needs --backend openai, --tokenizer, --max-length; see the docs)
 #   --prefill-mode <m>   - apertus2 answer prefills: 'after_think' (default) or 'empty_think'
+#   --temperature V, --top-p V, --top-k V, --min-p V, --repetition-penalty V
+#                        - Sampling of thinking/apertus2 runs (defaults: configs/sampling_defaults.json,
+#                          0.6 / 0.95); 'none' leaves one out. On other runs, --temperature turns sampling on.
+#   --sampling-profile P - A profile of the sampling config (e.g. thinking, greedy)
+#   --sampling-config F  - A sampling config file instead of configs/sampling_defaults.json
 #   --chunk-size N       - Tasks per resumable job chunk (default: 8)
 #   --max-parallel N     - Cap concurrent chunks (default: all generated chunks)
 #   --max-retries N      - Retry waves for missing tasks; chunks halve each wave (default: 1)
@@ -210,6 +215,9 @@ AUTODETECT_THINK_TOKENS=""
 TRACK_THINKING_METRICS=""     # "", "true", "false"
 REASONING_EFFORT=""
 LOG_LENGTH_METRICS=""
+SAMPLING_TEMPERATURE_FLAG=""; SAMPLING_TOP_P_FLAG=""; SAMPLING_TOP_K_FLAG=""
+SAMPLING_MIN_P_FLAG=""; SAMPLING_REPETITION_PENALTY_FLAG=""
+SAMPLING_PROFILE_FLAG=""; SAMPLING_CONFIG_FLAG=""
 TASK_FILE_OVERRIDE=""
 TABLE_METRICS_OVERRIDE=""
 LOGS_ROOT_FLAG=""
@@ -276,6 +284,13 @@ while [[ $# -gt 0 ]]; do
         --track-thinking-metrics)    TRACK_THINKING_METRICS="$2";       shift 2 ;;
         --no-track-thinking-metrics) TRACK_THINKING_METRICS="false";    shift ;;
         --reasoning-effort)          REASONING_EFFORT="$2";             shift 2 ;;
+        --temperature)               SAMPLING_TEMPERATURE_FLAG="$2";        shift 2 ;;
+        --top-p)                     SAMPLING_TOP_P_FLAG="$2";              shift 2 ;;
+        --top-k)                     SAMPLING_TOP_K_FLAG="$2";              shift 2 ;;
+        --min-p)                     SAMPLING_MIN_P_FLAG="$2";              shift 2 ;;
+        --repetition-penalty)        SAMPLING_REPETITION_PENALTY_FLAG="$2"; shift 2 ;;
+        --sampling-profile)          SAMPLING_PROFILE_FLAG="$2";            shift 2 ;;
+        --sampling-config)           SAMPLING_CONFIG_FLAG="$2";             shift 2 ;;
         --log-length-metrics)        LOG_LENGTH_METRICS="true";         shift ;;
         --convert-to-hf) CONVERT_TO_HF="true";           shift ;;
         --hf-output-dir) HF_OUTPUT_DIR_FLAG="$2";         shift 2 ;;
@@ -601,6 +616,45 @@ fi
 if [[ "$TRACK_THINKING_METRICS" == "false" && "$LOG_LENGTH_METRICS" == "true" ]]; then
     echo "WARNING: --track-thinking-metrics false drops thinking_length_*;"
     echo "         --log-length-metrics will only aggregate response_length_*."
+fi
+
+# --- Sampling flags (scripts/common/sampling.py) ---
+# Thinking and apertus2 runs sample (run_lm_eval.sbatch reads the defaults from the sampling config
+# and THINK_*); a flag, profile or config given here is resolved now and exported explicitly, so the
+# run configuration (and its resume signature) records it. Without any, nothing is exported and an
+# earlier run's signature is unchanged. Other runs stay greedy unless --temperature is given.
+if [[ -n "$SAMPLING_TEMPERATURE_FLAG$SAMPLING_TOP_P_FLAG$SAMPLING_TOP_K_FLAG$SAMPLING_MIN_P_FLAG$SAMPLING_REPETITION_PENALTY_FLAG$SAMPLING_PROFILE_FLAG$SAMPLING_CONFIG_FLAG" ]]; then
+    _sampling_thinking="false"
+    [[ "$ENABLE_THINKING_OVERRIDE" == "true" || "${CHAT_FORMAT:-template}" == "apertus2" ]] && _sampling_thinking="true"
+    _sampling_args=(--framework lm_eval --format shell)
+    [[ -n "$SAMPLING_CONFIG_FLAG"             ]] && _sampling_args+=(--config "$SAMPLING_CONFIG_FLAG")
+    [[ -n "$SAMPLING_PROFILE_FLAG"            ]] && _sampling_args+=(--profile "$SAMPLING_PROFILE_FLAG")
+    [[ -n "$SAMPLING_TEMPERATURE_FLAG"        ]] && _sampling_args+=(--temperature "$SAMPLING_TEMPERATURE_FLAG")
+    [[ -n "$SAMPLING_TOP_P_FLAG"              ]] && _sampling_args+=(--top-p "$SAMPLING_TOP_P_FLAG")
+    [[ -n "$SAMPLING_TOP_K_FLAG"              ]] && _sampling_args+=(--top-k "$SAMPLING_TOP_K_FLAG")
+    [[ -n "$SAMPLING_MIN_P_FLAG"              ]] && _sampling_args+=(--min-p "$SAMPLING_MIN_P_FLAG")
+    [[ -n "$SAMPLING_REPETITION_PENALTY_FLAG" ]] && _sampling_args+=(--repetition-penalty "$SAMPLING_REPETITION_PENALTY_FLAG")
+    if [[ "$_sampling_thinking" == "true" ]]; then
+        _sampling_args+=(--warn-greedy)
+    else
+        _sampling_args+=(--no-default)
+    fi
+    _sampling_out=$(python3 -m scripts.common.sampling "${_sampling_args[@]}") || exit 1
+    eval "$_sampling_out"
+    if [[ "$_sampling_thinking" == "true" ]]; then
+        export THINK_TEMPERATURE="${SAMPLING_TEMPERATURE:-none}" THINK_TOP_P="${SAMPLING_TOP_P:-none}"
+        export THINK_TOP_K="${SAMPLING_TOP_K:-none}" THINK_MIN_P="${SAMPLING_MIN_P:-none}"
+        export THINK_REPETITION_PENALTY="${SAMPLING_REPETITION_PENALTY:-none}"
+    else
+        if [[ -z "$SAMPLING_TEMPERATURE" ]]; then
+            echo "Error: sampling flags on a run that does not think need --temperature (without it the run is greedy)."
+            exit 1
+        fi
+        export NOTHINK_TEMPERATURE="$SAMPLING_TEMPERATURE" NOTHINK_TOP_P="${SAMPLING_TOP_P:-none}"
+        [[ -n "$SAMPLING_TOP_K" ]] && export THINK_TOP_K="$SAMPLING_TOP_K"
+        [[ -n "$SAMPLING_MIN_P" ]] && export THINK_MIN_P="$SAMPLING_MIN_P"
+        [[ -n "$SAMPLING_REPETITION_PENALTY" ]] && export THINK_REPETITION_PENALTY="$SAMPLING_REPETITION_PENALTY"
+    fi
 fi
 
 # Export only what was set: unset ENABLE_THINKING keeps the hf template default; unset

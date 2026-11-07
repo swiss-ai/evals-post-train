@@ -51,9 +51,10 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# EvalScope's own default for API models (DEFAULT_TEXT_GEN_SERVICE_CONFIG), which it only
-# applies when generation_config is empty: --generation-config is merged over it instead.
-DEFAULT_GENERATION_CONFIG: Dict[str, Any] = {"temperature": 0.0}
+# EvalScope applies its own default for API models (DEFAULT_TEXT_GEN_SERVICE_CONFIG, greedy)
+# only when generation_config is empty. The model's sampling settings are therefore always set:
+# the defaults of configs/sampling_defaults.json, then --generation-config over them, then the
+# sampling flags (see generation_config()).
 
 # --sandbox k8s defaults: ms-enclave's 4g OOM-kills SWE-bench Pro's element-web and teleport
 # tests, while an 8 GiB request often does not schedule on Breithorn's amd64 nodes. So the
@@ -87,7 +88,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--max-steps", type=int, default=None)
     p.add_argument("--strategy", default=None)
     p.add_argument("--command-timeout", type=float, default=None)
-    p.add_argument("--generation-config", default="{}", help="JSON merged over {\"temperature\": 0}.")
+    p.add_argument("--generation-config", default="{}", help="JSON merged over the sampling defaults.")
+    for flag in ("temperature", "top-p", "top-k", "min-p", "repetition-penalty"):
+        p.add_argument("--" + flag, default=None, help="Sampling setting, or 'none' to leave it out.")
+    p.add_argument("--sampling-profile", default=None, help="Profile of the sampling config (e.g. greedy).")
+    p.add_argument("--sampling-config", default=None, help="Sampling config (default: configs/sampling_defaults.json).")
     p.add_argument("--dataset-revision", action="append", default=[], help="<benchmark>=<revision>.")
     p.add_argument("--extra-param", action="append", default=[], help="key=value (JSON value or string).")
     p.add_argument("--api-timeout", type=float, default=None)
@@ -160,6 +165,50 @@ def environment_extra_params(name: str) -> Dict[str, Any]:
     return {}
 
 
+def generation_config(args: argparse.Namespace) -> Dict[str, Any]:
+    """The model's generation_config: sampling defaults, --generation-config over them, flags over both.
+
+    top_k, top_p, temperature and repetition_penalty are EvalScope fields; min_p goes in extra_body,
+    which the OpenAI-compatible server reads. 'none' on a flag removes that setting.
+    """
+    from scripts.common import sampling
+
+    def to_config(values: Dict[str, Any]) -> Dict[str, Any]:
+        cfg = {key: value for key, value in values.items() if key != "min_p"}
+        if "min_p" in values:
+            cfg["extra_body"] = {"min_p": values["min_p"]}
+        return cfg
+
+    try:
+        config = sampling.read_config(args.sampling_config)
+        explicit = {
+            name: sampling.parse_value(name, getattr(args, name))
+            for name in sampling.SAMPLERS
+            if getattr(args, name) is not None
+        }
+        cfg = to_config(sampling.resolve("evalscope", config=config, profile=args.sampling_profile))
+        user = json.loads(args.generation_config)
+        cfg.update({key: value for key, value in user.items() if key != "extra_body"})
+        if "extra_body" in user:
+            cfg["extra_body"] = {**cfg.get("extra_body", {}), **user["extra_body"]}
+        for name, value in explicit.items():
+            if name == "min_p":
+                body = {key: val for key, val in cfg.get("extra_body", {}).items() if key != "min_p"}
+                cfg["extra_body"] = {**body, "min_p": value} if value is not None else body
+                if not cfg["extra_body"]:
+                    del cfg["extra_body"]
+            elif value is None:
+                cfg.pop(name, None)
+            else:
+                cfg[name] = value
+    except ValueError as exc:
+        raise SystemExit(f"Error: {exc}") from exc
+    chosen = bool(explicit or args.sampling_profile or "temperature" in json.loads(args.generation_config))
+    if chosen and (warning := sampling.greedy_warning(cfg)):
+        print(warning, file=sys.stderr)
+    return cfg
+
+
 def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dict[str, str]) -> Dict[str, Any]:
     extra_params = parse_pairs(args.extra_param, "--extra-param", as_json=True)
     dataset_args = {
@@ -195,7 +244,7 @@ def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dic
         "dataset_args": dataset_args,
         "dataset_hub": "huggingface",
         "eval_batch_size": args.max_concurrency,
-        "generation_config": {**DEFAULT_GENERATION_CONFIG, **json.loads(args.generation_config)},
+        "generation_config": generation_config(args),
         "work_dir": args.work_dir,
         "no_timestamp": True,
         # Every sandbox (agent loop and scorer) reads this; the engine stays "docker"

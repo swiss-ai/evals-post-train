@@ -61,7 +61,12 @@
 #   --strategy <name>           swe_bench_toolcall (the default, function calling) or
 #                               swe_bench_backticks (text-based actions, no tool-call parser needed).
 #   --command-timeout <s>       Default timeout for each agent bash command.
-#   --generation-config <json> Merged over the default {"temperature": 0}, e.g.
+#   --temperature V, --top-p V, --top-k V, --min-p V, --repetition-penalty V
+#                               Sampling of the model (defaults: configs/sampling_defaults.json,
+#                               0.6 / 0.95; 'none' leaves one out). Over --generation-config.
+#   --sampling-profile <name>   A profile of the sampling config (e.g. greedy); --sampling-config
+#                               <file> reads another file instead.
+#   --generation-config <json> Merged over the sampling defaults, e.g.
 #                               '{"max_tokens": 8192, "retries": 100, "retry_interval": 60}' (more
 #                               patient retries for a rate-limited endpoint; EvalScope's default is 5).
 #   --dataset-revision <b>=<sha> Hugging Face dataset revision for benchmark <b> (repeatable). Both
@@ -142,7 +147,8 @@ while (( $# > 0 )); do
         --no-wandb) NO_WANDB=1; shift ;;
         --shuffle) RUN_ARGS+=("$1"); shift ;;
         --sandbox-config|--limit|--max-concurrency|--max-steps|--strategy|--command-timeout|\
-        --generation-config|--dataset-revision|--extra-param|--api-timeout|--agent-network)
+        --generation-config|--dataset-revision|--extra-param|--api-timeout|--agent-network|\
+        --temperature|--top-p|--top-k|--min-p|--repetition-penalty|--sampling-profile|--sampling-config)
             RUN_ARGS+=("$1" "$2"); shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "Unknown argument: $1 (see --help)" ;;

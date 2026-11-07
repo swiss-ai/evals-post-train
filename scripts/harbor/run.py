@@ -123,6 +123,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--attempts", type=int, default=1, help="Attempts per task (Harbor's -k).")
     p.add_argument("--timeout-multiplier", type=float, default=1.0)
     p.add_argument("--agent-kwarg", action="append", default=[], help="Harbor --ak key=value; repeatable.")
+    for flag in ("temperature", "top-p", "top-k", "min-p", "repetition-penalty"):
+        p.add_argument("--" + flag, default=None, help="Sampling setting of the model, or 'none' to leave it out.")
+    p.add_argument("--sampling-profile", default=None, help="Profile of the sampling config (e.g. greedy).")
+    p.add_argument("--sampling-config", default=None, help="Sampling config (default: configs/sampling_defaults.json).")
     p.add_argument(
         "--agent-network",
         choices=("allowlist", "public"),
@@ -223,6 +227,57 @@ def task_patches(args: argparse.Namespace, name: str) -> List[Callable[[Path], N
     return patches
 
 
+def agent_kwargs(args: argparse.Namespace) -> List[str]:
+    """The --ak entries: the user's own, plus the model's sampling settings.
+
+    terminus-2 reads `temperature` and `llm_kwargs` (extra LLM call kwargs); everything but the
+    temperature goes in llm_kwargs' extra_body, which the OpenAI-compatible server reads. Over the
+    sampling defaults the user's own --agent-kwarg wins; the sampling flags win over both. Other
+    agents are not wired: they get no defaults, and refuse the flags.
+    """
+    from scripts.common import sampling
+
+    kwargs: Dict[str, str] = {}
+    for kv in args.agent_kwarg:
+        key, _, value = kv.partition("=")
+        kwargs[key] = value
+    try:
+        explicit = {
+            name: sampling.parse_value(name, getattr(args, name))
+            for name in sampling.SAMPLERS
+            if getattr(args, name) is not None
+        }
+        chosen = bool(explicit or args.sampling_profile or args.sampling_config)
+        if args.gold or args.agent != "terminus-2":
+            if chosen:
+                raise ValueError(
+                    "the sampling flags apply to a model run with the terminus-2 agent; "
+                    "for another agent pass --agent-kwarg yourself"
+                )
+            return list(args.agent_kwarg)
+        values = sampling.resolve(
+            "harbor", config=sampling.read_config(args.sampling_config), profile=args.sampling_profile, overrides=explicit
+        )
+        if "temperature" in explicit:
+            kwargs.pop("temperature", None)
+        if "temperature" in values and "temperature" not in kwargs:
+            kwargs["temperature"] = str(values["temperature"])
+        llm_kwargs = json.loads(kwargs.get("llm_kwargs") or "{}")
+        body = dict(llm_kwargs.get("extra_body") or {})
+        for name in sampling.SAMPLERS[1:]:
+            if name in explicit:
+                body.pop(name, None)
+            if name in values and (name in explicit or name not in body):
+                body[name] = values[name]
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Error: {exc}") from exc
+    if body:
+        kwargs["llm_kwargs"] = json.dumps({**llm_kwargs, "extra_body": body}, separators=(",", ":"))
+    if chosen and (warning := sampling.greedy_warning(values)):
+        print(warning, file=sys.stderr)
+    return [f"{key}={value}" for key, value in kwargs.items()]
+
+
 def harbor_command(args: argparse.Namespace, name: str, jobs_dir: Path) -> List[str]:
     spec = BENCHMARKS[name]
     cmd = [harbor_bin(), "run", "-o", str(jobs_dir), "--job-name", name, "-y", "-q"]
@@ -249,7 +304,7 @@ def harbor_command(args: argparse.Namespace, name: str, jobs_dir: Path) -> List[
     else:
         cmd += ["-a", args.agent, "-m", f"openai/{args.model}"]
     cmd += ["-n", str(args.max_concurrency), "-k", str(args.attempts), "--timeout-multiplier", str(args.timeout_multiplier)]
-    for kv in args.agent_kwarg:
+    for kv in agent_kwargs(args):
         cmd += ["--ak", kv]
     cmd += ["--env", ENVIRONMENTS[args.sandbox]]
     return cmd

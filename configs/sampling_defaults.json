@@ -1,0 +1,13 @@
+{
+  "profiles": {
+    "thinking": {"temperature": 0.6, "top_p": 0.95},
+    "greedy": {"temperature": 0.0}
+  },
+  "frameworks": {
+    "lm_eval": "thinking",
+    "inspect": "thinking",
+    "evalscope": "thinking",
+    "harbor": "thinking",
+    "tau2": null
+  }
+}

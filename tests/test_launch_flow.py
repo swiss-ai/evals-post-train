@@ -738,6 +738,68 @@ class LaunchFlowTests(unittest.TestCase):
             "max_gen_toks=32768",
         )
 
+    def test_sampling_flags_reach_the_job_and_the_run_config(self) -> None:
+        apertus2 = ["--backend", "openai", "--api-base-url", "http://localhost:8000",
+                    "--api-model-name", "test-model", "--chat-format", "apertus2",
+                    "--tokenizer", "/ckpt/tokenizer", "--max-length", "65536"]
+
+        def config(*extra: str) -> dict:
+            with tempfile.TemporaryDirectory() as tmp:
+                completed = _launch("single", "--task", "gsm8k", *apertus2, *extra, "--logs-root", tmp)
+                self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+                self.last_output = completed.stdout + completed.stderr
+                return _run_config(tmp)["configuration"]
+
+        # No flag: nothing is exported, so an earlier run's configuration (and resume signature) is unchanged.
+        plain = config()
+        self.assertEqual((plain["think_temperature"], plain["think_top_p"]), ("", ""))
+        # Flags are resolved at launch, exported explicitly and recorded; "none" leaves a sampler out.
+        flagged = config("--temperature", "1", "--top-p", "none", "--top-k", "20")
+        self.assertEqual(
+            (flagged["think_temperature"], flagged["think_top_p"], flagged["think_top_k"]),
+            ("1.0", "none", "20"),
+        )
+        self.assertEqual(
+            _gen_kwargs(CHAT_FORMAT="apertus2", REASONING_EFFORT="medium", THINK_TEMPERATURE="1.0",
+                        THINK_TOP_P="none", THINK_TOP_K="20", THINK_MIN_P="none",
+                        THINK_REPETITION_PENALTY="none"),
+            "do_sample=true,temperature=1.0,top_k=20,max_gen_toks=32768",
+        )
+        # A profile replaces the framework default; greedy on a thinking run is called out.
+        greedy = config("--sampling-profile", "greedy")
+        self.assertEqual((greedy["think_temperature"], greedy["think_top_p"]), ("0.0", "none"))
+        self.assertIn("greedy decoding", self.last_output)
+
+    def test_sampling_flags_on_a_run_that_does_not_think(self) -> None:
+        api = ["--backend", "openai", "--api-base-url", "http://localhost:8000", "--api-model-name", "test-model"]
+        with tempfile.TemporaryDirectory() as tmp:
+            refused = _launch("single", "--task", "gsm8k", *api, "--top-p", "0.9", "--logs-root", tmp)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("need --temperature", refused.stdout + refused.stderr)
+        with tempfile.TemporaryDirectory() as tmp:
+            invalid = _launch("single", "--task", "gsm8k", *api, "--temperature", "-1", "--logs-root", tmp)
+            self.assertNotEqual(invalid.returncode, 0)
+            self.assertIn("temperature must be >= 0", invalid.stdout + invalid.stderr)
+        with tempfile.TemporaryDirectory() as tmp:
+            sampled = _launch("single", "--task", "gsm8k", *api, "--temperature", "0.7", "--top-k", "20",
+                              "--logs-root", tmp)
+            self.assertEqual(sampled.returncode, 0, sampled.stdout + sampled.stderr)
+            config = _run_config(tmp)["configuration"]
+        self.assertEqual((config["nothink_temperature"], config["nothink_top_p"], config["think_top_k"]),
+                         ("0.7", "none", "20"))
+        self.assertEqual(
+            _gen_kwargs(NOTHINK_TEMPERATURE="0.7", NOTHINK_TOP_P="none", THINK_TOP_K="20"),
+            "do_sample=true,temperature=0.7,top_k=20",
+        )
+        self.assertEqual(_gen_kwargs(NOTHINK_TEMPERATURE="0.7"), "do_sample=true,temperature=0.7,top_p=0.95")
+
+    def test_invalid_sampling_environment_fails_the_job(self) -> None:
+        # A bad value must stop the job, not be dropped from the request.
+        for env in ({"CHAT_FORMAT": "apertus2", "THINK_TOP_P": "3"}, {"NOTHINK_TEMPERATURE": "-1"}):
+            with self.subTest(env):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    _gen_kwargs(**env)
+
     def test_apertus2_requirements_pin_full_commits(self) -> None:
         pins = [
             line for line in (REPO_ROOT / "requirements/apertus2.txt").read_text().splitlines()
