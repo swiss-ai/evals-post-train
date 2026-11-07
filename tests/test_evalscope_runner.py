@@ -590,3 +590,30 @@ class LiveCodeBenchTest(unittest.TestCase):
         with self.assertRaises(SystemExit) as k8s:
             run.main([*base, "--model", "m", "--api-base-url", "http://x/v1", "--sandbox", "k8s"])
         self.assertIn("sandbox pool", str(k8s.exception))
+
+
+class CompletionsFlagTest(unittest.TestCase):
+    def _cfg(self, *extra):
+        args = run.parse_args(["--benchmark", "live_code_bench", "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", *extra])
+        return run.build_task_config(args, ["live_code_bench"], run.resolved_revisions(["live_code_bench"], []))
+
+    def test_default_is_the_chat_backend(self):
+        cfg = self._cfg()
+        self.assertEqual(cfg["eval_type"], "openai_api")
+        self.assertNotIn("stop_seqs", cfg["generation_config"])
+
+    def test_completions_selects_the_backend_and_the_official_limits(self):
+        cfg = self._cfg("--completions")
+        self.assertEqual(cfg["eval_type"], "openai_completions")
+        self.assertEqual(cfg["generation_config"]["stop_seqs"], ["###"])
+        self.assertEqual(cfg["generation_config"]["max_tokens"], 2000)
+
+    def test_generation_config_overrides_the_completions_defaults(self):
+        cfg = self._cfg("--completions", "--generation-config", '{"max_tokens": 4096, "stop_seqs": ["###", "\\n\\n\\n"]}')
+        self.assertEqual(cfg["generation_config"]["max_tokens"], 4096)
+        self.assertEqual(cfg["generation_config"]["stop_seqs"], ["###", "\n\n\n"])
+
+    def test_completions_is_refused_for_the_swe_benchmarks(self):
+        with self.assertRaises(SystemExit) as refused:
+            run.main(["--benchmark", "swe_bench", "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", "--completions"])
+        self.assertIn("only live_code_bench", str(refused.exception))

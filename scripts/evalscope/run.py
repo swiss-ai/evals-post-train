@@ -64,6 +64,7 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
         "extra_params": {},
         "gold": False,
         "pool": True,
+        "completions": True,
     },
 }
 
@@ -111,6 +112,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         p.add_argument("--" + flag, default=None, help="Sampling setting, or 'none' to leave it out.")
     p.add_argument("--sampling-profile", default=None, help="Profile of the sampling config (e.g. greedy).")
     p.add_argument("--sampling-config", default=None, help="Sampling config (default: configs/sampling_defaults.json).")
+    p.add_argument(
+        "--completions",
+        action="store_true",
+        help="Base models: send plain text to /v1/completions with the official base-model prompt "
+        "(lcb_base.py) instead of the chat prompt to /v1/chat/completions (live_code_bench only).",
+    )
     p.add_argument(
         "--subset",
         default=None,
@@ -240,6 +247,12 @@ def generation_config(args: argparse.Namespace) -> Dict[str, Any]:
                 cfg[name] = value
     except ValueError as exc:
         raise SystemExit(f"Error: {exc}") from exc
+    if args.completions:
+        # lcb_runner's own --stop and --max_tokens defaults; /v1/completions would otherwise cut at 16 tokens.
+        from scripts.evalscope import lcb_base
+
+        cfg.setdefault("stop_seqs", list(lcb_base.STOP))
+        cfg.setdefault("max_tokens", lcb_base.MAX_TOKENS)
     chosen = bool(explicit or args.sampling_profile or "temperature" in json.loads(args.generation_config))
     if chosen and (warning := sampling.greedy_warning(cfg)):
         print(warning, file=sys.stderr)
@@ -275,7 +288,7 @@ def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dic
             "model": args.model,
             "api_url": args.api_base_url,
             "api_key": os.environ.get("EVALSCOPE_API_KEY") or "EMPTY",
-            "eval_type": "openai_api",
+            "eval_type": "openai_completions" if args.completions else "openai_api",
         }
     cfg: Dict[str, Any] = {
         **model_cfg,
@@ -404,6 +417,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     revisions = resolved_revisions(names, args.dataset_revision)
     if args.gold and (no_gold := [n for n in names if BENCHMARKS[n].get("gold", True) is False]):
         raise SystemExit(f"--gold has no reference solutions to score for {', '.join(no_gold)}")
+    if args.completions and (chat_only := [n for n in names if not BENCHMARKS[n].get("completions")]):
+        raise SystemExit(f"--completions has no base-model prompt for {', '.join(chat_only)}: only live_code_bench")
     if args.sandbox == "k8s" and (no_pool := [n for n in names if BENCHMARKS[n].get("pool")]):
         raise SystemExit(f"{', '.join(no_pool)} score in a sandbox pool, which --sandbox k8s does not have: use docker or opensandbox")
     os.makedirs(args.work_dir, exist_ok=True)
@@ -426,6 +441,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         signal.signal(signal.SIGTERM, exit_on_sigterm)
     if args.gold:
         install_gold()
+    if args.completions:
+        from scripts.evalscope import completions_model, lcb_base  # noqa: F401 (registers openai_completions)
+
+        lcb_base.install()
 
     import evalscope
     from evalscope.run import run_task
@@ -446,6 +465,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "model": "gold (reference patches)" if args.gold else args.model,
         "api_base_url": args.api_base_url,
         "sandbox": args.sandbox,
+        "completions": args.completions,
         **({"opensandbox_endpoint": opensandbox_endpoint()} if args.sandbox == "opensandbox" else {}),
         # Only enforced on OpenSandbox; docker and k8s sandboxes have open internet.
         "agent_network": args.agent_network if args.sandbox == "opensandbox" else "public",

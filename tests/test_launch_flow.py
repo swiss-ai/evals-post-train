@@ -298,6 +298,37 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("--max-length must be a positive integer", completed.stderr)
 
+    def test_api_retry_and_concurrency_flags_reach_the_openai_run(self) -> None:
+        output = _dry_run(
+            "single", "--task", "hellaswag", "--backend", "openai", "--api-base-url", "http://localhost:8000",
+            "--api-model-name", "test-model", "--api-max-retries", "20", "--api-num-concurrent", "4",
+        )
+        self.assertIn("API max retries: 20, concurrent requests: 4", output)
+
+    def test_api_retry_and_concurrency_default_to_the_sbatchs_own(self) -> None:
+        output = _dry_run(
+            "single", "--task", "hellaswag", "--backend", "openai", "--api-base-url", "http://localhost:8000",
+            "--api-model-name", "test-model",
+        )
+        self.assertIn("API max retries: 3 (default), concurrent requests: 8 (default)", output)
+
+    def test_api_retry_and_concurrency_flags_need_the_openai_backend(self) -> None:
+        for flag in ("--api-max-retries", "--api-num-concurrent"):
+            with tempfile.TemporaryDirectory() as tmp:
+                completed = _launch("single", "--task", "hellaswag", "--model", "test/model", flag, "5", "--logs-root", tmp)
+            self.assertNotEqual(completed.returncode, 0, flag)
+            self.assertIn(f"{flag} only applies with --backend openai", completed.stderr + completed.stdout)
+
+    def test_api_retry_and_concurrency_must_be_positive_integers(self) -> None:
+        for flag, value in (("--api-max-retries", "many"), ("--api-num-concurrent", "0")):
+            with tempfile.TemporaryDirectory() as tmp:
+                completed = _launch(
+                    "single", "--task", "hellaswag", "--backend", "openai", "--api-base-url", "http://localhost:8000",
+                    "--api-model-name", "test-model", flag, value, "--logs-root", tmp,
+                )
+            self.assertNotEqual(completed.returncode, 0, flag)
+            self.assertIn(f"{flag} must be a positive integer", completed.stderr + completed.stdout)
+
     def test_reasoning_effort_is_a_named_part_of_the_run_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(

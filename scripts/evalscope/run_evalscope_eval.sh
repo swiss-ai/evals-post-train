@@ -72,6 +72,9 @@
 #   --generation-config <json> Merged over the sampling defaults, e.g.
 #                               '{"max_tokens": 8192, "retries": 100, "retry_interval": 60}' (more
 #                               patient retries for a rate-limited endpoint; EvalScope's default is 5).
+#   --completions               live_code_bench for BASE models: plain text to /v1/completions with the
+#                               official base-model prompt (one worked example, no system message, stop at
+#                               "###", 2000 tokens) instead of the chat prompt (scripts/evalscope/lcb_base.py).
 #   --subset <s[,s]>            live_code_bench: dataset subsets (default v6 = release 6's new
 #                               problems; release_v6 = every problem up to v6).
 #   --dataset-revision <b>=<sha> Dataset revision for benchmark <b> (repeatable; Hugging Face, and
@@ -150,7 +153,7 @@ while (( $# > 0 )); do
         --wandb-entity) WANDB_ENTITY=$2; shift 2 ;;
         --wandb-project) WANDB_PROJECT=$2; shift 2 ;;
         --no-wandb) NO_WANDB=1; shift ;;
-        --shuffle) RUN_ARGS+=("$1"); shift ;;
+        --shuffle|--completions) RUN_ARGS+=("$1"); shift ;;
         --sandbox-config|--limit|--max-concurrency|--max-steps|--strategy|--command-timeout|\
         --generation-config|--dataset-revision|--subset|--extra-param|--api-timeout|--agent-network|\
         --temperature|--top-p|--top-k|--min-p|--repetition-penalty|--sampling-profile|--sampling-config)
