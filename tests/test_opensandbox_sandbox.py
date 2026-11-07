@@ -140,6 +140,96 @@ class ExecuteToolTest(unittest.TestCase):
         self.assertEqual((result.status, result.error), (ExecutionStatus.ERROR, "OOM"))
 
 
+@unittest.skipUnless(HAS_ENCLAVE and HAS_OPENSANDBOX, "ms-enclave/opensandbox not installed (evalscope-runtime.lock)")
+class PythonExecutorAndPoolTest(unittest.TestCase):
+    """What LiveCodeBench's scorer (CodeExecutionSandboxMixin) needs: python_executor on a pool."""
+
+    def _manager(self, ids=("s1",)):
+        calls = []
+        written = []
+
+        async def run_command(argv, opts=None):
+            calls.append(argv)
+            return SimpleNamespace(exit_code=0, logs=SimpleNamespace(stdout=_lines("TEST_PASSED"), stderr=[]), error=None)
+
+        async def write_files(entries):
+            written.extend(entries)
+
+        manager = opensandbox_sandbox.OpenSandboxSandboxManager()
+        for sandbox_id in ids:
+            sandbox = SimpleNamespace(
+                id=sandbox_id, commands=SimpleNamespace(run=run_command), files=SimpleNamespace(write_files=write_files)
+            )
+            manager._boxes[sandbox_id] = opensandbox_sandbox._Box(sandbox, {})
+        return manager, calls, written
+
+    def test_python_code_goes_through_a_script_file_not_the_command_line(self):
+        from ms_enclave.sandbox.model import ExecutionStatus
+
+        manager, calls, written = self._manager()
+        code = "print('x')\n" + "# padding\n" * 50000  # far above the 128 KiB limit of one argument
+        result = asyncio.run(manager.execute_tool("s1", "python_executor", {"code": code, "timeout": 6}))
+        self.assertEqual((result.status, result.output), (ExecutionStatus.SUCCESS, "TEST_PASSED\n"))
+        self.assertEqual(written[0].data, code.encode())
+        script = written[0].path
+        self.assertRegex(script, r"^/tmp/exec_script_[0-9a-f]{32}\.py$")
+        self.assertEqual(calls[0], ["timeout", "-s", "TERM", "-k", "5s", "6.0s", "python", script])
+        self.assertEqual(calls[1][-3:], ["rm", "-f", script])
+
+    def test_empty_python_code_is_an_error(self):
+        from ms_enclave.sandbox.model import ExecutionStatus
+
+        manager, calls, _ = self._manager()
+        result = asyncio.run(manager.execute_tool("s1", "python_executor", {"code": "  "}))
+        self.assertEqual((result.status, calls), (ExecutionStatus.ERROR, []))
+
+    def test_the_pool_lends_each_sandbox_to_one_caller_at_a_time(self):
+        manager, _, _ = self._manager(("s1", "s2"))
+        manager._pool_initialized = True
+        manager._pool = asyncio.Queue()
+        in_use, peak = set(), [0]
+
+        async def execute_tool(sandbox_id, tool_name, parameters):
+            self.assertNotIn(sandbox_id, in_use)
+            in_use.add(sandbox_id)
+            peak[0] = max(peak[0], len(in_use))
+            await asyncio.sleep(0.01)
+            in_use.discard(sandbox_id)
+            return sandbox_id
+
+        async def go():
+            for sandbox_id in ("s1", "s2"):
+                manager._pool.put_nowait(sandbox_id)
+            with mock.patch.object(manager, "execute_tool", side_effect=execute_tool):
+                return await asyncio.gather(*(manager.execute_tool_in_pool("python_executor", {}) for _ in range(6)))
+
+        results = asyncio.run(go())
+        self.assertEqual(sorted(set(results)), ["s1", "s2"])
+        self.assertEqual(peak[0], 2)
+        self.assertEqual(manager._pool.qsize(), 2)  # everything returned
+
+    def test_the_pool_must_be_initialized_first(self):
+        manager, _, _ = self._manager()
+        with self.assertRaises(ValueError):
+            asyncio.run(manager.execute_tool_in_pool("python_executor", {}))
+
+    def test_initialize_pool_creates_the_sandboxes(self):
+        manager = opensandbox_sandbox.OpenSandboxSandboxManager()
+        created = []
+
+        async def create_sandbox(sandbox_type=None, config=None, sandbox_id=None):
+            created.append(config)
+            return f"s{len(created)}"
+
+        async def go():
+            with mock.patch.object(manager, "create_sandbox", side_effect=create_sandbox):
+                return await manager.initialize_pool(pool_size=3, sandbox_type=None, config={"image": "python:3.11-slim"})
+
+        ids = asyncio.run(go())
+        self.assertEqual((ids, manager._pool_initialized, manager._pool.qsize()), (["s1", "s2", "s3"], True, 3))
+        self.assertEqual(asyncio.run(opensandbox_sandbox.OpenSandboxSandboxManager().initialize_pool(pool_size=0)), [])
+
+
 @unittest.skipUnless(HAS_OPENSANDBOX, "opensandbox not installed (requirements/evalscope-runtime.lock)")
 class CreateSandboxTest(unittest.TestCase):
     def test_the_working_dir_is_created_before_any_command_runs_in_it(self):

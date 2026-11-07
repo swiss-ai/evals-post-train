@@ -28,8 +28,10 @@ import sys
 import uuid
 from typing import Any, Dict, List, Optional
 
-# Our benchmark names -> the EvalScope benchmark, its pinned Hugging Face dataset revision
-# (--dataset-revision overrides) and the extra_params we always set.
+# Our benchmark names -> the EvalScope benchmark, its pinned dataset revision (--dataset-revision
+# overrides), the hub it loads from ("huggingface" unless given), the subsets it runs by default
+# (--subset overrides) and the extra_params we always set. EvalScope loads every benchmark of a run
+# from one hub, so benchmarks on different hubs cannot share a run.
 BENCHMARKS: Dict[str, Dict[str, Any]] = {
     # SWE-bench Verified (500 tasks) as a bash agent loop, the same protocol as swe_bench_pro.
     # Images are the prebuilt swebench/sweb.eval.x86_64.* ones from DockerHub: EvalScope's
@@ -49,7 +51,23 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
         "revision": "7ab5114912baf22bb098818e604c02fe7ad2c11f",
         "extra_params": {},
     },
+    # LiveCodeBench code generation (lite). EvalScope's copy of the dataset lives only on ModelScope
+    # (evalscope/livecodebench_code_generation_lite_parquet; not on Hugging Face), pinned to its
+    # latest commit as of 2026-11. Its subsets: release_vN = every problem up to release N,
+    # vN = only that release's new problems; "v6" (Feb-Apr 2025) is what papers call
+    # "LiveCodeBench v6". Scoring runs the model's code in the sandbox pool (python_executor).
+    "live_code_bench": {
+        "evalscope": "live_code_bench",
+        "hub": "modelscope",
+        "revision": "30d05eb0e009927dfb0d91073abdbf1522dbd2a9",
+        "subsets": ["v6"],
+        "extra_params": {},
+        "gold": False,
+        "pool": True,
+    },
 }
+
+HUB_REVISION_KEY = {"huggingface": "hf_dataset_revision", "modelscope": "dataset_revision"}
 
 # EvalScope applies its own default for API models (DEFAULT_TEXT_GEN_SERVICE_CONFIG, greedy)
 # only when generation_config is empty. The model's sampling settings are therefore always set:
@@ -93,6 +111,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         p.add_argument("--" + flag, default=None, help="Sampling setting, or 'none' to leave it out.")
     p.add_argument("--sampling-profile", default=None, help="Profile of the sampling config (e.g. greedy).")
     p.add_argument("--sampling-config", default=None, help="Sampling config (default: configs/sampling_defaults.json).")
+    p.add_argument(
+        "--subset",
+        default=None,
+        help="Comma-separated dataset subsets (live_code_bench: v6 by default; release_v6 = all problems up to v6).",
+    )
     p.add_argument("--dataset-revision", action="append", default=[], help="<benchmark>=<revision>.")
     p.add_argument("--extra-param", action="append", default=[], help="key=value (JSON value or string).")
     p.add_argument("--api-timeout", type=float, default=None)
@@ -139,6 +162,20 @@ def selected_benchmarks(value: str) -> List[str]:
     if unknown or not names:
         raise SystemExit(f"--benchmark must be one or more of {', '.join(BENCHMARKS)}; got {value!r}")
     return names
+
+
+def dataset_hub(names: List[str]) -> str:
+    hubs = sorted({BENCHMARKS[n].get("hub", "huggingface") for n in names})
+    if len(hubs) > 1:
+        raise SystemExit(f"{', '.join(names)} load from different dataset hubs ({', '.join(hubs)}): run them separately")
+    return hubs[0]
+
+
+def subset_list(name: str, args: argparse.Namespace) -> Optional[List[str]]:
+    given = [x.strip() for x in (args.subset or "").split(",") if x.strip()]
+    if given and not BENCHMARKS[name].get("subsets"):
+        raise SystemExit(f"--subset is not supported for {name}")
+    return given or BENCHMARKS[name].get("subsets")
 
 
 def resolved_revisions(names: List[str], overrides: List[str]) -> Dict[str, str]:
@@ -211,9 +248,11 @@ def generation_config(args: argparse.Namespace) -> Dict[str, Any]:
 
 def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dict[str, str]) -> Dict[str, Any]:
     extra_params = parse_pairs(args.extra_param, "--extra-param", as_json=True)
+    hub = dataset_hub(names)
     dataset_args = {
         BENCHMARKS[n]["evalscope"]: {
-            "hf_dataset_revision": revisions[n],
+            HUB_REVISION_KEY[hub]: revisions[n],
+            **({"subset_list": subset_list(n, args)} if subset_list(n, args) else {}),
             "extra_params": {**BENCHMARKS[n]["extra_params"], **environment_extra_params(n), **extra_params},
             **({"shuffle": True} if args.shuffle else {}),
         }
@@ -242,7 +281,7 @@ def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dic
         **model_cfg,
         "datasets": [BENCHMARKS[n]["evalscope"] for n in names],
         "dataset_args": dataset_args,
-        "dataset_hub": "huggingface",
+        "dataset_hub": hub,
         "eval_batch_size": args.max_concurrency,
         "generation_config": generation_config(args),
         "work_dir": args.work_dir,
@@ -363,6 +402,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     names = selected_benchmarks(args.benchmark)
     revisions = resolved_revisions(names, args.dataset_revision)
+    if args.gold and (no_gold := [n for n in names if BENCHMARKS[n].get("gold", True) is False]):
+        raise SystemExit(f"--gold has no reference solutions to score for {', '.join(no_gold)}")
+    if args.sandbox == "k8s" and (no_pool := [n for n in names if BENCHMARKS[n].get("pool")]):
+        raise SystemExit(f"{', '.join(no_pool)} score in a sandbox pool, which --sandbox k8s does not have: use docker or opensandbox")
     os.makedirs(args.work_dir, exist_ok=True)
 
     from scripts.evalscope import swe_bench_scoring
@@ -406,7 +449,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         **({"opensandbox_endpoint": opensandbox_endpoint()} if args.sandbox == "opensandbox" else {}),
         # Only enforced on OpenSandbox; docker and k8s sandboxes have open internet.
         "agent_network": args.agent_network if args.sandbox == "opensandbox" else "public",
+        "dataset_hub": dataset_hub(names),
         "dataset_revisions": revisions,
+        "subsets": {n: subset_list(n, args) for n in names if subset_list(n, args)},
         "limit": cfg.get("limit"),
         "reports": collect_reports(args.work_dir),
         "evaluation_errors": evaluation_errors(args.work_dir),

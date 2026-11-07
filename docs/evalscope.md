@@ -1,15 +1,18 @@
 # EvalScope
 
-`scripts/evalscope/run_evalscope_eval.sh` runs two benchmarks through [EvalScope](https://github.com/modelscope/evalscope); [Harbor](harbor.md) runs them too, with a different agent and scoring, so the scores differ.
+`scripts/evalscope/run_evalscope_eval.sh` runs these benchmarks through [EvalScope](https://github.com/modelscope/evalscope); [Harbor](harbor.md) runs them too, with a different agent and scoring, so the scores differ.
 
 | `--benchmark` | What | Images |
 |---|---|---|
 | `swe_bench` | SWE-bench Verified, 500 tasks (EvalScope's `swe_bench_verified_agentic`) | `swebench/sweb.eval.x86_64.*` (prebuilt, pulled) |
 | `swe_bench_pro` | SWE-bench Pro **v1**, 731 tasks (see below) | `jefzda/sweap-images:<tag>` |
+| `live_code_bench` | LiveCodeBench code generation (lite), `v6` slice by default (see below) | `python:3.11-slim` |
 
 Both use the same protocol. The agent works through a multi-turn bash loop inside the instance's own container and submits a `git diff`. EvalScope then applies that patch in a fresh container and runs the instance's tests. An instance counts as resolved when every fail-to-pass and pass-to-pass test passes. Pass `--benchmark swe_bench,swe_bench_pro` to run both in one go.
 
 The script runs EvalScope from a cached venv of `requirements/evalscope-runtime.lock` (every package pinned, see `scripts/common/locked_venv.sh`). It can't share the lm-eval/Inspect environment because EvalScope's `math-verify` pin conflicts with that environment's `antlr4` pin. The script takes `--model`/`--api-base-url` and uses the same serving-key fallback as `run_inspect_eval.sh`. It writes EvalScope's own outputs plus a `summary.json` to `logs/evalscope/<name>/`. Besides the scores, `summary.json` records what's needed to reproduce the run: the EvalScope version, the Hugging Face dataset revision for each benchmark (both pinned in `scripts/evalscope/run.py`, override with `--dataset-revision <benchmark>=<sha>`) and the `SWE-bench_Pro-os` commit (EvalScope pins `ca10a60`).
+
+**LiveCodeBench.** `--benchmark live_code_bench` runs EvalScope's `live_code_bench`: one 0-shot prompt per problem, the code extracted from the reply and run against the problem's tests in a sandbox pool (`python_executor`, 6 s per test). EvalScope's copy of the dataset exists only on ModelScope, so this benchmark loads from there (`dataset_hub: modelscope`), pinned to a commit in `scripts/evalscope/run.py` (`--dataset-revision live_code_bench=<sha>` overrides). That also means it can't share a run with the SWE-bench benchmarks. `--subset` picks the slice: the default `v6` is the problems released in release 6 only (Feb-Apr 2025, what papers call "LiveCodeBench v6"); `release_v6` is every problem up to release 6, and `release_v5`, `v5` etc. work the same way. The score is `pass@1`. `--sandbox docker` and `opensandbox` work; `--sandbox k8s` has no sandbox pool and is refused. There are no reference solutions, so `--gold` is refused too.
 
 SWE-bench is scored by `scripts/evalscope/swe_bench_scoring.py`, not EvalScope's own scorer. The evaluation itself is the same: the same `swebench` test spec, eval script, patch-apply fallbacks and grading. EvalScope's version uses the Docker SDK directly, which never pulls the image and doesn't work without a Docker daemon. This one creates its container through EvalScope's sandbox layer, so it pulls the image and works on both `--sandbox` engines.
 
