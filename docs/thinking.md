@@ -26,6 +26,54 @@ graders or user simulators.
 The effort is sent twice, as the request's `reasoning_effort` and as the template kwarg, because
 servers differ in which one they read. The on/off switch is a template kwarg only.
 
+## Apertus 2 on `/v1/chat/completions` (temporary)
+
+lm-eval renders Apertus 2 itself (`--chat-format apertus2`). The other frameworks send ordinary chat
+requests, so for them the **server** has to render the Apertus 2 format and split the reasoning from
+the reply. That is the vLLM plugin of `apertus-common` PR #5, which is **not merged yet**:
+`requirements/apertus2-vllm-plugin.txt` pins the PR head we tested. When the PR merges, replace
+that commit with the merged one (or drop the file if the server image ships the plugin).
+
+1. **Build the wheel** where your git access is (the repository is private):
+   `scripts/lm_eval_harness/prepare_apertus_common.sh requirements/apertus2-vllm-plugin.txt`
+   prints the directory it keeps the wheel in, under `$EVAL_ENV_CACHE_ROOT`.
+2. **Serve the model with the plugin.** The `vllm-apertus2-cuda` image does not contain it, so every
+   node installs the wheel before `vllm serve`, and the server gets the four `apertus2` options.
+   With model-launch's `sml advanced`, for a launch like `examples/clariden/cli/swiss-ai/apertus2/chonk/`:
+
+   ```bash
+   sml advanced ... \
+     --pre-launch-cmds "pip install -q --no-deps --force-reinstall --ignore-requires-python <wheel dir>/apertus_common-*.whl" \
+     --framework-args "--model <checkpoint> ... --tokenizer-mode apertus2 --reasoning-parser apertus2 \
+       --enable-auto-tool-choice --tool-call-parser apertus2"
+   ```
+
+   The wheel directory must be one the job's container mounts. Without the install the server exits
+   at startup with `invalid tool call parser: apertus2`. `sml advanced` does not set a QoS: for
+   `highprio`, render the job with `--output-script`, add the `#SBATCH --qos` line, and `sbatch` it.
+3. **Point the framework at it** like any served model: `--model <served name> --api-base-url ...`.
+
+The server answers with the reasoning in a separate `reasoning` field. Notes:
+
+- Apertus 2 always reasons: `--no-enable-thinking` did not change the output length, so the thinking
+  flags only pick the sampling profile ([sampling](sampling.md)) for this model.
+- It thinks a lot even on trivial prompts, so give a large token budget. The Chonk launch has a
+  context of 16384; an empty `content` with `finish_reason: length` means the budget ran out while
+  it was still thinking.
+- Harbor's terminus-2 agent assumes a very large context window. On a server with a smaller one it
+  hits "Context length exceeded" and keeps falling back to summaries. Tell it the real limit:
+  `--agent-kwarg 'model_info={"max_input_tokens": 16384}'` (the Chonk launch's context).
+- A launch over two or more nodes can crash OpenTela (`file exists` on `~/.ocfcore`, then a
+  nil-pointer panic) because the nodes share one peer ID and database through `$HOME`. The fix is
+  model-launch PR #263 (OpenTela's `--ephemeral-identity` and `--datadir`, needs OpenTela v0.2.7).
+  Until it lands, relaunch if it happens, or render the job with that branch.
+
+Tested against Chonk: Inspect `gsm8k --limit 5` (5 of 5); EvalScope `live_code_bench --limit 3`
+(2 of 3, no evaluation errors); Harbor `terminal_bench_2 --limit 1` with terminus-2 (the agent loop
+ran for the full 15 minutes with the setting above and no endpoint errors; reward 0.0, an agent
+timeout on a hard task). Not tested: tau2, tool calls (none of these use them), and whether the
+scores match lm-eval's `--chat-format apertus2` path.
+
 ## What this does not do
 
 It does not strip or measure the reasoning in the answer. Without a server-side reasoning parser

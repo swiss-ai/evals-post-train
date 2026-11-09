@@ -1,0 +1,7 @@
+# TEMPORARY. The vLLM plugin that serves the Apertus 2 format on /v1/chat/completions
+# (--tokenizer-mode / --reasoning-parser / --tool-call-parser apertus2) is apertus-common PR #5
+# (branch feat/vllm-plugin), not merged yet. This pins the PR head we tested; when the PR merges,
+# replace the commit with the merged one (or drop this file if the server image ships the plugin).
+# Built into a wheel by scripts/lm_eval_harness/prepare_apertus_common.sh and installed on every
+# node of the server before `vllm serve`; see docs/thinking.md.
+apertus-common @ git+https://github.com/swiss-ai/apertus-common.git@cf7eb8185868832a58adde84f6900c19274d3537
