@@ -45,6 +45,11 @@
 #   --opensandbox-image <ref>   Image for --sandbox-backend opensandbox (default: E2B's public
 #                               code-interpreter image, pinned by digest, the same libraries as
 #                               code-interpreter-v1).
+#   --enable-thinking, --no-enable-thinking, --reasoning-effort <level>
+#                               Thinking and reasoning effort of the model under test (same flags as the other
+#                               launchers, scripts/common/thinking.py): the client's reasoning_effort plus the
+#                               chat-template kwargs in the request's extra_body. Unset: the model's server-side
+#                               default. The judges never get them.
 #   --workdir <path>            Scratch dir for generated deliverables (default: a temp dir
 #                               under /tmp).
 #   --no-grade                  Skip pairwise grading even if judge credentials are set --
@@ -90,6 +95,7 @@ E2B_TEMPLATE="code-interpreter-v1"
 OPENSANDBOX_IMAGE=""
 WORKDIR=""
 NO_GRADE=0
+THINKING_ARGS=(--format json)
 
 while (( $# > 0 )); do
     case "$1" in
@@ -104,12 +110,17 @@ while (( $# > 0 )); do
         --opensandbox-image) OPENSANDBOX_IMAGE=$2; shift 2 ;;
         --workdir) WORKDIR=$2; shift 2 ;;
         --no-grade) NO_GRADE=1; shift ;;
+        --enable-thinking|--no-enable-thinking) THINKING_ARGS+=("$1"); shift ;;
+        --reasoning-effort) THINKING_ARGS+=("$1" "$2"); shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "Unknown argument: $1 (see --help)" ;;
     esac
 done
 
 [[ -n "$MODEL" ]] || die "Missing --model. See --help."
+# Validated before anything else runs (the system python3, stdlib only): a bad level stops the run
+# here, not at the first request.
+GDPVAL_THINKING=$(python3 -m scripts.common.thinking "${THINKING_ARGS[@]}") || exit 1
 [[ "$SANDBOX_BACKEND" == e2b || "$SANDBOX_BACKEND" == opensandbox || "$SANDBOX_BACKEND" == local ]] ||
     die "--sandbox-backend must be e2b, opensandbox or local, got: $SANDBOX_BACKEND"
 if [[ "$SANDBOX_BACKEND" == opensandbox ]]; then
@@ -170,7 +181,7 @@ fi
 export PATH="$GDPVAL_VENV/bin:$PATH" VIRTUAL_ENV="$GDPVAL_VENV"
 [[ "$SANDBOX_BACKEND" == opensandbox ]] && trap cleanup_sandboxes EXIT
 
-EVAL_MODEL="$MODEL" EVAL_API_BASE_URL="$API_BASE_URL" EVAL_WORKDIR="$WORKDIR" \
+EVAL_MODEL="$MODEL" EVAL_API_BASE_URL="$API_BASE_URL" EVAL_WORKDIR="$WORKDIR" GDPVAL_THINKING="$GDPVAL_THINKING" \
 GDPVAL_NUM_TASKS="$NUM_TASKS" GDPVAL_TASK_IDS="$TASK_IDS" GDPVAL_MAX_TURNS="$MAX_TURNS" \
 GDPVAL_MAX_CONCURRENCY="$MAX_CONCURRENCY" GDPVAL_SANDBOX_BACKEND="$SANDBOX_BACKEND" \
 GDPVAL_E2B_TEMPLATE="$E2B_TEMPLATE" GDPVAL_OPENSANDBOX_IMAGE="$OPENSANDBOX_IMAGE" \
@@ -223,12 +234,18 @@ def download_reference_files(row):
 
 
 def build_model_client():
+    from scripts.common import thinking
+
+    values = json.loads(os.environ.get("GDPVAL_THINKING") or "{}")
+    body = thinking.extra_body(values)
     return ChatCompletionsClient(
         model=os.environ["EVAL_MODEL"],
         base_url=os.environ["EVAL_API_BASE_URL"],
         api_key=os.environ.get("CSCS_SERVING_API") or os.environ.get("OPENAI_API_KEY") or "unused",
         max_tokens=8_192,
         context_window_tokens=128_000,
+        reasoning_effort=values.get("reasoning_effort"),
+        kwargs={"extra_body": body} if body else None,
     )
 
 

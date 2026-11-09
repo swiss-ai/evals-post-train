@@ -66,6 +66,12 @@
 #                              temperature and top-p are litellm kwargs; the rest go in extra_body.
 #   --sampling-profile <name>  A profile of the sampling config (e.g. thinking, greedy);
 #   --sampling-config <file>   another file instead of configs/sampling_defaults.json.
+#   --enable-thinking, --no-enable-thinking, --reasoning-effort <level>
+#                              Thinking and reasoning effort of the agent model (same flags as the other
+#                              launchers, scripts/common/thinking.py): litellm's reasoning_effort plus the
+#                              chat-template kwargs in extra_body, merged over --agent-llm-args. Unset: the
+#                              model's server-side default. The user simulator never gets them (see
+#                              --user-llm-args for it).
 #   --max-concurrency <n>      Parallel trials (default: 4).
 #   --git-ref <ref>            tau2-bench ref (default: v1.0.1, AA's protocol). It must name the
 #                               commit requirements/tau2-runtime.lock pins, which is what runs
@@ -105,6 +111,7 @@ AGENT_LLM_ARGS_OVERRIDE=""
 SAMPLING_TEMPERATURE_FLAG=""; SAMPLING_TOP_P_FLAG=""; SAMPLING_TOP_K_FLAG=""
 SAMPLING_MIN_P_FLAG=""; SAMPLING_REPETITION_PENALTY_FLAG=""
 SAMPLING_PROFILE_FLAG=""; SAMPLING_CONFIG_FLAG=""
+THINKING_ENABLE_FLAG=""; THINKING_EFFORT_FLAG=""
 NUM_TRIALS=5
 MAX_STEPS=200
 NUM_TASKS=""
@@ -132,6 +139,9 @@ while (( $# > 0 )); do
         --repetition-penalty) SAMPLING_REPETITION_PENALTY_FLAG=$2; shift 2 ;;
         --sampling-profile) SAMPLING_PROFILE_FLAG=$2; shift 2 ;;
         --sampling-config) SAMPLING_CONFIG_FLAG=$2; shift 2 ;;
+        --enable-thinking) THINKING_ENABLE_FLAG=--enable-thinking; shift ;;
+        --no-enable-thinking) THINKING_ENABLE_FLAG=--no-enable-thinking; shift ;;
+        --reasoning-effort) THINKING_EFFORT_FLAG=$2; shift 2 ;;
         --num-trials) NUM_TRIALS=$2; shift 2 ;;
         --max-steps) MAX_STEPS=$2; shift 2 ;;
         --num-tasks) NUM_TASKS=$2; shift 2 ;;
@@ -206,6 +216,22 @@ merged = json.loads(sys.argv[1])
 merged.update(json.loads(sys.argv[2]))
 print(json.dumps(merged))' "$USER_LLM_ARGS" "$USER_LLM_ARGS_OVERRIDE")
 fi
+
+# Thinking and reasoning effort of the agent model (scripts/common/thinking.py), merged over its litellm
+# args after the user simulator copied them: the simulator is not the model under test.
+THINKING_ARGS=(--format json)
+[[ -n "$THINKING_ENABLE_FLAG" ]] && THINKING_ARGS+=("$THINKING_ENABLE_FLAG")
+[[ -n "$THINKING_EFFORT_FLAG" ]] && THINKING_ARGS+=(--reasoning-effort "$THINKING_EFFORT_FLAG")
+THINKING_VALUES=$(python3 -m scripts.common.thinking "${THINKING_ARGS[@]}") || exit 1
+AGENT_LLM_ARGS=$(python3 -c '
+import json, sys
+from scripts.common import thinking
+args, values = json.loads(sys.argv[1]), json.loads(sys.argv[2])
+args.update({k: v for k, v in thinking.litellm_kwargs(values).items() if k != "extra_body"})
+body = thinking.merge_extra_body(args.get("extra_body"), values)
+if body:
+    args["extra_body"] = body
+print(json.dumps(args))' "$AGENT_LLM_ARGS" "$THINKING_VALUES")
 
 # The commit a tau2-bench ref names in $TAU_REPO (a full commit is taken as is).
 resolve_tau_ref() {

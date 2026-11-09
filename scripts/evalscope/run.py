@@ -114,6 +114,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         p.add_argument("--" + flag, default=None, help="Sampling setting, or 'none' to leave it out.")
     p.add_argument("--sampling-profile", default=None, help="Profile of the sampling config (e.g. greedy).")
     p.add_argument("--sampling-config", default=None, help="Sampling config (default: configs/sampling_defaults.json).")
+    p.add_argument("--enable-thinking", dest="enable_thinking", action="store_true", default=None,
+                   help="Switch the model's chat-template thinking on.")
+    p.add_argument("--no-enable-thinking", dest="enable_thinking", action="store_false",
+                   help="Switch the model's chat-template thinking off.")
+    p.add_argument("--reasoning-effort", default=None, help="Reasoning effort of the model.")
     p.add_argument(
         "--completions",
         action="store_true",
@@ -216,8 +221,12 @@ def generation_config(args: argparse.Namespace) -> Dict[str, Any]:
 
     top_k, top_p, temperature and repetition_penalty are EvalScope fields; min_p goes in extra_body,
     which the OpenAI-compatible server reads. 'none' on a flag removes that setting.
+
+    The thinking flags (scripts/common/thinking.py) set EvalScope's reasoning_effort and the chat-template
+    kwargs in extra_body; they win over --generation-config. Chat-template settings mean nothing to
+    --completions (plain text to /v1/completions), which refuses them.
     """
-    from scripts.common import sampling
+    from scripts.common import sampling, thinking
 
     def to_config(values: Dict[str, Any]) -> Dict[str, Any]:
         cfg = {key: value for key, value in values.items() if key != "min_p"}
@@ -247,6 +256,14 @@ def generation_config(args: argparse.Namespace) -> Dict[str, Any]:
                 cfg.pop(name, None)
             else:
                 cfg[name] = value
+        thinking_values = thinking.resolve(args.enable_thinking, args.reasoning_effort)
+        if thinking_values and args.completions:
+            raise ValueError("--completions sends plain text to /v1/completions: no chat template for the thinking flags")
+        if "reasoning_effort" in thinking_values:
+            cfg["reasoning_effort"] = thinking_values["reasoning_effort"]
+        body = thinking.merge_extra_body(cfg.get("extra_body"), thinking_values)
+        if body:
+            cfg["extra_body"] = body
     except ValueError as exc:
         raise SystemExit(f"Error: {exc}") from exc
     if args.completions:

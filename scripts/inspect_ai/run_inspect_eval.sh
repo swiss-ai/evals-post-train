@@ -77,6 +77,13 @@
 #                              an OpenAI-compatible server reads. A literal `-- --temperature ...` still wins.
 #   --sampling-profile <name>  A profile of the sampling config (e.g. greedy); --sampling-config <file>
 #                              reads another file instead of configs/sampling_defaults.json.
+#   --enable-thinking, --no-enable-thinking
+#                              Switch the model's chat-template thinking on or off (chat_template_kwargs
+#                              enable_thinking, in --extra-body). Unset: the model's server-side default.
+#   --reasoning-effort <level> Reasoning effort (none|minimal|low|medium|high|xhigh|max): Inspect's own
+#                              --reasoning-effort, plus the template kwarg of the same name. Same flags
+#                              as the other launchers (scripts/common/thinking.py); the reasoning is not
+#                              stripped from the answer here, a server-side reasoning parser does that.
 #   -- <extra args>            Everything after a literal -- is forwarded verbatim to
 #                              `inspect eval`/`inspect eval-set` (e.g. -- --temperature 0.5
 #                              --max-connections 10).
@@ -134,6 +141,7 @@ SANDBOX=""
 SAMPLING_TEMPERATURE_FLAG=""; SAMPLING_TOP_P_FLAG=""; SAMPLING_TOP_K_FLAG=""
 SAMPLING_MIN_P_FLAG=""; SAMPLING_REPETITION_PENALTY_FLAG=""
 SAMPLING_PROFILE_FLAG=""; SAMPLING_CONFIG_FLAG=""
+THINKING_ENABLE_FLAG=""; THINKING_EFFORT_FLAG=""
 
 while (( $# > 0 )); do
     case "$1" in
@@ -158,6 +166,9 @@ while (( $# > 0 )); do
         --repetition-penalty) SAMPLING_REPETITION_PENALTY_FLAG=$2; shift 2 ;;
         --sampling-profile) SAMPLING_PROFILE_FLAG=$2; shift 2 ;;
         --sampling-config) SAMPLING_CONFIG_FLAG=$2; shift 2 ;;
+        --enable-thinking) THINKING_ENABLE_FLAG=--enable-thinking; shift ;;
+        --no-enable-thinking) THINKING_ENABLE_FLAG=--no-enable-thinking; shift ;;
+        --reasoning-effort) THINKING_EFFORT_FLAG=$2; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         --) shift; EXTRA_ARGS+=("$@"); break ;;
         *) die "Unknown argument: $1 (see --help)" ;;
@@ -302,14 +313,25 @@ eval "$SAMPLING_OUT"
 [[ -n "$SAMPLING_TEMPERATURE" ]] && COMMON_ARGS+=(--temperature "$SAMPLING_TEMPERATURE")
 [[ -n "$SAMPLING_TOP_P"       ]] && COMMON_ARGS+=(--top-p "$SAMPLING_TOP_P")
 [[ -n "$SAMPLING_TOP_K"       ]] && COMMON_ARGS+=(--top-k "$SAMPLING_TOP_K")
+# Thinking and reasoning effort (scripts/common/thinking.py): nothing is sent unless asked for. The
+# effort is Inspect's own --reasoning-effort; both settings also go in --extra-body as chat-template
+# kwargs, next to the sampling keys below.
+THINKING_ARGS=(--format shell)
+[[ -n "$THINKING_ENABLE_FLAG" ]] && THINKING_ARGS+=("$THINKING_ENABLE_FLAG")
+[[ -n "$THINKING_EFFORT_FLAG" ]] && THINKING_ARGS+=(--reasoning-effort "$THINKING_EFFORT_FLAG")
+THINKING_OUT=$(python3 -m scripts.common.thinking "${THINKING_ARGS[@]}") || exit 1
+eval "$THINKING_OUT"
+[[ -n "$THINKING_EFFORT" ]] && COMMON_ARGS+=(--reasoning-effort "$THINKING_EFFORT")
 SAMPLING_EXTRA_BODY=""
 [[ -n "$SAMPLING_MIN_P" ]] && SAMPLING_EXTRA_BODY="\"min_p\": $SAMPLING_MIN_P"
 [[ -n "$SAMPLING_REPETITION_PENALTY" ]] &&
     SAMPLING_EXTRA_BODY="${SAMPLING_EXTRA_BODY:+$SAMPLING_EXTRA_BODY, }\"repetition_penalty\": $SAMPLING_REPETITION_PENALTY"
+[[ -n "$THINKING_EXTRA_BODY" ]] &&
+    SAMPLING_EXTRA_BODY="${SAMPLING_EXTRA_BODY:+$SAMPLING_EXTRA_BODY, }$THINKING_EXTRA_BODY"
 if [[ -n "$SAMPLING_EXTRA_BODY" ]]; then
     COMMON_ARGS+=(--extra-body "{$SAMPLING_EXTRA_BODY}")
     for arg in ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}; do
-        [[ "$arg" == --extra-body* ]] && echo "WARNING: your --extra-body replaces the min-p/repetition-penalty sampling settings." >&2
+        [[ "$arg" == --extra-body* ]] && echo "WARNING: your --extra-body replaces the min-p/repetition-penalty/thinking settings." >&2
     done
 fi
 
