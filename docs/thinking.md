@@ -26,6 +26,44 @@ graders or user simulators.
 The effort is sent twice, as the request's `reasoning_effort` and as the template kwarg, because
 servers differ in which one they read. The on/off switch is a template kwarg only.
 
+## Apertus 2 on `/v1/chat/completions` (temporary)
+
+lm-eval renders Apertus 2 itself (`--chat-format apertus2`). The other frameworks send ordinary chat
+requests, so for them the **server** has to render the Apertus 2 format and split the reasoning from
+the reply. That is the vLLM plugin of `apertus-common` PR #5, which is **not merged yet**:
+`requirements/apertus2-vllm-plugin.txt` pins the PR head we tested. When the PR merges, replace
+that commit with the merged one (or drop the file if the server image ships the plugin).
+
+1. **Build the wheel** where your git access is (the repository is private):
+   `scripts/lm_eval_harness/prepare_apertus_common.sh requirements/apertus2-vllm-plugin.txt`
+   prints the directory it keeps the wheel in, under `$EVAL_ENV_CACHE_ROOT`.
+2. **Serve the model with the plugin.** The `vllm-apertus2-cuda` image does not contain it, so every
+   node installs the wheel before `vllm serve`, and the server gets the four `apertus2` options.
+   With model-launch's `sml advanced`, for a launch like `examples/clariden/cli/swiss-ai/apertus2/chonk/`:
+
+   ```bash
+   sml advanced ... \
+     --pre-launch-cmds "pip install -q --no-deps --force-reinstall --ignore-requires-python <wheel dir>/apertus_common-*.whl" \
+     --framework-args "--model <checkpoint> ... --tokenizer-mode apertus2 --reasoning-parser apertus2 \
+       --enable-auto-tool-choice --tool-call-parser apertus2"
+   ```
+
+   The wheel directory must be one the job's container mounts. Without the install the server exits
+   at startup with `invalid tool call parser: apertus2`. `sml advanced` does not set a QoS: for
+   `highprio`, render the job with `--output-script`, add the `#SBATCH --qos` line, and `sbatch` it.
+3. **Point the framework at it** like any served model: `--model <served name> --api-base-url ...`.
+
+The server answers with the reasoning in a separate `reasoning` field. Notes:
+
+- Apertus 2 always reasons: `--no-enable-thinking` did not change the output length, so the thinking
+  flags only pick the sampling profile ([sampling](sampling.md)) for this model.
+- It thinks a lot even on trivial prompts, so give a large token budget. The Chonk launch has a
+  context of 16384; an empty `content` with `finish_reason: length` means the budget ran out while
+  it was still thinking.
+
+Tested: Inspect `gsm8k --limit 5` against Chonk (5 of 5). Not tested: EvalScope, Harbor, tau2, and
+whether the scores match lm-eval's `--chat-format apertus2` path.
+
 ## What this does not do
 
 It does not strip or measure the reasoning in the answer. Without a server-side reasoning parser

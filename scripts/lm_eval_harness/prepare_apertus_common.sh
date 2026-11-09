@@ -1,6 +1,7 @@
 #!/bin/bash
 #
-# prepare_apertus_common.sh - Build the apertus-common wheel that requirements/apertus2.txt pins.
+# prepare_apertus_common.sh [requirements file] - Build the apertus-common wheel that
+# requirements/apertus2.txt (or the file given, e.g. requirements/apertus2-vllm-plugin.txt) pins.
 #
 # apertus-common is a private repository, and the prebuilt image has neither a credential nor an ssh
 # client. So the launcher (which runs where your git access is) clones the pinned commit and builds a
@@ -8,21 +9,22 @@
 # ${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}/apertus-common/<commit>/, which the job's container must
 # mount (like the rest of EVAL_ENV_CACHE_ROOT). Prints that directory; EVAL_DRY_RUN=true only prints it.
 #
-# Cloning uses the URL in apertus2.txt through your own git configuration, e.g. an ssh rewrite:
+# Cloning uses the URL in that file through your own git configuration, e.g. an ssh rewrite:
 #   git config --global url."git@github.com:".insteadOf https://github.com/
 
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-pin=$(grep -E '^[[:space:]]*apertus-common[[:space:]]*@[[:space:]]*git\+' requirements/apertus2.txt) \
-    || { echo "requirements/apertus2.txt has no 'apertus-common @ git+<url>@<commit>' line" >&2; exit 1; }
+req=${1:-requirements/apertus2.txt}
+pin=$(grep -E '^[[:space:]]*apertus-common[[:space:]]*@[[:space:]]*git\+' "$req") \
+    || { echo "$req has no 'apertus-common @ git+<url>@<commit>' line" >&2; exit 1; }
 url=${pin#*git+}
 url=${url%@*}
 commit=${pin##*@}
 commit=${commit//[[:space:]]/}
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] \
-    || { echo "requirements/apertus2.txt does not pin apertus-common to a full commit sha" >&2; exit 1; }
+    || { echo "$req does not pin apertus-common to a full commit sha" >&2; exit 1; }
 
 cache_root=${EVAL_ENV_CACHE_ROOT:-${SCRATCH:-/tmp}/eval-envs}
 wheel_dir="$cache_root/apertus-common/$commit"
