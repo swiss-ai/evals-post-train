@@ -241,7 +241,15 @@ def generation_config(args: argparse.Namespace) -> Dict[str, Any]:
             for name in sampling.SAMPLERS
             if getattr(args, name) is not None
         }
-        cfg = to_config(sampling.resolve("evalscope", config=config, profile=args.sampling_profile))
+        cfg = to_config(
+            sampling.resolve(
+                "evalscope",
+                config=config,
+                profile=args.sampling_profile,
+                enable_thinking=args.enable_thinking,
+                reasoning_effort=args.reasoning_effort,
+            )
+        )
         user = json.loads(args.generation_config)
         cfg.update({key: value for key, value in user.items() if key != "extra_body"})
         if "extra_body" in user:

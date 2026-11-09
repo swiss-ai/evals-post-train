@@ -83,12 +83,59 @@ class SamplingConfigTest(unittest.TestCase):
             {"profiles": {"p": {"top_p": 3}}},
             {"profiles": {"p": {}}, "frameworks": {"spark": "p"}},
             {"profiles": {"p": {}}, "frameworks": {"inspect": "missing"}},
+            {"profiles": {"p": {}}, "modes": {"sleepy": "p"}},
+            {"profiles": {"p": {}}, "modes": {"thinking": "missing"}},
         ):
             with self.assertRaises(ValueError, msg=str(bad)):
                 sampling.read_config(write(bad))
         ok = sampling.read_config(write({"profiles": {"p": {"temperature": 0.3, "top_p": None}},
                                           "frameworks": {"inspect": "p"}}))
         self.assertEqual(sampling.resolve("inspect", config=ok), {"temperature": 0.3})
+
+    def test_thinking_mode_from_the_thinking_flags(self):
+        self.assertIsNone(sampling.thinking_mode())
+        self.assertEqual(sampling.thinking_mode(enable_thinking=True), "thinking")
+        self.assertEqual(sampling.thinking_mode(enable_thinking=False), "non_thinking")
+        self.assertEqual(sampling.thinking_mode(reasoning_effort="high"), "thinking")
+        self.assertEqual(sampling.thinking_mode(reasoning_effort="none"), "non_thinking")
+        # The on/off switch wins over the effort.
+        self.assertEqual(sampling.thinking_mode(True, "none"), "thinking")
+        self.assertEqual(sampling.thinking_mode(False, "high"), "non_thinking")
+
+    def test_mode_picks_the_profile_for_every_framework(self):
+        config = sampling.read_config()
+        for framework in sampling.FRAMEWORKS:
+            self.assertEqual(
+                sampling.resolve(framework, config=config, enable_thinking=True),
+                {"temperature": 0.6, "top_p": 0.95},
+                framework,
+            )
+            self.assertEqual(
+                sampling.resolve(framework, config=config, reasoning_effort="none"), {"temperature": 0.0}, framework
+            )
+        # tau2 has no default, but a thinking flag asks for a profile.
+        self.assertEqual(
+            sampling.resolve("tau2", config=config, reasoning_effort="high"), {"temperature": 0.6, "top_p": 0.95}
+        )
+
+    def test_mode_precedence(self):
+        config = sampling.read_config()
+        # --profile beats the mode, explicit samplers beat both.
+        self.assertEqual(
+            sampling.resolve("inspect", config=config, profile="greedy", enable_thinking=True), {"temperature": 0.0}
+        )
+        self.assertEqual(
+            sampling.resolve("inspect", config=config, enable_thinking=False, overrides={"temperature": 0.3}),
+            {"temperature": 0.3},
+        )
+        # No thinking flag: the framework default, as before.
+        self.assertEqual(sampling.resolve("inspect", config=config), {"temperature": 0.6, "top_p": 0.95})
+
+    def test_mode_needs_a_mapping_in_the_config(self):
+        config = {"profiles": {"p": {"temperature": 1.0}}, "frameworks": {"inspect": "p"}}
+        self.assertEqual(sampling.resolve("inspect", config=config), {"temperature": 1.0})
+        with self.assertRaises(ValueError):
+            sampling.resolve("inspect", config=config, enable_thinking=True)
 
     def test_unknown_profile_and_framework(self):
         config = sampling.read_config()
@@ -104,6 +151,20 @@ class SamplingConfigTest(unittest.TestCase):
 
 
 class SamplingCliTest(unittest.TestCase):
+    def test_thinking_flags_pick_the_mode(self):
+        for flags, expected in (
+            (("--enable-thinking",), {"temperature": 0.6, "top_p": 0.95}),
+            (("--no-enable-thinking",), {"temperature": 0.0}),
+            (("--reasoning-effort", "none"), {"temperature": 0.0}),
+            (("--reasoning-effort", "high"), {"temperature": 0.6, "top_p": 0.95}),
+        ):
+            done = _cli("--framework", "tau2", *flags)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual(json.loads(done.stdout), expected, flags)
+        done = _cli("--framework", "inspect", "--no-enable-thinking", "--reasoning-effort", "high")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout), {"temperature": 0.0})
+
     def test_default_json(self):
         done = _cli("--framework", "harbor")
         self.assertEqual(done.returncode, 0, done.stderr)

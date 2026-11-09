@@ -265,7 +265,12 @@ def agent_kwargs(args: argparse.Namespace) -> List[str]:
                 )
             return list(args.agent_kwarg)
         values = sampling.resolve(
-            "harbor", config=sampling.read_config(args.sampling_config), profile=args.sampling_profile, overrides=explicit
+            "harbor",
+            config=sampling.read_config(args.sampling_config),
+            profile=args.sampling_profile,
+            overrides=explicit,
+            enable_thinking=args.enable_thinking,
+            reasoning_effort=args.reasoning_effort,
         )
         if "temperature" in explicit:
             kwargs.pop("temperature", None)

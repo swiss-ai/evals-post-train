@@ -19,6 +19,7 @@ def _args(extra_args=(), **flags: str) -> subprocess.CompletedProcess:
         "temperature": "SAMPLING_TEMPERATURE_FLAG", "top_p": "SAMPLING_TOP_P_FLAG", "top_k": "SAMPLING_TOP_K_FLAG",
         "min_p": "SAMPLING_MIN_P_FLAG", "repetition_penalty": "SAMPLING_REPETITION_PENALTY_FLAG",
         "profile": "SAMPLING_PROFILE_FLAG", "config": "SAMPLING_CONFIG_FLAG",
+        "thinking_switch": "THINKING_ENABLE_FLAG", "reasoning_effort": "THINKING_EFFORT_FLAG",
     }
     env = {"PATH": os.environ["PATH"]} | {variable: flags.get(key, "") for key, variable in names.items()}
     script = (
@@ -49,6 +50,17 @@ class InspectSamplingTest(unittest.TestCase):
         self.assertIn("greedy decoding", done.stderr)
         self.assertNotIn("greedy decoding", _args().stderr)
 
+    def test_thinking_flags_pick_the_sampling_profile(self):
+        off = _args(thinking_switch="--no-enable-thinking").stdout.split()
+        self.assertEqual(off[:2], ["--temperature", "0.0"])
+        self.assertNotIn("--top-p", off)
+        on = _args(thinking_switch="--enable-thinking").stdout.split()
+        self.assertEqual(on[:4], ["--temperature", "0.6", "--top-p", "0.95"])
+        self.assertEqual(_args(reasoning_effort="none").stdout.split()[:2], ["--temperature", "0.0"])
+        # An explicit sampling flag still wins over the mode.
+        self.assertEqual(_args(thinking_switch="--no-enable-thinking", temperature="0.4").stdout.split()[:2],
+                         ["--temperature", "0.4"])
+
     def test_a_literal_extra_body_is_called_out(self):
         done = _args(extra_args=("--extra-body", "{}"), min_p="0.1")
         self.assertIn("replaces the min-p", done.stderr)
@@ -68,6 +80,7 @@ def _tau2_args(agent_args: str = '{"api_base": "http://x/v1", "api_key": "k"}', 
         "temperature": "SAMPLING_TEMPERATURE_FLAG", "top_p": "SAMPLING_TOP_P_FLAG", "top_k": "SAMPLING_TOP_K_FLAG",
         "min_p": "SAMPLING_MIN_P_FLAG", "repetition_penalty": "SAMPLING_REPETITION_PENALTY_FLAG",
         "profile": "SAMPLING_PROFILE_FLAG", "config": "SAMPLING_CONFIG_FLAG",
+        "thinking_switch": "THINKING_ENABLE_FLAG", "reasoning_effort": "THINKING_EFFORT_FLAG",
     }
     env = {"PATH": os.environ["PATH"], "AGENT_LLM_ARGS": agent_args}
     env |= {variable: flags.get(key, "") for key, variable in names.items()}
@@ -91,6 +104,13 @@ class Tau2SamplingTest(unittest.TestCase):
             {"api_base": "http://x/v1", "temperature": 1.0, "top_p": 0.9,
              "extra_body": {"x": 1, "top_k": 20, "min_p": 0.05}},
         )
+
+    def test_a_thinking_flag_asks_for_a_profile_where_tau2_has_no_default(self):
+        done = _tau2_args(reasoning_effort="high")
+        self.assertEqual(json.loads(done.stdout), {"api_base": "http://x/v1", "api_key": "k",
+                                                   "temperature": 0.6, "top_p": 0.95})
+        done = _tau2_args(thinking_switch="--no-enable-thinking")
+        self.assertEqual(json.loads(done.stdout)["temperature"], 0.0)
 
     def test_profile_and_invalid_value(self):
         done = _tau2_args(profile="thinking")
