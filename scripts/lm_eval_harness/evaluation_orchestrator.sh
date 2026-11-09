@@ -273,20 +273,75 @@ _eval_pinned_harness_commit() {
     awk -v repo="$repo" '$1 == repo {print $2; exit}' requirements/lm-eval-harness.txt
 }
 
+_eval_resolve_harness_ref() {
+    # A branch, tag or full commit of github.com/<repo> -> its commit (same
+    # precedence as build_eval_env.sh).
+    local repo="$1" ref="$2" url="https://github.com/$1.git"
+    if [[ "$ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
+        printf '%s\n' "${ref,,}"
+        return
+    fi
+    git ls-remote "$url" "$ref" "refs/heads/$ref" "refs/tags/$ref^{}" | awk 'NR == 1 {print $1}'
+}
+
+_eval_prebuilt_harness_overlay() {
+    # Another harness than the image's, for one run (e.g. an unmerged PR): the
+    # image already has every dependency, so install just the harness itself
+    # --no-deps, the same overlay layout as the image's /opt/lm-eval-harness,
+    # into a shared cache keyed by commit. Takes seconds; runs here, inside
+    # the prebuilt container, so the overlay matches its Python. A harness
+    # that needs new dependencies still needs a new image.
+    local repo="$1" commit="$2" overlay tmp
+    overlay="${EVAL_ENV_CACHE_ROOT:-${SCRATCH:-/tmp}/eval-envs}/prebuilt-harness/$repo/$commit"
+    if [[ -f "$overlay/.complete" ]]; then
+        printf '%s\n' "$overlay"
+        return
+    fi
+    if [[ "${EVAL_DRY_RUN:-false}" == "true" ]]; then
+        echo "[DRY RUN] pip install --no-deps --target $overlay git+https://github.com/$repo.git@$commit" >&2
+        printf '%s\n' "$overlay"
+        return
+    fi
+    tmp="$overlay.tmp.$$"
+    rm -rf "$tmp"
+    mkdir -p "$(dirname "$overlay")"
+    echo "Installing $repo@$commit as a --no-deps overlay in $overlay" >&2
+    if ! pip install --quiet --no-cache-dir --no-deps --target "$tmp" \
+            "git+https://github.com/$repo.git@$commit" >&2 \
+        || ! PYTHONPATH="$tmp" python -c "import lm_eval" >&2; then
+        rm -rf "$tmp"
+        echo "Error: could not install $repo@$commit over the prebuilt image" >&2
+        return 1
+    fi
+    printf '%s\n' "$commit" > "$tmp/.commit"
+    touch "$tmp/.complete"
+    # Two launches racing on one commit build the same thing: the loser drops its copy.
+    mv -T "$tmp" "$overlay" 2>/dev/null || rm -rf "$tmp"
+    printf '%s\n' "$overlay"
+}
+
 _eval_use_prebuilt_environment() {
     # EVAL_PREBUILT_ENV=1: the container already holds every package and the
     # pinned harness (containers/Dockerfile.eval), so there is nothing to
     # prepare. Write the manifest directly; run_lm_eval.sbatch checks it against
-    # the container instead of building anything.
-    local repo="$1" commit
+    # the container instead of building anything. With --harness-branch (and/or
+    # --harness-repo) only the harness is swapped, see _eval_prebuilt_harness_overlay.
+    local repo="$1" commit overlay
+    overlay="${EVAL_PREBUILT_HARNESS_ROOT:-/opt/lm-eval-harness}/$repo"
     if [[ -n "${LM_EVAL_HARNESS_BRANCH:-}" ]]; then
-        echo "Error: --harness-branch/LM_EVAL_HARNESS_BRANCH cannot be used with EVAL_PREBUILT_ENV=1;" \
-            "the image pins the harness in requirements/lm-eval-harness.txt" >&2
-        return 1
+        commit=$(_eval_resolve_harness_ref "$repo" "$LM_EVAL_HARNESS_BRANCH")
+        if [[ ! "$commit" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "Error: $repo has no branch or tag '$LM_EVAL_HARNESS_BRANCH'" \
+                "(a commit needs all 40 hex digits)" >&2
+            return 1
+        fi
+        overlay=$(_eval_prebuilt_harness_overlay "$repo" "${commit,,}") || return 1
+    else
+        commit=$(_eval_pinned_harness_commit "$repo")
     fi
-    commit=$(_eval_pinned_harness_commit "$repo")
     if [[ ! "$commit" =~ ^[0-9a-fA-F]{40}$ ]]; then
-        echo "Error: requirements/lm-eval-harness.txt has no commit for $repo" >&2
+        echo "Error: requirements/lm-eval-harness.txt has no commit for $repo;" \
+            "name one with --harness-branch" >&2
         return 1
     fi
     # apertus-common is private and not in the image: build its pinned wheel here, where the launcher's
@@ -297,7 +352,7 @@ _eval_use_prebuilt_environment() {
     fi
     {
         printf 'EVAL_ENV_KIND=prebuilt\n'
-        printf 'EVAL_HARNESS_OVERLAY=%q\n' "${EVAL_PREBUILT_HARNESS_ROOT:-/opt/lm-eval-harness}/$repo"
+        printf 'EVAL_HARNESS_OVERLAY=%q\n' "$overlay"
         printf 'EVAL_RESOLVED_HARNESS_REPO=%q\n' "$repo"
         printf 'EVAL_RESOLVED_HARNESS_COMMIT=%q\n' "${commit,,}"
         [[ -z "$apertus_common_wheels" ]] || printf 'EVAL_APERTUS_COMMON_WHEELS=%q\n' "$apertus_common_wheels"
@@ -379,7 +434,9 @@ submit_evaluation() {
     python3 -m scripts.lm_eval_harness.eval_state normalize --tasks "$TASKS" \
         --output "$state_dir/expected_tasks.txt"
 
-    repo="swiss-ai/lm-evaluation-harness"
+    # --harness-repo: a fork of the harness (with --harness-branch, or pinned
+    # in requirements/lm-eval-harness.txt).
+    repo="${LM_EVAL_HARNESS_REPO:-swiss-ai/lm-evaluation-harness}"
     _eval_create_run_config "$model" "$repo" "$state_dir"
 
     if [[ -n "${EVAL_FORCE_TASKS:-}" ]]; then

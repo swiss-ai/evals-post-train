@@ -816,7 +816,7 @@ if [[ ! -f '$EVAL_HARNESS_OVERLAY/.complete' || ! -d '$EVAL_HARNESS_OVERLAY/lm_e
 fi
 container_harness_commit=\$(cat '$EVAL_HARNESS_OVERLAY/.commit' 2>/dev/null || true)
 if [[ \"\$container_harness_commit\" != '$EVAL_RESOLVED_HARNESS_COMMIT' ]]; then
-    echo \"The container's harness is $EVAL_RESOLVED_HARNESS_REPO@\$container_harness_commit, but requirements/lm-eval-harness.txt pins $EVAL_RESOLVED_HARNESS_COMMIT. Use the image built from this commit.\" >&2
+    echo \"The container's harness is $EVAL_RESOLVED_HARNESS_REPO@\$container_harness_commit, but this run's manifest pins $EVAL_RESOLVED_HARNESS_COMMIT. Use the image built from this commit.\" >&2
     exit 1
 fi
 export PYTHONPATH='$EVAL_HARNESS_OVERLAY'\${PYTHONPATH:+:\$PYTHONPATH}

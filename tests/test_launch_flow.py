@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # Launcher inputs a caller's shell may export; the dry runs start without them.
 _LAUNCH_INPUTS = {
     "TOKENIZER", "MAX_LENGTH", "BOS", "CHAT_FORMAT", "PREFILL_MODE", "EVAL_PREBUILT_ENV",
-    "LM_EVAL_BACKEND", "LM_EVAL_HARNESS_BRANCH", "API_CHAT_ENDPOINT", "ENABLE_THINKING",
+    "LM_EVAL_BACKEND", "LM_EVAL_HARNESS_BRANCH", "LM_EVAL_HARNESS_REPO", "EVAL_ENV_CACHE_ROOT", "API_CHAT_ENDPOINT", "ENABLE_THINKING",
 }
 ENV = {key: value for key, value in os.environ.items() if key not in _LAUNCH_INPUTS}
 
@@ -270,13 +270,50 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertIn('export PATH=\\"\\${LM_EVAL_VENV:-/opt/lm-eval-venv}/bin:\\$PATH\\"', SBATCH)
         self.assertIn("LM_EVAL_VENV=/opt/lm-eval-venv", (REPO_ROOT / "containers/Dockerfile.eval").read_text())
 
-    def test_prebuilt_environment_refuses_a_harness_branch(self) -> None:
-        completed, _ = _prebuilt_dry_run(
-            "single", "--task", "hellaswag", "--model", "test/model",
-            LM_EVAL_HARNESS_BRANCH="some-branch",
-        )
-        self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("cannot be used with EVAL_PREBUILT_ENV=1", completed.stderr)
+    def test_prebuilt_environment_overlays_another_harness_commit(self) -> None:
+        commit = "32b8b593890ec9a983c9aadf81a6a08d840beb63"
+        args = ("single", "--task", "hellaswag", "--model", "test/model", "--harness-branch")
+        with tempfile.TemporaryDirectory() as cache:
+            overlay = Path(cache, "prebuilt-harness/swiss-ai/lm-evaluation-harness", commit)
+            completed, manifest = _prebuilt_dry_run(*args, commit.upper(), EVAL_ENV_CACHE_ROOT=cache)
+            output = completed.stdout + completed.stderr
+            self.assertEqual(completed.returncode, 0, output)
+            self.assertNotIn("prepare_eval_env.sbatch", output)
+            self.assertIn(f"[DRY RUN] pip install --no-deps --target {overlay}", output)
+            self.assertIn(f"EVAL_HARNESS_OVERLAY={overlay}", manifest)
+            self.assertIn(f"EVAL_RESOLVED_HARNESS_COMMIT={commit}", manifest)
+            # Installed once, the overlay is reused.
+            overlay.mkdir(parents=True)
+            (overlay / ".complete").touch()
+            completed, manifest = _prebuilt_dry_run(*args, commit, EVAL_ENV_CACHE_ROOT=cache)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertNotIn("pip install", completed.stdout + completed.stderr)
+            self.assertIn(f"EVAL_HARNESS_OVERLAY={overlay}", manifest)
+
+    def test_prebuilt_environment_takes_a_harness_fork(self) -> None:
+        commit = "c2efb6bd" + "0" * 32
+        with tempfile.TemporaryDirectory() as cache:
+            completed, manifest = _prebuilt_dry_run(
+                "single", "--task", "hellaswag", "--model", "test/model",
+                "--harness-repo", "someone/lm-evaluation-harness", "--harness-branch", commit,
+                EVAL_ENV_CACHE_ROOT=cache,
+            )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("EVAL_RESOLVED_HARNESS_REPO=someone/lm-evaluation-harness", manifest)
+        self.assertIn(f"/prebuilt-harness/someone/lm-evaluation-harness/{commit}", manifest)
+
+    def test_bad_harness_overrides_are_refused(self) -> None:
+        for repo, error in (
+            # A fork has no pin: it needs a ref.
+            ("someone/lm-evaluation-harness", "name one with --harness-branch"),
+            ("https://github.com/x/y", "--harness-repo must be <owner>/<repo>"),
+        ):
+            with self.subTest(repo=repo):
+                completed, _ = _prebuilt_dry_run(
+                    "single", "--task", "hellaswag", "--model", "test/model", "--harness-repo", repo,
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn(error, completed.stderr)
 
     def test_max_length_reaches_the_run_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

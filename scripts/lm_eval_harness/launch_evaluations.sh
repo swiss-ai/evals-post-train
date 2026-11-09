@@ -97,7 +97,9 @@
 #   --table-metrics <p>  - Main-metrics list for custom mode
 #   --force-tasks <csv>  - Re-run completed tasks matching these substrings
 #   --limit N            - Optional argument to pass as --limit to the lm-evaluation-harness, to limit the number of samples per task (default: no limit).
-#   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: the commit in requirements/lm-eval-harness.txt)
+#   --harness-branch B   - Install lm-evaluation-harness from branch/ref B (default: the commit in requirements/lm-eval-harness.txt).
+#                          In the prebuilt image only the harness is installed, --no-deps, over the image's packages
+#   --harness-repo O/R   - Use the fork github.com/O/R of lm-evaluation-harness (default: swiss-ai/lm-evaluation-harness)
 #   --reservation <name> - Submit jobs under a SLURM reservation, including an auto-launched judge
 #                          (exported as SBATCH_RESERVATION; ambient SBATCH_RESERVATION is respected
 #                          for evaluation jobs when the flag is absent)
@@ -205,6 +207,7 @@ MAX_LENGTH="${MAX_LENGTH:-}"
 MEGATRON_ITER=""
 SINGLE_TASK=""
 HARNESS_BRANCH=""
+HARNESS_REPO=""
 RESERVATION_FLAG=""
 QOS_FLAG=""
 PARTITION_FLAG=""
@@ -265,6 +268,7 @@ while [[ $# -gt 0 ]]; do
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --max-length) MAX_LENGTH="$2";          shift 2 ;;
         --harness-branch) HARNESS_BRANCH="$2";        shift 2 ;;
+        --harness-repo)   HARNESS_REPO="$2";          shift 2 ;;
         --reservation)   RESERVATION_FLAG="$2";        shift 2 ;;
         --qos)           QOS_FLAG="$2";                shift 2 ;;
         --partition)     PARTITION_FLAG="$2";          shift 2 ;;
@@ -849,7 +853,7 @@ if [[ "$EVAL_FAILURE_POLICY" == "resume" ]]; then
     echo "  Max parallel: ${EVAL_MAX_PARALLEL:-all chunks}"
     echo "  Retry waves: $EVAL_MAX_RETRIES"
 fi
-echo "  Harness: swiss-ai/lm-evaluation-harness${HARNESS_BRANCH:+@$HARNESS_BRANCH}"
+echo "  Harness: ${HARNESS_REPO:-swiss-ai/lm-evaluation-harness}${HARNESS_BRANCH:+@$HARNESS_BRANCH}"
 if [[ "$THINKING_TOUCHED" == "true" ]]; then
     echo "  Thinking: enable=${ENABLE_THINKING_OVERRIDE:-<unset>} autodetect=${AUTODETECT_THINK_TOKENS:-false} track=${TRACK_THINKING_METRICS:-<derive>} lengths=${LOG_LENGTH_METRICS:-false}"
     [[ -n "$THINK_START_TOKEN" || -n "$THINK_END_TOKEN" ]] && echo "  Think tokens: start='${THINK_START_TOKEN:-<none>}' end='${THINK_END_TOKEN:-<none>}'"
@@ -882,6 +886,11 @@ if [[ -n "$MAX_LENGTH" ]]; then
     export MAX_LENGTH
 fi
 [[ -n "$HARNESS_BRANCH" ]] && export LM_EVAL_HARNESS_BRANCH="$HARNESS_BRANCH"
+if [[ -n "$HARNESS_REPO" ]]; then
+    [[ "$HARNESS_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] \
+        || { echo "Error: --harness-repo must be <owner>/<repo> on GitHub (got '$HARNESS_REPO')." >&2; exit 1; }
+    export LM_EVAL_HARNESS_REPO="$HARNESS_REPO"
+fi
 
 # Judge allocation is deferred to submit_evaluation(), after its result scan.
 # If none is set, rely on an already hosted judge or a manual launch.
