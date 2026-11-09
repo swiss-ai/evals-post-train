@@ -10,7 +10,7 @@ bash scripts/lm_eval_harness/launch_evaluations.sh <mode> --model <path> [option
 ## Apertus
 
 > Requires: `--tokenizer alehc/swissai-tokenizer --bos`
-> Aligned variants also need: `--chat-template`
+> The chat template is applied by default; base variants also need `--no-chat-template`.
 
 | Name | Path | Type |
 |------|------|------|

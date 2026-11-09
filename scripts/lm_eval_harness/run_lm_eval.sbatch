@@ -110,11 +110,9 @@ WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
 LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-true}
-# by-type: generative tasks with the chat template, log-likelihood ones without
-# (two lm-eval passes, merged; see scripts/lm_eval_harness/task_output_types.py).
 case "$APPLY_CHAT_TEMPLATE" in
-    true|false|by-type) ;;
-    *) echo "APPLY_CHAT_TEMPLATE must be true, false or by-type (got '$APPLY_CHAT_TEMPLATE')" >&2; exit 1 ;;
+    true|false) ;;
+    *) echo "APPLY_CHAT_TEMPLATE must be true or false (got '$APPLY_CHAT_TEMPLATE')" >&2; exit 1 ;;
 esac
 HARNESS_LIMIT=${HARNESS_LIMIT:-""}
 LM_EVAL_HARNESS_BRANCH=${LM_EVAL_HARNESS_BRANCH:-""}
@@ -895,7 +893,7 @@ if [[ "$COMMON_MODEL_ARGS" == *\'* ]]; then
     die "Model args must not contain a single quote: $COMMON_MODEL_ARGS"
 fi
 
-# make_cmd <tasks> <output dir> <chat template: true|false>: one lm-eval pass, in CMD.
+# make_cmd <tasks> <output dir> <chat template: true|false>: the lm-eval command, in CMD.
 make_cmd() {
     local eval_args="${COMMON_EVAL_ARGS[*]} --tasks $1 --output_path $2"
     local repeat_setup="" repeat_file
@@ -943,47 +941,10 @@ if [[ "$CHAT_FORMAT" == "apertus2" ]]; then
     TIMED_CMD="$TIMED_CMD
 cd $PWD && python -m scripts.lm_eval_harness.task_output_types --tasks '$TASKS' --require-generative"
 fi
-if [[ $APPLY_CHAT_TEMPLATE != by-type ]]; then
-    make_cmd "$TASKS" "$HARNESS_EVAL_DIR" "$APPLY_CHAT_TEMPLATE"
-    TIMED_CMD="$TIMED_CMD
+make_cmd "$TASKS" "$HARNESS_EVAL_DIR" "$APPLY_CHAT_TEMPLATE"
+TIMED_CMD="$TIMED_CMD
 $CMD"
-    echo "Final command: $CMD"
-else
-    # Sort the tasks by how lm-eval scores them, in the evaluation container (it reads
-    # the harness's task index), then run each kind as its own pass and merge the two
-    # into $HARNESS_EVAL_DIR, so everything downstream sees one result as usual.
-    KINDS_FILE="$HARNESS_EVAL_DIR/.task-kinds.sh"
-    srun -n 1 --mpi=pmix -ul --environment=$CONTAINER_ENV bash -lc "
-    set -euo pipefail
-    unset SSL_CERT_FILE
-    $LOAD_ENV_CMD
-    cd $PWD && python -m scripts.lm_eval_harness.task_output_types --tasks '$TASKS' --output '$KINDS_FILE'
-    " || die "Could not sort the tasks by output type (scripts/lm_eval_harness/task_output_types.py)."
-    source "$KINDS_FILE"
-    if [[ -z "$RAW_TASKS" || -z "$CHAT_TASKS" ]]; then
-        # One kind only: a single pass straight into the eval directory.
-        if [[ -n "$RAW_TASKS" ]]; then
-            make_cmd "$RAW_TASKS" "$HARNESS_EVAL_DIR" false
-        else
-            make_cmd "$CHAT_TASKS" "$HARNESS_EVAL_DIR" true
-        fi
-        TIMED_CMD="$TIMED_CMD
-$CMD"
-        echo "Final command: $CMD"
-    else
-        # Outside eval_* so the result scan never takes a pass for a whole evaluation.
-        PASS_ROOT="$HARNESS_DIR/.passes/$(basename "$HARNESS_EVAL_DIR")"
-        make_cmd "$CHAT_TASKS" "$PASS_ROOT/chat" true
-        TIMED_CMD="$TIMED_CMD
-$CMD"
-        echo "Final command (chat template): $CMD"
-        make_cmd "$RAW_TASKS" "$PASS_ROOT/raw" false
-        TIMED_CMD="$TIMED_CMD
-$CMD
-cd $PWD && python -m scripts.results.merge_split_results --split_dirs '$PASS_ROOT/chat' '$PASS_ROOT/raw' --output_dir '$HARNESS_EVAL_DIR'"
-        echo "Final command (no chat template): $CMD"
-    fi
-fi
+echo "Final command: $CMD"
 
 # Environment preparation happens once in a dependency job. This duration is
 # therefore evaluation-only and remains meaningful when results are aggregated.
