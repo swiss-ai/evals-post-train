@@ -6,10 +6,13 @@ from unittest.mock import patch
 
 from scripts.results.eval_export.exporter import (
     ExportError,
+    _attempt_samples,
     _evaluation_name,
+    _extract_output,
     _internal_task_mapping,
     _load_samples,
     _sample_file,
+    _sample_score,
     export_results,
     validate_export,
 )
@@ -1022,6 +1025,55 @@ class EvalExportTests(unittest.TestCase):
                     for warning in manifest["warnings"]
                 )
             )
+
+    def test_shared_repeat_export_selects_mean_and_preserves_attempts(self):
+        raw = fixture_results()
+        task = "gsm8k_cot"
+        raw["results"] = {task: {"exact_match_mean_repeats,strict-match": .5,
+                                 "exact_match_pass@2,strict-match": 1.0}}
+        raw["configs"][task].update({"repeats": 2, "repeat_filter": "strict-match",
+            "repeat_scoring": {"enabled": True, "mean": True, "pass_at_k": {"exact_match": [2]}}})
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = root / "results_repeat.json"
+            results.write_text(json.dumps(raw))
+            sample = fixture_sample()
+            sample.update({"filter": "strict-match", "repeat_indices": [0, 1],
+                           "metrics": ["exact_match"], "exact_match": [1.0, 0.0],
+                           "resps": [["42", "wrong"]], "filtered_resps": [["42", "wrong"]]})
+            (root / f"samples_{task}_repeat.jsonl").write_text(json.dumps(sample) + "\n")
+            manifest = export_results(results, root / "export", retrieved_timestamp="1770000000.0", include_samples=True)
+            record = json.loads((root / "export" / manifest["records"][0]["eee_record"]).read_text())
+            exported = record["evaluation_results"]
+            self.assertEqual([r["score_details"]["score"] for r in exported], [.5])
+            config = exported[0]["metric_config"]
+            self.assertNotIn("mean_repeats", config.get("metric_id", ""))
+            self.assertEqual(exported[0]["generation_config"]["additional_details"]["repeats"], "2")
+            samples, source, count = _load_samples(root / f"samples_{task}_repeat.jsonl", "eval", "model", "gsm8k", ["exact_match_mean_repeats,strict-match"], None)
+            self.assertEqual((source, count), (2, 2))
+            self.assertEqual([r["evaluation"]["score"] for r in samples], [1., 0.])
+            self.assertNotEqual(samples[0]["sample_id"], samples[1]["sample_id"])
+
+    def test_pass_at_k_only_policy_exports_no_derived_headline(self):
+        raw = fixture_results()
+        task = "gsm8k_cot"
+        raw["results"] = {task: {"exact_match_pass@2,strict-match": 1.0, "generation_truncated,none": 0.25}}
+        raw["configs"][task].update({"repeats": 2, "repeat_filter": "strict-match",
+            "repeat_scoring": {"enabled": True, "mean": False, "pass_at_k": {"exact_match": [2]}}})
+        with tempfile.TemporaryDirectory() as temporary:
+            results = Path(temporary) / "results_repeat.json"
+            results.write_text(json.dumps(raw))
+            manifest = export_results(results, Path(temporary) / "export", retrieved_timestamp="1770000000.0")
+            record = json.loads((Path(temporary) / "export" / manifest["records"][0]["eee_record"]).read_text())
+            self.assertEqual([r["score_details"]["score"] for r in record["evaluation_results"]], [.25])
+        sample = {"filter": "strict-match", "exact_match": 1}
+        self.assertEqual(_sample_score(sample, ["exact_match_pass@2,strict-match"]), (1.0, True))
+
+    def test_code_attempts_export_the_program(self):
+        sample = {"doc_id": 0, "repeat_indices": [0, 1], "metrics": [],
+                  "resps": [["a", "b"]], "filtered_resps": [[["def f(): pass0"], ["def f(): pass1"]]]}
+        attempts = list(_attempt_samples(sample))
+        self.assertEqual([_extract_output(a, None) for a in attempts], ["def f(): pass0", "def f(): pass1"])
 
     def test_self_consistency_suffix_uses_mean_at_logged_repeats(self):
         raw = fixture_results()

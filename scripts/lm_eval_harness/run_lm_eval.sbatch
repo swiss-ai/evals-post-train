@@ -891,6 +891,14 @@ fi
 # make_cmd <tasks> <output dir> <chat template: true|false>: one lm-eval pass, in CMD.
 make_cmd() {
     local eval_args="${COMMON_EVAL_ARGS[*]} --tasks $1 --output_path $2"
+    local repeat_setup="" repeat_file
+    if [[ -n "${EVAL_REPEAT_CONFIG:-}" ]]; then
+        printf -v repeat_file '%q' "$2/repeat_config.json"
+        # A subshell: scripts.* needs the repository as working directory, lm_eval does not.
+        printf -v repeat_setup '(cd %q && python -m scripts.lm_eval_harness.repeat_config --policy %q --suite %q --tasks %q --output %q)\n' \
+            "$PWD" "$EVAL_REPEAT_CONFIG" "${EVAL_REPEAT_TASKS:-}" "$1" "$2/repeat_config.json"
+        eval_args="$eval_args --config $repeat_file"
+    fi
     [[ $3 == true ]] && eval_args="$eval_args --apply_chat_template --fewshot_as_multiturn"
     if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
         CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS $eval_args"
@@ -907,6 +915,7 @@ make_cmd() {
     elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
         CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args='$COMMON_MODEL_ARGS' $eval_args"
     fi
+    CMD="$repeat_setup$CMD"
 }
 
 # The container of the jobs that need no model server. EVAL_PREBUILT_CONTAINER_CONFIG (an EDF, written

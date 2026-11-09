@@ -25,5 +25,25 @@ class FailureRateTests(unittest.TestCase):
         self.assertNotIn("score-row", table._row_classes("row", "failure"))
 
 
+class RepeatHeadlineTests(unittest.TestCase):
+    def test_oracle_scores_never_replace_headline_means(self):
+        summary = {"mmlu_pro/exact_match_mean_repeats,none": .25,
+                   "mmlu_pro/exact_match_pass@2,none": .5,
+                   "code/pass@1_pass@2,none": 1.0}
+        self.assertEqual(table.get_metric(summary, "mmlu_pro/exact_match"), .25)
+        self.assertEqual(table.compute_mmlu_pro_detail(summary)["accuracy"], .25)
+        self.assertIsNone(table.get_metric(summary, "code/pass@1"))
+        self.assertIsNone(table.compute_degeneration_avg(summary))
+        cell = table._value_cell(.25, 1, "rate", "", "mean@5")
+        self.assertIn('data-label="mean@5"', cell)
+        self.assertIn('data-val="25.0"', cell)
+
+
+class ThinkingColumnTests(unittest.TestCase):
+    def test_table_metadata_is_not_a_score(self):
+        self.assertFalse(table.has_scores({"_repeat_labels": {}, "gsm8k/thinking_format_correct": None}))
+        self.assertTrue(table.has_scores({"_repeat_labels": {}, "gsm8k/thinking_format_correct": 0.9}))
+
+
 if __name__ == "__main__":
     unittest.main()

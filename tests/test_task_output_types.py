@@ -36,6 +36,7 @@ class _TaskManager:
         "ai2_arc": _entry("TAG"),
         "mc_group": _entry("GROUP", {"task": ["arc_easy", {"task": "arc_challenge"}]}),
         "mixed_group": _entry("GROUP", {"task": ["arc_easy", "gsm8k"]}),
+        "inline_group": _entry("GROUP", {"task": ["gsm8k", {"task": "custom", "dataset_path": "x"}]}),
         "py_task": _entry("PY_TASK"),
     }
 
@@ -54,6 +55,9 @@ class ClassifierTests(unittest.TestCase):
         self.assertEqual(raw, ["mc_group", "ai2_arc"])
         # A mix keeps the chat template, the launcher's default.
         self.assertEqual(chat, ["mixed_group"])
+
+    def test_inline_group_tasks_take_lm_evals_names(self) -> None:
+        self.assertEqual(self.classifier.leaves("inline_group"), {"gsm8k", "inline_group::custom"})
 
     def test_unknown_names_keep_the_chat_template(self) -> None:
         chat, raw = self.classifier.split(["not_a_task", "py_task", "arc_easy"])
