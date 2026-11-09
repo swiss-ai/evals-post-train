@@ -5,8 +5,8 @@ Gemma 4's tokenizer defines <bos> but never adds it (add_bos_token unset in its
 tokenizer_config; Gemma 3 has true), and the model reads a prompt without it as
 nonsense: plain completion prompts and log-likelihood tasks without a chat template
 score around chance. Chat templates write <bos> themselves, and the harness never
-doubles one (swiss-ai/lm-evaluation-harness add_bos_token), so prepending it is safe
-for every task.
+doubles one and leaves tokenizers that add BOS themselves untouched
+(swiss-ai/lm-evaluation-harness add_bos_token), so prepending it is safe for every task.
 
 Standard library only: run_lm_eval.sbatch calls this on the host, before the
 evaluation environment is up. A local model directory is read (config.json
@@ -22,7 +22,9 @@ from pathlib import Path
 
 # model_type values whose tokenizer never adds the BOS token the model needs.
 BOS_MODEL_TYPES = {"gemma4", "gemma4_text"}
-_NAME_RE = re.compile(r"gemma[-_]?4", re.IGNORECASE)
+# "gemma-4-31B-it", "gemma-4-E2B-it", "gemma4": a 4 not followed by a letter or digit, so
+# Gemma-3-based names like "medgemma-4b-it" don't match.
+_NAME_RE = re.compile(r"gemma[-_]?4(?![0-9a-z])", re.IGNORECASE)
 
 
 def needs_bos(model: str) -> bool:

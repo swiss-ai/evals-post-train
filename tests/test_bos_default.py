@@ -13,6 +13,7 @@ class BosDefaultTests(unittest.TestCase):
             "google/gemma-4-E2B-it",
             "google/gemma-4-26B-A4B-it",
             "CSCS-Inference/google/gemma-4-31B-it",
+            "some-org/gemma4",
         ):
             self.assertTrue(needs_bos(model), model)
 
@@ -23,6 +24,9 @@ class BosDefaultTests(unittest.TestCase):
             "openai/gpt-oss-120b",
             "swiss-ai/Apertus-8B-Instruct-2509",
             "allenai/Olmo-3.1-32B-Instruct",
+            "google/medgemma-4b-it",
+            "RCP-AIaaS/google/medgemma-27b-text-it",
+            "google/gemma-3-4b-it",
         ):
             self.assertFalse(needs_bos(model), model)
 
