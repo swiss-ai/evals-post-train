@@ -53,6 +53,11 @@
 #                               0.6 / 0.95; 'none' leaves one out). Your own --agent-kwarg temperature=... wins
 #                               over the defaults, these flags win over both. --sampling-profile <name> picks a
 #                               profile (e.g. greedy), --sampling-config <file> another config file.
+#   --enable-thinking, --no-enable-thinking, --reasoning-effort <level>
+#                               Thinking and reasoning effort of the model (terminus-2 only; same flags as the other
+#                               launchers, scripts/common/thinking.py). Unset: the model's server-side default. They
+#                               go in the agent's llm_kwargs extra_body (chat_template_kwargs) and, for the effort,
+#                               its reasoning_effort kwarg; they win over your own --agent-kwarg of the same name.
 #                               so terminus-2 knows a served model's context window.
 #   --name <name>              Run name (default: derived from --model).
 #   --work-dir <path>          Output dir (default: logs/harbor/<name>): jobs/<benchmark>/ (Harbor's
@@ -133,6 +138,8 @@ while (( $# > 0 )); do
         --benchmark|--agent|--agent-kwarg|--agent-network|--limit|--task|--max-concurrency|--attempts|--timeout-multiplier|\
         --temperature|--top-p|--top-k|--min-p|--repetition-penalty|--sampling-profile|--sampling-config)
             RUN_ARGS+=("$1" "$2"); shift 2 ;;
+        --enable-thinking|--no-enable-thinking) RUN_ARGS+=("$1"); shift ;;
+        --reasoning-effort) RUN_ARGS+=("$1" "$2"); shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "Unknown argument: $1 (see --help)" ;;
     esac

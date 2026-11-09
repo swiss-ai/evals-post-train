@@ -69,6 +69,11 @@
 #                               0.6 / 0.95; 'none' leaves one out). Over --generation-config.
 #   --sampling-profile <name>   A profile of the sampling config (e.g. greedy); --sampling-config
 #                               <file> reads another file instead.
+#   --enable-thinking, --no-enable-thinking, --reasoning-effort <level>
+#                               Thinking and reasoning effort of the model (same flags as the other launchers,
+#                               scripts/common/thinking.py). Unset: the model's server-side default. They set
+#                               EvalScope's reasoning_effort and the chat-template kwargs in extra_body, and win
+#                               over --generation-config. Not with --completions (no chat template there).
 #   --generation-config <json> Merged over the sampling defaults, e.g.
 #                               '{"max_tokens": 8192, "retries": 100, "retry_interval": 60}' (more
 #                               patient retries for a rate-limited endpoint; EvalScope's default is 5).
@@ -153,10 +158,11 @@ while (( $# > 0 )); do
         --wandb-entity) WANDB_ENTITY=$2; shift 2 ;;
         --wandb-project) WANDB_PROJECT=$2; shift 2 ;;
         --no-wandb) NO_WANDB=1; shift ;;
-        --shuffle|--completions) RUN_ARGS+=("$1"); shift ;;
+        --shuffle|--completions|--enable-thinking|--no-enable-thinking) RUN_ARGS+=("$1"); shift ;;
         --sandbox-config|--limit|--max-concurrency|--max-steps|--strategy|--command-timeout|\
         --generation-config|--dataset-revision|--subset|--extra-param|--api-timeout|--agent-network|\
-        --temperature|--top-p|--top-k|--min-p|--repetition-penalty|--sampling-profile|--sampling-config)
+        --temperature|--top-p|--top-k|--min-p|--repetition-penalty|--sampling-profile|--sampling-config|\
+        --reasoning-effort)
             RUN_ARGS+=("$1" "$2"); shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "Unknown argument: $1 (see --help)" ;;

@@ -127,6 +127,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         p.add_argument("--" + flag, default=None, help="Sampling setting of the model, or 'none' to leave it out.")
     p.add_argument("--sampling-profile", default=None, help="Profile of the sampling config (e.g. greedy).")
     p.add_argument("--sampling-config", default=None, help="Sampling config (default: configs/sampling_defaults.json).")
+    p.add_argument("--enable-thinking", dest="enable_thinking", action="store_true", default=None,
+                   help="Switch the model's chat-template thinking on (terminus-2 only).")
+    p.add_argument("--no-enable-thinking", dest="enable_thinking", action="store_false",
+                   help="Switch the model's chat-template thinking off (terminus-2 only).")
+    p.add_argument("--reasoning-effort", default=None, help="Reasoning effort of the model (terminus-2 only).")
     p.add_argument(
         "--agent-network",
         choices=("allowlist", "public"),
@@ -228,14 +233,17 @@ def task_patches(args: argparse.Namespace, name: str) -> List[Callable[[Path], N
 
 
 def agent_kwargs(args: argparse.Namespace) -> List[str]:
-    """The --ak entries: the user's own, plus the model's sampling settings.
+    """The --ak entries: the user's own, plus the model's sampling and thinking settings.
 
     terminus-2 reads `temperature` and `llm_kwargs` (extra LLM call kwargs); everything but the
     temperature goes in llm_kwargs' extra_body, which the OpenAI-compatible server reads. Over the
     sampling defaults the user's own --agent-kwarg wins; the sampling flags win over both. Other
     agents are not wired: they get no defaults, and refuse the flags.
+
+    The thinking flags (scripts/common/thinking.py) add terminus-2's `reasoning_effort` kwarg and the
+    chat-template kwargs in llm_kwargs' extra_body; they win over the user's own --agent-kwarg.
     """
-    from scripts.common import sampling
+    from scripts.common import sampling, thinking
 
     kwargs: Dict[str, str] = {}
     for kv in args.agent_kwarg:
@@ -248,10 +256,11 @@ def agent_kwargs(args: argparse.Namespace) -> List[str]:
             if getattr(args, name) is not None
         }
         chosen = bool(explicit or args.sampling_profile or args.sampling_config)
+        thinking_values = thinking.resolve(args.enable_thinking, args.reasoning_effort)
         if args.gold or args.agent != "terminus-2":
-            if chosen:
+            if chosen or thinking_values:
                 raise ValueError(
-                    "the sampling flags apply to a model run with the terminus-2 agent; "
+                    "the sampling and thinking flags apply to a model run with the terminus-2 agent; "
                     "for another agent pass --agent-kwarg yourself"
                 )
             return list(args.agent_kwarg)
@@ -271,6 +280,9 @@ def agent_kwargs(args: argparse.Namespace) -> List[str]:
                 body[name] = values[name]
     except (ValueError, json.JSONDecodeError) as exc:
         raise SystemExit(f"Error: {exc}") from exc
+    if "reasoning_effort" in thinking_values:
+        kwargs["reasoning_effort"] = thinking_values["reasoning_effort"]
+    body = thinking.merge_extra_body(body, thinking_values)
     if body:
         kwargs["llm_kwargs"] = json.dumps({**llm_kwargs, "extra_body": body}, separators=(",", ":"))
     if chosen and (warning := sampling.greedy_warning(values)):
