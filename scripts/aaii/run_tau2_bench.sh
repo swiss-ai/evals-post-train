@@ -187,6 +187,9 @@ SAMPLING_ARGS=(--framework tau2 --format litellm --warn-greedy)
 [[ -n "$SAMPLING_TOP_K_FLAG"              ]] && SAMPLING_ARGS+=(--top-k "$SAMPLING_TOP_K_FLAG")
 [[ -n "$SAMPLING_MIN_P_FLAG"              ]] && SAMPLING_ARGS+=(--min-p "$SAMPLING_MIN_P_FLAG")
 [[ -n "$SAMPLING_REPETITION_PENALTY_FLAG" ]] && SAMPLING_ARGS+=(--repetition-penalty "$SAMPLING_REPETITION_PENALTY_FLAG")
+# The thinking flags also pick the sampling profile (thinking or non_thinking mode).
+[[ -n "$THINKING_ENABLE_FLAG"             ]] && SAMPLING_ARGS+=("$THINKING_ENABLE_FLAG")
+[[ -n "$THINKING_EFFORT_FLAG"             ]] && SAMPLING_ARGS+=(--reasoning-effort "$THINKING_EFFORT_FLAG")
 SAMPLING_LITELLM=$(python3 -m scripts.common.sampling "${SAMPLING_ARGS[@]}") || exit 1
 AGENT_LLM_ARGS=$(python3 -c '
 import json, sys

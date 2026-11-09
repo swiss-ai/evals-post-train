@@ -5,11 +5,31 @@ One policy sets how the model under test is sampled, in every framework launcher
 
 ```json
 {
-  "profiles": {"thinking": {"temperature": 0.6, "top_p": 0.95}, "greedy": {"temperature": 0.0}},
+  "profiles": {"thinking": {"temperature": 0.6, "top_p": 0.95}, "non_thinking": {"temperature": 0.0},
+               "greedy": {"temperature": 0.0}},
+  "modes": {"thinking": "thinking", "non_thinking": "non_thinking"},
   "frameworks": {"lm_eval": "thinking", "inspect": "thinking", "evalscope": "thinking",
                  "harbor": "thinking", "tau2": null}
 }
 ```
+
+`modes` names the profile of each thinking mode (below); `frameworks` names the profile a launcher
+uses when the run asks for no mode (`null`: none).
+
+## Thinking mode
+
+The thinking flags every launcher already takes choose the profile, so a thinking and a non-thinking
+run are sampled differently without a second flag:
+
+| Flags | Mode | Profile |
+|---|---|---|
+| `--enable-thinking`, or `--reasoning-effort` other than `none` | thinking | `modes.thinking` |
+| `--no-enable-thinking`, or `--reasoning-effort none` | non-thinking | `modes.non_thinking` |
+| neither | none | the framework's default from `frameworks` |
+
+The on/off switch wins over an effort given with it. `non_thinking` is greedy for now. tau2 has no
+default, but a thinking flag gives it the mode's profile. Base models have no thinking tokens and are
+not covered: lm-eval's base-model and pretrain suites keep the task yaml's own setting.
 
 A sampler that is not set stays out of the request, so the server's own default applies (top-k,
 min-p and the repetition penalty are unset by default). The sampling applies to the model under
@@ -30,7 +50,7 @@ Every launcher takes the same flags:
 | `--sampling-config F` | Another config file instead of `configs/sampling_defaults.json` |
 
 `none` leaves one out (`--top-p none`). Precedence, strongest first: the flags, `--sampling-profile`,
-the framework's default profile. The resolved values are printed in the run's log. Temperature 0
+the profile of the thinking mode, the framework's default profile. The resolved values are printed in the run's log. Temperature 0
 on a thinking run prints a warning: reasoning models loop and truncate under greedy decoding.
 
 ## By framework

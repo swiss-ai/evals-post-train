@@ -182,12 +182,12 @@ class HarborThinkingTest(unittest.TestCase):
 
     def test_flags(self):
         aks = self._aks("--no-enable-thinking", "--reasoning-effort", "low")
-        self.assertEqual(aks[0], "temperature=0.6")
+        self.assertEqual(aks[0], "temperature=0.0")  # --no-enable-thinking picks the non_thinking profile
         self.assertIn("reasoning_effort=low", aks)
         llm_kwargs = json.loads(next(ak for ak in aks if ak.startswith("llm_kwargs=")).split("=", 1)[1])
         self.assertEqual(
             llm_kwargs["extra_body"],
-            {"top_p": 0.95, "chat_template_kwargs": {"enable_thinking": False, "reasoning_effort": "low"}},
+            {"chat_template_kwargs": {"enable_thinking": False, "reasoning_effort": "low"}},
         )
 
     def test_flags_win_over_the_users_own_agent_kwargs(self):
@@ -232,7 +232,7 @@ class EvalScopeThinkingTest(unittest.TestCase):
         cfg = self._generation_config("--reasoning-effort", "low", "--no-enable-thinking", "--min-p", "0.05")
         self.assertEqual(
             cfg,
-            {"temperature": 0.6, "top_p": 0.95, "reasoning_effort": "low",
+            {"temperature": 0.0, "reasoning_effort": "low",  # --no-enable-thinking: the non_thinking profile
              "extra_body": {"min_p": 0.05,
                             "chat_template_kwargs": {"enable_thinking": False, "reasoning_effort": "low"}}},
         )
