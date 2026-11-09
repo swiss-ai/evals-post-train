@@ -54,9 +54,6 @@
 #   --no-wandb           - Don't upload the results to W&B (exports WANDB_MODE=disabled)
 #   --chat-template      - Apply the chat template to every task (the default)
 #   --no-chat-template   - Apply it to none (base models)
-#   --chat-template-by-type - Generative tasks with the chat template, log-likelihood ones
-#                          (multiple_choice/loglikelihood output_type) without it: two lm-eval
-#                          passes per job, merged into one result (scripts/lm_eval_harness/task_output_types.py)
 #   --tokenizer <tok>    - Custom tokenizer (default: same as model)
 #   --trust-remote-code  - Load the tokenizer (and, for hf/vllm, the model) with
 #                          trust_remote_code=True: for models whose tokenizer is custom
@@ -251,7 +248,6 @@ while [[ $# -gt 0 ]]; do
         --task)         SINGLE_TASK="$2";             shift 2 ;;
         --chat-template)    CHAT_TEMPLATE_OVERRIDE="true";  shift ;;
         --no-chat-template) CHAT_TEMPLATE_OVERRIDE="false"; shift ;;
-        --chat-template-by-type) CHAT_TEMPLATE_OVERRIDE="by-type"; shift ;;
         --tokenizer)    CUSTOM_TOKENIZER="$2";        shift 2 ;;
         --bos)          BOS_FLAG="true";              shift ;;
         --no-bos)       BOS_FLAG="false";             shift ;;
@@ -462,10 +458,10 @@ case "${CHAT_FORMAT_FLAG:-template}" in
             echo "Error: --chat-format apertus2 runs generative tasks only; use custom --task-file configs/apertus/tasks_posttrain_thinking.txt (or single), not the '$EVAL_MODE' suite"
             exit 1
         fi
-        if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" || "$CHAT_TEMPLATE_OVERRIDE" == "by-type" \
+        if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" \
               || "${API_ENDPOINT_FLAG:-}" == "chat-completions" \
               || ( -z "$API_ENDPOINT_FLAG" && "${API_CHAT_ENDPOINT:-false}" == "true" ) ]]; then
-            echo "Error: --chat-format apertus2 renders every task as chat over /v1/completions; drop --no-chat-template, --chat-template-by-type and --api-endpoint chat-completions (or API_CHAT_ENDPOINT=true)"
+            echo "Error: --chat-format apertus2 renders every task as chat over /v1/completions; drop --no-chat-template and --api-endpoint chat-completions (or API_CHAT_ENDPOINT=true)"
             exit 1
         fi
         if [[ "$THINKING_UMBRELLA" == "true" || -n "$ENABLE_THINKING_OVERRIDE" || -n "${ENABLE_THINKING:-}" \
@@ -521,8 +517,7 @@ if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
             echo "Error: --enable-thinking/--no-enable-thinking are chat-template arguments; drop --no-chat-template"
             exit 1
         fi
-        # by-type keeps the template on the generative tasks, the only ones these affect.
-        [[ "$CHAT_TEMPLATE_OVERRIDE" == "by-type" ]] || CHAT_TEMPLATE_OVERRIDE="true"
+        CHAT_TEMPLATE_OVERRIDE="true"
     fi
 fi
 
@@ -543,7 +538,7 @@ if [[ -n "$REASONING_EFFORT" ]]; then
         echo "Error: --reasoning-effort is a chat-template argument; drop --no-chat-template"
         exit 1
     fi
-    [[ "$CHAT_TEMPLATE_OVERRIDE" == "by-type" ]] || CHAT_TEMPLATE_OVERRIDE="true"
+    CHAT_TEMPLATE_OVERRIDE="true"
 fi
 
 # The openai backend needs an endpoint; fail here, not after scheduling.
@@ -589,11 +584,9 @@ if [[ -n "$API_ENDPOINT_FLAG" ]]; then
            exit 1 ;;
     esac
 fi
-# chat/completions only generates: log-likelihood tasks (and their template-free pass)
-# need the completions endpoint.
-if [[ "${API_CHAT_ENDPOINT:-false}" == "true" ]] \
-        && [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" || "$CHAT_TEMPLATE_OVERRIDE" == "by-type" ]]; then
-    echo "Error: --api-endpoint chat-completions needs the chat template on every task (generative tasks only); drop --no-chat-template/--chat-template-by-type or use --api-endpoint completions"
+# chat/completions only generates: log-likelihood tasks need the completions endpoint.
+if [[ "${API_CHAT_ENDPOINT:-false}" == "true" && "$CHAT_TEMPLATE_OVERRIDE" == "false" ]]; then
+    echo "Error: --api-endpoint chat-completions needs the chat template on every task (generative tasks only); drop --no-chat-template or use --api-endpoint completions"
     exit 1
 fi
 
@@ -631,7 +624,7 @@ if [[ "$THINKING_METRICS_ASKED" == "true" ]]; then
         echo "Error: thinking metrics require the chat template; drop --no-chat-template"
         exit 1
     fi
-    [[ "$CHAT_TEMPLATE_OVERRIDE" == "by-type" ]] || CHAT_TEMPLATE_OVERRIDE="true"
+    CHAT_TEMPLATE_OVERRIDE="true"
 
     # Without a close token nothing is stripped or recorded -- the run silently produces nothing.
     if [[ -z "$THINK_END_TOKEN" && "$AUTODETECT_THINK_TOKENS" != "true" ]]; then
