@@ -131,11 +131,12 @@ class SamplingConfigTest(unittest.TestCase):
         # No thinking flag: the framework default, as before.
         self.assertEqual(sampling.resolve("inspect", config=config), {"temperature": 0.6, "top_p": 0.95})
 
-    def test_mode_needs_a_mapping_in_the_config(self):
+    def test_a_config_without_modes_keeps_the_framework_default(self):
+        # A custom --sampling-config from before the modes still works with the thinking flags.
         config = {"profiles": {"p": {"temperature": 1.0}}, "frameworks": {"inspect": "p"}}
         self.assertEqual(sampling.resolve("inspect", config=config), {"temperature": 1.0})
-        with self.assertRaises(ValueError):
-            sampling.resolve("inspect", config=config, enable_thinking=True)
+        self.assertEqual(sampling.resolve("inspect", config=config, enable_thinking=False), {"temperature": 1.0})
+        self.assertEqual(sampling.resolve("inspect", config=config, reasoning_effort="high"), {"temperature": 1.0})
 
     def test_unknown_profile_and_framework(self):
         config = sampling.read_config()

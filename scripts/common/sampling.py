@@ -105,8 +105,8 @@ def resolve(
 ):
     """The sampling settings to send, as {sampler: number}; unset samplers are absent.
 
-    Profile precedence: `profile`, the thinking mode the thinking flags ask for, the framework's
-    default (only with use_default)."""
+    Profile precedence: `profile`, the profile the config maps to the thinking mode the thinking
+    flags ask for (if it maps one), the framework's default (only with use_default)."""
     if framework not in FRAMEWORKS:
         raise ValueError(f"unknown framework {framework!r}")
     config = config or read_config()
@@ -114,9 +114,8 @@ def resolve(
         raise ValueError(f"unknown sampling profile {profile!r} (have {sorted(config['profiles'])})")
     mode = thinking_mode(enable_thinking, reasoning_effort)
     if profile is None and mode is not None:
+        # A config without a "modes" entry for it keeps the framework default, as before.
         profile = config.get("modes", {}).get(mode)
-        if profile is None:
-            raise ValueError(f"the sampling config maps no profile to the {mode!r} mode")
     chosen = profile if profile is not None else (config["frameworks"].get(framework) if use_default else None)
     values = dict(config["profiles"][chosen]) if chosen else {}
     for key, value in (overrides or {}).items():
