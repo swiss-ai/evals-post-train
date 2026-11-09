@@ -1,0 +1,18 @@
+{
+  "repeats": 5,
+  "repeat_scoring": {
+    "enabled": true,
+    "mean": true,
+    "pass_at_k": {}
+  },
+  "task_overrides": {
+    "aime25": {
+      "repeats": 10,
+      "repeat_scoring": {"pass_at_k": {"exact_match": [2, 5, 10]}}
+    },
+    "minerva_math500": {
+      "repeat_scoring": {"pass_at_k": {"math_verify": [2, 5]}}
+    },
+    "ifeval": {"repeats": 1}
+  }
+}

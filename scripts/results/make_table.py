@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 
 import os
+try:
+    from scripts.results.repeat_metrics import compute_mgsm_avg, first_key, mean_key
+except ModuleNotFoundError:  # run as a file: python scripts/results/make_table.py
+    from repeat_metrics import compute_mgsm_avg, first_key, mean_key
+
 import argparse
 import wandb
 import pandas as pd
@@ -27,22 +32,6 @@ def list_models(base_dir):
     )
 
 
-def compute_mgsm_avg(summary):
-    vals = []
-    # Strictly target keys ending in 'exact_match' to filter out stderr and ordered-extract
-    for k, v in summary.items():
-        if "mgsm" in k and k.endswith("exact_match"):
-            try:
-                vals.append(float(v))
-            except (ValueError, TypeError):
-                pass
-
-    if not vals:
-        return None
-
-    return sum(vals) / len(vals)
-
-
 def is_mgsm_aggregate(task, metric_name):
     """True when a request means the MGSM average across per-language subtasks."""
     if metric_name != "exact_match":
@@ -55,6 +44,10 @@ def get_metric(summary, metric):
     # Split metric into task and metric_name parts for fuzzy matching
     # e.g. "agieval/acc" -> task="agieval", metric_name="acc"
     # e.g. "mmlu_flan_cot_zeroshot/exact_match,ordered-extract" -> task="mmlu_flan_cot_zeroshot", metric_name="exact_match", filter="ordered-extract"
+    repeated = mean_key(summary, metric)
+    if repeated is not None:
+        return summary[repeated]
+
     parts = metric.split("/", 1)
     task = parts[0]
     metric_name = parts[1] if len(parts) > 1 else None
@@ -75,7 +68,7 @@ def get_metric(summary, metric):
     # Search for matching keys in summary
     candidates = []
     for k, v in summary.items():
-        if "stderr" in k:
+        if "stderr" in k or ("_pass@" in k and "_pass@" not in metric):
             continue
         k_lower = k.lower()
         task_lower = task.lower()
@@ -92,16 +85,7 @@ def get_metric(summary, metric):
 
     if not candidates:
         return None
-
-    # Prefer strict-match for gsm8k
-    if "gsm8k" in task.lower():
-        for k, v in candidates:
-            if "strict-match" in k:
-                return float(v)
-
-    # If multiple candidates, prefer the shortest key (most specific match)
-    candidates.sort(key=lambda x: len(x[0]))
-    return candidates[0][1]
+    return summary[first_key(task, [k for k, _ in candidates])]
 
 
 def normalize_score(val):

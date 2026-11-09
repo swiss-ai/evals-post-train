@@ -13,6 +13,7 @@ from typing import List
 import wandb
 
 from .data_structures import Sample, Metric, Task, ModelEvaluation
+from .repeat_metrics import mean_key
 from .wandb_names import make_sample_table_key, make_wandb_run_id
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,8 @@ def _select_stratified_samples(
         for metric_name in metric_names:
             if metric_name in BINARY_METRICS and metric_name in sample:
                 value = sample[metric_name]
+                if isinstance(value, list) and value:
+                    value = sum(value) / len(value)  # repeat attempts: correct in all
                 if isinstance(value, (int, float)):
                     sample["is_correct"] = value == 1.0
                     (positive if value == 1.0 else negative).append(sample)
@@ -170,7 +173,7 @@ def create_model_evaluation_from_results(
             samples=task_samples
         ))
 
-    return ModelEvaluation(model_name=model_name, tasks=tasks)
+    return ModelEvaluation(model_name=model_name, tasks=tasks, repeat_protocols=res.get("repeat_protocols", {}))
 
 
 def create_wandb_table(run_id: str, main_log_data: dict) -> wandb.Table:
@@ -210,9 +213,11 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
     
     # Main log_data to only include keys that start with eval names from the file
     main_log_data = {}
+    summary = {**log_data, "repeat_protocols": model_eval.repeat_protocols}
     for eval_metric in main_metrics:
-        if eval_metric in log_data:
-            main_log_data[eval_metric] = log_data[eval_metric]
+        key = mean_key(summary, eval_metric) or eval_metric
+        if key in log_data:
+            main_log_data[eval_metric] = log_data[key]
     
     run_id_suffix = "-001"
     wandb_id = make_wandb_run_id(model_eval.model_name, run_id_suffix)
@@ -226,6 +231,8 @@ def _upload_to_wandb_with_model_eval(entity: str, project: str, model_eval: Mode
     ) as run:
         run.log({"main_results": create_wandb_table(model_eval.model_name, main_log_data)})
         run.log(log_data)
+        # Always written: a rerun without repeats must clear the previous protocols.
+        run.summary["repeat_protocols"] = model_eval.repeat_protocols
         run.log({"eval_duration": eval_duration})
 
         # Upload samples as a table directly from the structured data
