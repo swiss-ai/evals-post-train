@@ -74,6 +74,16 @@ _eval_submit_aggregator() {
     fi
 }
 
+# BOS as run_lm_eval.sbatch resolves it (BOS=auto -> bos_default.py), so a run records
+# what it actually used: unchanged "false" for most models, "true" for Gemma 4.
+_eval_resolved_bos() {
+    local bos="${BOS:-auto}"
+    if [[ "$bos" == "auto" ]]; then
+        bos=$(python3 -m scripts.lm_eval_harness.bos_default "$1" 2>/dev/null || echo false)
+    fi
+    echo "$bos"
+}
+
 _eval_create_run_config() {
     local model="$1" repo="$2" state_dir="$3"
     # vllm used to pin an unset enable_thinking to False; it now leaves the template default.
@@ -89,7 +99,7 @@ _eval_create_run_config() {
         --field "harness_repo=$repo"
         --field "harness_ref=${LM_EVAL_HARNESS_BRANCH:-$(_eval_pinned_harness_commit "$repo")}"
         --field "apply_chat_template=${APPLY_CHAT_TEMPLATE:-true}"
-        --field "bos=${BOS:-false}"
+        --field "bos=$(_eval_resolved_bos "${TOKENIZER:-$model}")"
         --field "limit=${HARNESS_LIMIT:-}"
         --field "num_fewshot=${NUM_FEWSHOT:-}"
         --field "batch_size=${BS:-auto:20}"

@@ -209,7 +209,7 @@ bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --mod
 bash scripts/lm_eval_harness/launch_evaluations.sh single --task multijail --model meta-llama/Llama-3.2-3B --backend vllm
 ```
 
-`--bos` explicitly prepends a BOS token. Normally leave it unset unless the model requires it; chat-template detection does not infer this option.
+`--bos` explicitly prepends a BOS token. Normally leave it unset: by default (`BOS=auto`) it is on only for models whose tokenizer never adds the BOS token they need, which is Gemma 4 (`scripts/lm_eval_harness/bos_default.py`: a local checkpoint's `config.json` `model_type`, otherwise the name). Without it Gemma 4 reads plain prompts and log-likelihood tasks without a chat template as nonsense. The harness never doubles a BOS that is already there (tokenizer or chat template). `--no-bos` turns the default off. Chat-template detection does not infer this option.
 
 ### Megatron checkpoints
 

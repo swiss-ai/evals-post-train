@@ -62,7 +62,9 @@
 #                          trust_remote_code=True: for models whose tokenizer is custom
 #                          code in the repo (e.g. Kimi-K2's tokenization_kimi.py).
 #                          hf, vllm and openai backends.
-#   --bos                - Prepend BOS token
+#   --bos                - Prepend BOS token (default: only for models whose tokenizer never adds
+#                          the BOS token they need, i.e. Gemma 4; see bos_default.py)
+#   --no-bos             - Never prepend it beyond what the tokenizer does (turns that default off)
 #   --repeat-config <json> - Repeat policy: repeats, repeat_scoring, task_overrides.
 #   --num-fewshot N      - Override num_fewshot for all tasks (default: use task YAML defaults)
 #                          Note: tasks with num_fewshot=0 in YAML are never overridden.
@@ -252,6 +254,7 @@ while [[ $# -gt 0 ]]; do
         --chat-template-by-type) CHAT_TEMPLATE_OVERRIDE="by-type"; shift ;;
         --tokenizer)    CUSTOM_TOKENIZER="$2";        shift 2 ;;
         --bos)          BOS_FLAG="true";              shift ;;
+        --no-bos)       BOS_FLAG="false";             shift ;;
         --trust-remote-code) TRUST_REMOTE_CODE_FLAG="true"; shift ;;
         --backend)      BACKEND_FLAG="$2";            shift 2 ;;
         --api-base-url) API_BASE_URL_FLAG="$2";       shift 2 ;;
@@ -447,7 +450,7 @@ case "${CHAT_FORMAT_FLAG:-template}" in
             echo "Error: --chat-format apertus2 needs --backend openai, --tokenizer <the checkpoint's tokenizer> and --max-length <the server's --max-model-len>"
             exit 1
         fi
-        if [[ -n "$BOS_FLAG" || "${BOS:-false}" == "true" ]]; then
+        if [[ "$BOS_FLAG" == "true" || "${BOS:-}" == "true" ]]; then
             echo "Error: --chat-format apertus2 renders the BOS token itself; drop --bos (or BOS=true)"
             exit 1
         fi
