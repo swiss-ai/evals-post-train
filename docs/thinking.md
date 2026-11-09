@@ -60,9 +60,19 @@ The server answers with the reasoning in a separate `reasoning` field. Notes:
 - It thinks a lot even on trivial prompts, so give a large token budget. The Chonk launch has a
   context of 16384; an empty `content` with `finish_reason: length` means the budget ran out while
   it was still thinking.
+- Harbor's terminus-2 agent assumes a very large context window. On a server with a smaller one it
+  hits "Context length exceeded" and keeps falling back to summaries. Tell it the real limit:
+  `--agent-kwarg 'model_info={"max_input_tokens": 16384}'` (the Chonk launch's context).
+- A launch over two or more nodes can crash OpenTela (`file exists` on `~/.ocfcore`, then a
+  nil-pointer panic) because the nodes share one peer ID and database through `$HOME`. The fix is
+  model-launch PR #263 (OpenTela's `--ephemeral-identity` and `--datadir`, needs OpenTela v0.2.7).
+  Until it lands, relaunch if it happens, or render the job with that branch.
 
-Tested: Inspect `gsm8k --limit 5` against Chonk (5 of 5). Not tested: EvalScope, Harbor, tau2, and
-whether the scores match lm-eval's `--chat-format apertus2` path.
+Tested against Chonk: Inspect `gsm8k --limit 5` (5 of 5); EvalScope `live_code_bench --limit 3`
+(2 of 3, no evaluation errors); Harbor `terminal_bench_2 --limit 1` with terminus-2 (the agent loop
+ran for the full 15 minutes with the setting above and no endpoint errors; reward 0.0, an agent
+timeout on a hard task). Not tested: tau2, tool calls (none of these use them), and whether the
+scores match lm-eval's `--chat-format apertus2` path.
 
 ## What this does not do
 
