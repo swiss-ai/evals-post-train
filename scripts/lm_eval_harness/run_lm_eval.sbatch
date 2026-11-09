@@ -37,7 +37,7 @@ usage() {
 	echo " VLLM_TP_SIZE / VLLM_DP_SIZE: Explicit vLLM topology. Defaults to TP=4/DP=1, or TP=1/DP=4 when a model name unambiguously indicates <30B."
 	echo " VLLM_MEMORY_FRACTION: vLLM/SGLang GPU memory fraction (default: 0.8)."
 	echo " MEGATRON_MICRO_BATCH_SIZE: Megatron micro-batch override; otherwise uses numeric BS or 1 when BS=auto."
-	echo " BOS: Set this to 'true' if you wish to prepend the BOS token when evaluating models."
+	echo " BOS: 'true' prepends the BOS token, 'false' leaves it to the tokenizer; default 'auto' = true for models whose tokenizer never adds the BOS token they need (Gemma 4, scripts/lm_eval_harness/bos_default.py)."
 	echo " TRUST_REMOTE_CODE: 'true' loads the tokenizer (hf/vllm: also the model) with trust_remote_code=True; hf, vllm and openai backends."
 	echo " LOGS_ROOT: Where are your evaluation wandb&harness logs going to."
 	echo " TASKS: Tasks to run with lm eval harness."
@@ -101,7 +101,7 @@ NAME=$2
 CKPT_ITER=${CKPT_ITER:-${CKPT_ITERATION:-"latest"}}
 BS=${BS:-"auto:20"}
 SIZE=${SIZE:-1}
-BOS=${BOS:-false}
+BOS=${BOS:-auto}
 TRUST_REMOTE_CODE=${TRUST_REMOTE_CODE:-false}
 LOGS_ROOT=${LOGS_ROOT:-$SCRATCH/eval_logs_start/}
 TASKS=${TASKS:-./configs/apertus/tasks_default.txt}
@@ -427,6 +427,13 @@ if [ -z ${TOKENIZER+x} ]; then
         TOKENIZER=$MODEL
         echo "TOKENIZER not set, using TOKENIZER=$MODEL"
     fi
+fi
+# BOS=auto: on for models whose tokenizer never adds the BOS token they need (Gemma 4);
+# the harness never doubles a BOS that is already there (tokenizer or chat template).
+if [[ "$BOS" == "auto" ]]; then
+    BOS=$(python3 -m scripts.lm_eval_harness.bos_default "$TOKENIZER" 2>/dev/null || echo false)
+    [[ "$BOS" == "true" ]] \
+        && echo "BOS=auto: prepending the BOS token for $TOKENIZER (its tokenizer never adds it); BOS=false / --no-bos turns this off"
 fi
 
 
