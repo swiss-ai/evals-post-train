@@ -16,6 +16,7 @@ __pycache__
 logs_archive/
 logs*
 core*
+!scripts/helpfulness/core.py
 
 lm_eval_reference
 Megatron-LM/

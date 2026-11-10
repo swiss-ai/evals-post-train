@@ -13,6 +13,10 @@ Evaluation infrastructure for LLMs on CSCS Alps (Clariden), with results in W&B.
 
 ### How a run can be set up
 
+**Helpfulness checkpoint bundles:** [docs/helpfulness.md](docs/helpfulness.md)
+describes the standalone batch CLI, existing harness adapters, independent
+judges, explicitly adapted protocols, staged data, and local reports.
+
 | Framework | Model | Runner runs on | Task containers |
 |---|---|---|---|
 | lm-eval-harness | loaded in the job: `--backend vllm` (default), `sglang`, `hf`, `megatron_lm` | Clariden GPU job, in a CSCS container (`containers/env*.toml`) | — |

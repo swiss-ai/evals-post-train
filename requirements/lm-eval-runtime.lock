@@ -809,6 +809,10 @@ distro==1.9.0 \
     --hash=sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed \
     --hash=sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2
     # via cwevals
+emoji==2.16.0 \
+    --hash=sha256:c4230d80640def9071599ff56b1b5950fe13a2a94c0da98c5deab12431b24330 \
+    --hash=sha256:ff9e9b1c48389ef78ed1787e7693c555e84e6bb9bac16be1fd65e1616dbf80c8
+    # via -r requirements/lm-eval-runtime.txt
 evaluate==0.4.6 \
     --hash=sha256:bca85bc294f338377b7ac2f861e21c308b11b2a285f510d7d5394d5df437db29 \
     --hash=sha256:e07036ca12b3c24331f83ab787f21cc2dbf3631813a1631e63e40897c69a3f21
@@ -3695,10 +3699,11 @@ sentence-transformers==6.2.0 \
     --hash=sha256:1e3cd8796ab7bcad4cfa2f51e2083d8b37b15d6b68e6fa6b91a147c67380574d \
     --hash=sha256:ffb51ccfef65427cfa61776d0eeeb257600b0099cf0c7533ae9a6856d31e4665
     # via subset2evaluate
-setuptools==84.2.1 \
-    --hash=sha256:3ff8b3b5492a0aa66960f4419365a86b84e013070d4313e4d4a6894f5d64d6bc \
-    --hash=sha256:ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2
+setuptools==80.10.2 \
+    --hash=sha256:8b0e9d10c784bf7d262c4e5ec5d4ec94127ce206e8738f29a437945fbc219b70 \
+    --hash=sha256:95b30ddfb717250edb492926c92b5221f7ef3fbcc2b07579bcd4a27da21d0173
     # via
+    #   -r requirements/lm-eval-runtime.txt
     #   pytablewriter
     #   spacy
     #   thinc
@@ -3866,6 +3871,10 @@ srsly==2.5.5 \
 subset2evaluate==1.0.27 \
     --hash=sha256:2ddbe7c776661a8143aa6fa973cae903c5e7c40b8834d8a9e3774e051cd96775 \
     --hash=sha256:776fb4094faf00c34f34106e70beac97f9b5aa03f90ca55cdf039831545d3f87
+    # via -r requirements/lm-eval-runtime.txt
+syllapy==0.8.0 \
+    --hash=sha256:8dbf266909fa8b62d3c16425200326809244253532631d774d2465663c4e7436 \
+    --hash=sha256:eea0a65665ad6c980686785af3e588cfcc8d359d5975ba67b18dea9cef6b0425
     # via -r requirements/lm-eval-runtime.txt
 sympy==1.14.0 \
     --hash=sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517 \

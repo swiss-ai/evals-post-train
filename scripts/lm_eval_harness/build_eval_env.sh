@@ -12,6 +12,7 @@ export PYTHONNOUSERSITE=1
 : "${EVAL_CONTAINER_CONFIG:?EVAL_CONTAINER_CONFIG is required}"
 
 EVAL_HARNESS_REF=${EVAL_HARNESS_REF:-HEAD}
+EVAL_HARNESS_REF=$(printf '%s' "$EVAL_HARNESS_REF" | tr -d '\r\n')
 EVAL_ENV_CACHE_ROOT=${EVAL_ENV_CACHE_ROOT:-${SCRATCH:-/tmp}/eval-envs}
 EVAL_RUNTIME_REQUIREMENTS=${EVAL_RUNTIME_REQUIREMENTS:-${EVAL_REPO_ROOT:-$PWD}/requirements/lm-eval-runtime.txt}
 # requirements/apertus2.txt for CHAT_FORMAT=apertus2 runs only (their own overlay).
@@ -19,11 +20,17 @@ EVAL_APERTUS2_REQUIREMENTS=${EVAL_APERTUS2_REQUIREMENTS:-}
 EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
 HARNESS_URL="https://github.com/${EVAL_HARNESS_REPO}.git"
 BASE_VENV_ARGS=(--system-site-packages)
+EVAL_ENV_ISOLATED=${EVAL_ENV_ISOLATED:-false}
+case "$EVAL_ENV_ISOLATED" in
+    true|false) ;;
+    *) echo "EVAL_ENV_ISOLATED must be true or false" >&2; exit 2 ;;
+esac
 # The lock is complete, as in the prebuilt image: its venv leaves out the container's packages
 # (their torchvision is built for the container's torch). The container also lists its torch's
 # libraries on LD_LIBRARY_PATH, ahead of the lock's: torch would load its older libtorch_python.
-if [[ "$EVAL_RUNTIME_REQUIREMENTS" == *.lock ]]; then
+if [[ "$EVAL_RUNTIME_REQUIREMENTS" == *.lock || "$EVAL_ENV_ISOLATED" == true ]]; then
     BASE_VENV_ARGS=()
+    unset PYTHONPATH PYTHONHOME
     LD_LIBRARY_PATH=$(tr ':' '\n' <<< "${LD_LIBRARY_PATH:-}" | { grep -vx '.*/torch/lib' || true; } | paste -sd: -)
     export LD_LIBRARY_PATH
 fi
@@ -196,6 +203,7 @@ manifest_tmp="${EVAL_ENV_MANIFEST}.tmp.$$"
     printf 'EVAL_RESOLVED_HARNESS_REPO=%q\n' "$EVAL_HARNESS_REPO"
     printf 'EVAL_RESOLVED_HARNESS_COMMIT=%q\n' "$HARNESS_COMMIT"
     printf 'EVAL_RESOLVED_BASE_KEY=%q\n' "$BASE_KEY"
+    printf 'EVAL_ENV_ISOLATED=%q\n' "$([[ ${#BASE_VENV_ARGS[@]} -eq 0 ]] && echo true || echo false)"
 } > "$manifest_tmp"
 mv "$manifest_tmp" "$EVAL_ENV_MANIFEST"
 
