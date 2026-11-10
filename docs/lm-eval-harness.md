@@ -44,7 +44,9 @@ Each mode maps to a task list and a metric config (`*_main_table.txt`) in the sa
 ```bash
 bash scripts/lm_eval_harness/launch_evaluations.sh <mode> --model <hf_path_or_local_path> [options]
 ```
-Automatically derives the run name; the chat template is applied by default for every model (pass `--no-chat-template` to disable it).
+Automatically derives the run name; the chat template is applied by default, to every task of the run: always for post-trained models, never for base (pre-trained) models, which need `--no-chat-template`.
+
+> A multiple-choice task through the chat template is scored by how likely the model is to *start its reply* with each answer, not as a raw continuation of the prompt. That is comparable across the tasks of one run and across post-trained models, not with raw-continuation numbers (base models, older `--no-chat-template` runs).
 
 The mode may be omitted for the default post-training suite:
 ```bash
@@ -63,8 +65,8 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 |------|-------------|
 | `--name <name>` | Override the auto-derived evaluation run name |
 | `--task <task>` | Task name(s) for `single` mode (single task or comma-separated list) |
-| `--chat-template` | Force enable chat template (applied by default for every model) |
-| `--no-chat-template` | Force disable chat template |
+| `--chat-template` | Force the chat template on every task (the default; right for post-trained models) |
+| `--no-chat-template` | Turn it off for the whole run: base (pre-trained) models need it |
 | `--tokenizer <path>` | Custom tokenizer (default: same as model) |
 | `--num-fewshot N` | Override num_fewshot globally. Tasks with explicit `num_fewshot: 0` in their YAML are never overridden. OLMo3 paper uses 5-shot for most MC tasks. |
 | `--backend <hf\|vllm\|sglang\|megatron_lm\|openai>` | Inference backend (default: from sbatch script). `vllm` recommended for in-job inference; `openai` evaluates against an already-running OpenAI-compatible endpoint instead of loading the model. |
@@ -608,7 +610,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `LM_EVAL_RATE_LIMIT_STATE_DIR` | per-launch controller directory | Shared request-slot state used to coordinate threads, processes, and Slurm nodes; point independent launches at the same directory to share budgets |
 | `OPENAI_API_KEY` | `scripts/secrets.env`, then `CSCS_SERVING_API` | OpenAI GPT judge or `openai` backend bearer token |
 | `LM_EVAL_HARNESS_BRANCH` | commit in `requirements/lm-eval-harness.txt` | Branch, tag, or commit installed from the task-selected harness repository (not allowed with `EVAL_PREBUILT_ENV=1`) |
-| `APPLY_CHAT_TEMPLATE` | `true` | Apply chat template for instruct models |
+| `APPLY_CHAT_TEMPLATE` | `true` | Apply the chat template to every task of the run (post-trained models); `false` for base models |
 | `TOKENIZER` | same as model | Custom tokenizer path |
 | `BOS` | `false` | Prepend BOS token |
 | `BS` | `auto:20` | Batch size |
