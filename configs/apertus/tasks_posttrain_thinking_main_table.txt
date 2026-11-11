@@ -6,6 +6,7 @@ agieval_math/acc
 arc_challenge_chat/exact_match
 # Instruction Following
 ifeval/prompt_level_loose_acc
+ifbench/prompt_level_loose_acc
 multi-if/prompt_level_loose_acc
 # Chat
 alpaca_eval/length_controlled_winrate
