@@ -809,6 +809,10 @@ distro==1.9.0 \
     --hash=sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed \
     --hash=sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2
     # via cwevals
+emoji==2.16.0 \
+    --hash=sha256:c4230d80640def9071599ff56b1b5950fe13a2a94c0da98c5deab12431b24330 \
+    --hash=sha256:ff9e9b1c48389ef78ed1787e7693c555e84e6bb9bac16be1fd65e1616dbf80c8
+    # via -r requirements/lm-eval-runtime.txt
 evaluate==0.4.6 \
     --hash=sha256:bca85bc294f338377b7ac2f861e21c308b11b2a285f510d7d5394d5df437db29 \
     --hash=sha256:e07036ca12b3c24331f83ab787f21cc2dbf3631813a1631e63e40897c69a3f21
@@ -3866,6 +3870,10 @@ srsly==2.5.5 \
 subset2evaluate==1.0.27 \
     --hash=sha256:2ddbe7c776661a8143aa6fa973cae903c5e7c40b8834d8a9e3774e051cd96775 \
     --hash=sha256:776fb4094faf00c34f34106e70beac97f9b5aa03f90ca55cdf039831545d3f87
+    # via -r requirements/lm-eval-runtime.txt
+syllapy==0.8.0 \
+    --hash=sha256:8dbf266909fa8b62d3c16425200326809244253532631d774d2465663c4e7436 \
+    --hash=sha256:eea0a65665ad6c980686785af3e588cfcc8d359d5975ba67b18dea9cef6b0425
     # via -r requirements/lm-eval-runtime.txt
 sympy==1.14.0 \
     --hash=sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517 \
