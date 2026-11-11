@@ -1,0 +1,14 @@
+# Apertus 1.5 tech report, Table 25: thinking-mode comparison on reasoning-heavy benchmarks.
+# Thinking on: 32,768-token budget (the launcher's default with --thinking), sampled; repeat
+# policy in configs/apertus/repeat_scoring_tech_report_table25.json (mean@8 AIME, mean@4 the rest).
+# Task choices are our best match to the table's names, not confirmed against the authors' runs:
+#   MMLU -> mmlu_flan_cot_zeroshot, GPQA -> gpqa_main_cot_zeroshot (not diamond),
+#   MATH -> hendrycks_math (full test set), MATH-500 -> minerva_math500.
+mmlu_flan_cot_zeroshot
+gpqa_main_cot_zeroshot
+ifbench
+gsm8k_cot
+hendrycks_math
+minerva_math500
+aime24
+aime25

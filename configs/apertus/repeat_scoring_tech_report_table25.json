@@ -1,0 +1,8 @@
+{
+  "repeats": 4,
+  "repeat_scoring": {"enabled": true, "mean": true, "pass_at_k": {}},
+  "task_overrides": {
+    "aime24": {"repeats": 8},
+    "aime25": {"repeats": 8}
+  }
+}
