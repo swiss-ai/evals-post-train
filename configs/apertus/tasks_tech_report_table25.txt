@@ -3,12 +3,14 @@
 # policy in configs/apertus/repeat_scoring_tech_report_table25.json (mean@8 AIME, mean@4 the rest).
 # Task choices are our best match to the table's names, not confirmed against the authors' runs:
 #   MMLU -> mmlu_flan_cot_zeroshot, GPQA -> gpqa_main_cot_zeroshot (not diamond),
-#   MATH -> hendrycks_math (full test set), MATH-500 -> minerva_math500.
+#   MATH -> hendrycks_math (full test set), MATH-500 -> minerva_math500_cot_zeroshot (zero-shot,
+#   Rapha's variant; needs a harness with lm-evaluation-harness 663cffd, e.g. --harness-branch
+#   feat/repeat-support-olympiadbench-ifbench, which also declares repeat scoring for IFBench).
 mmlu_flan_cot_zeroshot
 gpqa_main_cot_zeroshot
 ifbench
 gsm8k_cot
 hendrycks_math
-minerva_math500
+minerva_math500_cot_zeroshot
 aime24
 aime25
