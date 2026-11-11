@@ -35,6 +35,14 @@ RUN apt-get update -qq \
     && apt-get purge -y -qq --auto-remove build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# NLTK's data (ifeval, multi_if, ruler, ifbench) is baked in: /opt/lm-eval-venv/nltk_data is on
+# NLTK's search path, root-owned and read-only. Downloading at run time put it in the run's
+# folder on shared storage, which NLTK refuses (group-writable), and failed ifeval with
+# "Resource 'punkt_tab' not found". With the data here, the harness finds it and downloads nothing.
+RUN /opt/lm-eval-venv/bin/python -m nltk.downloader -d /opt/lm-eval-venv/nltk_data \
+        punkt punkt_tab stopwords averaged_perceptron_tagger_eng \
+    && /opt/lm-eval-venv/bin/python -c "import nltk; nltk.data.find('tokenizers/punkt_tab/english/')"
+
 # Inspect gets its own virtualenv: lm-eval-harness pins datasets==4.0.0, and
 # in one environment pip would resolve inspect-evals to the last release that
 # accepts it (January 2026) instead of the pinned one. run_inspect_eval.sh puts
