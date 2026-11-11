@@ -37,6 +37,7 @@ from stirrup.tools.code_backends.base import (
 )
 
 from scripts.common.opensandbox_sandbox import (
+    save_sandbox_logs,
     HEALTH_POLL_SEC,
     OVERCOMMIT_COMMAND,
     READY_TIMEOUT_SEC,
@@ -135,6 +136,7 @@ class OpenSandboxCodeExecToolProvider(CodeExecToolProvider):
         if self._sbx is not None:
             sandbox, self._sbx = self._sbx, None
             try:
+                await save_sandbox_logs(sandbox)
                 await sandbox.kill()
             finally:
                 await sandbox.close()
