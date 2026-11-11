@@ -1,7 +1,9 @@
 import asyncio
 import importlib.util
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -347,3 +349,88 @@ class InstallTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _Diagnostics:
+    """A sandbox as save_sandbox_logs sees it: its id and the two diagnostics calls."""
+
+    def __init__(self, sandbox_id="sbx-1", fail=False, url=None):
+        self.id = sandbox_id
+        self.fail = fail
+        self.url = url
+        self.calls = []
+
+    async def get_diagnostic_events(self, scope):
+        self.calls.append(("events", scope))
+        if self.fail:
+            raise RuntimeError("server down")
+        return SimpleNamespace(content="pulled the image", content_url=None, truncated=False)
+
+    async def get_diagnostic_logs(self, scope):
+        self.calls.append(("logs", scope))
+        if self.url:
+            return SimpleNamespace(content=None, content_url=self.url, truncated=True)
+        return SimpleNamespace(content="execd started", content_url=None, truncated=False)
+
+
+class SaveSandboxLogsTest(unittest.TestCase):
+    def test_events_and_logs_are_saved_by_sandbox_id(self):
+        sandbox = _Diagnostics()
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.dict(os.environ, {opensandbox_sandbox.LOG_DIR_ENV: f"{directory}/opensandbox"}):
+                asyncio.run(opensandbox_sandbox.save_sandbox_logs(sandbox))
+            saved = Path(directory, "opensandbox", "sbx-1.log").read_text()
+        self.assertEqual(
+            saved, "----- events -----\npulled the image\n\n----- logs -----\nexecd started\n"
+        )
+        self.assertEqual(sorted(sandbox.calls), [("events", "all"), ("logs", "all")])
+
+    def test_a_link_of_its_own_is_fetched_and_a_cut_is_said(self):
+        sandbox = _Diagnostics(url="https://elsewhere.example/x")
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(
+            os.environ, {opensandbox_sandbox.LOG_DIR_ENV: directory}
+        ), mock.patch.object(opensandbox_sandbox, "_fetch_text", return_value="from the link") as fetch:
+            asyncio.run(opensandbox_sandbox.save_sandbox_logs(sandbox))
+            saved = Path(directory, "sbx-1.log").read_text()
+        fetch.assert_called_once_with("https://elsewhere.example/x")
+        self.assertIn("from the link\n[the server cut this short]", saved)
+
+    def test_off_without_the_folder_and_never_raises(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env = dict(os.environ)
+            env.pop(opensandbox_sandbox.LOG_DIR_ENV, None)
+            with mock.patch.dict(os.environ, env, clear=True):
+                sandbox = _Diagnostics()
+                asyncio.run(opensandbox_sandbox.save_sandbox_logs(sandbox))
+                self.assertEqual(sandbox.calls, [])
+            with mock.patch.dict(os.environ, {opensandbox_sandbox.LOG_DIR_ENV: directory}):
+                asyncio.run(opensandbox_sandbox.save_sandbox_logs(_Diagnostics(fail=True)))
+                asyncio.run(opensandbox_sandbox.save_sandbox_logs(None))
+            self.assertEqual(os.listdir(directory), [])
+
+    def test_the_manager_saves_a_sandboxs_logs_before_it_kills_it(self):
+        order = []
+
+        class Sandbox:
+            id = "sbx-2"
+
+            async def get_diagnostic_events(self, scope):
+                order.append("saved")
+                return SimpleNamespace(content="", content_url=None, truncated=False)
+
+            async def get_diagnostic_logs(self, scope):
+                return SimpleNamespace(content="", content_url=None, truncated=False)
+
+            async def kill(self):
+                order.append("killed")
+
+            async def close(self):
+                order.append("closed")
+
+        manager = opensandbox_sandbox.OpenSandboxSandboxManager.__new__(opensandbox_sandbox.OpenSandboxSandboxManager)
+        manager._boxes = {"sbx-2": SimpleNamespace(sandbox=Sandbox())}
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(
+            os.environ, {opensandbox_sandbox.LOG_DIR_ENV: directory}
+        ):
+            self.assertTrue(asyncio.run(manager.delete_sandbox("sbx-2")))
+        self.assertEqual(order, ["saved", "killed", "closed"])

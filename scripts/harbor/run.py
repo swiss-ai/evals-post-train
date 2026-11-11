@@ -341,8 +341,9 @@ def harbor_env(args: argparse.Namespace) -> Dict[str, str]:
         env.setdefault("DOCKER_DEFAULT_PLATFORM", "linux/amd64")
     if args.sandbox == "opensandbox":
         env.setdefault("OPENSANDBOX_DOMAIN", OPENSANDBOX_KATA_DOMAIN)
-        # Unique to this run: the cleanup after it must not touch another run's sandboxes.
-        env["OPENSANDBOX_RUN_LABEL"] = f"harbor-{uuid.uuid4().hex[:12]}"
+        # Unique to this run: the cleanup after it must not touch another run's sandboxes. A
+        # label the caller set (one per run of theirs) is kept.
+        env.setdefault("OPENSANDBOX_RUN_LABEL", f"harbor-{uuid.uuid4().hex[:12]}")
     return env
 
 

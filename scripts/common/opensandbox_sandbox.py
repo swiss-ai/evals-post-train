@@ -31,7 +31,8 @@ What the Docker manager does and how it maps here (as in scripts/common/k8s_sand
 
 The server is OPENSANDBOX_DOMAIN (default: Breithorn's Kata endpoint; a gVisor one rejects
 network policies) with OPENSANDBOX_API_KEY. OPENSANDBOX_RUN_LABEL sets the run label (default:
-random).
+random). OPENSANDBOX_LOG_DIR, if set, gets each sandbox's diagnostic events and logs as
+<sandbox id>.log just before it is killed.
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ import os
 import shlex
 import tarfile
 import time
+import urllib.request
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -78,6 +80,51 @@ REQUEST_SLACK_SEC = 60
 DEFAULT_COMMAND_TIMEOUT_SEC = 3600
 # Run as root in every new sandbox (Harbor's and EvalScope's): see the module docstring.
 OVERCOMMIT_COMMAND = "echo 1 > /proc/sys/vm/overcommit_memory"
+
+
+# A sandbox's logs go with it when it is killed: with this set, each one's diagnostic
+# events and logs (the server's /diagnostics, scope "all") are saved to <dir>/<sandbox id>.log
+# just before (save_sandbox_logs). Off unless set; a failure to save never stops a run.
+LOG_DIR_ENV = "OPENSANDBOX_LOG_DIR"
+SAVE_LOGS_TIMEOUT_SEC = 30
+
+
+async def save_sandbox_logs(sandbox: Any) -> None:
+    """Writes the sandbox's diagnostic events and logs to $OPENSANDBOX_LOG_DIR/<id>.log; called
+    before the sandbox is killed. Does nothing without OPENSANDBOX_LOG_DIR, and never raises."""
+    directory = os.environ.get(LOG_DIR_ENV)
+    if not directory or sandbox is None:
+        return
+    try:
+        events, logs = await asyncio.wait_for(
+            asyncio.gather(
+                _diagnostic_text(sandbox.get_diagnostic_events),
+                _diagnostic_text(sandbox.get_diagnostic_logs),
+            ),
+            SAVE_LOGS_TIMEOUT_SEC,
+        )
+        path = Path(directory)
+        path.mkdir(parents=True, exist_ok=True)
+        (path / f"{sandbox.id}.log").write_text(f"----- events -----\n{events}\n\n----- logs -----\n{logs}\n")
+    except Exception as exc:  # noqa: BLE001 - saving logs must never stop the run
+        print(f"opensandbox: could not save the logs of sandbox {getattr(sandbox, 'id', '?')}: {exc}", flush=True)
+
+
+async def _diagnostic_text(get: Any) -> str:
+    content = await get("all")
+    text = getattr(content, "content", None) or ""
+    url = getattr(content, "content_url", None)
+    if not text and url:
+        # A link of its own (presigned): fetched without the server's key.
+        text = await asyncio.to_thread(_fetch_text, url)
+    if getattr(content, "truncated", False):
+        text += "\n[the server cut this short]"
+    return text
+
+
+def _fetch_text(url: str) -> str:
+    with urllib.request.urlopen(url, timeout=20) as resp:
+        return resp.read().decode("utf-8", "replace")
 
 
 def domain() -> str:
@@ -209,6 +256,7 @@ class OpenSandboxSandboxManager:
         if box is None:
             return False
         try:
+            await save_sandbox_logs(box.sandbox)
             await box.sandbox.kill()
         finally:
             await box.sandbox.close()
