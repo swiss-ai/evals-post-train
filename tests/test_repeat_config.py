@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.lm_eval_harness.repeat_config import select_policy
+from scripts.lm_eval_harness.repeat_config import select_policy, with_flags
 from scripts.lm_eval_harness.task_output_types import Classifier
 from scripts.results.merge_split_results import merge_split_results
 from scripts.results.repeat_metrics import mean_key, score_label
@@ -31,6 +31,45 @@ class RepeatPolicyTests(unittest.TestCase):
         globbed = select_policy(policy, ["gsm8*"], ["gsm8*"], classifier)
         self.assertEqual(globbed["task_overrides"], {"gsm8k": {"repeats": 5}})
 
+    def test_flags_build_a_policy_and_win_over_the_config(self):
+        policy = with_flags(None, 8, ["8"])
+        self.assertEqual(policy["repeats"], 8)
+        self.assertTrue(policy["repeat_scoring"]["mean"])
+        self.assertEqual(policy["repeat_scoring"]["pass_at_k"]["exact_match"], [8])
+        base = {"repeats": 5, "repeat_scoring": {"enabled": True, "pass_at_k": {"exact_match": [2]}},
+                "task_overrides": {"ifeval": {"repeats": 1}}}
+        merged = with_flags(base, 4, [])
+        self.assertEqual(merged["repeats"], 4)
+        self.assertEqual(merged["task_overrides"], base["task_overrides"])
+        self.assertEqual(base["repeats"], 5)
+        self.assertEqual(with_flags(base, None, [4])["repeat_scoring"]["pass_at_k"]["exact_match"], [4])
+        self.assertEqual(with_flags(base, None, [])["repeat_scoring"]["pass_at_k"]["exact_match"], [2])
+        with self.assertRaisesRegex(ValueError, "pass@8 needs"):
+            with_flags(None, 4, [8])
+
+    def test_launcher_checks_repeat_flags(self):
+        base = ("single", "--task", "gsm8k_cot", "--model", "test/model", "--backend", "openai",
+                "--api-base-url", "http://localhost:8000", "--api-model-name", "m")
+        with tempfile.TemporaryDirectory() as tmp:
+            for flags, message in [
+                (["--repeats", "4"], "identical samples"),
+                (["--repeats", "4", "--enable-thinking", "--temperature", "0"], "identical samples"),
+                (["--repeats", "x"], "positive integer"),
+                (["--repeats", "4", "--temperature", "0.6", "--repeat-metric", "pass@8"], "needs at least 8"),
+                (["--repeat-metric", "mean"], "pass@K"),
+            ]:
+                run = _launch(*base, *flags, "--logs-root", tmp)
+                self.assertNotEqual(run.returncode, 0, flags)
+                self.assertIn(message, run.stdout + run.stderr)
+            ok = _launch(*base, "--repeats", "4", "--repeat-metric", "pass@4", "--temperature", "0.6",
+                         "--logs-root", tmp)
+            self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+            thinking = _launch(*base, "--repeats", "4", "--enable-thinking", "--logs-root", tmp)
+            self.assertEqual(thinking.returncode, 0, thinking.stdout + thinking.stderr)
+            local = _launch("single", "--task", "gsm8k_cot", "--model", "test/model", "--repeats", "4",
+                            "--temperature", "0.6", "--logs-root", tmp)
+            self.assertIn("need --backend openai", local.stdout + local.stderr)
+
     def test_launcher_refuses_repeat_config_for_local_backends(self):
         with tempfile.TemporaryDirectory() as tmp:
             policy = Path(tmp) / "policy.json"
@@ -38,7 +77,7 @@ class RepeatPolicyTests(unittest.TestCase):
             run = _launch("single", "--task", "gsm8k_cot", "--model", "test/model",
                           "--repeat-config", str(policy), "--logs-root", tmp)
             self.assertNotEqual(run.returncode, 0)
-            self.assertIn("--repeat-config needs --backend openai", run.stdout + run.stderr)
+            self.assertIn("need --backend openai", run.stdout + run.stderr)
 
     def test_job_runs_repeat_config_from_the_repository(self):
         sbatch = (Path(__file__).resolve().parents[1] / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()

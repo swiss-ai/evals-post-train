@@ -565,6 +565,9 @@ class OpenSandboxRunTest(unittest.TestCase):
         self.assertIn(run.OPENSANDBOX_ENVIRONMENT, run.harbor_command(args, "terminal_bench_2", Path("w/jobs")))
         self.assertEqual(first["OPENSANDBOX_DOMAIN"], run.OPENSANDBOX_KATA_DOMAIN)
         self.assertNotEqual(first["OPENSANDBOX_RUN_LABEL"], second["OPENSANDBOX_RUN_LABEL"])
+        # A label the caller set (one per run of theirs, e.g. evals-svc's) is kept.
+        with mock.patch.dict(os.environ, {"OPENSANDBOX_API_KEY": "k", "OPENSANDBOX_RUN_LABEL": "evals-svc-1"}):
+            self.assertEqual(run.harbor_env(run.parse_args(self.ARGS))["OPENSANDBOX_RUN_LABEL"], "evals-svc-1")
 
     def test_summary_records_the_endpoint_and_leftovers_are_deleted(self):
         def fake_command(args, name, jobs_dir):

@@ -71,6 +71,7 @@ from scripts.common.opensandbox_sandbox import (
     READY_TIMEOUT_SEC,
     REQUEST_SLACK_SEC,
     RUN_LABEL_ENV,
+    save_sandbox_logs,
     RUN_LABEL_KEY,
     connection_config,
     delete_run_sandboxes,
@@ -284,6 +285,7 @@ async def _create_sandbox(spec: ServiceSpec, image: str, metadata: Optional[Dict
 async def _kill(sandbox: Any) -> None:
     """Kills the sandbox; one that is already gone (expired, or failed on its own) is no error,
     and nothing here hides the error that led to the kill."""
+    await save_sandbox_logs(sandbox)  # its logs go with it
     try:
         await sandbox.kill()
     except Exception as exc:  # noqa: BLE001

@@ -48,6 +48,7 @@ from opensandbox.models.sandboxes import NetworkRule
 from scripts.common.opensandbox_sandbox import (  # noqa: F401
     OVERCOMMIT_COMMAND,
     RUN_LABEL_ENV,
+    save_sandbox_logs,
     RUN_LABEL_KEY,
     delete_run_sandboxes,
     joined_lines,
@@ -110,6 +111,11 @@ class KataSandboxEnvironment(OpenSandboxEnvironment):
                 "dynamic_network_policy": True,
             }
         )
+
+    async def stop(self, delete: bool) -> None:
+        # Harbor's stop kills the sandbox, and its logs go with it.
+        await save_sandbox_logs(self._sandbox)
+        await super().stop(delete)
 
     async def start(self, force_build: bool) -> None:
         replay = DockerfileReplay(self, force_build)

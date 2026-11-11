@@ -16,6 +16,24 @@ bash scripts/lm_eval_harness/launch_evaluations.sh custom \
   --chat-format apertus2 --tokenizer /path/to/tokenizer
 ```
 
+## Quick flags
+
+For one global budget, skip the JSON:
+
+```bash
+... --enable-thinking --repeats 8 --repeat-metric pass@8
+```
+
+- `--repeats N` samples every repeat-capable task N times and reports `mean@N`.
+- `--repeat-metric pass@K[,K..]` adds `pass@K` (K <= N) on every task that has a binary metric. The
+  mean stays; `pass@K` is on top of it.
+- With `--repeat-config` too, the flags win over the file's global `repeats` and `pass_at_k`; its
+  per-task `task_overrides` stay. Per-task budgets still need the file.
+- Repeats need sampling. `--repeats N>1` on a greedy run (`--temperature 0`, or no thinking and no
+  `--temperature`) is refused: the samples would be identical. Thinking runs sample by default.
+
+## Config file
+
 The example policy uses mean@5, mean@10 plus pass@2/5/10 for AIME25,
 pass@2/5 for MATH-500's math-verify grader, and one attempt for IFEval.
 These are example budgets, not a benchmark standard. Set generation temperature,

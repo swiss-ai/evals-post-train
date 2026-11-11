@@ -63,6 +63,10 @@
 #                          the BOS token they need, i.e. Gemma 4; see bos_default.py)
 #   --no-bos             - Never prepend it beyond what the tokenizer does (turns that default off)
 #   --repeat-config <json> - Repeat policy: repeats, repeat_scoring, task_overrides.
+#   --repeats N          - Sample every repeat-capable task N times and report mean@N. Overrides the
+#                          repeat config's global `repeats`; its per-task overrides stay.
+#   --repeat-metric pass@K[,K..] - Also report pass@K (K <= N) on every task with a binary metric.
+#                          Needs sampling: greedy repeats are identical, so --repeats N>1 is refused.
 #   --num-fewshot N      - Override num_fewshot for all tasks (default: use task YAML defaults)
 #                          Note: tasks with num_fewshot=0 in YAML are never overridden.
 #                          OLMo3 uses 5-shot for most MC tasks; pass --num-fewshot 5 to match.
@@ -226,6 +230,7 @@ LOG_LENGTH_METRICS=""
 SAMPLING_TEMPERATURE_FLAG=""; SAMPLING_TOP_P_FLAG=""; SAMPLING_TOP_K_FLAG=""
 SAMPLING_MIN_P_FLAG=""; SAMPLING_REPETITION_PENALTY_FLAG=""
 SAMPLING_PROFILE_FLAG=""; SAMPLING_CONFIG_FLAG=""
+REPEATS_FLAG=""; REPEAT_METRIC_FLAG=""
 TASK_FILE_OVERRIDE=""
 TABLE_METRICS_OVERRIDE=""
 LOGS_ROOT_FLAG=""
@@ -284,6 +289,8 @@ while [[ $# -gt 0 ]]; do
         --no-wandb)      export WANDB_MODE=disabled;    shift ;;
         --account)       SBATCH_ACCOUNT_FLAG="$2";      shift 2 ;;
         --repeat-config) export EVAL_REPEAT_CONFIG="$2"; shift 2 ;;
+        --repeats)       REPEATS_FLAG="$2"; shift 2 ;;
+        --repeat-metric) REPEAT_METRIC_FLAG="$2"; shift 2 ;;
         --force-tasks)   FORCE_TASKS="$2";              shift 2 ;;
         --merge-only)    EVAL_MERGE_ONLY="true";        shift ;;
         --debug)         EVAL_DRY_RUN="true";           shift ;;
@@ -430,9 +437,31 @@ fi
 EFFECTIVE_BACKEND="${BACKEND_FLAG:-${LM_EVAL_BACKEND:-}}"
 
 # Only the harness's API models send every attempt with its own seed.
-if [[ -n "${EVAL_REPEAT_CONFIG:-}" && "$EFFECTIVE_BACKEND" != "openai" ]]; then
-    echo "Error: --repeat-config needs --backend openai (repeat scoring supports API models only)"
+if [[ -n "${EVAL_REPEAT_CONFIG:-}$REPEATS_FLAG$REPEAT_METRIC_FLAG" && "$EFFECTIVE_BACKEND" != "openai" ]]; then
+    echo "Error: --repeat-config, --repeats and --repeat-metric need --backend openai (repeat scoring supports API models only)"
     exit 1
+fi
+
+# --repeats / --repeat-metric: layered over --repeat-config (flags win) into one policy file.
+_pass_at=""
+if [[ -n "$REPEATS_FLAG" && ! "$REPEATS_FLAG" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: --repeats takes a positive integer (got '$REPEATS_FLAG')"
+    exit 1
+fi
+if [[ -n "$REPEAT_METRIC_FLAG" ]]; then
+    if [[ ! "$REPEAT_METRIC_FLAG" =~ ^pass@[0-9]+(,[0-9]+)*$ ]]; then
+        echo "Error: --repeat-metric takes pass@K or pass@K1,K2 (got '$REPEAT_METRIC_FLAG'); the mean@N is always reported"
+        exit 1
+    fi
+    _pass_at="${REPEAT_METRIC_FLAG#pass@}"
+fi
+if [[ -n "$REPEATS_FLAG$_pass_at" ]]; then
+    _repeat_args=(--output "$(mktemp -d)/repeat_flags.json")
+    [[ -n "${EVAL_REPEAT_CONFIG:-}" ]] && _repeat_args+=(--policy "$EVAL_REPEAT_CONFIG")
+    [[ -n "$REPEATS_FLAG"           ]] && _repeat_args+=(--repeats "$REPEATS_FLAG")
+    [[ -n "$_pass_at"               ]] && _repeat_args+=(--pass-at "$_pass_at")
+    python3 -m scripts.lm_eval_harness.repeat_config "${_repeat_args[@]}" > /dev/null || exit 1
+    export EVAL_REPEAT_CONFIG="${_repeat_args[1]}"
 fi
 
 # apertus2: the harness renders and parses the native format and always reasons, so the
@@ -684,6 +713,19 @@ if [[ -n "$SAMPLING_TEMPERATURE_FLAG$SAMPLING_TOP_P_FLAG$SAMPLING_TOP_K_FLAG$SAM
         [[ -n "$SAMPLING_TOP_K" ]] && export THINK_TOP_K="$SAMPLING_TOP_K"
         [[ -n "$SAMPLING_MIN_P" ]] && export THINK_MIN_P="$SAMPLING_MIN_P"
         [[ -n "$SAMPLING_REPETITION_PENALTY" ]] && export THINK_REPETITION_PENALTY="$SAMPLING_REPETITION_PENALTY"
+    fi
+fi
+
+# Repeats of a greedy run are identical. Greedy = temperature 0, or no sampling on a run that does not think.
+if [[ -n "$REPEATS_FLAG" && "$REPEATS_FLAG" -gt 1 ]]; then
+    if [[ "$ENABLE_THINKING_OVERRIDE" == "true" || "${CHAT_FORMAT:-template}" == "apertus2" ]]; then
+        _greedy=$([[ "${SAMPLING_TEMPERATURE:-}" =~ ^0(\.0*)?$ ]] && echo true || echo false)
+    else
+        _greedy=$([[ -n "${SAMPLING_TEMPERATURE:-}" && ! "$SAMPLING_TEMPERATURE" =~ ^0(\.0*)?$ ]] && echo false || echo true)
+    fi
+    if [[ "$_greedy" == "true" ]]; then
+        echo "Error: --repeats $REPEATS_FLAG on a greedy run gives $REPEATS_FLAG identical samples. Sample: --enable-thinking (profile thinking) or --temperature."
+        exit 1
     fi
 fi
 
