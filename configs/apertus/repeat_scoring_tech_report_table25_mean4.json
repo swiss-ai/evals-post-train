@@ -1,0 +1,4 @@
+{
+  "repeats": 4,
+  "repeat_scoring": {"enabled": true, "mean": true, "pass_at_k": {}}
+}
