@@ -34,7 +34,7 @@ def with_flags(policy, repeats=None, pass_at=()):
     if ks:
         if ks[-1] > policy.get("repeats", 1):
             raise ValueError(f"pass@{ks[-1]} needs at least {ks[-1]} repeats (have {policy.get('repeats', 1)})")
-        scoring["pass_at_k"] = {m: ks for m in BINARY_METRICS} | scoring.get("pass_at_k", {})
+        scoring["pass_at_k"] = scoring.get("pass_at_k", {}) | {m: ks for m in BINARY_METRICS}
     return policy
 
 

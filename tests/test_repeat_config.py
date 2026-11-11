@@ -42,7 +42,8 @@ class RepeatPolicyTests(unittest.TestCase):
         self.assertEqual(merged["repeats"], 4)
         self.assertEqual(merged["task_overrides"], base["task_overrides"])
         self.assertEqual(base["repeats"], 5)
-        self.assertEqual(with_flags(base, None, [4])["repeat_scoring"]["pass_at_k"]["exact_match"], [2])
+        self.assertEqual(with_flags(base, None, [4])["repeat_scoring"]["pass_at_k"]["exact_match"], [4])
+        self.assertEqual(with_flags(base, None, [])["repeat_scoring"]["pass_at_k"]["exact_match"], [2])
         with self.assertRaisesRegex(ValueError, "pass@8 needs"):
             with_flags(None, 4, [8])
 
