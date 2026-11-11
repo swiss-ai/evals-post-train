@@ -47,6 +47,8 @@ wonderwords
 nltk
 immutabledict
 langdetect
+emoji
+syllapy
 subset2evaluate
 alpaca-eval>=0.6.2
 peft>=0.19.0
