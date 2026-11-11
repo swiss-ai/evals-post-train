@@ -1,6 +1,11 @@
 # Contributing
 
-Keep this repo stand-alone (not coupled to a downstream consumer), and pin what you add (datasets, harness commits, packages) so runs can be repeated.
+## Principles
+
+- **Stand-alone:** no coupling to a downstream consumer.
+- **Generic:** no per-model special cases.
+- **Simple:** one code path over extra modes; small PRs.
+- **Pinned:** pin what you add (datasets, harness commits, packages) so runs can be repeated.
 
 ## Before you open a PR
 
@@ -11,6 +16,8 @@ uv run --all-extras python -m unittest discover -s tests
 CI also runs syntax checks, ShellCheck and the Harbor tests ([ci.yml](.github/workflows/ci.yml)). Harbor's tests are skipped locally unless Harbor is installed (Python >= 3.12, `pip install -r requirements/harbor-runtime.lock`).
 
 Smoke-test your change with a few samples (`--limit`) and `--no-wandb`, so nothing reaches the shared W&B project. For Harbor and EvalScope, `--gold` checks environments and scoring without a model.
+
+Run `bash -n` on edited shell scripts; they must work on macOS bash 3.2 (`${ARR[@]+"${ARR[@]}"}` under `set -u`), quote paths, and never `rm -rf` a variable path.
 
 **Bug fixes** come with a test in `tests/` that fails without the fix (offline `unittest`: no cluster, network or model), and update the docs if documented behavior changes.
 
@@ -29,6 +36,12 @@ EvalScope covers only SWE-bench Verified and Pro. Results are uploaded by the fr
 **Inspect AI:** a task in [inspect_evals](https://github.com/UKGovernmentBEIS/inspect_evals) needs no code (`--task <name>`); add an example to [docs/inspect-ai.md](docs/inspect-ai.md). Otherwise write a `@task` file, run it by path (`--task path/to/task.py`), and test it. `scripts/aaii/aa_lcr.py` and its `tests/test_aa_lcr.py` are an example with a judge.
 
 **Harbor:** add a pinned entry to `BENCHMARKS` in `scripts/harbor/run.py` (`name@1.0` or `@sha256:...`), list it in `run_harbor_eval.sh`'s header and [docs/harbor.md](docs/harbor.md), and check that `--gold --limit 2` scores 1 on each sandbox it supports. Tasks that need fixing after download get a patch in `scripts/harbor/task_patches.py`, with a test.
+
+**Before a new benchmark counts as done**, it runs end to end, not just with `--limit`/`--gold`:
+
+- against an OpenAI-compatible endpoint (`--api-base-url`; `--backend openai` for lm-eval),
+- with W&B logging, and
+- on both Clariden and Beverin.
 
 ## Adding a framework
 
