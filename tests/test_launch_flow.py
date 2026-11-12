@@ -756,7 +756,7 @@ class LaunchFlowTests(unittest.TestCase):
         # The template path keeps its own model, context argument and chat_template_args token.
         template = model()
         self.assertTrue(template.startswith("local-completions "))
-        self.assertTrue(template.endswith(",max_length=65536 'chat_template_args={...}'"))
+        self.assertTrue(template.endswith(",max_length=65536,clamp_gen_toks=True 'chat_template_args={...}'"))
 
     def test_apertus2_samples_like_a_thinking_run(self) -> None:
         self.assertEqual(
