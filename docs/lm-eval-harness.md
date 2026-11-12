@@ -431,6 +431,12 @@ Recorded per task, and uploaded to W&B as `<task>/<metric>` alongside a `_stderr
 > Multiple-choice and loglikelihood tasks — `mmlu`, `hellaswag`, `arc_challenge` — emit nothing,
 > and are dropped automatically from the thinking table.
 
+The reasoning itself is not a metric. With `--thinking`, each sample in `samples_<task>_*.jsonl` carries it
+as `length_info[<i>].thinking_text`: the response up to and including the last close token, as the model
+wrote it (`resps` holds only the answer, the reasoning is stripped before scoring). It is there whenever the
+close token is in the response, whether or not the format check passed (a template that prefills the open
+token, like Qwen's, reads as not well-formed but keeps its text). Not for `hf` with an integer close token.
+
 Two caveats worth internalising:
 
 - **The two length families use different denominators.** `response_length_*` averages over *all*
