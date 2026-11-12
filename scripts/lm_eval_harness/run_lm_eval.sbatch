@@ -780,6 +780,10 @@ if [[ -n "$BACKEND_MAX_LENGTH" ]]; then
                 COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$MAX_LENGTH"
             else
                 COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_length=$BACKEND_MAX_LENGTH"
+                # The template path never counts tokens: a prompt longer than the context
+                # minus the budget gets the server's 400. clamp_gen_toks lowers that
+                # request's budget to what is left (the openai models only).
+                [[ "$LM_EVAL_BACKEND" == "openai" ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,clamp_gen_toks=True"
             fi
             ;;
     esac
