@@ -335,6 +335,26 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("--max-length must be a positive integer", completed.stderr)
 
+    def test_max_new_tokens_reaches_the_run_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            completed = _launch(
+                "single", "--task", "uncheatable_eval", "--model", "test/model",
+                "--max-new-tokens", "14336", "--logs-root", tmp,
+            )
+            output = completed.stdout + completed.stderr
+            self.assertEqual(completed.returncode, 0, output)
+            self.assertIn("Max new tokens: 14336", output)
+            self.assertEqual(_run_config(tmp)["configuration"]["max_new_tokens"], "14336")
+
+    def test_max_new_tokens_must_be_a_positive_integer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            completed = _launch(
+                "single", "--task", "uncheatable_eval", "--model", "test/model",
+                "--max-new-tokens", "16k", "--logs-root", tmp,
+            )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("--max-new-tokens must be a positive integer", completed.stderr)
+
     def test_api_retry_and_concurrency_flags_reach_the_openai_run(self) -> None:
         output = _dry_run(
             "single", "--task", "hellaswag", "--backend", "openai", "--api-base-url", "http://localhost:8000",
