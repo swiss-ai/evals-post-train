@@ -47,21 +47,28 @@ class ClassifierTests(unittest.TestCase):
 
     def test_kinds_follow_the_output_type(self) -> None:
         self.assertEqual(self.classifier.kinds("gsm8k"), {False})
-        self.assertEqual(self.classifier.kinds("ifeval"), {False})
         self.assertEqual(self.classifier.kinds("arc_easy"), {True})
-        self.assertEqual(self.classifier.kinds("wikitext"), {True})
+        self.assertEqual(self.classifier.kinds("mixed_group"), {True, False})
+        self.assertEqual(self.classifier.kinds("not_a_task"), set())
+
+    def test_splits_in_input_order(self) -> None:
+        chat, raw = self.classifier.split(["gsm8k", "arc_easy", "ifeval", "wikitext"])
+        self.assertEqual(chat, ["gsm8k", "ifeval"])
+        self.assertEqual(raw, ["arc_easy", "wikitext"])
 
     def test_groups_and_tags_follow_their_members(self) -> None:
-        self.assertEqual(self.classifier.kinds("mc_group"), {True})
-        self.assertEqual(self.classifier.kinds("ai2_arc"), {True})
-        self.assertEqual(self.classifier.kinds("mixed_group"), {True, False})
+        chat, raw = self.classifier.split(["mc_group", "ai2_arc", "mixed_group"])
+        self.assertEqual(raw, ["mc_group", "ai2_arc"])
+        # A mix keeps the chat template, the launcher's default.
+        self.assertEqual(chat, ["mixed_group"])
 
     def test_inline_group_tasks_take_lm_evals_names(self) -> None:
         self.assertEqual(self.classifier.leaves("inline_group"), {"gsm8k", "inline_group::custom"})
 
-    def test_unknown_names_have_no_kind(self) -> None:
-        self.assertEqual(self.classifier.kinds("not_a_task"), set())
-        self.assertEqual(self.classifier.kinds("py_task"), set())
+    def test_unknown_names_keep_the_chat_template(self) -> None:
+        chat, raw = self.classifier.split(["not_a_task", "py_task", "arc_easy"])
+        self.assertEqual(chat, ["not_a_task", "py_task"])
+        self.assertEqual(raw, ["arc_easy"])
 
     def test_any_loglikelihood_member_is_reported(self) -> None:
         # A generative-only model (CHAT_FORMAT=apertus2) cannot run a mixed group either.
@@ -89,6 +96,9 @@ class RequireGenerativeTests(unittest.TestCase):
         self.assertIn("cannot do: hellaswag", refused.stderr)
         accepted = self._run("--tasks", "gsm8k", "--require-generative")
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+    def test_checking_and_writing_are_exclusive(self) -> None:
+        self.assertEqual(self._run("--tasks", "gsm8k", "--require-generative", "--output", "x").returncode, 2)
 
 
 if __name__ == "__main__":
