@@ -75,11 +75,13 @@ _eval_submit_aggregator() {
 }
 
 # BOS as run_lm_eval.sbatch resolves it (BOS=auto -> bos_default.py), so a run records
-# what it actually used: unchanged "false" for most models, "true" for Gemma 4.
+# what it actually used: "true" for Gemma 4 and, without a chat template, for any tokenizer that defines a BOS token.
 _eval_resolved_bos() {
     local bos="${BOS:-auto}"
     if [[ "$bos" == "auto" ]]; then
-        bos=$(python3 -m scripts.lm_eval_harness.bos_default "$1" 2>/dev/null || echo false)
+        local no_template=""
+        [[ "${APPLY_CHAT_TEMPLATE:-true}" == "true" ]] || no_template="--no-chat-template"
+        bos=$(python3 -m scripts.lm_eval_harness.bos_default "$1" $no_template 2>/dev/null || echo false)
     fi
     echo "$bos"
 }

@@ -426,12 +426,16 @@ if [ -z ${TOKENIZER+x} ]; then
         echo "TOKENIZER not set, using TOKENIZER=$MODEL"
     fi
 fi
-# BOS=auto: on for models whose tokenizer never adds the BOS token they need (Gemma 4);
-# the harness never doubles a BOS that is already there (tokenizer or chat template).
+# BOS=auto: on for models whose tokenizer never adds the BOS token they need (Gemma 4) and,
+# without a chat template, for a tokenizer that defines a BOS token but is configured not to add
+# it (add_bos_token: false); one that adds it itself is left alone (see bos_default.py).
+BOS_REQUESTED=$BOS
 if [[ "$BOS" == "auto" ]]; then
-    BOS=$(python3 -m scripts.lm_eval_harness.bos_default "$TOKENIZER" 2>/dev/null || echo false)
+    BOS_NO_TEMPLATE=""
+    [[ $APPLY_CHAT_TEMPLATE = true ]] || BOS_NO_TEMPLATE="--no-chat-template"
+    BOS=$(python3 -m scripts.lm_eval_harness.bos_default "$TOKENIZER" $BOS_NO_TEMPLATE 2>/dev/null || echo false)
     [[ "$BOS" == "true" ]] \
-        && echo "BOS=auto: prepending the BOS token for $TOKENIZER (its tokenizer never adds it); BOS=false / --no-bos turns this off"
+        && echo "BOS=auto: prepending the BOS token for $TOKENIZER (a tokenizer that adds it itself is left alone); BOS=false / --no-bos turns this off"
 fi
 
 
@@ -944,6 +948,13 @@ if [[ "$CHAT_FORMAT" == "apertus2" ]]; then
     # log-likelihood (it reads the harness's task index, so it runs in the container).
     TIMED_CMD="$TIMED_CMD
 cd $PWD && python -m scripts.lm_eval_harness.task_output_types --tasks '$TASKS' --require-generative"
+fi
+if [[ "$LM_EVAL_BACKEND" == "openai" && "$API_LM_EVAL_MODEL" == "local-completions" && $APPLY_CHAT_TEMPLATE != true \
+        && "${BOS_CHECK:-true}" != "false" ]]; then
+    # Without a chat template the BOS comes from the tokenizers alone, and the server tokenizes
+    # with its own: ask it what it received, and stop before the first task if that is not one BOS.
+    TIMED_CMD="$TIMED_CMD
+cd $PWD && python -m scripts.lm_eval_harness.bos_probe --url '$API_BASE_URL' --model '$API_MODEL_NAME' --tokenizer '$TOKENIZER' --bos '$BOS' --bos-requested '$BOS_REQUESTED'"
 fi
 make_cmd "$TASKS" "$HARNESS_EVAL_DIR" "$APPLY_CHAT_TEMPLATE"
 TIMED_CMD="$TIMED_CMD
