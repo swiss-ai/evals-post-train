@@ -386,7 +386,7 @@ echo "Configuration set:"
 # Values go in printf's arguments, not the format string: a '%' would be read as a conversion.
 printf '%s\n' "MODEL=$MODEL" "NAME=$NAME" "TOKENIZER=$TOKENIZER" "BS=$BS" "REVISION=$REVISION" \
 	"SIZE=$SIZE" "HARNESS_LIMIT=$HARNESS_LIMIT" "LM_EVAL_HARNESS_BRANCH=$LM_EVAL_HARNESS_BRANCH" \
-	"BOS=$BOS" "TRUST_REMOTE_CODE=$TRUST_REMOTE_CODE" "TASKS=$TASKS" "MAX_LENGTH=$MAX_LENGTH" "WANDB_ENTITY=$WANDB_ENTITY" \
+	"BOS=$BOS" "BOS_BY_CLIENT=${BOS_BY_CLIENT:-false}" "TRUST_REMOTE_CODE=$TRUST_REMOTE_CODE" "TASKS=$TASKS" "MAX_LENGTH=$MAX_LENGTH" "WANDB_ENTITY=$WANDB_ENTITY" \
 	"WANDB_PROJECT=$WANDB_PROJECT" "LM_EVAL_BACKEND=$LM_EVAL_BACKEND" "HF_HOME=$HF_HOME" \
 	"API_CHAT_ENDPOINT=${API_CHAT_ENDPOINT:-false}" "CHAT_FORMAT=$CHAT_FORMAT" ""
 printf '%s\n' "ENABLE_THINKING=$ENABLE_THINKING (explicit=$ENABLE_THINKING_EXPLICIT)" \
@@ -430,6 +430,10 @@ fi
 # without a chat template, for a tokenizer that defines a BOS token but is configured not to add
 # it (add_bos_token: false); one that adds it itself is left alone (see bos_default.py).
 BOS_REQUESTED=$BOS
+case "${BOS_BY_CLIENT:-false}" in
+    true|false) ;;
+    *) echo "BOS_BY_CLIENT must be true or false (got '$BOS_BY_CLIENT')" >&2; exit 1 ;;
+esac
 if [[ "$BOS" == "auto" ]]; then
     BOS_NO_TEMPLATE=""
     [[ $APPLY_CHAT_TEMPLATE = true ]] || BOS_NO_TEMPLATE="--no-chat-template"
@@ -625,6 +629,8 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
         # regardless of the tokenizer setting.
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER,tokenized_requests=False"
         [[ $BOS = true ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
+        # The server adds no special tokens: the BOS the model gets is the one the client wrote.
+        [[ "${BOS_BY_CLIENT:-false}" == "true" ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,bos_by_client=True"
         # Rendered client-side with the HF tokenizer, so template arguments apply here; forward
         # enable_thinking only when set (unset keeps the template default).
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS${THINKING_DEFAULT_MODEL_ARG}${THINK_ARGS}"
@@ -949,12 +955,18 @@ if [[ "$CHAT_FORMAT" == "apertus2" ]]; then
     TIMED_CMD="$TIMED_CMD
 cd $PWD && python -m scripts.lm_eval_harness.task_output_types --tasks '$TASKS' --require-generative"
 fi
-if [[ "$LM_EVAL_BACKEND" == "openai" && "$API_LM_EVAL_MODEL" == "local-completions" && $APPLY_CHAT_TEMPLATE != true \
+if [[ "${BOS_BY_CLIENT:-false}" == "true" && ! ( "$LM_EVAL_BACKEND" == "openai" && "$API_LM_EVAL_MODEL" == "local-completions" ) ]]; then
+    die "BOS_BY_CLIENT=true (--bos-by-client) needs the openai backend on /v1/completions (no --api-endpoint chat-completions, no --chat-format apertus2: those do not send text for the server to tokenize)."
+fi
+if [[ "$LM_EVAL_BACKEND" == "openai" && "$API_LM_EVAL_MODEL" == "local-completions" \
         && "${BOS_CHECK:-true}" != "false" ]]; then
-    # Without a chat template the BOS comes from the tokenizers alone, and the server tokenizes
-    # with its own: ask it what it received, and stop before the first task if that is not one BOS.
+    # The BOS comes from the tokenizers alone (and the chat template), and the server tokenizes with its
+    # own copy: ask it what it received, and stop before the first task if that is not what was meant.
+    BOS_PROBE_FLAGS=""
+    [[ $APPLY_CHAT_TEMPLATE == true ]] && BOS_PROBE_FLAGS="$BOS_PROBE_FLAGS --chat-template"
+    [[ "${BOS_BY_CLIENT:-false}" == "true" ]] && BOS_PROBE_FLAGS="$BOS_PROBE_FLAGS --bos-by-client"
     TIMED_CMD="$TIMED_CMD
-cd $PWD && python -m scripts.lm_eval_harness.bos_probe --url '$API_BASE_URL' --model '$API_MODEL_NAME' --tokenizer '$TOKENIZER' --bos '$BOS' --bos-requested '$BOS_REQUESTED'"
+cd $PWD && python -m scripts.lm_eval_harness.bos_probe --url '$API_BASE_URL' --model '$API_MODEL_NAME' --tokenizer '$TOKENIZER' --bos '$BOS' --bos-requested '$BOS_REQUESTED'$BOS_PROBE_FLAGS"
 fi
 make_cmd "$TASKS" "$HARNESS_EVAL_DIR" "$APPLY_CHAT_TEMPLATE"
 TIMED_CMD="$TIMED_CMD

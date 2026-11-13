@@ -62,6 +62,10 @@
 #   --bos                - Prepend BOS token (default: Gemma 4, and without a chat template
 #                          every tokenizer that defines a BOS token; see bos_default.py)
 #   --no-bos             - Never prepend it beyond what the tokenizer does (turns that default off)
+#   --bos-by-client      - openai backend on /v1/completions: tell the server to add no special tokens, so the
+#                          model gets exactly the BOS the client wrote (one, also after a chat template that
+#                          starts with <s>, which the server's own BOS would double). Needs a harness with
+#                          bos_by_client; the BOS probe then verifies it on the server.
 #   --repeat-config <json> - Repeat policy: repeats, repeat_scoring, task_overrides.
 #   --repeats N          - Sample every repeat-capable task N times and report mean@N. Overrides the
 #                          repeat config's global `repeats`; its per-task overrides stay.
@@ -192,6 +196,7 @@ SCRIPT_PATH=""
 CHAT_TEMPLATE_OVERRIDE=""  # "", "true", "false"
 CUSTOM_TOKENIZER=""
 BOS_FLAG=""
+BOS_BY_CLIENT_FLAG=""
 TRUST_REMOTE_CODE_FLAG=""
 BACKEND_FLAG=""
 API_BASE_URL_FLAG=""
@@ -259,6 +264,7 @@ while [[ $# -gt 0 ]]; do
         --tokenizer)    CUSTOM_TOKENIZER="$2";        shift 2 ;;
         --bos)          BOS_FLAG="true";              shift ;;
         --no-bos)       BOS_FLAG="false";             shift ;;
+        --bos-by-client) BOS_BY_CLIENT_FLAG="true";   shift ;;
         --trust-remote-code) TRUST_REMOTE_CODE_FLAG="true"; shift ;;
         --backend)      BACKEND_FLAG="$2";            shift 2 ;;
         --api-base-url) API_BASE_URL_FLAG="$2";       shift 2 ;;
@@ -999,6 +1005,7 @@ if [[ -n "$MODEL_PATH" ]]; then
 
     [[ -n "$CUSTOM_TOKENIZER" ]] && export TOKENIZER="$CUSTOM_TOKENIZER"
     [[ -n "$BOS_FLAG" ]] && export BOS="$BOS_FLAG"
+    [[ -n "$BOS_BY_CLIENT_FLAG" ]] && export BOS_BY_CLIENT="$BOS_BY_CLIENT_FLAG"
     [[ -n "$BACKEND_FLAG" ]] && export LM_EVAL_BACKEND="$BACKEND_FLAG"
 
     echo "  Model:  $MODEL_PATH"
@@ -1033,6 +1040,7 @@ else
     [[ -n "$CHAT_TEMPLATE_OVERRIDE" ]] && export APPLY_CHAT_TEMPLATE="$CHAT_TEMPLATE_OVERRIDE"
     [[ -n "$CUSTOM_TOKENIZER" ]] && export TOKENIZER="$CUSTOM_TOKENIZER"
     [[ -n "$BOS_FLAG" ]] && export BOS="$BOS_FLAG"
+    [[ -n "$BOS_BY_CLIENT_FLAG" ]] && export BOS_BY_CLIENT="$BOS_BY_CLIENT_FLAG"
     [[ -n "$BACKEND_FLAG" ]] && export LM_EVAL_BACKEND="$BACKEND_FLAG"
 
     echo "  Script: $SCRIPT_PATH"

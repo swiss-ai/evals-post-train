@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
-"""Check that the served model receives exactly one BOS token (openai backend, no chat template).
+"""Check that the served model receives the BOS token the client meant it to (openai backend).
 
-The harness decides about the BOS from its own (client) tokenizer, but the server
-tokenizes the text it is sent with its own copy. When the two disagree the prompt reaches
-the model with no BOS, or with two (the harness writes `<s>` into the text and the server adds
-another), and every score changes without an error. So before the evaluation this sends the
-prompts the harness would send, built by the harness's own model class, and reads back the prompt
-tokens the server reports (echo + logprobs, the mechanism log-likelihood tasks use): the first
-must be the BOS token, the second must not. Two prompts are checked, the way a log-likelihood
-request and a generation request are built, because the harness writes the BOS differently for each.
+The harness decides about the BOS from its own (client) tokenizer, but the server tokenizes the text it
+is sent with its own copy. When the two disagree the prompt reaches the model with no BOS, or with two
+(a chat template or the harness writes `<s>` into the text and the server adds another), and every score
+changes without an error. So before the evaluation this sends the prompts the harness would send, built by
+the harness's own model class (with the chat template rendered when the run applies it), and reads back the
+prompt tokens the server reports (echo + logprobs, the mechanism log-likelihood tasks use). Two prompts are
+checked, a log-likelihood and a generation request, because the harness writes the BOS differently for each.
 
-A double BOS always fails. No BOS fails when one was expected (the tokenizer adds one itself, the run
-prepends one, or BOS=auto should have: see expected_bos) and only warns otherwise, because a model that
-defines a BOS token but was trained without one (GPT-2 style) legitimately gets none; so does a
-tokenizer whose config claims it adds one when nothing does (DeepSeek-V3). The server's tokens decide, not
-the config flag. Exit 0: one BOS, a warning, a skip (no BOS token, --no-bos, or an endpoint that returns
-no prompt tokens). Exit 1: a doubled BOS, or none where one was expected. BOS_CHECK=false skips it.
+Outcomes: exactly one BOS is ok. None fails where one was expected (the tokenizer adds one, the run or the
+chat template writes one, or BOS=auto should have: see expected_bos) and only warns otherwise: some models
+were trained without one (GPT-2 style), and a config can claim a BOS that nothing adds (DeepSeek-V3). Two or
+more fail, except in a run with a chat template that does not use --bos-by-client: that doubling (the
+template's `<s>` plus the server's) is how such runs have always gone, so it only warns and names the fix.
+With --bos-by-client the server is told not to add special tokens, so what it receives must be what the
+client wrote. The server's tokens decide, not the tokenizer's add_bos_token flag.
+Exit 0: ok, a warning, or a skip (no BOS token, --no-bos without a template, or an endpoint that returns no
+prompt tokens). Exit 1: a failure. BOS_CHECK=false skips the probe.
 """
 
 from __future__ import annotations
@@ -40,31 +42,42 @@ def leading_bos(tokens: list[str], bos_token: str) -> int:
     return count
 
 
-def prompt_tokens(url: str, model: str, prompt: str, api_key: str = "", timeout: float = 60) -> list[str]:
+def prompt_tokens(
+    url: str, model: str, prompt: str, api_key: str = "", timeout: float = 60, add_special_tokens=None
+) -> list[str]:
     """The prompt's tokens as the server tokenized it."""
-    body = json.dumps(
-        {"model": model, "prompt": prompt, "max_tokens": 1, "temperature": 0, "echo": True, "logprobs": 1}
-    ).encode()
+    payload = {"model": model, "prompt": prompt, "max_tokens": 1, "temperature": 0, "echo": True, "logprobs": 1}
+    if add_special_tokens is not None:  # --bos-by-client: the requests the harness sends carry it
+        payload["add_special_tokens"] = add_special_tokens
+    body = json.dumps(payload).encode()
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        payload = json.loads(response.read())
-    tokens = payload["choices"][0]["logprobs"]["tokens"]
+        answer = json.loads(response.read())
+    tokens = answer["choices"][0]["logprobs"]["tokens"]
     # echo returns the prompt tokens, then the generated one
     return tokens[:-1] if len(tokens) > 1 else tokens
 
 
 def probe(
-    url: str, model: str, bos_token: str, prompts: dict[str, str], api_key: str = "", expected: bool = True
+    url: str,
+    model: str,
+    bos_token: str,
+    prompts: dict[str, str],
+    api_key: str = "",
+    expected: bool = True,
+    double_is_error: bool = True,
+    add_special_tokens=None,
 ) -> tuple[bool, str]:
     """(ok, message): each named prompt, as sent, checked on the server. `expected`: a BOS should arrive
-    (none is then an error; otherwise a warning)."""
+    (none is then an error; otherwise a warning). `double_is_error`: two or more is an error (otherwise a
+    warning)."""
     lines, ok = [], True
     for name, prompt in prompts.items():
         try:
-            tokens = prompt_tokens(url, model, prompt, api_key)
+            tokens = prompt_tokens(url, model, prompt, api_key, add_special_tokens=add_special_tokens)
         except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
             return True, f"BOS check skipped: the endpoint did not return prompt tokens ({exc!r})"
         count = leading_bos(tokens, bos_token)
@@ -82,19 +95,29 @@ def probe(
                 f"  {name}: the server received NO {bos_token} ({shown} ...): the model reads the prompt "
                 "without its start token. Pass --bos, or make --tokenizer match the served model's"
             )
+        elif not double_is_error:
+            lines.append(
+                f"  {name}: WARNING, the server received {count} {bos_token} tokens ({shown} ...): the chat "
+                "template or the harness wrote one and the server added another. --bos-by-client tells the "
+                "server to add none, so the model gets one"
+            )
         else:
             ok = False
             lines.append(
-                f"  {name}: the server received {count} {bos_token} tokens ({shown} ...): the harness wrote "
-                "one and the server added another. Drop --bos, or make --tokenizer match the served model's"
+                f"  {name}: the server received {count} {bos_token} tokens ({shown} ...): the client wrote "
+                "one and the server added another. Drop --bos, use --bos-by-client, or make --tokenizer "
+                "match the served model's"
             )
     head = "BOS check ok" if ok else "BOS check FAILED (BOS_CHECK=false skips it)"
     return ok, "\n".join([head, *lines])
 
 
-def harness_prompts(model, tokenizer: str, base_url: str, bos: bool) -> dict[str, str]:
+def harness_prompts(
+    model, tokenizer: str, base_url: str, bos: bool, chat_template: bool = False, bos_by_client: bool = False
+) -> dict[str, str]:
     """The texts the harness sends: a log-likelihood request (ids decoded back to text) and a generation
-    request, built by the harness's own model class so they cannot drift from it."""
+    request, built by the harness's own model class so they cannot drift from it. With a chat template the
+    context is the rendered template of one user message."""
     from lm_eval.models.openai_completions import LocalCompletionsAPI
 
     harness = LocalCompletionsAPI(
@@ -104,10 +127,15 @@ def harness_prompts(model, tokenizer: str, base_url: str, bos: bool) -> dict[str
         tokenizer=tokenizer,
         tokenized_requests=False,
         add_bos_token=bos,
+        # an older harness ignores it: the probe then reports what the server received
+        **({"bos_by_client": True} if bos_by_client else {}),
     )
-    context_enc, continuation_enc = harness._encode_pair(CONTEXT, CONTINUATION)
+    context = CONTEXT
+    if chat_template:
+        context = harness.apply_chat_template([{"role": "user", "content": CONTEXT}], add_generation_prompt=True)
+    context_enc, continuation_enc = harness._encode_pair(context, CONTINUATION)
     inputs, _, _ = harness.batch_loglikelihood_requests([[(None, context_enc, continuation_enc)]])
-    generation = harness._with_bos_text(CONTEXT) if bos else CONTEXT
+    generation = harness._with_bos_text(context) if harness.add_bos_token else context
     return {"log-likelihood": harness.decode_batch(inputs)[0], "generation": generation}
 
 
@@ -148,6 +176,8 @@ def main() -> int:
     parser.add_argument(
         "--bos-requested", choices=("auto", "true", "false"), default="auto", help="BOS as the run asked for it"
     )
+    parser.add_argument("--chat-template", action="store_true", help="the run applies the chat template")
+    parser.add_argument("--bos-by-client", action="store_true", help="the run tells the server to add no BOS")
     parser.add_argument(
         "--api-key", default=os.environ.get("OPENAI_API_KEY", ""), help="bearer token (default: $OPENAI_API_KEY)"
     )
@@ -165,11 +195,24 @@ def main() -> int:
     expected = expected_bos(
         tokenizer.bos_token, adds_itself, args.bos == "true", args.bos_requested, add_bos_token
     )
-    if args.bos_requested == "false" and not adds_itself:
+    if args.bos_requested == "false" and not adds_itself and not args.chat_template:
         print("BOS check skipped: --no-bos (BOS=false) and the tokenizer adds none")
         return 0
-    prompts = harness_prompts(args.model, args.tokenizer, args.url, args.bos == "true")
-    ok, message = probe(args.url, args.model, tokenizer.bos_token, prompts, args.api_key, expected)
+    prompts = harness_prompts(
+        args.model, args.tokenizer, args.url, args.bos == "true", args.chat_template, args.bos_by_client
+    )
+    # a BOS the client wrote (a chat template that starts with one) is expected to arrive
+    expected = expected or prompts["generation"].startswith(tokenizer.bos_token)
+    ok, message = probe(
+        args.url,
+        args.model,
+        tokenizer.bos_token,
+        prompts,
+        args.api_key,
+        expected,
+        double_is_error=args.bos_by_client or not args.chat_template,
+        add_special_tokens=False if args.bos_by_client else None,
+    )
     print(message, file=sys.stdout if ok else sys.stderr)
     return 0 if ok else 1
 

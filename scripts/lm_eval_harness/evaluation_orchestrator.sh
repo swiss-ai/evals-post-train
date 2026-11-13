@@ -102,6 +102,7 @@ _eval_create_run_config() {
         --field "harness_ref=${LM_EVAL_HARNESS_BRANCH:-$(_eval_pinned_harness_commit "$repo")}"
         --field "apply_chat_template=${APPLY_CHAT_TEMPLATE:-true}"
         --field "bos=$(_eval_resolved_bos "${TOKENIZER:-$model}")"
+        --field "bos_by_client=${BOS_BY_CLIENT:-false}"
         --field "limit=${HARNESS_LIMIT:-}"
         --field "num_fewshot=${NUM_FEWSHOT:-}"
         --field "batch_size=${BS:-auto:20}"

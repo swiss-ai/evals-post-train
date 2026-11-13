@@ -72,6 +72,23 @@ class ProbeTests(unittest.TestCase):
             ok, _ = probe(server.url, "m", "<s>", {"generation": "<s>The"}, expected=False)
         self.assertFalse(ok)
 
+    def test_two_bos_after_a_chat_template_only_warns_without_bos_by_client(self):
+        # the template's <s> plus the one the server adds: how template runs have always gone
+        with FakeServer(["<s>", "<s>", "<|system_start|>"]) as server:
+            ok, message = probe(
+                server.url, "m", "<s>", {"generation": "<s><|system_start|>"}, expected=True, double_is_error=False
+            )
+        self.assertTrue(ok)
+        self.assertIn("WARNING", message)
+        self.assertIn("--bos-by-client", message)
+
+    def test_add_special_tokens_travels_with_the_request_when_given(self):
+        with FakeServer(["<s>", "The"]) as server:
+            probe(server.url, "m", "<s>", {"generation": "<s>The"}, add_special_tokens=False)
+            probe(server.url, "m", "<s>", {"generation": "<s>The"})
+        self.assertIs(server.requests[0][0]["add_special_tokens"], False)
+        self.assertNotIn("add_special_tokens", server.requests[1][0])
+
     def test_double_bos_fails(self):
         with FakeServer(["<s>", "<s>", "The"]) as server:
             ok, message = probe(server.url, "m", "<s>", {"generation": "<s>The capital"})
