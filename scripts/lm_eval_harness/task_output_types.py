@@ -1,17 +1,22 @@
 """Sort lm-eval tasks into generative and log-likelihood ones.
 
-Log-likelihood tasks are the ones whose output_type is multiple_choice,
-loglikelihood or loglikelihood_rolling.
+For APPLY_CHAT_TEMPLATE=by-type (launch_evaluations.sh --chat-template-by-type):
+run_lm_eval.sbatch runs the generative tasks with the chat template and the
+log-likelihood ones (multiple_choice, loglikelihood, loglikelihood_rolling)
+without it, since those score each choice as a raw continuation of the prompt.
 
 Reads each task's yaml (following ``include:``) through the harness's own task
 index, so it must run where lm_eval is importable (the evaluation container).
-A group or tag has the kinds of its members; a name the index doesn't know
-(a path, a Python-only task) has none.
+A group or tag counts as log-likelihood when all its members are; one mixing
+both kinds, and any name the index doesn't know (a path, a Python-only task),
+goes with the generative tasks: the chat template, the launcher's default.
 
-    python -m scripts.lm_eval_harness.task_output_types --tasks a,b,c --require-generative
+    python -m scripts.lm_eval_harness.task_output_types --tasks a,b,c --output kinds.sh
 
-(CHAT_FORMAT=apertus2, whose model only generates) fails, naming every task,
-group or tag with a log-likelihood member. Only yaml is read: a Python task class can still send
+writes CHAT_TASKS=... and RAW_TASKS=... (comma-separated, input order) for
+the caller to source. With ``--require-generative`` (CHAT_FORMAT=apertus2, whose
+model only generates) it instead fails, naming every task, group or tag with a
+log-likelihood member. Only yaml is read: a Python task class can still send
 log-likelihood requests its yaml doesn't declare (squadv2, scrolls).
 """
 
@@ -19,6 +24,8 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import shlex
+from pathlib import Path
 
 LOGLIKELIHOOD = frozenset({"multiple_choice", "loglikelihood", "loglikelihood_rolling"})
 
@@ -92,6 +99,13 @@ class Classifier:
         _members(self._config(entry).get("task"), members)
         return members
 
+    def split(self, tasks: list[str]) -> tuple[list[str], list[str]]:
+        chat: list[str] = []
+        raw: list[str] = []
+        for task in tasks:
+            (raw if self.kinds(task) == {True} else chat).append(task)
+        return chat, raw
+
     def with_loglikelihood(self, tasks: list[str]) -> list[str]:
         """Tasks, groups and tags with at least one log-likelihood member."""
         return [task for task in tasks if True in self.kinds(task)]
@@ -100,10 +114,11 @@ class Classifier:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--tasks", required=True, help="comma-separated lm-eval task names")
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--output", type=Path, help="shell file to write")
+    mode.add_argument(
         "--require-generative",
         action="store_true",
-        required=True,
         help="fail if any task is scored by log-likelihood",
     )
     args = parser.parse_args()
@@ -113,10 +128,20 @@ def main() -> None:
 
     tasks = [t.strip() for t in args.tasks.split(",") if t.strip()]
     classifier = Classifier(TaskManager(), load_yaml)
-    refused = classifier.with_loglikelihood(tasks)
-    if refused:
-        raise SystemExit(f"Scored by log-likelihood, which this model cannot do: {','.join(refused)}")
-    print(f"All {len(tasks)} tasks are generative.")
+    if args.require_generative:
+        refused = classifier.with_loglikelihood(tasks)
+        if refused:
+            raise SystemExit(
+                f"Scored by log-likelihood, which this model cannot do: {','.join(refused)}"
+            )
+        print(f"All {len(tasks)} tasks are generative.")
+        return
+    chat, raw = classifier.split(tasks)
+    args.output.write_text(
+        f"CHAT_TASKS={shlex.quote(','.join(chat))}\nRAW_TASKS={shlex.quote(','.join(raw))}\n"
+    )
+    print(f"With the chat template: {','.join(chat) or '(none)'}")
+    print(f"Without (log-likelihood): {','.join(raw) or '(none)'}")
 
 
 if __name__ == "__main__":
