@@ -10,9 +10,12 @@ tokens the server reports (echo + logprobs, the mechanism log-likelihood tasks u
 must be the BOS token, the second must not. Two prompts are checked, the way a log-likelihood
 request and a generation request are built, because the harness writes the BOS differently for each.
 
-Expected: exactly one BOS when the tokenizer adds one itself, when the run prepends one, or when
-BOS=auto should have (add_bos_token=false) -- see expected_bos. Exit 0: one BOS, nothing expected,
-or the endpoint cannot tell (a warning). Exit 1: no BOS or a doubled one. BOS_CHECK=false skips it.
+A double BOS always fails. No BOS fails when one was expected (the tokenizer adds one itself, the run
+prepends one, or BOS=auto should have: see expected_bos) and only warns otherwise, because a model that
+defines a BOS token but was trained without one (GPT-2 style) legitimately gets none; so does a
+tokenizer whose config claims it adds one when nothing does (DeepSeek-V3). The server's tokens decide, not
+the config flag. Exit 0: one BOS, a warning, a skip (no BOS token, --no-bos, or an endpoint that returns
+no prompt tokens). Exit 1: a doubled BOS, or none where one was expected. BOS_CHECK=false skips it.
 """
 
 from __future__ import annotations
@@ -53,8 +56,11 @@ def prompt_tokens(url: str, model: str, prompt: str, api_key: str = "", timeout:
     return tokens[:-1] if len(tokens) > 1 else tokens
 
 
-def probe(url: str, model: str, bos_token: str, prompts: dict[str, str], api_key: str = "") -> tuple[bool, str]:
-    """(ok, message): each named prompt, as sent, checked on the server."""
+def probe(
+    url: str, model: str, bos_token: str, prompts: dict[str, str], api_key: str = "", expected: bool = True
+) -> tuple[bool, str]:
+    """(ok, message): each named prompt, as sent, checked on the server. `expected`: a BOS should arrive
+    (none is then an error; otherwise a warning)."""
     lines, ok = [], True
     for name, prompt in prompts.items():
         try:
@@ -65,6 +71,11 @@ def probe(url: str, model: str, bos_token: str, prompts: dict[str, str], api_key
         shown = " ".join(tokens[:4])
         if count == 1:
             lines.append(f"  {name}: ok, the server received one {bos_token} ({shown} ...)")
+        elif count == 0 and not expected:
+            lines.append(
+                f"  {name}: WARNING, the server received no {bos_token} ({shown} ...). The tokenizer defines one "
+                "but nothing adds it; if the model was trained with a start token, pass --bos"
+            )
         elif count == 0:
             ok = False
             lines.append(
@@ -115,12 +126,13 @@ def configured_add_bos_token(tokenizer: str):
 def expected_bos(
     bos_token: str | None, adds_itself: bool, bos_resolved: bool, bos_requested: str, add_bos_token
 ) -> bool:
-    """Whether the run should deliver a BOS.
+    """Whether the run should deliver a BOS (none then fails; otherwise it only warns).
 
     Yes when the tokenizer adds one itself, when the run prepends one, or when BOS=auto would have
     (the tokenizer defines a BOS token and says add_bos_token=false) but the host-side lookup could not
     tell: a failed lookup must not hide a missing BOS. A tokenizer that defines a BOS token and says
-    nothing is not expected to deliver one (GPT-2 style models were trained without)."""
+    nothing is not expected to deliver one (GPT-2 style models were trained without): it is still probed,
+    and warned about."""
     if not bos_token:
         return False
     auto_would_prepend = bos_requested == "auto" and add_bos_token is False
@@ -147,11 +159,17 @@ def main() -> int:
     ids = tokenizer("a", add_special_tokens=True).input_ids
     adds_itself = bool(ids) and ids[0] == tokenizer.bos_token_id
     add_bos_token = configured_add_bos_token(args.tokenizer)
-    if not expected_bos(tokenizer.bos_token, adds_itself, args.bos == "true", args.bos_requested, add_bos_token):
-        print(f"BOS check skipped: no BOS expected for {args.tokenizer}")
+    if not tokenizer.bos_token:
+        print(f"BOS check skipped: {args.tokenizer} defines no BOS token")
+        return 0
+    expected = expected_bos(
+        tokenizer.bos_token, adds_itself, args.bos == "true", args.bos_requested, add_bos_token
+    )
+    if args.bos_requested == "false" and not adds_itself:
+        print("BOS check skipped: --no-bos (BOS=false) and the tokenizer adds none")
         return 0
     prompts = harness_prompts(args.model, args.tokenizer, args.url, args.bos == "true")
-    ok, message = probe(args.url, args.model, tokenizer.bos_token, prompts, args.api_key)
+    ok, message = probe(args.url, args.model, tokenizer.bos_token, prompts, args.api_key, expected)
     print(message, file=sys.stdout if ok else sys.stderr)
     return 0 if ok else 1
 

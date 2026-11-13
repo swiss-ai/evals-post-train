@@ -60,6 +60,18 @@ class ProbeTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("NO <s>", message)
 
+    def test_no_bos_without_an_expectation_only_warns(self):
+        # defines a BOS token but nothing adds it and nothing asked for one (GPT-2 style, a config that lies)
+        with FakeServer(["The", " capital"]) as server:
+            ok, message = probe(server.url, "m", "<s>", {"generation": "The capital"}, expected=False)
+        self.assertTrue(ok)
+        self.assertIn("WARNING", message)
+
+    def test_a_double_bos_fails_even_without_an_expectation(self):
+        with FakeServer(["<s>", "<s>", "The"]) as server:
+            ok, _ = probe(server.url, "m", "<s>", {"generation": "<s>The"}, expected=False)
+        self.assertFalse(ok)
+
     def test_double_bos_fails(self):
         with FakeServer(["<s>", "<s>", "The"]) as server:
             ok, message = probe(server.url, "m", "<s>", {"generation": "<s>The capital"})
