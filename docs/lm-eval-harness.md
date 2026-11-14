@@ -737,7 +737,8 @@ pushed commit as `ghcr.io/swiss-ai/evals-post-train-eval:<commit>`.
 On a Slurm cluster, `EVAL_PREBUILT_ENV=1` also needs the EDF that starts that image: set
 `EVAL_PREBUILT_CONTAINER_CONFIG` to a file with `image = "ghcr.io#swiss-ai/evals-post-train-eval:<commit>"`
 and the `mounts` the jobs read (the repository checkout, `EVAL_ENV_CACHE_ROOT`, the logs and tokenizer
-directories); the jobs that need no model server then use it in place of `containers/env.toml`. Use the
+directories, and your home for the Hugging Face cache: without it a job that needs a dataset waits on a download);
+the jobs that need no model server then use it in place of `containers/env.toml`, `run_inspect_eval.sbatch` included. Use the
 image of the commit you launch from: the job refuses a harness other than the pinned one. On Beverin,
 whose x86 nodes do not start the NGC image, this is the way to run lm-eval in a container.
 

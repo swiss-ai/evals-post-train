@@ -63,7 +63,14 @@ export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 export TARGET_API_KEY="${TARGET_API_KEY:-}"
 export WANDB_API_KEY="${WANDB_API_KEY:-}"
 
-srun -n 1 --mpi=pmix -ul --environment=./containers/env.toml \
+# With EVAL_PREBUILT_ENV=1 the job runs in the prebuilt image (EVAL_PREBUILT_CONTAINER_CONFIG), which
+# has the Inspect lock baked in and makes run_inspect_eval.sh skip its install.
+environment=./containers/env.toml
+if [[ "${EVAL_PREBUILT_ENV:-0}" == "1" && -n "${EVAL_PREBUILT_CONTAINER_CONFIG:-}" ]]; then
+    environment=$EVAL_PREBUILT_CONTAINER_CONFIG
+fi
+
+srun -n 1 --mpi=pmix -ul --environment="$environment" \
     --export=ALL,HF_TOKEN,CSCS_SERVING_API,OPENAI_API_KEY,ANTHROPIC_API_KEY,TARGET_API_KEY,WANDB_API_KEY \
     bash -c '
         set -euo pipefail
