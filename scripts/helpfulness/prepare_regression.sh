@@ -49,8 +49,8 @@ import sys
 suite_path = Path(os.environ["EVAL_SUITE_FILE"])
 suite = load_suite(suite_path)
 names = [item["name"] for item in suite["benchmarks"]]
-if set(names) != {"ifeval", "ifbench", "alpaca_eval_2_lc", "mt_bench", "sycophancy", "summeval"}:
-    raise SystemExit("Expected the requested six-benchmark suite without TruthfulQA or SimpleQA")
+if "ifeval" not in names:
+    raise SystemExit("IFEval replay requires a suite explicitly selecting ifeval; no runtime installation performed")
 write_json(Path(sys.argv[1]), {
     "harness_revision": os.environ["EVAL_HARNESS_REF"],
     "suite": str(suite_path), "benchmarks": names,

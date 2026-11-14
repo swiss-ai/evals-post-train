@@ -44,7 +44,14 @@ invented by the batch script.
 
 ## Submit one benchmark/scope per job
 
-### Prepare the missing runtime and first genuine regression fixture
+### Standalone IFEval regression tooling (not in the teacher suite)
+
+The active teacher suite now selects AlpacaEval 2 LC, non-code MT-Bench,
+biography sycophancy and SummEval. Do not submit the IFEval preparation job for
+that suite. The following tooling remains available for independent callers;
+it requires a separate suite explicitly selecting IFEval and rejects the teacher
+suite before installing dependencies. Previously submitted jobs and evidence
+remain historical records, not scheduled teacher evaluations.
 
 `scripts/helpfulness/prepare_regression.sbatch` runs the existing immutable
 environment builder inside the verified image, with
@@ -80,7 +87,7 @@ The released literal inputs do not establish GPT-4's original chat template.
 export EVAL_REGRESSION_ROOT=/ABSOLUTE/FRESH/PERMANENT/regression-001
 export EVAL_REPO_ROOT=/ABSOLUTE/STAGED/evals-post-train
 export EVAL_CONTAINER_CONFIG=/ABSOLUTE/APPROVED/evaluation.toml
-export EVAL_SUITE_FILE=/ABSOLUTE/EXPERT/evals/helpfulness.toml
+export EVAL_SUITE_FILE=/ABSOLUTE/INDEPENDENT/ifeval-suite.toml
 mkdir -p "$EVAL_REGRESSION_ROOT/logs"
 cd "$EVAL_REGRESSION_ROOT"
 sbatch --parsable --account=infra01 --partition=normal \
@@ -93,14 +100,14 @@ The final comparison is in `ifeval/report/report.json`. A scorer mismatch is a
 failed scientific gate, not permission to change expected answers or tolerances.
 Original/reference files stay outside git.
 
-The preparation preflight validates the staged six-family expert suite before
-installing anything. TruthfulQA generation and SimpleQA are excluded by request;
-optional library adapters/tests are retained but are not scheduled evaluations.
+The preparation preflight validates the staged independently selected suite
+before installing anything. Reusable library adapters/tests are retained and
+do not determine the active teacher suite.
 Harness revisions are read using whitespace-safe Python parsing, and the shared
 builder strips CR/LF from inherited revision values. Linux staging must normalize
 shell scripts **and requirement text files**, not just `.sh` files.
 
-This bootstraps **IFEval replay only**, not six completed benchmark approvals.
+This bootstraps **IFEval replay only**, not teacher-suite benchmark approvals.
 Other source corpora, published-model deployment metadata, independently sourced
 judge labels and justified regeneration/calibration policies remain separate
 prerequisites. No checkpoint server is launched. Missing proprietary baseline

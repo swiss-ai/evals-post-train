@@ -67,6 +67,47 @@ if command == 'plan':
             result = subprocess.run(["bash", "-n", str(path)], text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_ifeval_preparation_rejects_excluded_benchmark_before_installation(self):
+        suite = self.directory / "teacher.toml"
+        suite.write_text("""
+schema_version = 1
+[judge]
+base_url = "https://example.invalid/v1"
+[[checkpoints]]
+name = "teacher"
+path = "/checkpoint"
+revision = "frozen"
+tokenizer_revision = "frozen"
+chat_template_revision = "frozen"
+[checkpoints.endpoint]
+base_url = "https://example.invalid/v1"
+[[benchmarks]]
+name = "alpaca_eval_2_lc"
+[[benchmarks]]
+name = "mt_bench"
+categories = ["writing"]
+[[benchmarks]]
+name = "sycophancy"
+[[benchmarks]]
+name = "summeval"
+source_file = "unused.jsonl"
+source_origin = "https://example.invalid/summeval"
+source_revision = "frozen"
+data_license = "fixture"
+""", encoding="utf-8")
+        environment = dict(self.environment, EVAL_REGRESSION_ROOT=str(self.directory),
+                           EVAL_SUITE_FILE=str(suite), EVAL_CONTAINER_CONFIG="unused")
+        environment["PATH"] = f"{Path(sys.executable).parent}:{environment['PATH']}"
+        result = subprocess.run(["bash", str(ROOT / "scripts/helpfulness/prepare_regression.sh")],
+                                env=environment, text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires a suite explicitly selecting ifeval", result.stderr)
+        self.assertFalse((self.directory / "runtime-cache").exists())
+        self.assertFalse((self.directory / "image.sha256").exists())
+        status = json.loads((self.directory / "workflow-status.json").read_text())
+        self.assertEqual(status["phase"], "runtime")
+        self.assertEqual(status["status"], "failed")
+
     def test_replay_and_quoted_paths(self):
         self.config.write_text("scorer_replay", encoding="utf-8")
         result = self.invoke("replay", self.config, self.output)

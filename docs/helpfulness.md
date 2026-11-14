@@ -6,10 +6,11 @@ separate ninth adapter, not a replacement for the single-turn benchmark.
 It is independent of evals-svc: no dashboard, database, model launching, or
 W&B account is required.
 
-The expert's active suite selects six families: IFEval, IFBench, AlpacaEval 2 LC,
-MT-Bench, biography sycophancy and SummEval. TruthfulQA generation and SimpleQA
-were removed from that suite by request. Their optional adapters remain available
-to other callers; the reference documentation below does not schedule them.
+The expert's active suite selects four families: AlpacaEval 2 LC, non-code
+MT-Bench, biography sycophancy and SummEval. IFEval, IFBench (including two-turn),
+TruthfulQA generation and SimpleQA were removed from that suite by request.
+Their optional adapters remain available to other callers; the reference
+documentation below does not schedule them for this teacher.
 
 Here "offline" means a batch evaluation rather than interactive training-time
 evaluation. Inference and independent judges can be hosted. Dataset acquisition
