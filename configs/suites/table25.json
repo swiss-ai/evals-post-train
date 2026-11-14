@@ -1,64 +1,38 @@
 {
   "name": "table25",
-  "description": "Thinking-mode comparison of the Apertus 1.5 paper (Table 25): MMLU, GPQA, IFBench, GSM8K, MATH-500, AIME 24, AIME 25. Mean@8 for AIME, mean@4 for the rest. MATH (hendrycks_math or minerva_math) is not listed yet: its task is undecided.",
-  "benchmarks": {
-    "mmlu_flan_cot_zeroshot": {
-      "framework": "lm_eval",
-      "repeats": 4,
-      "repeats_flag": true,
-      "metric": null
-    },
-    "gpqa_main_cot_zeroshot": {
-      "framework": "lm_eval",
-      "repeats": 4,
-      "repeats_flag": true,
-      "metric": null
-    },
-    "ifbench": {
-      "framework": "lm_eval",
-      "repeats": 4,
-      "repeats_flag": true,
-      "metric": "prompt_level_loose_acc_mean_repeats,none"
-    },
-    "gsm8k_cot_zeroshot_self_consistency": {
-      "framework": "lm_eval",
-      "repeats": 4,
-      "repeats_flag": false,
-      "metric": "exact_match,mean@4"
-    },
-    "minerva_math500_self_consistency": {
-      "framework": "lm_eval",
-      "repeats": 4,
-      "repeats_flag": false,
-      "metric": "math_verify,mean@4"
-    },
-    "aime24": {
-      "framework": "lm_eval",
-      "repeats": 8,
-      "repeats_flag": false,
-      "metric": "exact_match,mean@8"
-    },
-    "aime25": {
-      "framework": "lm_eval",
-      "repeats": 8,
-      "repeats_flag": false,
-      "metric": "exact_match,mean@8"
-    }
-  },
-  "recipes": {
+  "title": "Thinking-mode comparison, Apertus 1.5 paper (Table 25)",
+  "description": "Rows of the table, in order. Mean@8 for AIME, mean@4 for the rest. MATH is not listed yet: its task (hendrycks_math or minerva_math) is undecided.",
+  "benchmarks": [
+    {"label": "MMLU", "task": "mmlu_flan_cot_zeroshot", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null}},
+    {"label": "GPQA", "task": "gpqa_main_cot_zeroshot", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null}},
+    {"label": "IFBench", "task": "ifbench", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": "prompt_level_loose_acc_mean_repeats,none"}},
+    {"label": "GSM8K", "task": "gsm8k_cot_zeroshot_self_consistency", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "task"}, "metric": {"label": "mean@4", "key": "exact_match,mean@4"}},
+    {"label": "MATH-500", "task": "minerva_math500_self_consistency", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "task"}, "metric": {"label": "mean@4", "key": "math_verify,mean@4"}},
+    {"label": "AIME 24", "task": "aime24", "framework": "lm_eval",
+     "repeats": {"n": 8, "via": "task"}, "metric": {"label": "mean@8", "key": "exact_match,mean@8"}},
+    {"label": "AIME 25", "task": "aime25", "framework": "lm_eval",
+     "repeats": {"n": 8, "via": "task"}, "metric": {"label": "mean@8", "key": "exact_match,mean@8"}}
+  ],
+  "setups": {
     "apertus-1.5-70b-thinking": {
       "description": "swiss-ai/Apertus-v1.5-70B with thinking on. Window 32768 (user, 2026-11-12).",
       "max_length": 32768,
       "flags": ["--enable-thinking", "--chat-template"]
     },
     "apertus-2-chonk-sft": {
-      "description": "Apertus 2 Chonk SFT (no Jinja template, native format). The 16k window is the checkpoint's name, not a decision: the maximal window is still to be set.",
+      "description": "Apertus 2 Chonk SFT, native format (no Jinja template). 16384 is the checkpoint's name, not a decision: the maximal window is still to be set.",
       "max_length": 16384,
       "flags": ["--chat-format", "apertus2", "--tokenizer", "apertus-2-instruct-tokenizer"]
     }
   },
   "notes": {
-    "repeats_flag": "true: the task has no repeats of its own, pass --repeats N. false: the task yaml already repeats N times, passing --repeats would double-apply it.",
-    "metric": "Key in the run's results that holds the table value. null: not checked against a finished run yet."
+    "repeats.via": "flag: the task has no repeats of its own, the launcher gets --repeats n. task: the task yaml already repeats n times and the launcher gets nothing, because --repeats would apply it twice.",
+    "metric.key": "The key in a run's results that holds the table value. null: not checked against a finished run yet.",
+    "setups": "A setup is the max window and launcher flags one kind of model needs. Serving settings (nodes, image, --max-model-len, partition, wall time) are not here; keep --max-model-len equal to max_length."
   }
 }

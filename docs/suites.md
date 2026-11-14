@@ -1,20 +1,26 @@
 # Suites
 
-A suite names the benchmarks of a comparison and the settings each needs, so a run is not rebuilt from memory. It lives in `configs/suites/<name>.json` and is read by `scripts/common/suites.py`.
-
-| Part | Holds |
-|---|---|
-| `benchmarks` | Per task: `framework`, `repeats`, `repeats_flag`, `metric` |
-| `recipes` | Per kind of setup: `max_length` and the launcher `flags` it needs (thinking, chat format, tokenizer) |
-
-`repeats_flag` is `true` when the task has no repeats of its own and needs `--repeats N`; `false` when its yaml already repeats (AIME 8, the self-consistency tasks 4), where the flag would apply them twice. `metric` is the key of the run's results that holds the table value; `null` means it was not checked against a finished run.
+A suite writes down a comparison once: its benchmarks, how each is repeated and scored, and the setups a model can run under. It lives in `configs/suites/<name>.json`; `scripts/common/suites.py` reads it and knows no model.
 
 ```bash
-python -m scripts.common.suites list
-python -m scripts.common.suites flags table25 --recipe apertus-1.5-70b-thinking --task ifbench
+python -m scripts.common.suites show table25
+python -m scripts.common.suites plan table25 --setup apertus-1.5-70b-thinking
+python -m scripts.common.suites flags table25 --setup apertus-1.5-70b-thinking --task ifbench
 # --enable-thinking --chat-template --max-length 32768 --repeats 4
 ```
 
-Pass the printed flags to the launcher next to `--task`. Serving settings (nodes, image, `--max-model-len`, partition, wall time) are not here: they belong to whoever launches the model. Keep `--max-model-len` equal to the recipe's `max_length`.
+`plan` prints one row per benchmark (label, task, launcher flags, what it reports, the results key). Give `flags` output to the launcher next to `--task`.
 
-A recipe is data, not a special case in code: add one for a new kind of setup, with the model's maximal window. `table25` is the thinking-mode comparison of the Apertus 1.5 paper; MATH is not in it yet (its task is undecided).
+## File
+
+| Part | Fields |
+|---|---|
+| `benchmarks` (list, table order) | `label` (the table row), `task`, `framework`, `repeats {n, via}`, `metric {label, key}` |
+| `setups` (by name) | `max_length` (the model's maximal window), `flags` (thinking, chat format, tokenizer) |
+
+- `repeats.via` is `flag` when the task has no repeats of its own and the launcher gets `--repeats n`, or `task` when its yaml already repeats `n` times (AIME 8, the self-consistency tasks 4). Passing the flag there would apply the repeats twice, so nothing is passed.
+- `metric.label` is what the table shows (`mean@4`); it must agree with `repeats.n`. `metric.key` is the key in a run's results that holds the value, `null` until it has been checked against a finished run.
+- `--max-length` and `--repeats` come from `max_length` and `repeats`, so a setup's `flags` may not contain them. Keep the served `--max-model-len` equal to `max_length`.
+- A malformed file is refused with the field named (`benchmarks[5] (aime24): repeats.via must be one of ...`).
+
+Serving (nodes, image, partition, wall time) is not in a suite; it belongs to whoever launches the model. To add a comparison, copy `table25.json`; to add a kind of model, add a setup. The `tasks_*.txt` lists the launcher modes read are separate and unchanged.
