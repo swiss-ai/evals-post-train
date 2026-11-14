@@ -201,7 +201,7 @@ class LaunchFlowTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 (Path(tmp) / "tokenizer_config.json").write_text(json.dumps(config))
                 script = (
-                    f"BOS_REQUESTED={requested}; TOKENIZER={tmp}\n{block}\n"
+                    f"set -euo pipefail\nBOS_REQUESTED={requested}; TOKENIZER={tmp}\n{block}\n"
                     f'resolve_pass_bos {template}\necho "[$PASS_BOS]"\n'
                 )
                 out = subprocess.run(["bash", "-c", script], cwd=REPO_ROOT, text=True, capture_output=True)
@@ -225,7 +225,7 @@ class LaunchFlowTests(unittest.TestCase):
 
         def probed(template: str, backend: str = "openai", model: str = "local-completions", check: str = "") -> bool:
             script = (
-                f"LM_EVAL_BACKEND={backend}; API_LM_EVAL_MODEL={model}; BOS_CHECK={check}; PASS_BOS=true; BOS_REQUESTED=auto\n"
+                f"set -euo pipefail\nLM_EVAL_BACKEND={backend}; API_LM_EVAL_MODEL={model}; BOS_CHECK={check}; PASS_BOS=true; BOS_REQUESTED=auto\n"
                 "API_BASE_URL=http://x/v1/completions; API_MODEL_NAME=m; TOKENIZER=t; TIMED_CMD=start\n"
                 f"{block}\nappend_bos_probe {template}\necho \"$TIMED_CMD\"\n"
             )

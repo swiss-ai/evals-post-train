@@ -904,6 +904,7 @@ resolve_pass_bos() {
         [[ "$PASS_BOS" == "true" ]] \
             && echo "BOS=auto: prepending the BOS token for $TOKENIZER (a tokenizer that adds it itself is left alone); BOS=false / --no-bos turns this off"
     fi
+    return 0  # the && list above fails when the rule says false, which set -e must not take for a failed call
 }
 
 # append_bos_probe <chat template: true|false>: the BOS probe of the command make_cmd just built, in TIMED_CMD.
@@ -914,6 +915,7 @@ append_bos_probe() {
         && $1 != true && "${BOS_CHECK:-true}" != "false" ]] || return 0
     TIMED_CMD="$TIMED_CMD
 cd $PWD && python -m scripts.lm_eval_harness.bos_probe --url '$API_BASE_URL' --model '$API_MODEL_NAME' --tokenizer '$TOKENIZER' --bos '$PASS_BOS' --bos-requested '$BOS_REQUESTED'"
+    return 0
 }
 # bos per pass end
 
