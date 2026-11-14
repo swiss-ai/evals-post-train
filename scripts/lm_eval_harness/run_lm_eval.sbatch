@@ -434,6 +434,18 @@ case "${BOS_BY_CLIENT:-false}" in
     true|false) ;;
     *) echo "BOS_BY_CLIENT must be true or false (got '$BOS_BY_CLIENT')" >&2; exit 1 ;;
 esac
+# --bos-by-client applies to runs with a chat template: a rendered template is a complete prompt, so the server
+# must add nothing to it. Raw text is what the tokenizer's own BOS is for: the server keeps adding it there.
+# bos-by-client active begin
+BOS_BY_CLIENT_ACTIVE=false
+if [[ "${BOS_BY_CLIENT:-false}" == "true" ]]; then
+    if [[ $APPLY_CHAT_TEMPLATE = true ]]; then
+        BOS_BY_CLIENT_ACTIVE=true
+    else
+        echo "--bos-by-client applies to runs with a chat template: ignored here (no chat template)"
+    fi
+fi
+# bos-by-client active end
 if [[ "$BOS" == "auto" ]]; then
     BOS_NO_TEMPLATE=""
     [[ $APPLY_CHAT_TEMPLATE = true ]] || BOS_NO_TEMPLATE="--no-chat-template"
@@ -630,7 +642,7 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER,tokenized_requests=False"
         [[ $BOS = true ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
         # The server adds no special tokens: the BOS the model gets is the one the client wrote.
-        [[ "${BOS_BY_CLIENT:-false}" == "true" ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,bos_by_client=True"
+        [[ "$BOS_BY_CLIENT_ACTIVE" == "true" ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,bos_by_client=True"
         # Rendered client-side with the HF tokenizer, so template arguments apply here; forward
         # enable_thinking only when set (unset keeps the template default).
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS${THINKING_DEFAULT_MODEL_ARG}${THINK_ARGS}"
@@ -964,7 +976,7 @@ if [[ "$LM_EVAL_BACKEND" == "openai" && "$API_LM_EVAL_MODEL" == "local-completio
     # own copy: ask it what it received, and stop before the first task if that is not what was meant.
     BOS_PROBE_FLAGS=""
     [[ $APPLY_CHAT_TEMPLATE == true ]] && BOS_PROBE_FLAGS="$BOS_PROBE_FLAGS --chat-template"
-    [[ "${BOS_BY_CLIENT:-false}" == "true" ]] && BOS_PROBE_FLAGS="$BOS_PROBE_FLAGS --bos-by-client"
+    [[ "$BOS_BY_CLIENT_ACTIVE" == "true" ]] && BOS_PROBE_FLAGS="$BOS_PROBE_FLAGS --bos-by-client"
     TIMED_CMD="$TIMED_CMD
 cd $PWD && python -m scripts.lm_eval_harness.bos_probe --url '$API_BASE_URL' --model '$API_MODEL_NAME' --tokenizer '$TOKENIZER' --bos '$BOS' --bos-requested '$BOS_REQUESTED'$BOS_PROBE_FLAGS"
 fi

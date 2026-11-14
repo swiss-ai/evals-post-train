@@ -193,6 +193,27 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("only supported with the hf, vllm and openai backends", refused.stdout)
 
+    def test_bos_by_client_applies_to_runs_with_a_chat_template(self) -> None:
+        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
+        block = sbatch[
+            sbatch.index("# bos-by-client active begin"): sbatch.index("# bos-by-client active end")
+        ]
+
+        def active(requested: str, template: str) -> tuple[str, str]:
+            script = (
+                f'BOS_BY_CLIENT={requested}; APPLY_CHAT_TEMPLATE={template}\n'
+                f'{block}\necho "$BOS_BY_CLIENT_ACTIVE"\n'
+            )
+            out = subprocess.run(["bash", "-c", script], text=True, capture_output=True).stdout.strip().splitlines()
+            return out[-1], "\n".join(out[:-1])
+
+        self.assertEqual(active("true", "true"), ("true", ""))
+        self.assertEqual(active("false", "true"), ("false", ""))
+        self.assertEqual(active("false", "false"), ("false", ""))
+        ignored, note = active("true", "false")
+        self.assertEqual(ignored, "false")
+        self.assertIn("ignored here (no chat template)", note)
+
     def test_debug_is_forwarded_to_deferred_judge_launch(self) -> None:
         orchestrator = (REPO_ROOT / "scripts/lm_eval_harness/evaluation_orchestrator.sh").read_text()
         self.assertIn("launch_args+=(--dry-run)", orchestrator)
