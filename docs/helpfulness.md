@@ -1,16 +1,137 @@
 # Batch helpfulness checkpoint evaluations
 
-The `scripts.helpfulness` CLI bundles five existing Swiss AI harness adapters
-and three new judge-based adapters. Optional IFBench two-turn evaluation is a
-separate ninth adapter, not a replacement for the single-turn benchmark.
+The `scripts.helpfulness` CLI reuses the Swiss AI harness adapters and adds
+teacher-specific open-weight benchmark integrations. Optional IFBench two-turn
+evaluation remains a separate reusable adapter, not a teacher-suite selection.
 It is independent of evals-svc: no dashboard, database, model launching, or
 W&B account is required.
 
-The expert's active suite selects three families: AlpacaEval 2 LC, non-code
-MT-Bench and biography sycophancy. IFEval, IFBench (including two-turn),
-TruthfulQA generation, SimpleQA and SummEval were removed from that suite by request.
-Their optional adapters remain available to other callers; the reference
-documentation below does not schedule them for this teacher.
+The expert's suite selects AlpacaEval 2 LC, non-code MT-Bench, biography
+sycophancy and the nine checkpoint diagnostics below. LitBench is a separate
+scorer-validation command, not a teacher-quality score. IFEval, IFBench
+(including two-turn), TruthfulQA generation, SimpleQA and SummEval remain excluded.
+Their reusable adapters are not scheduled for this teacher.
+
+## Open-weight teacher extensions
+
+These are **adapted, uncalibrated diagnostics**, not published leaderboard
+scores. The teacher opts in with `purpose = "helpfulness_chitchat_teacher"` and
+`model_policy = "open_weights_only"`. Other users' existing generic suites are
+not restricted. All selected target and judge endpoints require a staged
+`provenance_file`, including the existing AlpacaEval/MT-Bench/sycophancy paths.
+There is no closed-model default or fallback in the teacher integrations.
+
+An endpoint profile binds the exact URL and served model to an immutable
+weights revision, public weights location, reviewed model-specific license,
+checksummed local model card, developer/display name and capabilities. The
+profile is an **operator assertion, not remote attestation**: it cannot prove
+what a server actually loaded. Do not approve a profile based on its alias alone.
+Profiles and their card hashes enter the run fingerprint; changing them prevents
+resume. Target and judge cannot be aliases/revisions of the same model repository.
+Reference baselines for adapted Arena-Hard also require open-weight profiles.
+
+Gemma/Phi are candidate families, not calibrated judges. Verified public examples
+are [`google/gemma-3-27b-it`](https://huggingface.co/google/gemma-3-27b-it)
+(Gemma-specific license, gated acknowledgement) and
+[`microsoft/phi-4`](https://huggingface.co/microsoft/phi-4) (MIT).
+Neither is selected/downloaded/hosted automatically. Open weights do not imply
+an unrestricted or OSI-approved license. Endpoint IDs, effective chat formats,
+context limits and actual judge agreement must still be verified.
+
+All targets need chat completions. Biography likelihood scoring additionally
+needs text completions, token logprobs and its runner-local tokenizer. Native
+EQ generation additionally needs `min_p`, as does Creative Writing v3 judging
+in the pinned OpenAI-compatible client; unsupported settings fail rather than
+being dropped. Judge prompts require the documented binary, preference, JSON or
+rubric outputs; malformed output is a recorded failure, not a negative label,
+abstention, tie or successful fallback.
+
+| Selection | Canonical source and implemented scope | Remaining prerequisites/limits |
+| --- | --- | --- |
+| LitBench, separate command | [drfein/LitBench](https://github.com/drfein/LitBench); raw-text scalar reward comparison on rehydrated held-out story pairs, strict `chosen > rejected`, ties reported separately. | Validates an evaluator, **not teacher generation**. Requires the published scalar verifier, local weights and original held-out IDs/text. |
+| `abstention_bench` | [facebookresearch/AbstentionBench](https://github.com/facebookresearch/AbstentionBench); native abstention and correctness judge prompts, dataset/scenario precision/recall/F1 and macro F1, answerable accuracy. | Upstream ships Llama judge configurations, not a bespoke trained small judge. Stage dataset labels/references/scenarios; CC-BY-NC-4.0 and each component's terms apply. |
+| `or_bench` | [justincui03/or-bench](https://github.com/justincui03/or-bench); exact case-sensitive generic/Qwen prefix diagnostic. | Generic profile matches only `I cannot`/`Sorry`; Qwen adds two prefixes. This is **not a semantic or calibrated Gemma/Phi refusal detector**. Keep safe/hard/toxic configurations and denominators separate. |
+| `arena_hard_v2` | [lmarena/arena-hard-auto](https://github.com/lmarena/arena-hard-auto); v2 category rubrics, both answer positions, five-way preferences, upstream strong-win weight 3, observed weighted win rates per category. | Requires separately staged **open** reference answers/profile identities. Does not report the upstream multi-judge Bradley-Terry/bootstrap headline. Both baseline and judge are adapted. |
+| `eqbench_creative_v3` | [EQ-bench/creative-writing-bench](https://github.com/EQ-bench/creative-writing-bench); pinned native generation, rubric parsing/inversion/aggregation; 3 iterations, no Elo. | Separate user-selected rubric diagnostic, not leaderboard rating. No LICENSE file found at inspected revision: confirm permission/terms before executing. Stage native dependencies and CMUdict/Punkt assets. |
+| `eqbench3` | [EQ-bench/eqbench3](https://github.com/EQ-bench/eqbench3); native scenario turns, roleplay/drafting/analysis distinctions, debrief and weighted rubric aggregation, no Elo. | MIT code; review scenario terms. No inherited Claude-scored comparison pool or rating. Dependencies must already be provisioned. |
+| `wildbench_v2` | [allenai/WildBench](https://github.com/allenai/WildBench); native v2 history/checklist template, 1000-space-separated-word clipping, ordinary sequential calls, raw 1-10, `(score - 5) * 20`, task-group macro. | Upstream already has non-Batch calls. This implements WB-Score, not WB-Reward-Mix or Elo. Strict JSON/schema checks are stricter than its permissive regex fallback. Verify dataset terms separately from Apache-2.0 toolkit. |
+| `multichallenge` | [ekwinox117/multi-challenge](https://github.com/ekwinox117/multi-challenge); complete released fixed conversation, final-answer instance rubric, reasoning/YES-NO schema, original YES/NO pass orientation, per-axis single-attempt pass rate. | Not regenerated earlier turns or pass@k. Native SDK structured output is transported as the same requested JSON schema. No LICENSE file found: confirm code/data permission. |
+| `elephant` | [myracheng/elephant](https://github.com/myracheng/elephant); native validation/indirectness/framing prompts and orientation; optional same-judge human-response deltas. | CC0 repository, underlying sources may differ. These social attributes are not automatically errors. `variant="moral"` supports separately staged paired AITA perspectives, native YTA/NTA first-five-character classification and unclassified rate; never invent counterpart posts. |
+| `darkbench` | [apartresearch/DarkBench](https://github.com/apartresearch/DarkBench), **not the darkbench-ai website**; native issue descriptions/overseer prompt, incidence and egregious incidence per issue. | Original Inspect task's default overseer is closed and must be overridden. This transport reuses rubrics without installing Inspect. Explicit developer/model context supports Gemma/Phi/Apertus instead of guessing brands. Invalid overseer outputs are failures, not clean negatives. |
+
+`open_benchmarks.SPECS` pins source revisions and SHA256 hashes of the actual
+rubric files. Stage original bytes under each `upstream_directory`; runtime
+acquisition is not implicit. Literal prompts are read without importing modules
+that construct OpenAI clients. ELEPHANT compiles only the pinned pure
+`create_prompt` function, never its credential-reading/module-level client.
+No upstream source, private dataset, story text or model weights are distributed
+in this repository. `upstream_terms` and `data_license` placeholders deliberately
+block preparation until reviewed, especially where no license was found.
+
+Stage exported JSONL/CSV sources as follows:
+
+| Adapter | Required original fields |
+| --- | --- |
+| AbstentionBench | `question`, boolean `should_abstain`, `reference_answers` (list/null), `dataset`, `scenario`; optional boolean `math_mode`. Preserve dataset/scenario identity during HF export; answerable cases require references. |
+| OR-Bench | Native CSV `prompt`, `category`; declare exact `dataset_config` and `keyword_profile`. The HF split is named `train` even for this evaluation release; do not use these evaluation cases for RL training. |
+| Arena-Hard v2 | Original `uid`, `prompt`, `category`, plus separately joined `reference_answer` and `reference_model`. Every reference identity must appear in `[reference_models.ID]` with an open-model profile. |
+| WildBench v2 | Original `session_id`/`id`, `conversation_input`, `checklist`, `primary_tag`, `secondary_tags`; retain fixed prior assistant turns. |
+| MultiChallenge | Original uppercase `QUESTION_ID`, `AXIS`, `CONVERSATION`, `TARGET_QUESTION`, `PASS_CRITERIA`. |
+| ELEPHANT social | Original ID and configured `prompt_column` (default `question`); `compare_human=true` additionally requires aligned `human_response`, rejudged with the same open judge. |
+| ELEPHANT moral | Original aligned pair ID plus `side_a_prompt`, `side_b_prompt`; do not infer pairing from row order. Use a separate suite copy with `variant="moral"`, not the social source. |
+| DarkBench | Native `id`, `input`, `target` issue key. |
+
+Preparation checks mandatory sources/terms before native dataset acquisition.
+The existing sequential rate-limited client, durable generated-answer records,
+fingerprint-bound resume and explicit failure reports are reused. Multi-request
+judgments retain raw prompts/results even when a later parse fails. Invalid or
+partial samples cannot become a successful benchmark. Reports retain scoped
+protocol labels and `published_protocol_equivalence=false`. No overall blended
+helpfulness score is introduced.
+
+EQ adapters export only committed Python/data bytes from a staged checkout at
+the exact pinned commit. They run in a subprocess with an explicit replacement
+for upstream's API client: only the declared target/judge models and endpoints
+can be called, one thread at a time. native defaults to OpenAI/Anthropic are
+never used. Local historical ratings and leaderboard pools are excluded.
+Native task coverage is checked against the complete prepared scenarios/prompts;
+a printed upstream "completed" status or zero-shaped fallback is insufficient.
+The pre-provisioned environment must satisfy the exact upstream requirements;
+missing imports/assets are an explicit blocker, not permission to install during
+evaluation. No new container/GPU job is launched by this integration.
+
+LitBench scorer validation is invoked separately:
+
+```bash
+python -m scripts.helpfulness.litbench \
+  --pairs /staged/rehydrated_test_data.csv --heldout-ids /staged/heldout-ids.jsonl \
+  --data-manifest /staged/litbench-data.json \
+  --model-directory /staged/Llama8B-CreativeWritingVerifier \
+  --provenance /staged/litbench-open-model.json --device cpu \
+  --output /fresh/litbench-scorer-validation
+```
+
+The verified scalar model is `SAA-Lab/Llama8B-CreativeWritingVerifier` at
+`81e7bc150b17012c856eb39172c1b15fccd239b5` (Llama-3.1 license).
+The adapter follows its model card: raw story text, **no chat template**, scalar
+logits, 4096-token truncation, eval/inference mode. All model files must already
+exist locally and match a complete SHA256 manifest in `local_files`; remote
+model code and downloads are disabled. The profile uses `weights_directory`
+instead of endpoint binding and capability `scalar_reward_raw_text`.
+The data manifest requires `source="SAA-Lab/LitBench-Test"`, immutable
+`revision="21e2739a2bce58bf0bc9317be412e8f33ed8f370"`, `ids_sha256`,
+`rehydrated_sha256` and reviewed `terms`. The pinned release contains 2381 ID
+pairs, despite the paper's 2480-pair description; require complete matching
+rehydration, not training/rationale pairs or a silently reduced subset.
+
+The user selected separate LitBench scorer validation, rubric-only EQ runs,
+and Arena-Hard pairwise diagnostics without a headline rating. All new teacher
+protocols are currently diagnostics. Their independent
+acceptance replay/producer contracts are **not implemented**; existing acceptance
+commands reject these names explicitly rather than minting a false judge lock.
+The existing AlpacaEval/MT-Bench acceptance paths remain available. No scorer
+agreement result, model-regeneration equivalence or open-judge calibration is
+claimed by adding adapters or passing their implementation tests.
 
 Here "offline" means a batch evaluation rather than interactive training-time
 evaluation. Inference and independent judges can be hosted. Dataset acquisition

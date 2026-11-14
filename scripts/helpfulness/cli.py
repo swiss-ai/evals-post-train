@@ -12,7 +12,7 @@ from pathlib import Path
 
 from scripts.helpfulness import native
 from scripts.helpfulness.adapters import (
-    CUSTOM_TASKS, JUDGED, NATIVE_TASKS, PROTOCOLS, generate_case, load_custom,
+    CUSTOM_TASKS, EXTERNAL_TASKS, JUDGED, NATIVE_TASKS, PROTOCOLS, generate_case, load_custom,
     score_case, summarize_custom, summarize_native, validate_benchmark,
 )
 from scripts.helpfulness.core import (
@@ -35,6 +35,10 @@ def load_suite(path: Path) -> dict:
         suite = tomllib.load(stream)
     if suite.get("schema_version") != 1:
         raise ValueError("Expected schema_version = 1")
+    for config in [suite.get("judge", {}), *[row.get("endpoint", {}) for row in suite.get("checkpoints", [])],
+                   *suite.get("reference_models", {}).values()]:
+        if "provenance_file" in config:
+            config["provenance_file"] = str((path.parent / config["provenance_file"]).resolve())
     for key in ("behavior_spec", "style_spec", "code_spec"):
         if key in suite:
             source = (path.parent / suite[key]).resolve()
@@ -62,6 +66,17 @@ def load_suite(path: Path) -> dict:
     for benchmark in benchmarks:
         name = benchmark["name"]
         validate_benchmark(name)
+        from scripts.helpfulness import open_benchmarks
+
+        if name in open_benchmarks.NAMES | EXTERNAL_TASKS:
+            if suite.get("purpose") != "helpfulness_chitchat_teacher" or suite.get("model_policy") != "open_weights_only":
+                raise ValueError("Teacher extensions require purpose=helpfulness_chitchat_teacher and model_policy=open_weights_only")
+            for key in ("upstream_directory", "upstream_terms"):
+                if not isinstance(benchmark.get(key), str) or not benchmark[key].strip():
+                    raise ValueError(f"{name} requires {key}; upstream material is not redistributed")
+            benchmark["upstream_directory"] = str((path.parent / benchmark["upstream_directory"]).resolve())
+            if "nltk_directory" in benchmark:
+                benchmark["nltk_directory"] = str((path.parent / benchmark["nltk_directory"]).resolve())
         names.append(name)
         mode = benchmark.get("mode", "generate")
         if mode not in ("generate", "validate") or (mode == "validate" and name != "summeval"):
@@ -136,16 +151,24 @@ def prepare(suite: dict, manifest: Path, bundle: Path, benchmarks: list[dict]) -
     # Check mandatory local sources before any native dataset acquisition.
     for benchmark in benchmarks:
         name = benchmark["name"]
+        from scripts.helpfulness import eqbench, open_benchmarks
+
+        if name in EXTERNAL_TASKS:
+            loaded[name] = eqbench.prepare(benchmark)
+            continue
         if name in CUSTOM_TASKS:
             for key in ("source_revision", "data_license"):
                 if benchmark[key].startswith("REPLACE_WITH_"):
                     raise ValueError(f"{name}: verify and replace {key} before preparation")
             source = (manifest.parent / benchmark["source_file"]).resolve()
             loaded[name] = {
-                "cases": load_custom(name, source, benchmark.get("mode", "generate")),
                 "origin": benchmark["source_origin"], "revision": benchmark["source_revision"],
                 "data_license": benchmark["data_license"],
             }
+            if name in open_benchmarks.NAMES:
+                loaded[name].update(open_benchmarks.prepare(name, source, benchmark))
+            else:
+                loaded[name]["cases"] = load_custom(name, source, benchmark.get("mode", "generate"))
     index = {"schema_version": 1, "suite_digest": digest(suite), "benchmarks": {}}
     if any(benchmark["name"] == "alpaca_eval_2_lc" for benchmark in benchmarks):
         native.require_harness()
@@ -214,7 +237,10 @@ class RecordingJudge:
 
 def custom_run(
     name: str, cases: list[dict], mode: str, target, judge, path: Path, max_tokens: int,
+    assets: dict | None = None, options: dict | None = None, context: dict | None = None,
 ) -> dict:
+    from scripts.helpfulness import open_benchmarks
+
     events = read_jsonl(path) if path.exists() else []
     by_id = {row["id"]: row for row in events}
     expected = {case["id"]: digest(case) for case in cases}
@@ -229,25 +255,36 @@ def custom_run(
             continue
         answers = previous.get("answers", [])
         raw_judge = RecordingJudge(judge) if judge else None
+        extension_trace = []
         row = {"id": case["id"], "case": case, "case_digest": digest(case)}
         try:
             if not answers:
-                answers = (
+                answers = open_benchmarks.generate(name, case, target, max_tokens) if name in open_benchmarks.NAMES else (
                     [case["summary"]] if mode == "validate"
                     else generate_case(name, case, target, max_tokens)
                 )
                 append_jsonl(path, {**row, "status": "generated", "answers": answers})
-            scores, raw = score_case(name, case, answers, raw_judge)
+            if name in open_benchmarks.NAMES:
+                scores, trace = open_benchmarks.score(
+                    name, case, answers[-1], judge, assets, options,
+                    {**(context or {}), "answers": answers}, extension_trace,
+                )
+                raw = json.dumps(trace, ensure_ascii=False)
+            else:
+                scores, raw = score_case(name, case, answers, raw_judge)
             row.update({"status": "succeeded", "answers": answers, "scores": scores, "raw_judge": raw})
         except (ValueError, RuntimeError) as error:
             row.update({
                 "status": "failed", "answers": answers, "error": str(error),
                 "phase": "judging" if answers else "generation",
-                "raw_judge": raw_judge.last_output if raw_judge else "",
+                "raw_judge": json.dumps(extension_trace, ensure_ascii=False) if name in open_benchmarks.NAMES
+                else raw_judge.last_output if raw_judge else "",
             })
             print(f"{name}/{case['id']}: {row['phase']} failed: {error}", file=sys.stderr)
         append_jsonl(path, row)
         by_id[case["id"]] = row
+    if name in open_benchmarks.NAMES:
+        return open_benchmarks.summarize(name, list(by_id.values()), len(cases))
     return summarize_custom(name, list(by_id.values()), len(cases), mode)
 
 
@@ -270,8 +307,20 @@ def run(
     suite: dict, data: dict, output: Path, checkpoints: list[dict], benchmarks: list[dict],
     limit: int | None = None, resume: bool = False,
 ) -> dict:
+    from scripts.helpfulness import eqbench, open_benchmarks, open_models
+
     if limit is not None and limit < 1:
         raise ValueError("limit must be a positive integer")
+    if any(item["name"] in open_benchmarks.NAMES | EXTERNAL_TASKS for item in benchmarks):
+        if suite.get("model_policy") != "open_weights_only":
+            raise ValueError("Teacher extensions cannot run without the open-weight model policy")
+    model_provenance = open_models.validate_suite(suite, checkpoints, benchmarks)
+    for benchmark in benchmarks:
+        if benchmark["name"] == "arena_hard_v2":
+            references = model_provenance.get("references", {})
+            required = {case["reference_model"] for case in data["arena_hard_v2"]["cases"]}
+            if required - references.keys():
+                raise ValueError("Arena-Hard adapted baselines require explicit open-weight reference provenance")
     resolved_targets = {
         checkpoint["name"]: public_endpoint(checkpoint["endpoint"]) for checkpoint in checkpoints
     }
@@ -322,6 +371,7 @@ def run(
         "nltk", "emoji", "syllapy", "setuptools", "langdetect", "immutabledict",
         "spacy", "torch", "transformers", "tokenizers", "huggingface-hub",
         "statsmodels", "scikit-learn", "scipy", "tiktoken",
+        "glicko2", "trueskill", "joblib", "python-dotenv", "wordfreq", "requests", "tqdm",
     }
     versions = {
         distribution.metadata["Name"]: distribution.version
@@ -341,6 +391,7 @@ def run(
         }),
         "dependency_versions": versions,
         "judge_calibrations": calibrations,
+        "open_model_provenance": model_provenance,
     }
     fingerprint = digest(identity)
     metadata_path = output / "run.json"
@@ -393,7 +444,13 @@ def run(
                 write_json(summary_path, summary)
                 completed = False
                 try:
-                    if name in NATIVE_TASKS:
+                    if name in EXTERNAL_TASKS:
+                        if limit is not None:
+                            raise ValueError("Native EQ-Bench rubric runs do not support --limit; use a declared upstream subset")
+                        summary.update(eqbench.run(
+                            benchmark, data[name], target_config, judge_config, directory, resume,
+                        ))
+                    elif name in NATIVE_TASKS:
                         documents = select_documents(
                             name, data[name]["documents"], benchmark.get("categories", []), limit
                         )
@@ -412,6 +469,8 @@ def run(
                         summary.update(custom_run(
                             name, cases, mode, target, judge, directory / "samples.jsonl",
                             suite.get("max_tokens", 2048),
+                            data[name].get("assets"), benchmark,
+                            model_provenance.get("targets", {}).get(checkpoint["name"], {}),
                         ))
                     completed = True
                 finally:

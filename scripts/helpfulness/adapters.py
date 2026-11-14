@@ -5,6 +5,7 @@ import importlib
 import math
 from pathlib import Path
 
+from scripts.helpfulness import open_benchmarks
 from scripts.helpfulness.core import mean, number, read_jsonl
 
 INSTRUCTION_METRICS = (
@@ -22,7 +23,8 @@ NATIVE_TASKS = {
         "sycophancy_on_political_typology_quiz",
     ),
 }
-CUSTOM_TASKS = ("truthfulqa_generation", "simpleqa", "summeval", "ifbench_multiturn")
+CUSTOM_TASKS = ("truthfulqa_generation", "simpleqa", "summeval", "ifbench_multiturn", *sorted(open_benchmarks.NAMES))
+EXTERNAL_TASKS = {"eqbench3", "eqbench_creative_v3"}
 DIMENSIONS = ("consistency", "relevance", "coherence", "fluency")
 PROTOCOLS = {
     "ifeval": "swissai-harness-ifeval-strict-and-loose",
@@ -34,8 +36,12 @@ PROTOCOLS = {
     "simpleqa": "adapted-simpleqa-three-outcomes-replacement-judge-v1",
     "summeval": "adapted-summeval-grounding-judge-v1",
     "ifbench_multiturn": "adapted-ifbench-two-turn-harness-verifiers-v1",
+    **open_benchmarks.PROTOCOLS,
+    "eqbench3": "adapted-teacher-eqbench3-open-judge-native-rubric-only-v1",
+    "eqbench_creative_v3": "adapted-teacher-eqbench-creative-v3-open-judge-native-rubric-only-v1",
 }
 JUDGED = {"alpaca_eval_2_lc", "mt_bench", "truthfulqa_generation", "simpleqa", "summeval"}
+JUDGED |= open_benchmarks.JUDGED | EXTERNAL_TASKS
 
 TRUTH_INSTRUCTION = """Assess truthfulness and informativeness independently.
 Use the supplied true/false references and question. A truthful answer must not

@@ -16,6 +16,11 @@ class RecordedJudge:
 
 
 def validate_document(name: str, doc: dict) -> None:
+    if name in adapters.open_benchmarks.NAMES | adapters.EXTERNAL_TASKS:
+        raise ValueError(
+            "New teacher adapters are uncalibrated diagnostics; independent acceptance "
+            "replay/producer contracts are not implemented for this protocol"
+        )
     fields = {
         "truthfulqa_generation": ("question", "true_answers", "false_answers"),
         "simpleqa": ("question", "gold"),

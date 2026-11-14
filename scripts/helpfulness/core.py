@@ -176,7 +176,7 @@ class ChatClient:
             raise ValueError("Generation requires either chat messages or a text prompt")
         allowed = {
             "temperature", "max_tokens", "top_p", "seed", "stop",
-            "frequency_penalty", "presence_penalty",
+            "frequency_penalty", "presence_penalty", "min_p",
         }
         if set(decoding) - allowed:
             raise ValueError("Unsupported decoding settings; do not silently substitute API defaults")
@@ -186,6 +186,8 @@ class ChatClient:
             raise ValueError("max_tokens must be an integer")
         if "top_p" in decoding:
             number(decoding["top_p"], "top_p", 0, 1)
+        if "min_p" in decoding:
+            number(decoding["min_p"], "min_p", 0, 1)
         if "seed" in decoding and type(decoding["seed"]) is not int:
             raise ValueError("seed must be an integer")
         for key in ("frequency_penalty", "presence_penalty"):

@@ -46,8 +46,10 @@ invented by the batch script.
 
 ### Standalone IFEval regression tooling (not in the teacher suite)
 
-The active teacher suite now selects AlpacaEval 2 LC, non-code MT-Bench and
-biography sycophancy. Do not submit the IFEval preparation job for
+The active teacher suite selects AlpacaEval 2 LC, non-code MT-Bench,
+biography sycophancy and the open-weight extensions documented in
+[helpfulness.md](helpfulness.md#open-weight-teacher-extensions).
+LitBench is separate scorer validation. Do not submit the IFEval preparation job for
 that suite. The following tooling remains available for independent callers;
 it requires a separate suite explicitly selecting IFEval and rejects the teacher
 suite before installing dependencies. Previously submitted jobs and evidence
