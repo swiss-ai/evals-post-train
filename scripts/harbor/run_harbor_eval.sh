@@ -157,6 +157,8 @@ fi
 
 # shellcheck source=scripts/common/secrets.sh
 source scripts/common/secrets.sh
+# shellcheck source=scripts/common/cache_dirs.sh
+source scripts/common/cache_dirs.sh
 # shellcheck source=scripts/common/wandb.sh
 source scripts/common/wandb.sh
 if (( NO_WANDB )); then

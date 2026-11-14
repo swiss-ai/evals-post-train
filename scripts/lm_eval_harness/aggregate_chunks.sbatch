@@ -34,7 +34,8 @@ EVAL_INCOMPLETE_TASKS_FILE=${EVAL_INCOMPLETE_TASKS_FILE:-""}
 # shellcheck source=scripts/common/secrets.sh
 source scripts/common/secrets.sh
 export WANDB_API_KEY="${WANDB_API_KEY:-}"
-export HF_HOME=${HF_HOME:-/iopsstor/scratch/cscs/$USER/huggingface}
+# shellcheck source=scripts/common/cache_dirs.sh
+source scripts/common/cache_dirs.sh
 
 if [ -f "$TABLE_METRICS" ]; then
     echo "Reading table metrics from file: $TABLE_METRICS"

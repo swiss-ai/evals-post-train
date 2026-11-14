@@ -366,12 +366,11 @@ if [ -f "$TABLE_METRICS" ]; then
 	TABLE_METRICS=$(grep -v '^\s*#' "$TABLE_METRICS" | grep -v '^\s*$' | paste -sd' ' -)
 fi
 
-# export HF_HOME=${HF_HOME:-/capstor/store/cscs/swissai/infra01/hf_home/}
-export HF_HOME=${HF_HOME:-/iopsstor/scratch/cscs/$USER/huggingface}
-
-# Redirect all caches to SCRATCH to avoid filling up HOME
-CACHE_ROOT="${SCRATCH:-/tmp}/.cache"
-export HF_DATASETS_CACHE="$CACHE_ROOT/huggingface/datasets"
+# Redirect all caches to SCRATCH to avoid filling up HOME: HF_HOME and HF_DATASETS_CACHE come from
+# scripts/common/cache_dirs.sh, shared with the Inspect and aggregation jobs.
+# shellcheck source=scripts/common/cache_dirs.sh
+source scripts/common/cache_dirs.sh
+CACHE_ROOT="$EVAL_CACHE_ROOT"
 export NLTK_DATA="$CACHE_ROOT/nltk_data"
 export TRITON_CACHE_DIR="$CACHE_ROOT/triton"
 export TIKTOKEN_CACHE_DIR="$CACHE_ROOT/tiktoken"

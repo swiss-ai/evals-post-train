@@ -63,6 +63,10 @@ export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 export TARGET_API_KEY="${TARGET_API_KEY:-}"
 export WANDB_API_KEY="${WANDB_API_KEY:-}"
 
+# Hugging Face caches on scratch, shared with lm-eval (scripts/common/cache_dirs.sh).
+# shellcheck source=scripts/common/cache_dirs.sh
+source scripts/common/cache_dirs.sh
+
 # With EVAL_PREBUILT_ENV=1 the job runs in the prebuilt image (EVAL_PREBUILT_CONTAINER_CONFIG), which
 # has the Inspect lock baked in and makes run_inspect_eval.sh skip its install.
 environment=./containers/env.toml

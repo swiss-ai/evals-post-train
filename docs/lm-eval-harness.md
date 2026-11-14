@@ -681,6 +681,8 @@ The pipeline runs inside containers managed by enroot/pyxis on SLURM. The availa
 | `env_vllm.toml` | CSCS vLLM 0.22.1 runtime image | vLLM and Megatron-LM evals |
 | `env_sglang.toml` | CSCS SGLang CUDA 13 image | SGLang evals |
 
+Hugging Face caches are on scratch for every runner (lm-eval, Inspect, the aggregation job, EvalScope, Harbor), set in one place, `scripts/common/cache_dirs.sh`: datasets in `$SCRATCH/.cache/huggingface/datasets` (`HF_DATASETS_CACHE`), hub and models in `$SCRATCH/huggingface` (`HF_HOME`, which a caller may set). A dataset is therefore downloaded once for all of them, and a job in the prebuilt image needs only the scratch mount. The pinned artifacts (environments, the `apertus-common` wheel, tokenizers) are separate, under `$EVAL_ENV_CACHE_ROOT` below.
+
 Evaluation dependencies use a shared two-tier cache under `${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}`:
 
 1. A base virtual environment is keyed by backend, Python/container configuration, and its requirements: `requirements/lm-eval-runtime.lock` for the `openai` backend, `requirements/lm-eval-runtime.txt` for in-job backends, which take `torch` and their server from the container.
@@ -737,7 +739,7 @@ pushed commit as `ghcr.io/swiss-ai/evals-post-train-eval:<commit>`.
 On a Slurm cluster, `EVAL_PREBUILT_ENV=1` also needs the EDF that starts that image: set
 `EVAL_PREBUILT_CONTAINER_CONFIG` to a file with `image = "ghcr.io#swiss-ai/evals-post-train-eval:<commit>"`
 and the `mounts` the jobs read (the repository checkout, `EVAL_ENV_CACHE_ROOT`, the logs and tokenizer
-directories, and your home for the Hugging Face cache: without it a job that needs a dataset waits on a download);
+directories);
 the jobs that need no model server then use it in place of `containers/env.toml`, `run_inspect_eval.sbatch` included. Use the
 image of the commit you launch from: the job refuses a harness other than the pinned one. On Beverin,
 whose x86 nodes do not start the NGC image, this is the way to run lm-eval in a container.
