@@ -9,7 +9,7 @@ bash scripts/lm_eval_harness/launch_evaluations.sh <mode> --model <path> [option
 
 ## Apertus
 
-> Requires: `--tokenizer alehc/swissai-tokenizer --bos`
+> Requires: `--tokenizer alehc/swissai-tokenizer` (it adds the BOS itself: do not add `--bos`, the openai backend would then score log-likelihood prompts with two)
 > The chat template is applied by default; base variants also need `--no-chat-template`.
 
 | Name | Path | Type |

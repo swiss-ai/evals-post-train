@@ -4,7 +4,7 @@
 #   bash scripts/lm_eval_harness/launch_evaluations.sh posttrain --script scripts/lm_eval_harness/runners/example_models.sh
 #
 # Per-run settings come from the launcher flags, e.g. base models: --no-chat-template, plus
-# --tokenizer alehc/swissai-tokenizer --bos for Apertus base checkpoints. Optional per-model
+# --tokenizer alehc/swissai-tokenizer for Apertus base checkpoints (no --bos: that tokenizer adds it). Optional per-model
 # Megatron iterations: declare -A MODEL_ITERATIONS=(["<name>-iter"]=8926).
 
 # name -> HF repo id or checkpoint path

@@ -212,7 +212,18 @@ bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --mod
 bash scripts/lm_eval_harness/launch_evaluations.sh single --task multijail --model meta-llama/Llama-3.2-3B --backend vllm
 ```
 
-`--bos` explicitly prepends a BOS token. Normally leave it unset: by default (`BOS=auto`) it is on only for models whose tokenizer never adds the BOS token they need, which is Gemma 4 (`scripts/lm_eval_harness/bos_default.py`: a local checkpoint's `config.json` `model_type`, otherwise the name). Without it Gemma 4 reads plain prompts and log-likelihood tasks without a chat template as nonsense. The harness never doubles a BOS that is already there (tokenizer or chat template). `--no-bos` turns the default off. Chat-template detection does not infer this option.
+`--bos` explicitly prepends a BOS token. Normally leave it unset: by default (`BOS=auto`) it is on for Gemma 4, whose tokenizer never adds the BOS token it needs, and, in runs without a chat template, for a tokenizer whose `tokenizer_config.json` defines a `bos_token` but sets `add_bos_token: false`, such as the Apertus 2 instruct tokenizer (no post-processor). Without it, log-likelihood tasks read the prompt without its start token and score lower, silently (`scripts/lm_eval_harness/bos_default.py`: a local directory is read, a Hugging Face repo's config fetched with `HF_TOKEN` when set). A tokenizer that adds the BOS itself (`add_bos_token: true`: Llama 3, Mistral, the Chonk eval tokenizer) is left alone: forcing `--bos` there makes a log-likelihood prompt reach the server with two (the harness writes the BOS it decoded from its own ids, and the server adds another). A tokenizer without a BOS token (Qwen) is untouched. `--no-bos` turns the default off. Chat-template detection does not infer this option. The rule is resolved for each lm-eval command, because it depends on whether that command applies the chat template: a `--chat-template-by-type` run has two commands, generative tasks with the template and log-likelihood tasks without it, and each gets its own BOS setting (and its own probe).
+
+Before each lm-eval command of an openai-backend run on `/v1/completions` that applies no chat template, `scripts/lm_eval_harness/bos_probe.py` sends the prompts the harness would send (a log-likelihood and a generation prompt, built by the harness's own model class) and reads back the prompt tokens the server reports (echo with logprobs). It checks how many BOS tokens lead each prompt, as the server tokenized it, and prints what it received (it shows in the run's console output):
+
+| Server received | BOS expected? | Result |
+|---|---|---|
+| exactly 1 | either | ok |
+| 0 | yes | the run fails |
+| 0 | no | warning, the run continues |
+| 2 or more | either | the run fails |
+
+A BOS is expected when the tokenizer adds one itself, when `--bos` is set, or when `BOS=auto` should have set it. A tokenizer that defines a BOS token but adds none and was not asked to (Pythia, OLMo, DeepSeek-V3, whose config claims `add_bos_token: true` while nothing adds one) only warns, because some models were trained without one. The server's tokens decide, not the `add_bos_token` flag. The probe is skipped for a tokenizer without a BOS token (Qwen), with `--no-bos` when the tokenizer adds none, and when the endpoint returns no prompt tokens (a warning). The server tokenizes with its own copy of the tokenizer, so a client tokenizer that adds a BOS next to a server that does not, or a harness-written BOS next to one the server adds, would otherwise change every score without an error. `BOS_CHECK=false` skips the probe.
 
 ### Megatron checkpoints
 
@@ -670,7 +681,7 @@ export APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-true}
 source scripts/lm_eval_harness/runners/hf_base_runner.sh "models"
 ```
 
-Base models take the launcher's `--no-chat-template` (Apertus base checkpoints also `--tokenizer alehc/swissai-tokenizer --bos`).
+Base models take the launcher's `--no-chat-template` (Apertus base checkpoints also `--tokenizer alehc/swissai-tokenizer`, which adds the BOS itself: no `--bos`).
 
 `hf_base_runner.sh` handles the model loop and delegates resumable chunk orchestration to `scripts/lm_eval_harness/evaluation_orchestrator.sh`. It respects `EVAL_CHUNK_SIZE`, `EVAL_MAX_PARALLEL`, `EVAL_MAX_RETRIES`, `SBATCH_SCRIPT`, and `WANDB_*`.
 

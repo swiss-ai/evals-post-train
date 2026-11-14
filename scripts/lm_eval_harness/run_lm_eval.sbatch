@@ -428,13 +428,9 @@ if [ -z ${TOKENIZER+x} ]; then
         echo "TOKENIZER not set, using TOKENIZER=$MODEL"
     fi
 fi
-# BOS=auto: on for models whose tokenizer never adds the BOS token they need (Gemma 4);
-# the harness never doubles a BOS that is already there (tokenizer or chat template).
-if [[ "$BOS" == "auto" ]]; then
-    BOS=$(python3 -m scripts.lm_eval_harness.bos_default "$TOKENIZER" 2>/dev/null || echo false)
-    [[ "$BOS" == "true" ]] \
-        && echo "BOS=auto: prepending the BOS token for $TOKENIZER (its tokenizer never adds it); BOS=false / --no-bos turns this off"
-fi
+# BOS=auto is resolved for each lm-eval command (resolve_pass_bos, before make_cmd): the rule depends on whether the
+# chat template is applied, and by-type decides that per kind of task.
+BOS_REQUESTED=$BOS
 
 
 # Preserve the historically compatible TP=4/DP=1 default. For an unambiguous
@@ -499,10 +495,6 @@ export HF_ALLOW_CODE_EVAL=1
 # Finally, run the actual evaluations.
 HF_CHECKPOINT_PATH=$MODEL
 COMMON_MODEL_ARGS="dtype=bfloat16"
-if [[ $BOS = true ]]; then
-	echo "Adding BOS token."
-	COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
-fi
 
 # Add vLLM specific arguments.
 export OMP_NUM_THREADS=$(( 8 * $GPUS_PER_NODE ))
@@ -622,7 +614,6 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
         # gateway's /v1/completions only parses a plain string there, so it must be forced False
         # regardless of the tokenizer setting.
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER,tokenized_requests=False"
-        [[ $BOS = true ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
         # Rendered client-side with the HF tokenizer, so template arguments apply here; forward
         # enable_thinking only when set (unset keeps the template default).
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS${THINKING_DEFAULT_MODEL_ARG}${THINK_ARGS}"
@@ -899,9 +890,49 @@ if [[ "$COMMON_MODEL_ARGS" == *\'* ]]; then
     die "Model args must not contain a single quote: $COMMON_MODEL_ARGS"
 fi
 
+# bos per pass begin
+# resolve_pass_bos <chat template: true|false>: the BOS setting of one lm-eval command, in PASS_BOS. BOS=auto: on for
+# models whose tokenizer never adds the BOS token they need (Gemma 4) and, without a chat template, for a tokenizer
+# that defines a BOS token but is configured not to add it (add_bos_token: false); one that adds it itself is left
+# alone (see bos_default.py). --bos / --no-bos give true / false for every command.
+resolve_pass_bos() {
+    PASS_BOS=$BOS_REQUESTED
+    if [[ "$PASS_BOS" == "auto" ]]; then
+        local no_template=""
+        [[ $1 == true ]] || no_template="--no-chat-template"
+        # Not silent: the node's bare python3 can be too old for the helper (Clariden: 3.6), and "false" would then
+        # look like a decision.
+        if ! PASS_BOS=$(python3 -m scripts.lm_eval_harness.bos_default "$TOKENIZER" $no_template); then
+            echo "WARNING: BOS=auto could not be resolved (bos_default.py failed above), using false" >&2
+            PASS_BOS=false
+        fi
+        [[ "$PASS_BOS" == "true" ]] \
+            && echo "BOS=auto: prepending the BOS token for $TOKENIZER (a tokenizer that adds it itself is left alone); BOS=false / --no-bos turns this off"
+    fi
+    return 0  # the && list above fails when the rule says false, which set -e must not take for a failed call
+}
+
+# append_bos_probe <chat template: true|false>: the BOS probe of the command make_cmd just built, in TIMED_CMD.
+# Without a chat template the BOS comes from the tokenizers alone, and the server tokenizes with its own: the probe
+# asks it what it received, and stops before the first task if that is not one BOS.
+append_bos_probe() {
+    [[ "$LM_EVAL_BACKEND" == "openai" && "$API_LM_EVAL_MODEL" == "local-completions" \
+        && $1 != true && "${BOS_CHECK:-true}" != "false" ]] || return 0
+    TIMED_CMD="$TIMED_CMD
+cd $PWD && python -m scripts.lm_eval_harness.bos_probe --url '$API_BASE_URL' --model '$API_MODEL_NAME' --tokenizer '$TOKENIZER' --bos '$PASS_BOS' --bos-requested '$BOS_REQUESTED'"
+    return 0
+}
+# bos per pass end
+
 # make_cmd <tasks> <output dir> <chat template: true|false>: one lm-eval pass, in CMD.
 make_cmd() {
     local eval_args="${COMMON_EVAL_ARGS[*]} --tasks $1 --output_path $2"
+    resolve_pass_bos "$3"
+    local COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS"
+    if [[ $PASS_BOS == true && ( $LM_EVAL_BACKEND != openai || "$API_LM_EVAL_MODEL" == local-completions ) ]]; then
+        echo "Adding BOS token."
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
+    fi
     local repeat_setup="" repeat_file
     if [[ -n "${EVAL_REPEAT_CONFIG:-}" ]]; then
         printf -v repeat_file '%q' "$2/repeat_config.json"
@@ -949,6 +980,7 @@ cd $PWD && python -m scripts.lm_eval_harness.task_output_types --tasks '$TASKS' 
 fi
 if [[ $APPLY_CHAT_TEMPLATE != by-type ]]; then
     make_cmd "$TASKS" "$HARNESS_EVAL_DIR" "$APPLY_CHAT_TEMPLATE"
+    append_bos_probe "$APPLY_CHAT_TEMPLATE"
     TIMED_CMD="$TIMED_CMD
 $CMD"
     echo "Final command: $CMD"
@@ -968,8 +1000,10 @@ else
         # One kind only: a single pass straight into the eval directory.
         if [[ -n "$RAW_TASKS" ]]; then
             make_cmd "$RAW_TASKS" "$HARNESS_EVAL_DIR" false
+            append_bos_probe false
         else
             make_cmd "$CHAT_TASKS" "$HARNESS_EVAL_DIR" true
+            append_bos_probe true
         fi
         TIMED_CMD="$TIMED_CMD
 $CMD"
@@ -978,10 +1012,12 @@ $CMD"
         # Outside eval_* so the result scan never takes a pass for a whole evaluation.
         PASS_ROOT="$HARNESS_DIR/.passes/$(basename "$HARNESS_EVAL_DIR")"
         make_cmd "$CHAT_TASKS" "$PASS_ROOT/chat" true
+        append_bos_probe true
         TIMED_CMD="$TIMED_CMD
 $CMD"
         echo "Final command (chat template): $CMD"
         make_cmd "$RAW_TASKS" "$PASS_ROOT/raw" false
+        append_bos_probe false
         TIMED_CMD="$TIMED_CMD
 $CMD
 cd $PWD && python -m scripts.results.merge_split_results --split_dirs '$PASS_ROOT/chat' '$PASS_ROOT/raw' --output_dir '$HARNESS_EVAL_DIR'"

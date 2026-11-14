@@ -62,8 +62,8 @@
 #                          trust_remote_code=True: for models whose tokenizer is custom
 #                          code in the repo (e.g. Kimi-K2's tokenization_kimi.py).
 #                          hf, vllm and openai backends.
-#   --bos                - Prepend BOS token (default: only for models whose tokenizer never adds
-#                          the BOS token they need, i.e. Gemma 4; see bos_default.py)
+#   --bos                - Prepend BOS token (default: Gemma 4, and without a chat template
+#                          every tokenizer that defines a BOS token; see bos_default.py)
 #   --no-bos             - Never prepend it beyond what the tokenizer does (turns that default off)
 #   --repeat-config <json> - Repeat policy: repeats, repeat_scoring, task_overrides.
 #   --repeats N          - Sample every repeat-capable task N times and report mean@N. Overrides the
