@@ -22,12 +22,14 @@
     "apertus-1.5-70b-thinking": {
       "description": "swiss-ai/Apertus-v1.5-70B with thinking on. Window 32768.",
       "max_length": 32768,
-      "flags": ["--enable-thinking", "--chat-template"]
+      "sampling": "thinking",
+      "flags": {"lm_eval": ["--enable-thinking", "--chat-template"]}
     },
     "apertus-2-chonk-sft": {
       "description": "Apertus 2 Chonk SFT, native format (no Jinja template). The window 16384 is the checkpoint's name, not yet the maximal window.",
       "max_length": 16384,
-      "flags": ["--chat-format", "apertus2", "--tokenizer", "apertus-2-instruct-tokenizer"]
+      "sampling": "thinking",
+      "flags": {"lm_eval": ["--chat-format", "apertus2", "--tokenizer", "apertus-2-instruct-tokenizer"]}
     }
   }
 }
