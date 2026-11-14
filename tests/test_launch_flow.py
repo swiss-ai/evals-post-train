@@ -243,10 +243,12 @@ class LaunchFlowTests(unittest.TestCase):
         sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
         block = sbatch[sbatch.index("# bos per pass begin"): sbatch.index("# bos per pass end")]
 
-        def by_client(requested: str, template: str) -> tuple[str, str]:
+        def by_client(
+            requested: str, template: str, backend: str = "openai", model: str = "local-completions"
+        ) -> tuple[str, str]:
             script = (
-                f"set -euo pipefail\nBOS_BY_CLIENT={requested}\n{block}\n"
-                f'resolve_pass_bos_by_client {template}\necho "$PASS_BOS_BY_CLIENT"\n'
+                f"set -euo pipefail\nBOS_BY_CLIENT={requested}\nLM_EVAL_BACKEND={backend}\nAPI_LM_EVAL_MODEL={model}\n"
+                f'{block}\nresolve_pass_bos_by_client {template}\necho "$PASS_BOS_BY_CLIENT"\n'
             )
             out = subprocess.run(["bash", "-c", script], text=True, capture_output=True).stdout.strip().splitlines()
             return out[-1], "\n".join(out[:-1])
@@ -257,6 +259,31 @@ class LaunchFlowTests(unittest.TestCase):
         ignored, note = by_client("true", "false")
         self.assertEqual(ignored, "false")
         self.assertIn("ignored for this one (no chat template)", note)
+        # unset (auto): on for template commands where it can apply, silent without a template or elsewhere
+        self.assertEqual(by_client("auto", "true"), ("true", ""))
+        self.assertEqual(by_client("auto", "false"), ("false", ""))
+        self.assertEqual(by_client("auto", "true", model="local-chat-completions"), ("false", ""))
+        self.assertEqual(by_client("auto", "true", backend="vllm", model=""), ("false", ""))
+
+    def test_orchestrator_records_bos_by_client_as_applied(self) -> None:
+        orchestrator = (REPO_ROOT / "scripts/lm_eval_harness/evaluation_orchestrator.sh").read_text()
+        func = orchestrator[
+            orchestrator.index("_eval_resolved_bos_by_client() {"): orchestrator.index("_eval_create_run_config() {")
+        ]
+
+        def recorded(**env: str) -> str:
+            exports = "".join(f"export {k}={v}\n" for k, v in env.items())
+            script = f"set -euo pipefail\n{exports}{func}\n_eval_resolved_bos_by_client\n"
+            return subprocess.run(["bash", "-c", script], text=True, capture_output=True).stdout.strip()
+
+        base = {"LM_EVAL_BACKEND": "openai"}
+        self.assertEqual(recorded(**base, APPLY_CHAT_TEMPLATE="true"), "true")
+        self.assertEqual(recorded(**base, APPLY_CHAT_TEMPLATE="false"), "false")
+        self.assertEqual(recorded(**base, APPLY_CHAT_TEMPLATE="by-type"), "chat=true,raw=false")
+        self.assertEqual(recorded(**base, APPLY_CHAT_TEMPLATE="true", BOS_BY_CLIENT="false"), "false")
+        self.assertEqual(recorded(**base, APPLY_CHAT_TEMPLATE="true", API_CHAT_ENDPOINT="true"), "false")
+        self.assertEqual(recorded(**base, APPLY_CHAT_TEMPLATE="true", CHAT_FORMAT="apertus2"), "false")
+        self.assertEqual(recorded(LM_EVAL_BACKEND="vllm", APPLY_CHAT_TEMPLATE="true"), "false")
 
     def test_bos_probe_runs_on_the_completions_endpoint_with_its_flags(self) -> None:
         sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()

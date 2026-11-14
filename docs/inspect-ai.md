@@ -157,6 +157,13 @@ The model under test is either passed straight through as an Inspect-native mode
 
 Results are **not** viewed at inspect.aisi.org.uk — that's Inspect's documentation site. Logs land as `.eval` files under `logs/inspect/<name>/`; view them with `inspect view --log-dir logs/inspect/<name>`.
 
+#### Chat template
+
+Inspect never renders a prompt itself. With `--api-base-url` it sends chat messages to `/v1/chat/completions`, and the **server** applies the chat template (for vLLM, the `chat_template` of the model's `tokenizer_config.json`, or the server's `--chat-template`). This launcher has no template flags: they are lm-eval's, and every Inspect task here is generative. Overview and Apertus 2: [README](../README.md#chat-template).
+
+- **Thinking** reaches the template as `chat_template_kwargs` in `--extra-body` ([thinking](thinking.md)); a template that does not read a kwarg ignores it silently.
+- **Reasoning in the answer:** without a server-side reasoning parser, `<think>...</think>` stays in the text that is scored ([what this does not do](thinking.md#what-this-does-not-do)).
+
 #### W&B upload
 
 Like every framework here, it uploads whenever `WANDB_API_KEY` is set (in the environment or `scripts/secrets.env`), by default to `apertus/apertus-1.5-post-training-v0.1`; `--wandb-entity`/`--wandb-project` change that, and `--no-wandb` (or `WANDB_MODE=disabled`) skips the upload, e.g. for a smoke test.

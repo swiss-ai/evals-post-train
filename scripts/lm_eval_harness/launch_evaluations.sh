@@ -47,12 +47,13 @@
 #   --bos                - Prepend BOS token (default: Gemma 4, and without a chat template
 #                          every tokenizer that defines a BOS token; see bos_default.py)
 #   --no-bos             - Never prepend it beyond what the tokenizer does (turns that default off)
-#   --bos-by-client      - Runs with a chat template, openai backend on /v1/completions: the server is told to add no
-#                          special tokens to the rendered template, so the model gets exactly the BOS the template
-#                          wrote (one: the server's own BOS would make two after a template that starts with <s>).
-#                          Ignored without a chat template. Needs a harness with bos_by_client; the BOS probe verifies
-#                          it on the server. Refused where it cannot apply (chat-completions endpoint,
-#                          --chat-format apertus2, other backends).
+#   --bos-by-client      - On by default for runs with a chat template on the openai backend on /v1/completions: the
+#                          server is told to add no special tokens to the rendered template, so the model gets exactly
+#                          the BOS the template wrote (one: the server's own BOS would make two after a template that
+#                          starts with <s>). Ignored without a chat template. Needs a harness with bos_by_client; the
+#                          BOS probe verifies it on the server. Given explicitly it is refused where it cannot apply
+#                          (chat-completions endpoint, --chat-format apertus2, other backends).
+#   --no-bos-by-client   - The server adds its own BOS to the template as before (the previous behaviour)
 #   --repeat-config <json> - Repeat policy: repeats, repeat_scoring, task_overrides.
 #   --repeats N          - Sample every repeat-capable task N times and report mean@N. Overrides the
 #                          repeat config's global `repeats`; its per-task overrides stay.
@@ -253,6 +254,7 @@ while [[ $# -gt 0 ]]; do
         --bos)          BOS_FLAG="true";              shift ;;
         --no-bos)       BOS_FLAG="false";             shift ;;
         --bos-by-client) BOS_BY_CLIENT_FLAG="true";   shift ;;
+        --no-bos-by-client) BOS_BY_CLIENT_FLAG="false"; shift ;;
         --trust-remote-code) TRUST_REMOTE_CODE_FLAG="true"; shift ;;
         --backend)      BACKEND_FLAG="$2";            shift 2 ;;
         --api-base-url) API_BASE_URL_FLAG="$2";       shift 2 ;;

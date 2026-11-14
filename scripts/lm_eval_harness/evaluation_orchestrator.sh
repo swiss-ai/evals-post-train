@@ -95,10 +95,17 @@ _eval_resolved_bos() {
     fi
 }
 
-# --bos-by-client as run_lm_eval.sbatch applies it: to commands with a chat template. A by-type run applies it to its
-# chat-template command only.
+# bos_by_client as run_lm_eval.sbatch applies it: to commands with a chat template, on by default where it can apply
+# (openai backend on /v1/completions); --no-bos-by-client turns it off. A by-type run applies it to its chat-template
+# command only.
 _eval_resolved_bos_by_client() {
-    if [[ "${BOS_BY_CLIENT:-false}" != "true" ]]; then
+    local requested="${BOS_BY_CLIENT:-auto}"
+    if [[ "$requested" == "false" ]]; then
+        echo false
+        return
+    fi
+    if [[ "$requested" != "true" ]] && ! [[ "${LM_EVAL_BACKEND:-vllm}" == "openai" && "${CHAT_FORMAT:-}" != "apertus2" \
+            && "${API_CHAT_ENDPOINT:-false}" != "true" ]]; then
         echo false
     elif [[ "${APPLY_CHAT_TEMPLATE:-true}" == "by-type" ]]; then
         echo "chat=true,raw=false"

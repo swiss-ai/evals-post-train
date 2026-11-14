@@ -78,5 +78,5 @@ scores match lm-eval's `--chat-format apertus2` path.
 
 It does not strip or measure the reasoning in the answer. Without a server-side reasoning parser
 (`reasoning_content`), `<think>...</think>` stays in the text the framework scores; lm-eval's
-`--thinking` is the only launcher option that strips it. `--chat-format apertus2` (lm-eval only)
+`--thinking` is the only launcher option that strips it. `--chat-format apertus2` (lm-eval only, [overview](../README.md#chat-template))
 renders thinking itself and refuses these flags.
