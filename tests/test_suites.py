@@ -1,4 +1,5 @@
 import copy
+import io
 import os
 import shutil
 import subprocess
@@ -157,8 +158,10 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(qwen_lm_eval[qwen_lm_eval.index("--api-model-name") + 1], "qwen")
 
     def test_run_prints_by_default_and_checks_its_arguments(self):
-        with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")):
-            self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m"]), 0)
+        with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
+                mock.patch("sys.stderr", new=io.StringIO()) as err:
+            self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m", "--model", "qwen3-32b-thinking=q"]), 0)
+        self.assertIn("14 launches: 2 models x 7 benchmarks", err.getvalue())
         for bad in (["--model", "m"], ["--model", "nope=m"], ["--model", f"{THINK}=a", "--model", f"{THINK}=b"]):
             self.assertEqual(suites.main(["run", SUITE, *bad]), 1)
 

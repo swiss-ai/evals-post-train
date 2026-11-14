@@ -342,6 +342,8 @@ def main(argv=None):
                 models[setup_name] = served
             rows = commands(suite, models, args.api_base_url, args.api_model_name, args.limit, args.no_wandb,
                             args.qos, args.partition, fetch=args.submit)
+            print(f"{len(rows)} launches: {len(models)} model{'s' * (len(models) != 1)} x "
+                  f"{len(suite['benchmarks'])} benchmarks", file=sys.stderr)
             for row in rows:
                 print(shlex.join(row["argv"]))
                 if args.submit:
