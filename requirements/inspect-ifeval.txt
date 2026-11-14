@@ -1,0 +1,5 @@
+# The IFEval scorer of inspect_evals/ifeval (the `ifeval` extra of inspect-evals). It is a GitHub-only
+# package, so it cannot sit in the hash-locked inspect-runtime.lock: this file pins its commit and is
+# installed without dependencies (which are in inspect-runtime.txt) after that lock, by
+# scripts/common/locked_venv.sh and containers/Dockerfile.eval.
+instruction_following_eval @ git+https://github.com/josejg/instruction_following_eval.git@0c495b2f95155e8b10acb919ae283bfb4d5be6e2

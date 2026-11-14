@@ -44,8 +44,8 @@ class SuiteTests(unittest.TestCase):
     def test_a_benchmark_samples_with_its_setups_profile_unless_it_names_one(self):
         suite = suites.load(SUITE)
         self.assertEqual(suites.sampling_for(suite, THINK, "aime2024"), "thinking")
-        suite["benchmarks"][5]["sampling"] = "thinking"
-        self.assertEqual(suites.plan(suite, THINK)[5]["sampling"], "thinking")
+        suite["benchmarks"][6]["sampling"] = "thinking"
+        self.assertEqual(suites.plan(suite, THINK)[6]["sampling"], "thinking")
 
     def test_unknown_task_or_setup_is_refused(self):
         suite = suites.load(SUITE)
@@ -57,24 +57,24 @@ class SuiteTests(unittest.TestCase):
     def test_malformed_suites_name_the_field(self):
         base = suites.load(SUITE)
         for mutate, message in (
-            (lambda s: s["benchmarks"][5].update(framework="x"), "framework"),
-            (lambda s: s["benchmarks"][5]["repeats"].update(n=0), "repeats.n"),
-            (lambda s: s["benchmarks"][5]["repeats"].update(via="both"), "repeats.via"),
-            (lambda s: s["benchmarks"][5]["metric"].update(label="mean@4"), "does not match"),
+            (lambda s: s["benchmarks"][6].update(framework="x"), "framework"),
+            (lambda s: s["benchmarks"][6]["repeats"].update(n=0), "repeats.n"),
+            (lambda s: s["benchmarks"][6]["repeats"].update(via="both"), "repeats.via"),
+            (lambda s: s["benchmarks"][6]["metric"].update(label="mean@4"), "does not match"),
             (lambda s: s["benchmarks"][1].update(task=s["benchmarks"][0]["task"]), "unique"),
             (lambda s: s["benchmarks"][0].pop("metric"), "missing 'metric'"),
             (lambda s: s["benchmarks"][0].update(repeats=4), "repeats must be an object"),
             (lambda s: s.pop("description"), "description"),
             (lambda s: s["setups"][THINK].update(max_length="32k"), "max_length"),
-            (lambda s: s["benchmarks"][5].update(sampling="warm"), "unknown sampling profile"),
+            (lambda s: s["benchmarks"][6].update(sampling="warm"), "unknown sampling profile"),
             (lambda s: s["setups"][THINK].update(sampling="greedy"), "not deterministic"),
-            (lambda s: s["benchmarks"][5].update(sampling="non_thinking"), "not deterministic"),
+            (lambda s: s["benchmarks"][6].update(sampling="non_thinking"), "not deterministic"),
             (lambda s: s["setups"][THINK].pop("sampling"), "sampling"),
             (lambda s: s["setups"][THINK]["flags"]["lm_eval"].extend(["--repeats", "2"]), "--repeats"),
             (lambda s: s["setups"][THINK].update(flags=["--thinking"]), "keyed by framework"),
             (lambda s: s["setups"][THINK].update(serving="--reasoning-parser x"), "serving must be a list"),
             (lambda s: s["setups"][THINK]["flags"].pop("lm_eval"), "no entry for 'lm_eval'"),
-            (lambda s: s["benchmarks"][1].update(task_args={"cot": "true"}), "inspect framework only"),
+            (lambda s: s["benchmarks"][2].update(task_args={"cot": "true"}), "inspect framework only"),
         ):
             suite = copy.deepcopy(base)
             mutate(suite)
@@ -146,12 +146,12 @@ class SuiteTests(unittest.TestCase):
                                qos="highprio", partition="highprio")
         self.assertEqual(len(rows), len(models) * len(suite["benchmarks"]))
         self.assertEqual([(r["setup"], r["label"]) for r in rows[:2]], [("chonk-lc-16k-v0.2-sft", "MMLU"), ("chonk-lc-16k-v0.2-sft", "GPQA")])
-        inspect_row, lm_eval_row = rows[0]["argv"], rows[1]["argv"]
+        inspect_row, lm_eval_row = rows[0]["argv"], rows[2]["argv"]
         self.assertEqual(inspect_row[:3], ["sbatch", "--qos=highprio", "--partition=highprio"])
         self.assertEqual(inspect_row[-3:], ["--", "--epochs", "4"])
         self.assertIn("--task-arg", inspect_row)
         self.assertEqual(lm_eval_row[:3], ["bash", "scripts/lm_eval_harness/launch_evaluations.sh", "single"])
-        self.assertEqual(lm_eval_row[lm_eval_row.index("--task") + 1], "gpqa_main_cot_zeroshot")
+        self.assertEqual(lm_eval_row[lm_eval_row.index("--task") + 1], "ifbench")
         self.assertEqual(lm_eval_row.count("--backend"), 1)  # the Chonk setup already names it
         qwen_lm_eval = next(r["argv"] for r in rows if r["setup"] == "qwen3-32b-thinking" and r["framework"] == "lm_eval")
         self.assertEqual(qwen_lm_eval[qwen_lm_eval.index("--backend") + 1], "openai")
@@ -161,7 +161,7 @@ class SuiteTests(unittest.TestCase):
         with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
             self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m", "--model", "qwen3-32b-thinking=q"]), 0)
-        self.assertIn("14 launches: 2 models x 7 benchmarks", err.getvalue())
+        self.assertIn("16 launches: 2 models x 8 benchmarks", err.getvalue())
         for bad in (["--model", "m"], ["--model", "nope=m"], ["--model", f"{THINK}=a", "--model", f"{THINK}=b"]):
             self.assertEqual(suites.main(["run", SUITE, *bad]), 1)
 

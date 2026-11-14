@@ -24,7 +24,7 @@ RUN apt-get update -qq \
 # outside the image. No model is loaded in this image, so the lock has CPU torch, from
 # PyTorch's index. The lock's hashes decide which file is accepted, whichever index has it.
 COPY --from=ghcr.io/astral-sh/uv:0.11.28 /uv /usr/local/bin/uv
-COPY requirements/lm-eval-runtime.lock requirements/inspect-runtime.lock /tmp/requirements/
+COPY requirements/lm-eval-runtime.lock requirements/inspect-runtime.lock requirements/inspect-ifeval.txt /tmp/requirements/
 # tree_sitter==0.21.3 (bfcl scoring) has no Python 3.13 wheel, so it is built from source:
 # the compiler is only there for this layer.
 RUN apt-get update -qq \
@@ -48,7 +48,9 @@ RUN /opt/lm-eval-venv/bin/python -m nltk.downloader -d /opt/lm-eval-venv/nltk_da
 # accepts it (January 2026) instead of the pinned one. run_inspect_eval.sh puts
 # EVAL_INSPECT_VENV/bin first on PATH.
 RUN python -m venv /opt/inspect-venv \
-    && /opt/inspect-venv/bin/pip install --no-cache-dir -r /tmp/requirements/inspect-runtime.lock
+    && /opt/inspect-venv/bin/pip install --no-cache-dir -r /tmp/requirements/inspect-runtime.lock \
+    && /opt/inspect-venv/bin/pip install --no-cache-dir --no-deps -r /tmp/requirements/inspect-ifeval.txt \
+    && /opt/inspect-venv/bin/python -c "import instruction_following_eval"
 
 # EvalScope (SWE-bench Verified and Pro, run_evalscope_eval.sh) in a third one:
 # its math-verify pin conflicts with lm-eval-runtime.txt's antlr4. SWE-bench_Pro-os,

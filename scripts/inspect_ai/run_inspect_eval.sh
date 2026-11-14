@@ -251,14 +251,25 @@ if [[ "${SKIP_INSTALL:-0}" == "1" || "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
 elif [[ -z "${EVAL_INSPECT_VENV:-}" ]]; then
     # shellcheck source=scripts/common/locked_venv.sh
     source "$(dirname "${BASH_SOURCE[0]}")/../common/locked_venv.sh"
-    locked_venv "$(dirname "${BASH_SOURCE[0]}")/../../requirements/inspect-runtime.lock" 3.11 ||
-        die "Installing requirements/inspect-runtime.lock failed. Set SKIP_INSTALL=1 if the environment already has it."
+    locked_venv "$(dirname "${BASH_SOURCE[0]}")/../../requirements/inspect-runtime.lock" 3.11 \
+        "$(dirname "${BASH_SOURCE[0]}")/../../requirements/inspect-ifeval.txt" ||
+        die "Installing requirements/inspect-runtime.lock (and inspect-ifeval.txt) failed. Set SKIP_INSTALL=1 if the environment already has it."
     EVAL_INSPECT_VENV=$LOCKED_VENV
 fi
 
 if [[ -n "${EVAL_INSPECT_VENV:-}" ]]; then
     [[ -x "$EVAL_INSPECT_VENV/bin/inspect" ]] || die "EVAL_INSPECT_VENV=$EVAL_INSPECT_VENV has no bin/inspect"
     export PATH="$EVAL_INSPECT_VENV/bin:$PATH"
+fi
+
+# IFEval's scorer looks for NLTK's data only in ~/.cache/nltk_data (not NLTK_DATA) and downloads it there
+# when it is missing. The prebuilt image already has the data (for lm-eval) in /opt/lm-eval-venv/nltk_data,
+# so link it in instead of downloading at the start of every run; elsewhere there is nothing to link.
+if [[ -d "${NLTK_BAKED_DATA:-/opt/lm-eval-venv/nltk_data}" ]]; then
+    mkdir -p "$HOME/.cache/nltk_data"
+    for _nltk_dir in "${NLTK_BAKED_DATA:-/opt/lm-eval-venv/nltk_data}"/*/; do
+        [[ -e "$HOME/.cache/nltk_data/$(basename "$_nltk_dir")" ]] || ln -s "${_nltk_dir%/}" "$HOME/.cache/nltk_data/$(basename "$_nltk_dir")"
+    done
 fi
 
 # A --sandbox local run has no Docker image to COPY these into, unlike inspect_evals/
