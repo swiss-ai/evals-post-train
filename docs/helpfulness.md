@@ -6,9 +6,9 @@ separate ninth adapter, not a replacement for the single-turn benchmark.
 It is independent of evals-svc: no dashboard, database, model launching, or
 W&B account is required.
 
-The expert's active suite selects four families: AlpacaEval 2 LC, non-code
-MT-Bench, biography sycophancy and SummEval. IFEval, IFBench (including two-turn),
-TruthfulQA generation and SimpleQA were removed from that suite by request.
+The expert's active suite selects three families: AlpacaEval 2 LC, non-code
+MT-Bench and biography sycophancy. IFEval, IFBench (including two-turn),
+TruthfulQA generation, SimpleQA and SummEval were removed from that suite by request.
 Their optional adapters remain available to other callers; the reference
 documentation below does not schedule them for this teacher.
 

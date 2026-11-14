@@ -88,12 +88,6 @@ name = "mt_bench"
 categories = ["writing"]
 [[benchmarks]]
 name = "sycophancy"
-[[benchmarks]]
-name = "summeval"
-source_file = "unused.jsonl"
-source_origin = "https://example.invalid/summeval"
-source_revision = "frozen"
-data_license = "fixture"
 """, encoding="utf-8")
         environment = dict(self.environment, EVAL_REGRESSION_ROOT=str(self.directory),
                            EVAL_SUITE_FILE=str(suite), EVAL_CONTAINER_CONFIG="unused")
