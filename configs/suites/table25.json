@@ -1,0 +1,64 @@
+{
+  "name": "table25",
+  "description": "Thinking-mode comparison of the Apertus 1.5 paper (Table 25): MMLU, GPQA, IFBench, GSM8K, MATH-500, AIME 24, AIME 25. Mean@8 for AIME, mean@4 for the rest. MATH (hendrycks_math or minerva_math) is not listed yet: its task is undecided.",
+  "benchmarks": {
+    "mmlu_flan_cot_zeroshot": {
+      "framework": "lm_eval",
+      "repeats": 4,
+      "repeats_flag": true,
+      "metric": null
+    },
+    "gpqa_main_cot_zeroshot": {
+      "framework": "lm_eval",
+      "repeats": 4,
+      "repeats_flag": true,
+      "metric": null
+    },
+    "ifbench": {
+      "framework": "lm_eval",
+      "repeats": 4,
+      "repeats_flag": true,
+      "metric": "prompt_level_loose_acc_mean_repeats,none"
+    },
+    "gsm8k_cot_zeroshot_self_consistency": {
+      "framework": "lm_eval",
+      "repeats": 4,
+      "repeats_flag": false,
+      "metric": "exact_match,mean@4"
+    },
+    "minerva_math500_self_consistency": {
+      "framework": "lm_eval",
+      "repeats": 4,
+      "repeats_flag": false,
+      "metric": "math_verify,mean@4"
+    },
+    "aime24": {
+      "framework": "lm_eval",
+      "repeats": 8,
+      "repeats_flag": false,
+      "metric": "exact_match,mean@8"
+    },
+    "aime25": {
+      "framework": "lm_eval",
+      "repeats": 8,
+      "repeats_flag": false,
+      "metric": "exact_match,mean@8"
+    }
+  },
+  "recipes": {
+    "apertus-1.5-70b-thinking": {
+      "description": "swiss-ai/Apertus-v1.5-70B with thinking on. Window 32768 (user, 2026-11-12).",
+      "max_length": 32768,
+      "flags": ["--enable-thinking", "--chat-template"]
+    },
+    "apertus-2-chonk-sft": {
+      "description": "Apertus 2 Chonk SFT (no Jinja template, native format). The 16k window is the checkpoint's name, not a decision: the maximal window is still to be set.",
+      "max_length": 16384,
+      "flags": ["--chat-format", "apertus2", "--tokenizer", "apertus-2-instruct-tokenizer"]
+    }
+  },
+  "notes": {
+    "repeats_flag": "true: the task has no repeats of its own, pass --repeats N. false: the task yaml already repeats N times, passing --repeats would double-apply it.",
+    "metric": "Key in the run's results that holds the table value. null: not checked against a finished run yet."
+  }
+}
