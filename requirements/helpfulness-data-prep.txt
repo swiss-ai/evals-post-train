@@ -1,0 +1,13 @@
+# Native data construction only; no model serving, inference or model downloads.
+# Keep this separate from the scorer environment; freeze the actual resolved set.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.15.0+cpu
+datasets==4.0.0
+gdown
+jsonlines
+numpy
+pandas
+pyarrow
+pydantic>=2,<3
+requests
+wget

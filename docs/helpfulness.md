@@ -136,12 +136,44 @@ The pre-provisioned environment must satisfy the exact upstream requirements;
 missing imports/assets are an explicit blocker, not permission to install during
 evaluation. No new container/GPU job is launched by this integration.
 
+LitBench's pinned index contains 2,381 oriented pairs and 3,438 distinct story
+IDs. To prepare it from a lawfully available **local** corpus, use the local-only
+joiner before invoking the scorer:
+
+```bash
+python -m scripts.helpfulness.litbench_sources \
+  --native-index /staged/litbench-test/data/train-00000-of-00001.parquet \
+  --stories /private/authorized-heldout-stories.jsonl \
+  --terms-review /private/reviewed-story-terms.txt \
+  --output-directory /private/fresh-litbench-inputs
+```
+
+Stories must use exact native `id` and `story` fields (CSV or JSONL). The importer
+checks the original Parquet hash and complete native ID coverage, preserves
+chosen/rejected orientation and text, and rejects duplicate, missing, deleted
+or unexpected stories. Optional `--training-ids` accepts an independently
+supplied native-pair index for story-ID overlap checks; without it, the manifest
+explicitly records that training overlap was not checked. This does not certify
+text authenticity, semantic leakage or lawful rights. The HF split name `train`
+does not make the held-out test release training data.
+
+The importer never scrapes stories, downloads data/models or runs inference.
+Keep its outputs outside Git in a private local directory. POSIX directory
+creation requests owner-only access; a Windows/WSL-mounted filesystem may not
+honor those modes, so use a private Linux filesystem or verify Windows ACLs.
+An existing Arrow runtime is required to read the pinned Parquet. The separate
+`requirements/helpfulness-data-prep.txt` profile supports input preparation;
+freeze its resolved packages and installation hashes in preparation evidence.
+It is **not** the complete scorer runtime or an ARM64 cluster environment.
+Missing packages must not be installed automatically during evaluation.
+
 LitBench scorer validation is invoked separately:
 
 ```bash
 python -m scripts.helpfulness.litbench \
-  --pairs /staged/rehydrated_test_data.csv --heldout-ids /staged/heldout-ids.jsonl \
-  --data-manifest /staged/litbench-data.json \
+  --pairs /private/fresh-litbench-inputs/pairs.jsonl \
+  --heldout-ids /private/fresh-litbench-inputs/heldout-ids.jsonl \
+  --data-manifest /private/fresh-litbench-inputs/data-manifest.json \
   --model-directory /staged/Llama8B-CreativeWritingVerifier \
   --provenance /staged/litbench-open-model.json --device cpu \
   --output /fresh/litbench-scorer-validation
