@@ -74,16 +74,37 @@ _eval_submit_aggregator() {
     fi
 }
 
-# BOS as run_lm_eval.sbatch resolves it (BOS=auto -> bos_default.py), so a run records
-# what it actually used: "true" for Gemma 4 and, without a chat template, for any tokenizer that defines a BOS token.
-_eval_resolved_bos() {
-    local bos="${BOS:-auto}"
+# BOS as run_lm_eval.sbatch resolves it for each lm-eval command (BOS=auto -> bos_default.py), so a run records what it
+# actually used: "true" for Gemma 4 and, without a chat template, for a tokenizer that defines a BOS token but does not
+# add it. A by-type run has two commands and records both: "raw=<bos>,chat=<bos>".
+_eval_resolved_bos_for() {
+    local tokenizer="$1" template="$2" bos="${BOS:-auto}"
     if [[ "$bos" == "auto" ]]; then
         local no_template=""
-        [[ "${APPLY_CHAT_TEMPLATE:-true}" == "true" ]] || no_template="--no-chat-template"
-        bos=$(python3 -m scripts.lm_eval_harness.bos_default "$1" $no_template 2>/dev/null || echo false)
+        [[ "$template" == "true" ]] || no_template="--no-chat-template"
+        bos=$(python3 -m scripts.lm_eval_harness.bos_default "$tokenizer" $no_template 2>/dev/null || echo false)
     fi
     echo "$bos"
+}
+
+_eval_resolved_bos() {
+    if [[ "${APPLY_CHAT_TEMPLATE:-true}" == "by-type" ]]; then
+        echo "raw=$(_eval_resolved_bos_for "$1" false),chat=$(_eval_resolved_bos_for "$1" true)"
+    else
+        _eval_resolved_bos_for "$1" "${APPLY_CHAT_TEMPLATE:-true}"
+    fi
+}
+
+# --bos-by-client as run_lm_eval.sbatch applies it: to commands with a chat template. A by-type run applies it to its
+# chat-template command only.
+_eval_resolved_bos_by_client() {
+    if [[ "${BOS_BY_CLIENT:-false}" != "true" ]]; then
+        echo false
+    elif [[ "${APPLY_CHAT_TEMPLATE:-true}" == "by-type" ]]; then
+        echo "chat=true,raw=false"
+    else
+        [[ "${APPLY_CHAT_TEMPLATE:-true}" == "true" ]] && echo true || echo false
+    fi
 }
 
 _eval_create_run_config() {
@@ -102,7 +123,7 @@ _eval_create_run_config() {
         --field "harness_ref=${LM_EVAL_HARNESS_BRANCH:-$(_eval_pinned_harness_commit "$repo")}"
         --field "apply_chat_template=${APPLY_CHAT_TEMPLATE:-true}"
         --field "bos=$(_eval_resolved_bos "${TOKENIZER:-$model}")"
-        --field "bos_by_client=$([[ "${BOS_BY_CLIENT:-false}" == "true" && "${APPLY_CHAT_TEMPLATE:-true}" == "true" ]] && echo true || echo false)"
+        --field "bos_by_client=$(_eval_resolved_bos_by_client)"
         --field "limit=${HARNESS_LIMIT:-}"
         --field "num_fewshot=${NUM_FEWSHOT:-}"
         --field "batch_size=${BS:-auto:20}"
