@@ -936,12 +936,8 @@ append_bos_probe() {
     [[ $1 == true ]] && flags="$flags --chat-template"
     [[ "$PASS_BOS_BY_CLIENT" == "true" ]] && flags="$flags --bos-by-client"
     TIMED_CMD="$TIMED_CMD
-<<<<<<< HEAD
 cd $PWD && python -m scripts.lm_eval_harness.bos_probe --url '$API_BASE_URL' --model '$API_MODEL_NAME' --tokenizer '$TOKENIZER' --bos '$PASS_BOS' --bos-requested '$BOS_REQUESTED'$flags"
-=======
-cd $PWD && python -m scripts.lm_eval_harness.bos_probe --url '$API_BASE_URL' --model '$API_MODEL_NAME' --tokenizer '$TOKENIZER' --bos '$PASS_BOS' --bos-requested '$BOS_REQUESTED'"
     return 0
->>>>>>> bos-from-tokenizer
 }
 # bos per pass end
 

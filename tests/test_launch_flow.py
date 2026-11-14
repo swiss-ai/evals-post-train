@@ -246,12 +246,8 @@ class LaunchFlowTests(unittest.TestCase):
             template: str, backend: str = "openai", model: str = "local-completions", check: str = "", by_client: str = "false"
         ) -> str:
             script = (
-<<<<<<< HEAD
-                f"LM_EVAL_BACKEND={backend}; API_LM_EVAL_MODEL={model}; BOS_CHECK={check}; PASS_BOS=true; BOS_REQUESTED=auto\n"
-                f"PASS_BOS_BY_CLIENT={by_client}\n"
-=======
                 f"set -euo pipefail\nLM_EVAL_BACKEND={backend}; API_LM_EVAL_MODEL={model}; BOS_CHECK={check}; PASS_BOS=true; BOS_REQUESTED=auto\n"
->>>>>>> bos-from-tokenizer
+                f"PASS_BOS_BY_CLIENT={by_client}\n"
                 "API_BASE_URL=http://x/v1/completions; API_MODEL_NAME=m; TOKENIZER=t; TIMED_CMD=start\n"
                 f"{block}\nappend_bos_probe {template}\necho \"$TIMED_CMD\"\n"
             )
