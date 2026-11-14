@@ -20,19 +20,14 @@
   ],
   "setups": {
     "apertus-1.5-70b-thinking": {
-      "description": "swiss-ai/Apertus-v1.5-70B with thinking on. Window 32768 (user, 2026-11-12).",
+      "description": "swiss-ai/Apertus-v1.5-70B with thinking on. Window 32768.",
       "max_length": 32768,
       "flags": ["--enable-thinking", "--chat-template"]
     },
     "apertus-2-chonk-sft": {
-      "description": "Apertus 2 Chonk SFT, native format (no Jinja template). 16384 is the checkpoint's name, not a decision: the maximal window is still to be set.",
+      "description": "Apertus 2 Chonk SFT, native format (no Jinja template). The window 16384 is the checkpoint's name, not yet the maximal window.",
       "max_length": 16384,
       "flags": ["--chat-format", "apertus2", "--tokenizer", "apertus-2-instruct-tokenizer"]
     }
-  },
-  "notes": {
-    "repeats.via": "flag: the task has no repeats of its own, the launcher gets --repeats n. task: the task yaml already repeats n times and the launcher gets nothing, because --repeats would apply it twice.",
-    "metric.key": "The key in a run's results that holds the table value. null: not checked against a finished run yet.",
-    "setups": "A setup is the max window and launcher flags one kind of model needs. Serving settings (nodes, image, --max-model-len, partition, wall time) are not here; keep --max-model-len equal to max_length."
   }
 }

@@ -19,10 +19,6 @@ class SuiteTests(unittest.TestCase):
                          ["--enable-thinking", "--chat-template", "--max-length", "32768", "--repeats", "4"])
         self.assertNotIn("--repeats", suites.flags_for(suite, THINK, "aime24"))
 
-    def test_task_or_label_finds_the_benchmark(self):
-        suite = suites.load("table25")
-        self.assertIs(suites.benchmark(suite, "AIME 24"), suites.benchmark(suite, "aime24"))
-
     def test_setup_sets_window_and_format(self):
         flags = suites.flags_for(suites.load("table25"), "apertus-2-chonk-sft", "gsm8k_cot_zeroshot_self_consistency")
         self.assertEqual(flags[:2], ["--chat-format", "apertus2"])
@@ -50,6 +46,8 @@ class SuiteTests(unittest.TestCase):
             (lambda s: s["benchmarks"][5]["metric"].update(label="mean@4"), "does not match"),
             (lambda s: s["benchmarks"][1].update(task=s["benchmarks"][0]["task"]), "unique"),
             (lambda s: s["benchmarks"][0].pop("metric"), "missing 'metric'"),
+            (lambda s: s["benchmarks"][0].update(repeats=4), "repeats must be an object"),
+            (lambda s: s.pop("description"), "description"),
             (lambda s: s["setups"][THINK].update(max_length="32k"), "max_length"),
             (lambda s: s["setups"][THINK]["flags"].extend(["--repeats", "2"]), "--repeats"),
         ):

@@ -9,7 +9,7 @@ configs/suites/<name>.json holds two things:
 yaml already repeats n times, nothing is passed). The code only reads the file and knows no model.
 
     python -m scripts.common.suites list
-    python -m scripts.common.suites show table25
+    python -m scripts.common.suites show table25    # title and setups
     python -m scripts.common.suites plan table25 --setup apertus-1.5-70b-thinking
     python -m scripts.common.suites flags table25 --setup apertus-1.5-70b-thinking --task ifbench
 """
@@ -32,7 +32,7 @@ def _positive_int(where, value):
 
 def validate(suite):
     """Raise ValueError naming the broken field; return the suite otherwise."""
-    for key in ("name", "title", "benchmarks", "setups"):
+    for key in ("name", "title", "description", "benchmarks", "setups"):
         if key not in suite:
             raise ValueError(f"suite is missing {key!r}")
     if not isinstance(suite["benchmarks"], list) or not suite["benchmarks"]:
@@ -43,10 +43,14 @@ def validate(suite):
         for key in ("label", "task", "framework", "repeats", "metric"):
             if key not in bench:
                 raise ValueError(f"{where}: missing {key!r}")
+        for key in ("repeats", "metric"):
+            if not isinstance(bench[key], dict):
+                raise ValueError(f"{where}: {key} must be an object (got {bench[key]!r})")
         where = f"{where} ({bench['task']})"
         if bench["task"] in tasks or bench["label"] in labels:
             raise ValueError(f"{where}: task and label must be unique within the suite")
-        tasks.add(bench["task"]), labels.add(bench["label"])
+        tasks.add(bench["task"])
+        labels.add(bench["label"])
         if bench["framework"] not in FRAMEWORKS:
             raise ValueError(f"{where}: framework must be one of {FRAMEWORKS} (got {bench['framework']!r})")
         _positive_int(f"{where} repeats.n", bench["repeats"].get("n"))
@@ -81,7 +85,7 @@ def load(name_or_path):
 
 def benchmark(suite, task):
     for bench in suite["benchmarks"]:
-        if task in (bench["task"], bench["label"]):
+        if bench["task"] == task:
             return bench
     raise ValueError(f"{task!r} is not in suite {suite['name']!r} ({', '.join(b['task'] for b in suite['benchmarks'])})")
 
@@ -134,12 +138,8 @@ def main(argv=None):
         elif args.command == "show":
             suite = load(args.suite)
             print(f"{suite['name']}: {suite['title']}\n{suite['description']}\n")
-            print(_table([[b["label"], b["task"], b["framework"], f"{b['repeats']['n']} via {b['repeats']['via']}",
-                           b["metric"]["label"]] for b in suite["benchmarks"]],
-                         ["label", "task", "framework", "repeats", "reports"]))
-            print("\nsetups:")
             for name, s in suite["setups"].items():
-                print(f"  {name}: window {s['max_length']}, {shlex.join(s.get('flags', []))}\n    {s.get('description', '')}")
+                print(f"{name}: window {s['max_length']}, {shlex.join(s.get('flags', []))}\n  {s.get('description', '')}")
         elif args.command == "plan":
             suite = load(args.suite)
             print(_table([[r["label"], r["task"], shlex.join(r["flags"]), r["metric"], r["key"] or "(unchecked)"]
