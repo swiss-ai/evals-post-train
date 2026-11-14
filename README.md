@@ -25,6 +25,19 @@ Evaluation infrastructure for LLMs on CSCS Alps (Clariden), with results in W&B.
 
 Every runner except the in-job lm-eval backends can also run from the prebuilt image (`containers/Dockerfile.eval`, [details](docs/lm-eval-harness.md#prebuilt-evaluation-image-no-installs-at-run-time)), which installs nothing at run time.
 
+### Chat template
+
+- **lm-eval, post-trained models:** `--chat-template-by-type`: generative tasks with the chat template, log-likelihood tasks (multiple choice) without it. lm-eval applies the template to every task by default, and through it a log-likelihood task measures how likely the model is to start its reply with the answer, not the raw continuation.
+- **lm-eval, base models:** never a template: `--no-chat-template`.
+- **lm-eval, post-trained Apertus 2:** it has no Jinja template: `--chat-format apertus2 --tokenizer <dir or name> --max-length <max-model-len>` ([details](docs/lm-eval-harness.md#apertus-2-native-format)).
+- **Inspect, Harbor, EvalScope:** they send chat requests, so the **server** applies the template, normally the model's own from `tokenizer_config.json` ([Inspect](docs/inspect-ai.md#chat-template)). The exception is EvalScope's `--completions` for base models: plain text to `/v1/completions`, no template ([details](docs/evalscope.md)). For Apertus 2 the server needs the `apertus-common` vLLM plugin ([setup](docs/thinking.md#apertus-2-on-v1chatcompletions-temporary)).
+
+### Thinking models, judges, sampling
+
+- **Thinking models:** no deterministic settings (keep the thinking profile in `configs/sampling_defaults.json`), and generally report repeated scores (`--repeat-config`, [docs/repeated_sampling.md](docs/repeated_sampling.md)).
+- **Judges:** no self-grading (biased); use a separate, fixed judge model.
+- **Sampling and thinking flags:** one policy for all launchers, changed in `scripts/common/` ([sampling](docs/sampling.md), [thinking](docs/thinking.md)).
+
 ---
 
 ## Quick Start
