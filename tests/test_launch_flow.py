@@ -193,6 +193,51 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("only supported with the hf, vllm and openai backends", refused.stdout)
 
+    def test_bos_is_resolved_for_each_command_by_whether_it_applies_the_chat_template(self) -> None:
+        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
+        block = sbatch[sbatch.index("# bos per pass begin"): sbatch.index("# bos per pass end")]
+
+        def pass_bos(requested: str, template: str, config: dict[str, object]) -> str:
+            with tempfile.TemporaryDirectory() as tmp:
+                (Path(tmp) / "tokenizer_config.json").write_text(json.dumps(config))
+                script = (
+                    f"BOS_REQUESTED={requested}; TOKENIZER={tmp}\n{block}\n"
+                    f'resolve_pass_bos {template}\necho "[$PASS_BOS]"\n'
+                )
+                out = subprocess.run(["bash", "-c", script], cwd=REPO_ROOT, text=True, capture_output=True)
+            return out.stdout.strip().splitlines()[-1]
+
+        not_added = {"bos_token": "<s>", "add_bos_token": False}  # e.g. the Apertus 2 instruct tokenizer
+        added = {"bos_token": "<s>", "add_bos_token": True}  # a tokenizer that adds it itself
+        # BOS=auto: the config rule applies to a command without the chat template only
+        self.assertEqual(pass_bos("auto", "false", not_added), "[true]")
+        self.assertEqual(pass_bos("auto", "true", not_added), "[false]")
+        self.assertEqual(pass_bos("auto", "false", added), "[false]")
+        self.assertEqual(pass_bos("auto", "true", added), "[false]")
+        # --bos / --no-bos decide every command
+        for template in ("true", "false"):
+            self.assertEqual(pass_bos("true", template, added), "[true]")
+            self.assertEqual(pass_bos("false", template, not_added), "[false]")
+
+    def test_bos_probe_runs_for_commands_without_the_chat_template_on_the_completions_endpoint(self) -> None:
+        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
+        block = sbatch[sbatch.index("# bos per pass begin"): sbatch.index("# bos per pass end")]
+
+        def probed(template: str, backend: str = "openai", model: str = "local-completions", check: str = "") -> bool:
+            script = (
+                f"LM_EVAL_BACKEND={backend}; API_LM_EVAL_MODEL={model}; BOS_CHECK={check}; PASS_BOS=true; BOS_REQUESTED=auto\n"
+                "API_BASE_URL=http://x/v1/completions; API_MODEL_NAME=m; TOKENIZER=t; TIMED_CMD=start\n"
+                f"{block}\nappend_bos_probe {template}\necho \"$TIMED_CMD\"\n"
+            )
+            out = subprocess.run(["bash", "-c", script], text=True, capture_output=True).stdout
+            return "bos_probe" in out and "--bos 'true'" in out
+
+        self.assertTrue(probed("false"))
+        self.assertFalse(probed("true"))  # a rendered template is probed in a later change
+        self.assertFalse(probed("false", check="false"))
+        self.assertFalse(probed("false", backend="vllm"))
+        self.assertFalse(probed("false", model="local-chat-completions"))
+
     def test_debug_is_forwarded_to_deferred_judge_launch(self) -> None:
         orchestrator = (REPO_ROOT / "scripts/lm_eval_harness/evaluation_orchestrator.sh").read_text()
         self.assertIn("launch_args+=(--dry-run)", orchestrator)
@@ -476,6 +521,10 @@ class LaunchFlowTests(unittest.TestCase):
                 [*api, "--api-endpoint", "chat-completions", "--no-chat-template"],
                 "needs the chat template on every task",
             ),
+            "chat by type": (
+                [*api, "--api-endpoint", "chat-completions", "--chat-template-by-type"],
+                "needs the chat template on every task",
+            ),
         }
         for name, (arguments, message) in cases.items():
             with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
@@ -638,6 +687,36 @@ class LaunchFlowTests(unittest.TestCase):
                 SBATCH,
             )
 
+    def test_chat_template_by_type_is_recorded_in_the_run_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            completed = _launch(
+                "single", "--task", "gsm8k,arc_easy", "--backend", "openai",
+                "--api-base-url", "http://localhost:8000", "--api-model-name", "test-model",
+                "--chat-template-by-type", "--reasoning-effort", "high", "--logs-root", tmp,
+            )
+            output = completed.stdout + completed.stderr
+            self.assertEqual(completed.returncode, 0, output)
+            config = _run_config(tmp)
+        # Template switches only touch the generative tasks, so they keep by-type.
+        self.assertEqual(config["configuration"]["apply_chat_template"], "by-type")
+        self.assertIn("Chat:   by-type", output)
+
+    def test_evaluate_runs_each_kind_as_its_own_pass(self) -> None:
+        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
+        self.assertIn("true|false|by-type) ;;", sbatch)
+        self.assertIn("python -m scripts.lm_eval_harness.task_output_types --tasks '$TASKS'", sbatch)
+        self.assertIn('make_cmd "$CHAT_TASKS" "$PASS_ROOT/chat" true', sbatch)
+        self.assertIn('make_cmd "$RAW_TASKS" "$PASS_ROOT/raw" false', sbatch)
+        self.assertIn(
+            "python -m scripts.results.merge_split_results --split_dirs '$PASS_ROOT/chat' '$PASS_ROOT/raw' --output_dir '$HARNESS_EVAL_DIR'",
+            sbatch,
+        )
+        # The chat-template flags are per pass, never in the shared arguments.
+        common = sbatch[sbatch.index("COMMON_EVAL_ARGS=("):]
+        common = common[: common.index(")")]
+        self.assertNotIn("--apply_chat_template", common)
+        self.assertNotIn("--tasks", common)
+
     def test_apertus2_is_a_recorded_thinking_run(self) -> None:
         apertus2 = ["--backend", "openai", "--api-base-url", "http://localhost:8000",
                     "--api-model-name", "test-model", "--chat-format", "apertus2",
@@ -686,6 +765,7 @@ class LaunchFlowTests(unittest.TestCase):
             "no max length": ([*api, "--chat-format", "apertus2", "--tokenizer", "/ckpt"],
                               "--max-length <the server's --max-model-len>"),
             "template off": ([*apertus2, "--no-chat-template"], "renders every task as chat"),
+            "by type": ([*apertus2, "--chat-template-by-type"], "renders every task as chat"),
             "chat endpoint": ([*apertus2, "--api-endpoint", "chat-completions"], "renders every task as chat"),
             "ambient chat endpoint": (apertus2, "renders every task as chat", {"API_CHAT_ENDPOINT": "true"}),
             "thinking": ([*apertus2, "--thinking"], "always reasons"),

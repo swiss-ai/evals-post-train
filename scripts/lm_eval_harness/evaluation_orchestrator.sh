@@ -74,16 +74,25 @@ _eval_submit_aggregator() {
     fi
 }
 
-# BOS as run_lm_eval.sbatch resolves it (BOS=auto -> bos_default.py), so a run records
-# what it actually used: "true" for Gemma 4 and, without a chat template, for any tokenizer that defines a BOS token.
-_eval_resolved_bos() {
-    local bos="${BOS:-auto}"
+# BOS as run_lm_eval.sbatch resolves it for each lm-eval command (BOS=auto -> bos_default.py), so a run records what it
+# actually used: "true" for Gemma 4 and, without a chat template, for a tokenizer that defines a BOS token but does not
+# add it. A by-type run has two commands and records both: "raw=<bos>,chat=<bos>".
+_eval_resolved_bos_for() {
+    local tokenizer="$1" template="$2" bos="${BOS:-auto}"
     if [[ "$bos" == "auto" ]]; then
         local no_template=""
-        [[ "${APPLY_CHAT_TEMPLATE:-true}" == "true" ]] || no_template="--no-chat-template"
-        bos=$(python3 -m scripts.lm_eval_harness.bos_default "$1" $no_template 2>/dev/null || echo false)
+        [[ "$template" == "true" ]] || no_template="--no-chat-template"
+        bos=$(python3 -m scripts.lm_eval_harness.bos_default "$tokenizer" $no_template 2>/dev/null || echo false)
     fi
     echo "$bos"
+}
+
+_eval_resolved_bos() {
+    if [[ "${APPLY_CHAT_TEMPLATE:-true}" == "by-type" ]]; then
+        echo "raw=$(_eval_resolved_bos_for "$1" false),chat=$(_eval_resolved_bos_for "$1" true)"
+    else
+        _eval_resolved_bos_for "$1" "${APPLY_CHAT_TEMPLATE:-true}"
+    fi
 }
 
 _eval_create_run_config() {
