@@ -18,13 +18,11 @@ as two. A tokenizer that says nothing (add_bos_token unset) is left alone too, a
 without a BOS token (Qwen); bos_probe.py catches a model that needed it anyway. With a chat
 template the template writes the BOS, so only the Gemma 4 rule applies.
 
-Standard library only: run_lm_eval.sbatch calls this on the host, before the
-evaluation environment is up. A local model directory is read (config.json
+Standard library only, and Python 3.6 syntax: run_lm_eval.sbatch calls this with the bare `python3` of the node,
+before the evaluation environment is up (3.6 on Clariden). A local model directory is read (config.json
 model_type, tokenizer_config.json); a Hugging Face repo id is matched by name and
 its tokenizer_config.json fetched (HF_TOKEN is sent when set; any failure means "no BOS token").
 """
-
-from __future__ import annotations
 
 import argparse
 import json
