@@ -95,6 +95,18 @@ _eval_resolved_bos() {
     fi
 }
 
+# --bos-by-client as run_lm_eval.sbatch applies it: to commands with a chat template. A by-type run applies it to its
+# chat-template command only.
+_eval_resolved_bos_by_client() {
+    if [[ "${BOS_BY_CLIENT:-false}" != "true" ]]; then
+        echo false
+    elif [[ "${APPLY_CHAT_TEMPLATE:-true}" == "by-type" ]]; then
+        echo "chat=true,raw=false"
+    else
+        [[ "${APPLY_CHAT_TEMPLATE:-true}" == "true" ]] && echo true || echo false
+    fi
+}
+
 _eval_create_run_config() {
     local model="$1" repo="$2" state_dir="$3"
     # vllm used to pin an unset enable_thinking to False; it now leaves the template default.
@@ -111,6 +123,7 @@ _eval_create_run_config() {
         --field "harness_ref=${LM_EVAL_HARNESS_BRANCH:-$(_eval_pinned_harness_commit "$repo")}"
         --field "apply_chat_template=${APPLY_CHAT_TEMPLATE:-true}"
         --field "bos=$(_eval_resolved_bos "${TOKENIZER:-$model}")"
+        --field "bos_by_client=$(_eval_resolved_bos_by_client)"
         --field "limit=${HARNESS_LIMIT:-}"
         --field "num_fewshot=${NUM_FEWSHOT:-}"
         --field "batch_size=${BS:-auto:20}"

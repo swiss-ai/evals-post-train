@@ -236,24 +236,52 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertIn("BOS=auto could not be resolved", out.stderr)
         self.assertIn("SyntaxError", out.stderr)
 
-    def test_bos_probe_runs_for_commands_without_the_chat_template_on_the_completions_endpoint(self) -> None:
+    def test_bos_by_client_applies_to_commands_with_a_chat_template(self) -> None:
         sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
         block = sbatch[sbatch.index("# bos per pass begin"): sbatch.index("# bos per pass end")]
 
-        def probed(template: str, backend: str = "openai", model: str = "local-completions", check: str = "") -> bool:
+        def by_client(requested: str, template: str) -> tuple[str, str]:
+            script = (
+                f"set -euo pipefail\nBOS_BY_CLIENT={requested}\n{block}\n"
+                f'resolve_pass_bos_by_client {template}\necho "$PASS_BOS_BY_CLIENT"\n'
+            )
+            out = subprocess.run(["bash", "-c", script], text=True, capture_output=True).stdout.strip().splitlines()
+            return out[-1], "\n".join(out[:-1])
+
+        self.assertEqual(by_client("true", "true"), ("true", ""))
+        self.assertEqual(by_client("false", "true"), ("false", ""))
+        self.assertEqual(by_client("false", "false"), ("false", ""))
+        ignored, note = by_client("true", "false")
+        self.assertEqual(ignored, "false")
+        self.assertIn("ignored for this one (no chat template)", note)
+
+    def test_bos_probe_runs_on_the_completions_endpoint_with_its_flags(self) -> None:
+        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
+        block = sbatch[sbatch.index("# bos per pass begin"): sbatch.index("# bos per pass end")]
+
+        def probe_line(
+            template: str, backend: str = "openai", model: str = "local-completions", check: str = "", by_client: str = "false"
+        ) -> str:
             script = (
                 f"set -euo pipefail\nLM_EVAL_BACKEND={backend}; API_LM_EVAL_MODEL={model}; BOS_CHECK={check}; PASS_BOS=true; BOS_REQUESTED=auto\n"
+                f"PASS_BOS_BY_CLIENT={by_client}\n"
                 "API_BASE_URL=http://x/v1/completions; API_MODEL_NAME=m; TOKENIZER=t; TIMED_CMD=start\n"
                 f"{block}\nappend_bos_probe {template}\necho \"$TIMED_CMD\"\n"
             )
             out = subprocess.run(["bash", "-c", script], text=True, capture_output=True).stdout
-            return "bos_probe" in out and "--bos 'true'" in out
+            return out if "bos_probe" in out else ""
 
-        self.assertTrue(probed("false"))
-        self.assertFalse(probed("true"))  # a rendered template is probed in a later change
-        self.assertFalse(probed("false", check="false"))
-        self.assertFalse(probed("false", backend="vllm"))
-        self.assertFalse(probed("false", model="local-chat-completions"))
+        raw = probe_line("false")
+        self.assertIn("--bos 'true'", raw)
+        self.assertNotIn("--chat-template", raw)
+        self.assertNotIn("--bos-by-client", raw)
+        chat = probe_line("true", by_client="true")
+        self.assertIn("--chat-template", chat)
+        self.assertIn("--bos-by-client", chat)
+        self.assertEqual(probe_line("false", check="false"), "")
+        self.assertEqual(probe_line("false", backend="vllm"), "")
+        self.assertEqual(probe_line("false", model="local-chat-completions"), "")
+
 
     def test_debug_is_forwarded_to_deferred_judge_launch(self) -> None:
         orchestrator = (REPO_ROOT / "scripts/lm_eval_harness/evaluation_orchestrator.sh").read_text()
