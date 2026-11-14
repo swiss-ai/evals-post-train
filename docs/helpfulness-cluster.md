@@ -179,6 +179,62 @@ Verify that original producer outputs identify that exact sealed plan.
 
 ## Inspect results and evaluate teachers
 
+### Apertus 2 load and native-format smoke
+
+The SFT exports can contain all weight shards while having **no Jinja chat
+template**. Do not invent a template, use Apertus 1 formatting, or infer serving
+support from the presence of a KDA kernel. The server must register
+`Apertus2KDAForCausalLM`; the three inspected generic CUDA images register
+only the older `ApertusForCausalLM`.
+
+The pinned team CUDA recipe is available in
+[`alps-extended-images`](https://github.com/andresnowak/alps-extended-images/tree/5ba1436ca304a9db90ca3a4a089548a3fced4485/Alps-Images/apps/vllm-apertus2/example).
+Its native server uses TP1, expert parallelism and four local data-parallel
+ranks per node, not an assumed TP4 layout. A separately versioned
+[`evals-svc` EDF](https://github.com/swiss-ai/evals-svc/blob/8f4e52312bc122fc77244e5f5740054397b5e2b4/app/resources/envs/vllm-apertus2.toml)
+pins CUDA image digest
+`2daf3b1906ab62291c00b6a78d9eaa8aa85aad792abffb6695dc89ce9dcc9e05`.
+Do not use the similarly named ROCm image on GH200. Provisioning/importing an
+image and submitting GPU jobs require the operator's authorization.
+
+`scripts.helpfulness.teacher_smoke` reuses the repository-pinned harness's
+`apertus2-completions` renderer/parser and the separately pinned
+`requirements/apertus2.txt` library. Its scorer environment remains separate
+from the serving image; install additions only into a new private environment
+or overlay, never the shared image or historical runtime. Preserve source and
+wheel hashes, resolved versions and image identity. A successful `preflight`
+does **not** load weights or run inference:
+
+```bash
+python -m scripts.helpfulness.teacher_smoke preflight \
+  --checkpoint /ABSOLUTE/CHECKPOINT --output /FRESH/preflight.json
+```
+
+Once an approved allocated server is running on that same node's loopback
+interface, the `run` command waits for its advertised model, generates at most
+five real OR-Bench cases and applies the existing exact generic-prefix scorer:
+
+```bash
+python -m scripts.helpfulness.teacher_smoke run \
+  --checkpoint /ABSOLUTE/CHECKPOINT --model EXACT_SERVED_MODEL \
+  --source /STAGED/or-bench-hard-1k.csv \
+  --upstream /STAGED/upstreams/or-bench --limit 3 \
+  --output /FRESH/teacher-smoke
+```
+
+Native raw output, rendered prompt and parser/failure flags are retained.
+Empty, malformed, truncated or dropped-output generations fail even when the
+harness supplies a partial final answer. The smoke uses low reasoning effort,
+temperature 0.6, top-p 0.95 and an 8192-token generation budget within a 16384-token
+server context. This is a bounded format/runtime diagnostic, **not** full
+OR-Bench coverage, a semantic refusal-detector validation, full teacher-suite
+execution, judge calibration or public-weight/license attestation.
+
+The regular teacher runner still requires its reviewed model/deployment
+provenance and benchmark permissions. The smoke does not bypass those gates or
+make the current chat-completions teacher transport native-format compatible.
+Resolve that transport explicitly before scheduling the complete suite.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID
