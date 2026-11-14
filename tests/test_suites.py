@@ -30,9 +30,9 @@ class SuiteTests(unittest.TestCase):
 
     def test_setup_sets_window_and_format(self):
         suite = suites.load("apertus2/chonk_sft")
-        flags = suites.flags_for(suite, "apertus-2-chonk-sft", "ifbench")
+        flags = suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "ifbench")
         self.assertEqual(flags[:4], ["--backend", "openai", "--chat-format", "apertus2"])
-        self.assertIn("apertus2", suite["setups"]["apertus-2-chonk-sft"]["serving"])
+        self.assertIn("apertus2", suite["setups"]["chonk-lc-16k-v0.2-sft"]["serving"])
         self.assertEqual(flags[flags.index("--max-length") + 1], "16384")
 
     def test_plan_has_one_row_per_benchmark_in_table_order(self):
@@ -85,7 +85,7 @@ class SuiteTests(unittest.TestCase):
         suite = suites.load("apertus2/chonk_sft")
         self.assertEqual(suites.flags_for(suite, "qwen3-32b-thinking", "mmlu_0_shot"),
                          ["--enable-thinking", "--task-arg", "cot=true", "--", "--epochs", "4"])
-        self.assertEqual(suites.flags_for(suite, "apertus-2-chonk-sft", "aime2024"), ["--", "--epochs", "8"])
+        self.assertEqual(suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "aime2024"), ["--reasoning-effort", "high", "--", "--epochs", "8"])
         lm_eval = suites.flags_for(suite, "qwen3-32b-thinking", "ifbench")
         self.assertIn("--max-length", lm_eval)
         self.assertNotIn("--epochs", lm_eval)
@@ -98,12 +98,12 @@ class SuiteTests(unittest.TestCase):
 
     def test_a_pinned_tokenizer_becomes_the_lm_eval_tokenizer_flag(self):
         suite = suites.load(SUITE)
-        spec = suite["setups"]["apertus-2-chonk-sft"]["tokenizer"]
+        spec = suite["setups"]["chonk-lc-16k-v0.2-sft"]["tokenizer"]
         with mock.patch.dict(os.environ, {"EVAL_ENV_CACHE_ROOT": "/cache"}):
-            flags = suites.flags_for(suite, "apertus-2-chonk-sft", "ifbench")
+            flags = suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "ifbench")
             self.assertEqual(flags[flags.index("--tokenizer") + 1], f"/cache/tokenizers/{spec['revision']}/{spec['path']}")
-            self.assertNotIn("--tokenizer", suites.flags_for(suite, "apertus-2-chonk-sft", "aime2024"))
-        suite["setups"]["apertus-2-chonk-sft"]["flags"]["lm_eval"] += ["--tokenizer", "x"]
+            self.assertNotIn("--tokenizer", suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "aime2024"))
+        suite["setups"]["chonk-lc-16k-v0.2-sft"]["flags"]["lm_eval"] += ["--tokenizer", "x"]
         with self.assertRaisesRegex(ValueError, "--tokenizer"):
             suites.validate(suite)
 
@@ -115,7 +115,7 @@ class SuiteTests(unittest.TestCase):
             (lambda t: t.pop("repo"), "repo, revision and path"),
         ):
             suite = copy.deepcopy(base)
-            mutate(suite["setups"]["apertus-2-chonk-sft"]["tokenizer"])
+            mutate(suite["setups"]["chonk-lc-16k-v0.2-sft"]["tokenizer"])
             with self.assertRaisesRegex(ValueError, message):
                 suites.validate(suite)
 
@@ -141,11 +141,11 @@ class SuiteTests(unittest.TestCase):
 
     def test_one_launch_per_model_and_benchmark(self):
         suite = suites.load(SUITE)
-        models = {"apertus-2-chonk-sft": "chonk", "qwen3-32b-thinking": "qwen"}
+        models = {"chonk-lc-16k-v0.2-sft": "chonk", "qwen3-32b-thinking": "qwen"}
         rows = suites.commands(suite, models, api_base_url="http://x/v1", limit=5, no_wandb=True,
                                qos="highprio", partition="highprio")
         self.assertEqual(len(rows), len(models) * len(suite["benchmarks"]))
-        self.assertEqual([(r["setup"], r["label"]) for r in rows[:2]], [("apertus-2-chonk-sft", "MMLU"), ("apertus-2-chonk-sft", "GPQA")])
+        self.assertEqual([(r["setup"], r["label"]) for r in rows[:2]], [("chonk-lc-16k-v0.2-sft", "MMLU"), ("chonk-lc-16k-v0.2-sft", "GPQA")])
         inspect_row, lm_eval_row = rows[0]["argv"], rows[1]["argv"]
         self.assertEqual(inspect_row[:3], ["sbatch", "--qos=highprio", "--partition=highprio"])
         self.assertEqual(inspect_row[-3:], ["--", "--epochs", "4"])
@@ -164,6 +164,29 @@ class SuiteTests(unittest.TestCase):
         self.assertIn("14 launches: 2 models x 7 benchmarks", err.getvalue())
         for bad in (["--model", "m"], ["--model", "nope=m"], ["--model", f"{THINK}=a", "--model", f"{THINK}=b"]):
             self.assertEqual(suites.main(["run", SUITE, *bad]), 1)
+
+    def test_a_setups_reasoning_effort_reaches_all_its_lm_eval_and_inspect_rows(self):
+        suite = suites.load(SUITE)
+        chonk = "chonk-lc-16k-v0.2-sft"
+        self.assertEqual(suite["setups"][chonk]["reasoning_effort"], "high")
+        for bench in suite["benchmarks"]:
+            flags = suites.flags_for(suite, chonk, bench["task"])
+            self.assertEqual(flags.count("--reasoning-effort"), 1, bench["label"])
+            self.assertEqual(flags[flags.index("--reasoning-effort") + 1], "high")
+        self.assertEqual(suites.flags_for(suite, chonk, "aime2024"), ["--reasoning-effort", "high", "--", "--epochs", "8"])
+        for other in set(suite["setups"]) - {chonk}:
+            for bench in suite["benchmarks"]:
+                self.assertNotIn("--reasoning-effort", suites.flags_for(suite, other, bench["task"]))
+
+    def test_reasoning_effort_is_validated_and_not_a_flag_of_the_setup(self):
+        suite = suites.load(SUITE)
+        suite["setups"]["chonk-lc-16k-v0.2-sft"]["reasoning_effort"] = "loud"
+        with self.assertRaisesRegex(ValueError, "reasoning_effort"):
+            suites.validate(suite)
+        suite = suites.load(SUITE)
+        suite["setups"]["qwen3-32b-thinking"]["flags"]["inspect"] += ["--reasoning-effort", "low"]
+        with self.assertRaisesRegex(ValueError, "--reasoning-effort"):
+            suites.validate(suite)
 
     def test_cli(self):
         for argv in (["list"], ["show", SUITE], ["plan", SUITE, "--setup", THINK],

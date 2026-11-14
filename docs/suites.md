@@ -25,6 +25,7 @@ python -m scripts.common.suites flags apertus2/chonk_sft --setup apertus-1.5-70b
 - `serving` (optional) lists the arguments the server itself needs, such as Apertus 2's `--tokenizer-mode apertus2 --reasoning-parser apertus2 ...` ([thinking](thinking.md#apertus-2-on-v1chatcompletions-temporary)); nothing in a suite runs them, whoever launches the model passes them to `vllm serve`.
 - `tokenizer` (optional, `{repo, revision, path}`) pins a tokenizer in a git repository by full commit sha. lm_eval rows get `--tokenizer <local copy>` (a setup's lm_eval flags may not hold `--tokenizer`); `flags` fetches the directory once into `$EVAL_ENV_CACHE_ROOT/tokenizers/<revision>/` (needs git read access, like `prepare_apertus_common.sh`) and `plan` only shows where it will be. Apertus 2 needs this: its format has no Jinja template, and the verified tokenizer is `tokenizers/Apertus_2_instruct` of `swiss-ai/apertus-omni-tokenizer` at `b801ff1`, the revision `apertus-common` names.
 - **Chat template** ([per framework](../README.md#chat-template)): a suite holds no template flag of its own, it is part of the setup's `flags`. lm_eval rows of a thinking setup get `--thinking`, which forces the template on; every lm_eval row here is generative, so no `--chat-template-by-type` is needed (add it to a setup that also runs log-likelihood tasks). Inspect, Harbor and EvalScope send chat requests and the server applies the template, so a setup's `inspect` flags carry only the thinking switch (`--enable-thinking`, which reaches the template as `chat_template_kwargs`).
+- `reasoning_effort` (optional, per setup) becomes `--reasoning-effort <level>` on every lm_eval and inspect row run under that setup, and the setup's flags may not set it. `chonk-lc-16k-v0.2-sft` uses `high` for all benchmarks: Chonk only reasons at `high` on non-math tasks (at `medium` its think frame is empty). Apertus 2 takes `low`, `medium` or `high`; the other setups set none.
 - `task_args` are the `-T` arguments of an inspect task, as strings: `{"cot": "true"}` for `mmlu_0_shot`, `{"fewshot": "0"}` for zero-shot `gsm8k`.
 - `name`, `title` and `description` are required. A malformed file is refused with the field named (`benchmarks[5] (aime24): repeats.via must be one of ...`).
 
@@ -32,7 +33,7 @@ python -m scripts.common.suites flags apertus2/chonk_sft --setup apertus-1.5-70b
 
 ```bash
 python -m scripts.common.suites run apertus2/chonk_sft --api-base-url https://api.swissai.svc.cscs.ch/v1 \
-  --model apertus-2-chonk-sft=<served name> --model qwen3-32b-thinking=<served name> \
+  --model chonk-lc-16k-v0.2-sft=<served name> --model qwen3-32b-thinking=<served name> \
   --qos highprio --partition highprio --limit 5 --no-wandb           # prints the commands
 ... --submit                                                          # runs them
 ```

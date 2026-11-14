@@ -16,6 +16,9 @@ configs/suites/<name>.json holds two things:
 launcher's `single` mode; inspect: `sbatch run_inspect_eval.sbatch`). --model SETUP=SERVED_NAME names a
 setup and the name its model is served under, repeatable. Without --submit it only prints the commands.
 
+A setup's reasoning_effort (optional) becomes --reasoning-effort <level> on every lm_eval and inspect row
+run under it.
+
 Profiles are the ones of configs/sampling_defaults.json; a suite names one and holds no temperature.
 
 `repeats.via` says who repeats: "flag" (lm_eval gets --repeats n, inspect gets -- --epochs n) or
@@ -27,7 +30,7 @@ inspect has no such flag, the server's --max-model-len is the window. The code o
     python -m scripts.common.suites plan apertus2/chonk_sft --setup apertus-1.5-70b-thinking
     python -m scripts.common.suites flags apertus2/chonk_sft --setup apertus-1.5-70b-thinking --task ifbench
     python -m scripts.common.suites run apertus2/chonk_sft --api-base-url <url> \\
-        --model apertus-2-chonk-sft=<served name> --model qwen3-32b-thinking=<served name> [--submit]
+        --model chonk-lc-16k-v0.2-sft=<served name> --model qwen3-32b-thinking=<served name> [--submit]
 """
 
 import argparse
@@ -40,7 +43,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from scripts.common import sampling
+from scripts.common import sampling, thinking
 
 SUITES_DIR = Path(__file__).resolve().parents[2] / "configs" / "suites"
 FRAMEWORKS = ("lm_eval", "inspect", "evalscope", "harbor", "tau2")
@@ -54,7 +57,8 @@ def _positive_int(where, value):
 
 THINKING_FLAGS = ("--thinking", "--enable-thinking")
 # Flags the suite itself produces, so a setup may not list them.
-RESERVED = {"lm_eval": {"--max-length", "--repeats"}, "inspect": {"--task-arg", "--epochs", "--"},
+RESERVED = {"lm_eval": {"--max-length", "--repeats", "--reasoning-effort"},
+            "inspect": {"--task-arg", "--epochs", "--", "--reasoning-effort"},
             "evalscope": set(), "harbor": set(), "tau2": set()}
 
 
@@ -159,6 +163,8 @@ def validate(suite):
     for name, setup in suite["setups"].items():
         _positive_int(f"setup {name} max_length", setup.get("max_length"))
         _profile(f"setup {name} sampling", setup.get("sampling"), profiles)
+        if "reasoning_effort" in setup and setup["reasoning_effort"] not in thinking.EFFORTS:
+            raise ValueError(f"setup {name}: reasoning_effort must be one of {thinking.EFFORTS} (got {setup['reasoning_effort']!r})")
         if "tokenizer" in setup:
             _tokenizer(f"setup {name}", setup["tokenizer"])
         serving = setup.get("serving", [])
@@ -210,6 +216,8 @@ def flags_for(suite, setup_name, task, fetch=False):
     copy first (once), otherwise the flag names where it will be."""
     bench, chosen = benchmark(suite, task), setup(suite, setup_name)
     flags = list(chosen["flags"][bench["framework"]])
+    if "reasoning_effort" in chosen and bench["framework"] in ("lm_eval", "inspect"):
+        flags += ["--reasoning-effort", chosen["reasoning_effort"]]
     repeat = bench["repeats"]["via"] == "flag"
     if bench["framework"] == "lm_eval":
         if "tokenizer" in chosen:
@@ -318,7 +326,8 @@ def main(argv=None):
             suite = load(args.suite)
             print(f"{suite['name']}: {suite['title']}\n{suite['description']}\n")
             for name, s in suite["setups"].items():
-                print(f"{name}: window {s['max_length']}, sampling {s['sampling']}\n  {s.get('description', '')}")
+                effort = f", reasoning effort {s['reasoning_effort']}" if "reasoning_effort" in s else ""
+                print(f"{name}: window {s['max_length']}, sampling {s['sampling']}{effort}\n  {s.get('description', '')}")
                 for framework, items in s["flags"].items():
                     print(f"  {framework}: {shlex.join(items) or '(none)'}")
                 if s.get("tokenizer"):
