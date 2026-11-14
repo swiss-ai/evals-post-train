@@ -1,0 +1,35 @@
+{
+  "name": "table25",
+  "title": "Thinking-mode comparison, Apertus 1.5 paper (Table 25)",
+  "description": "Rows of the table, in order. Mean@8 for AIME, mean@4 for the rest. MATH is not listed yet: its task (hendrycks_math or minerva_math) is undecided.",
+  "benchmarks": [
+    {"label": "MMLU", "task": "mmlu_flan_cot_zeroshot", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null}},
+    {"label": "GPQA", "task": "gpqa_main_cot_zeroshot", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null}},
+    {"label": "IFBench", "task": "ifbench", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": "prompt_level_loose_acc_mean_repeats,none"}},
+    {"label": "GSM8K", "task": "gsm8k_cot_zeroshot_self_consistency", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "task"}, "metric": {"label": "mean@4", "key": "exact_match,mean@4"}},
+    {"label": "MATH-500", "task": "minerva_math500_self_consistency", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "task"}, "metric": {"label": "mean@4", "key": "math_verify,mean@4"}},
+    {"label": "AIME 24", "task": "aime24", "framework": "lm_eval",
+     "repeats": {"n": 8, "via": "task"}, "metric": {"label": "mean@8", "key": "exact_match,mean@8"}},
+    {"label": "AIME 25", "task": "aime25", "framework": "lm_eval",
+     "repeats": {"n": 8, "via": "task"}, "metric": {"label": "mean@8", "key": "exact_match,mean@8"}}
+  ],
+  "setups": {
+    "apertus-1.5-70b-thinking": {
+      "description": "swiss-ai/Apertus-v1.5-70B with thinking on. Window 32768.",
+      "max_length": 32768,
+      "sampling": "thinking",
+      "flags": {"lm_eval": ["--enable-thinking", "--chat-template"]}
+    },
+    "apertus-2-chonk-sft": {
+      "description": "Apertus 2 Chonk SFT, native format (no Jinja template). The window 16384 is the checkpoint's name, not yet the maximal window.",
+      "max_length": 16384,
+      "sampling": "thinking",
+      "flags": {"lm_eval": ["--chat-format", "apertus2", "--tokenizer", "apertus-2-instruct-tokenizer"]}
+    }
+  }
+}

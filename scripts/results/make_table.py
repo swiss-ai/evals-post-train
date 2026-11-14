@@ -188,7 +188,7 @@ def main():
                         help="Only include model directories whose name contains this substring")
     parser.add_argument("--entity", default="apertus")
     parser.add_argument("--project", default="apertus-1.5-post-training-v0.0")
-    parser.add_argument("--metrics-file", default=["./configs/apertus/tasks_posttrain_main_table.txt"],
+    parser.add_argument("--metrics-file", default=["./configs/archive/apertus/tasks_posttrain_main_table.txt"],
                         nargs="+", help="One or more metrics files (all are merged)")
     parser.add_argument("--output", default=f"/iopsstor/scratch/cscs/{username}/eval_tables",
                         help="Output directory (created if it doesn't exist)")
