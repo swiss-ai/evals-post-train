@@ -388,7 +388,7 @@ echo "Configuration set:"
 # Values go in printf's arguments, not the format string: a '%' would be read as a conversion.
 printf '%s\n' "MODEL=$MODEL" "NAME=$NAME" "TOKENIZER=$TOKENIZER" "BS=$BS" "REVISION=$REVISION" \
 	"SIZE=$SIZE" "HARNESS_LIMIT=$HARNESS_LIMIT" "LM_EVAL_HARNESS_BRANCH=$LM_EVAL_HARNESS_BRANCH" \
-	"BOS=$BOS" "BOS_BY_CLIENT=${BOS_BY_CLIENT:-false}" "TRUST_REMOTE_CODE=$TRUST_REMOTE_CODE" "TASKS=$TASKS" "MAX_LENGTH=$MAX_LENGTH" "WANDB_ENTITY=$WANDB_ENTITY" \
+	"BOS=$BOS" "BOS_BY_CLIENT=${BOS_BY_CLIENT:-auto}" "TRUST_REMOTE_CODE=$TRUST_REMOTE_CODE" "TASKS=$TASKS" "MAX_LENGTH=$MAX_LENGTH" "WANDB_ENTITY=$WANDB_ENTITY" \
 	"WANDB_PROJECT=$WANDB_PROJECT" "LM_EVAL_BACKEND=$LM_EVAL_BACKEND" "HF_HOME=$HF_HOME" \
 	"API_CHAT_ENDPOINT=${API_CHAT_ENDPOINT:-false}" "CHAT_FORMAT=$CHAT_FORMAT" ""
 printf '%s\n' "ENABLE_THINKING=$ENABLE_THINKING (explicit=$ENABLE_THINKING_EXPLICIT)" \
@@ -431,9 +431,11 @@ fi
 # BOS=auto is resolved for each lm-eval command (resolve_pass_bos, before make_cmd): the rule depends on whether the
 # chat template is applied, and by-type decides that per kind of task.
 BOS_REQUESTED=$BOS
-case "${BOS_BY_CLIENT:-false}" in
-    true|false) ;;
-    *) echo "BOS_BY_CLIENT must be true or false (got '$BOS_BY_CLIENT')" >&2; exit 1 ;;
+# BOS_BY_CLIENT: unset/auto = on for commands with a chat template on the openai backend on /v1/completions
+# (--no-bos-by-client turns it off); true = --bos-by-client, refused where it cannot apply.
+case "${BOS_BY_CLIENT:-auto}" in
+    auto|true|false) ;;
+    *) echo "BOS_BY_CLIENT must be auto, true or false (got '$BOS_BY_CLIENT')" >&2; exit 1 ;;
 esac
 
 
@@ -916,17 +918,23 @@ resolve_pass_bos() {
     return 0  # the && list above fails when the rule says false, which set -e must not take for a failed call
 }
 
-# resolve_pass_bos_by_client <chat template: true|false>: --bos-by-client for one lm-eval command, in PASS_BOS_BY_CLIENT.
+# resolve_pass_bos_by_client <chat template: true|false>: bos_by_client for one lm-eval command, in PASS_BOS_BY_CLIENT.
 # It applies to commands with a chat template: a rendered template is a complete prompt, so the server must add nothing
-# to it. Raw text is what the tokenizer's own BOS is for: the server keeps adding it there.
+# to it. Raw text is what the tokenizer's own BOS is for: the server keeps adding it there. Unset (auto) it is on where
+# it can apply (openai backend on /v1/completions); --no-bos-by-client (false) turns it off; --bos-by-client (true) is
+# refused later where it cannot apply, and says so for a command without a template.
 resolve_pass_bos_by_client() {
     PASS_BOS_BY_CLIENT=false
-    if [[ "${BOS_BY_CLIENT:-false}" == "true" ]]; then
-        if [[ $1 == true ]]; then
+    local requested="${BOS_BY_CLIENT:-auto}"
+    if [[ "$requested" == "false" ]]; then
+        return 0
+    fi
+    if [[ $1 == true ]]; then
+        if [[ "$requested" == "true" || ( "$LM_EVAL_BACKEND" == "openai" && "${API_LM_EVAL_MODEL:-}" == "local-completions" ) ]]; then
             PASS_BOS_BY_CLIENT=true
-        else
-            echo "--bos-by-client applies to commands with a chat template: ignored for this one (no chat template)"
         fi
+    elif [[ "$requested" == "true" ]]; then
+        echo "--bos-by-client applies to commands with a chat template: ignored for this one (no chat template)"
     fi
     return 0
 }
@@ -1004,7 +1012,7 @@ if [[ "$CHAT_FORMAT" == "apertus2" ]]; then
     TIMED_CMD="$TIMED_CMD
 cd $PWD && python -m scripts.lm_eval_harness.task_output_types --tasks '$TASKS' --require-generative"
 fi
-if [[ "${BOS_BY_CLIENT:-false}" == "true" && ! ( "$LM_EVAL_BACKEND" == "openai" && "$API_LM_EVAL_MODEL" == "local-completions" ) ]]; then
+if [[ "${BOS_BY_CLIENT:-auto}" == "true" && ! ( "$LM_EVAL_BACKEND" == "openai" && "$API_LM_EVAL_MODEL" == "local-completions" ) ]]; then
     die "BOS_BY_CLIENT=true (--bos-by-client) needs the openai backend on /v1/completions (no --api-endpoint chat-completions, no --chat-format apertus2: those do not send text for the server to tokenize)."
 fi
 if [[ $APPLY_CHAT_TEMPLATE != by-type ]]; then
