@@ -3870,6 +3870,7 @@ dependencies = [
 
 [package.optional-dependencies]
 ci = [
+    { name = "agent-client-protocol" },
     { name = "huggingface-hub" },
     { name = "inspect-evals" },
     { name = "shellcheck-py" },
@@ -3878,6 +3879,7 @@ ci = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agent-client-protocol", marker = "extra == 'ci'", specifier = "<1" },
     { name = "huggingface-hub", marker = "extra == 'ci'", specifier = ">=1.16.0" },
     { name = "inspect-ai", specifier = ">=0.3.258" },
     { name = "inspect-evals", marker = "extra == 'ci'" },
