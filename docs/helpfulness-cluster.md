@@ -186,6 +186,8 @@ template**. Do not invent a template, use Apertus 1 formatting, or infer serving
 support from the presence of a KDA kernel. The server must register
 `Apertus2KDAForCausalLM`; the three inspected generic CUDA images register
 only the older `ApertusForCausalLM`.
+The current `iter_0019374` test target is the **Chonk SFT baseline**, not an
+already trained helpfulness/chit-chat teacher.
 
 The pinned team CUDA recipe is available in
 [`alps-extended-images`](https://github.com/andresnowak/alps-extended-images/tree/5ba1436ca304a9db90ca3a4a089548a3fced4485/Alps-Images/apps/vllm-apertus2/example).
@@ -207,8 +209,16 @@ does **not** load weights or run inference:
 
 ```bash
 python -m scripts.helpfulness.teacher_smoke preflight \
-  --checkpoint /ABSOLUTE/CHECKPOINT --output /FRESH/preflight.json
+  --checkpoint /ABSOLUTE/CHECKPOINT \
+  --source /STAGED/or-bench-hard-1k.csv \
+  --upstream /STAGED/upstreams/or-bench --limit 3 \
+  --output /FRESH/preflight.json
 ```
+
+Include the source/upstream arguments in the preflight **before starting the
+server step**. It validates real cases and pinned scorer assets with the same
+explicit `dataset_config="or-bench-hard-1k"` and
+`keyword_profile="opensource"` used during generation/scoring.
 
 Once an approved allocated server is running on that same node's loopback
 interface, the `run` command waits for its advertised model, generates at most

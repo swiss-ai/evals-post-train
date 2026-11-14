@@ -24,6 +24,18 @@ FAILURE_FLAGS = (
     "generation_call_counter_reused", "generation_unexpected_call",
 )
 
+OR_BENCH_OPTIONS = {
+    "keyword_profile": "opensource",
+    "dataset_config": "or-bench-hard-1k",
+}
+
+
+def load_or_bench(source: Path, upstream: Path) -> tuple[list[dict], dict]:
+    assets = open_benchmarks.staged_assets("or_bench", upstream)
+    with source.open(encoding="utf-8-sig", newline="") as stream:
+        cases = open_benchmarks.normalize("or_bench", list(csv.DictReader(stream)), OR_BENCH_OPTIONS)
+    return cases, assets
+
 
 def checkpoint_inventory(directory: Path) -> dict:
     config = read_json(directory / "config.json")
@@ -127,14 +139,13 @@ def run(args) -> dict:
     write_json(output / "report.json", report)
     try:
         report["preflight"] = preflight(args.checkpoint)
-        assets = open_benchmarks.staged_assets("or_bench", args.upstream)
-        with args.source.open(encoding="utf-8-sig", newline="") as stream:
-            cases = open_benchmarks.normalize("or_bench", list(csv.DictReader(stream)), {})
+        cases, assets = load_or_bench(args.source, args.upstream)
         if len(cases) < args.limit:
             raise ValueError("OR-Bench source has fewer cases than the declared limit")
         report.update(
             source_sha256=hashlib.sha256(args.source.read_bytes()).hexdigest(),
-            source_cases=len(cases), upstream=assets, phase="server_readiness",
+            source_cases=len(cases), upstream=assets, benchmark_options=OR_BENCH_OPTIONS,
+            checkpoint_role="model_under_test_not_assumed_final_teacher", phase="server_readiness",
             served_model=args.model, base_url=args.base_url,
             decoding={"temperature": 0.6, "top_p": 0.95, "max_gen_toks": args.max_tokens,
                       "reasoning_effort": "low", "prefill": "after_think", "seed": 1234},
@@ -170,7 +181,7 @@ def run(args) -> dict:
             append_jsonl(output / "generation-evidence.jsonl", record)
             validate_generation(answer, info)
             scores, _ = open_benchmarks.score(
-                "or_bench", case, answer, None, assets, {"keyword_profile": "opensource"}, {},
+                "or_bench", case, answer, None, assets, OR_BENCH_OPTIONS, {},
             )
             record.update(status="succeeded", scores=scores)
             append_jsonl(output / "samples.jsonl", record)
@@ -206,11 +217,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "run" and not all((args.source, args.upstream, args.model)):
         parser.error("run requires --source, --upstream and --model")
+    if bool(args.source) != bool(args.upstream):
+        parser.error("--source and --upstream must be provided together")
     try:
         if args.command == "preflight":
             if args.output.exists():
                 raise ValueError("Preflight output already exists")
-            write_json(args.output, preflight(args.checkpoint))
+            report = preflight(args.checkpoint)
+            if args.source:
+                cases, assets = load_or_bench(args.source, args.upstream)
+                if len(cases) < args.limit:
+                    raise ValueError("OR-Bench source has fewer cases than the declared limit")
+                report["or_bench"] = {
+                    "source_cases": len(cases), "selected_cases": args.limit,
+                    "source_sha256": hashlib.sha256(args.source.read_bytes()).hexdigest(),
+                    "options": OR_BENCH_OPTIONS, "upstream": assets,
+                }
+            write_json(args.output, report)
         else:
             run(args)
     except (ValueError, RuntimeError, OSError, ImportError, KeyError) as error:
