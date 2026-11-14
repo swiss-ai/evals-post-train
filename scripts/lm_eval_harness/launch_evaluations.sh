@@ -141,10 +141,10 @@
 #   bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model meta-llama/Llama-3.1-8B-Instruct
 #
 #   # Single model in resumable chunks
-#   bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/olmo/olmo3_main.txt --table-metrics configs/olmo/olmo3_main_main_table.txt --model allenai/OLMo-2-1124-7B --chunk-size 8
+#   bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/archive/olmo/olmo3_main.txt --table-metrics configs/archive/olmo/olmo3_main_main_table.txt --model allenai/OLMo-2-1124-7B --chunk-size 8
 #
 #   # Base model, explicit no chat template
-#   bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/olmo/olmo3_easy.txt --table-metrics configs/olmo/olmo3_easy_main_table.txt --model Qwen/Qwen2.5-7B --no-chat-template
+#   bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/archive/olmo/olmo3_easy.txt --table-metrics configs/archive/olmo/olmo3_easy_main_table.txt --model Qwen/Qwen2.5-7B --no-chat-template
 #
 #   # Run a multi-model script
 #   bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --script scripts/lm_eval_harness/runners/example_models.sh

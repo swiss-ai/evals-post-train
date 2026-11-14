@@ -34,7 +34,7 @@ The CSCS serving key is read from `scripts/secrets.env` (see [Credentials](#cred
 **lm-evaluation-harness**: serves the model in the job and runs the default task list, 10 samples per task.
 
 ```bash
-bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/apertus/tasks_default.txt --table-metrics configs/apertus/tasks_default_main_table.txt --model meta-llama/Llama-3.1-8B-Instruct \
+bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/archive/apertus/tasks_default.txt --table-metrics configs/archive/apertus/tasks_default_main_table.txt --model meta-llama/Llama-3.1-8B-Instruct \
   --name Llama-Baseline --limit 10 --no-wandb
 ```
 

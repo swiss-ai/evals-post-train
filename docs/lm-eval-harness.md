@@ -15,7 +15,7 @@ The launcher takes a required first positional argument, `<mode>`:
 | `single` | `--task` | One task, or a comma-separated list |
 | `custom` | `--task-file` | A task list, with an optional `--table-metrics` file (default: the task list) |
 
-The task lists the former modes used are still in `configs/apertus/` and `configs/olmo/`; pass one with `custom --task-file <list> --table-metrics <list>_main_table.txt` (for OLMo3: `olmo3_<suite>.txt` and `olmo3_<suite>_main_table.txt`). The launcher defaults `WANDB_PROJECT` to `apertus-1.5-post-training-v0.0` (not `run_lm_eval.sbatch`'s own `swissai-evals-test` default; see [SBATCH Scripts](#sbatch-scripts)); export `WANDB_PROJECT` yourself for test/smoke runs to avoid logging into the production project.
+The task lists the former modes used are still in `configs/archive/apertus/` and `configs/archive/olmo/`; pass one with `custom --task-file <list> --table-metrics <list>_main_table.txt` (for OLMo3: `olmo3_<suite>.txt` and `olmo3_<suite>_main_table.txt`). The launcher defaults `WANDB_PROJECT` to `apertus-1.5-post-training-v0.0` (not `run_lm_eval.sbatch`'s own `swissai-evals-test` default; see [SBATCH Scripts](#sbatch-scripts)); export `WANDB_PROJECT` yourself for test/smoke runs to avoid logging into the production project.
 
 ### Model Selection Modes
 
@@ -94,7 +94,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 Some LLM-as-a-judge tasks require a separate model to be available through the CSCS serving API. Pass `--judge auto` to launch the required judge models after the resume scan, and only when judge-dependent tasks are still missing:
 
 ```bash
-bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/apertus/tasks_posttrain_final.txt --table-metrics configs/apertus/tasks_posttrain_final_main_table.txt \
+bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/archive/apertus/tasks_posttrain_final.txt --table-metrics configs/archive/apertus/tasks_posttrain_final_main_table.txt \
   --model /capstor/store/.../checkpoint \
   --judge auto \
   --judge-requests-per-minute 30
@@ -142,12 +142,12 @@ By default the evaluation launcher submits a cleanup job that cancels automatica
 
 #### Experimental OpenAI GPT judge path
 
-The `configs/apertus/tasks_gpt.txt` list reserves a stable task/config path for the planned
+The `configs/archive/apertus/tasks_gpt.txt` list reserves a stable task/config path for the planned
 OpenAI GPT judge implementation in `swiss-ai/lm-evaluation-harness`:
 
 ```bash
 export OPENAI_API_KEY="..."
-bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/apertus/tasks_gpt.txt --table-metrics configs/apertus/tasks_gpt_main_table.txt \
+bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/archive/apertus/tasks_gpt.txt --table-metrics configs/archive/apertus/tasks_gpt_main_table.txt \
   --model /capstor/store/.../checkpoint
 ```
 
@@ -162,19 +162,19 @@ GPT-judge behavior. Other runs continue to use the CSCS judge setup described ab
 
 ```bash
 # OLMo3 paper-faithful 5-shot evaluation
-bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/olmo/olmo3_complete.txt --table-metrics configs/olmo/olmo3_complete_main_table.txt --model allenai/OLMo-2-1124-7B --num-fewshot 5 --no-chat-template
+bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/archive/olmo/olmo3_complete.txt --table-metrics configs/archive/olmo/olmo3_complete_main_table.txt --model allenai/OLMo-2-1124-7B --num-fewshot 5 --no-chat-template
 
 # Large model with vLLM, eight tasks per chunk and four concurrent chunks
-bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/apertus/tasks_default.txt --table-metrics configs/apertus/tasks_default_main_table.txt \
+bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/archive/apertus/tasks_default.txt --table-metrics configs/archive/apertus/tasks_default_main_table.txt \
   --model Qwen/Qwen2.5-72B-Instruct --backend vllm \
   --chunk-size 8 --max-parallel 4
 
 # Run all models from a batch script on the safety suite
-bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/olmo/olmo3_safety.txt --table-metrics configs/olmo/olmo3_safety_main_table.txt \
+bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/archive/olmo/olmo3_safety.txt --table-metrics configs/archive/olmo/olmo3_safety_main_table.txt \
   --script scripts/lm_eval_harness/runners/example_models.sh --chunk-size 4
 
 # The SGLang backend
-bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/olmo/olmo3_easy.txt --table-metrics configs/olmo/olmo3_easy_main_table.txt --model /capstor/store/../apertus-.../checkpoints/ --backend sglang
+bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/archive/olmo/olmo3_easy.txt --table-metrics configs/archive/olmo/olmo3_easy_main_table.txt --model /capstor/store/../apertus-.../checkpoints/ --backend sglang
 
 # Against an already-running OpenAI-compatible endpoint (vLLM serve, CSCS serving, ...) instead of
 # loading the model in the job
@@ -206,7 +206,7 @@ There are two ways to evaluate a Megatron-LM checkpoint:
 
 ```bash
 # Natively with the megatron_lm backend, no conversion; --megatron-iter defaults to latest
-bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/olmo/olmo3_easy.txt --table-metrics configs/olmo/olmo3_easy_main_table.txt --model /capstor/store/../apertus-.../checkpoints/ \
+bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/archive/olmo/olmo3_easy.txt --table-metrics configs/archive/olmo/olmo3_easy_main_table.txt --model /capstor/store/../apertus-.../checkpoints/ \
   --backend megatron_lm --name Megatron-Test-260216 --megatron-iter 4000000
 
 # Converted to HF first, then evaluated with vLLM (recommended: supports vllm/sglang/hf and the
@@ -237,9 +237,9 @@ Graceful execution is the default behavior of `scripts/lm_eval_harness/launch_ev
 
 ```bash
 bash scripts/lm_eval_harness/launch_evaluations.sh custom \
-  --task-file configs/apertus/tasks_posttrain_final.txt \
+  --task-file configs/archive/apertus/tasks_posttrain_final.txt \
   --model /capstor/store/.../apertus-1.5-checkpoint \
-  --table-metrics configs/apertus/tasks_posttrain_final_main_table.txt \
+  --table-metrics configs/archive/apertus/tasks_posttrain_final_main_table.txt \
   --wandb-entity apertus --wandb-project apertus-1.5-post-training-v0.0 \
   --chunk-size 8 --max-parallel 4 --max-retries 1
 ```
@@ -258,7 +258,7 @@ Use `--failure-policy fail-fast` to recover the original single-job behavior. `-
 
 ## Task Configuration
 
-Task lists are plain text files under `configs/` (principally `configs/apertus/` and `configs/olmo/`) with one task name per line. Comments (`#`) and blank lines are supported:
+Task lists are plain text files under `configs/` (principally `configs/archive/apertus/` and `configs/archive/olmo/`) with one task name per line. Comments (`#`) and blank lines are supported:
 
 ```
 # Math
@@ -500,7 +500,7 @@ the suite's **existing task list** as the metric source.
 
 ```bash
 python scripts/results/make_html_table.py --thinking \
-  --metrics-file configs/apertus/tasks_posttrain_final.txt \
+  --metrics-file configs/archive/apertus/tasks_posttrain_final.txt \
   --entity apertus --project apertus-1.5-post-training-v0.0 \
   --models my-reasoner-run another-run \
   --output thinking_table.html
@@ -541,8 +541,8 @@ with [`apertus-common`](https://github.com/swiss-ai/apertus-common) and sends te
 
 ```bash
 bash scripts/lm_eval_harness/launch_evaluations.sh custom \
-  --task-file configs/apertus/tasks_posttrain_thinking.txt \
-  --table-metrics configs/apertus/tasks_posttrain_thinking_main_table.txt \
+  --task-file configs/archive/apertus/tasks_posttrain_thinking.txt \
+  --table-metrics configs/archive/apertus/tasks_posttrain_thinking_main_table.txt \
   --backend openai --api-base-url <url> --api-model-name <served name> \
   --chat-format apertus2 --tokenizer <checkpoint dir> --max-length 65536
 ```
@@ -557,7 +557,7 @@ bash scripts/lm_eval_harness/launch_evaluations.sh custom \
   `empty_think` (no reasoning under a prefix, like other thinking models: cross-model tables).
 - **Generative tasks only:** `custom` or `single` runs; the job stops if a task (or a group or tag
   member) is scored by log-likelihood in its yaml (Python task classes such as `squadv2` are not
-  seen). `configs/apertus/tasks_posttrain_thinking.txt` holds the suite's generative tasks plus
+  seen). `configs/archive/apertus/tasks_posttrain_thinking.txt` holds the suite's generative tasks plus
   `bfcl_v3_fc` (Apertus 2 and chat-completions runs only).
 - **Refused:** `--thinking`, `--(no-)enable-thinking`, think tokens, `--track-thinking-metrics`,
   `--no-chat-template`, `--chat-template-by-type`, `--api-endpoint chat-completions`, `--bos`,
@@ -587,8 +587,8 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TASKS` | `configs/apertus/tasks_default.txt` | Task list file or comma-separated task names |
-| `TABLE_METRICS` | `configs/apertus/tasks_default_main_table.txt` | Metrics for W&B summary table |
+| `TASKS` | `configs/archive/apertus/tasks_default.txt` | Task list file or comma-separated task names |
+| `TABLE_METRICS` | `configs/archive/apertus/tasks_default_main_table.txt` | Metrics for W&B summary table |
 | `LM_EVAL_BACKEND` | `vllm` | Backend: `hf` (accelerate), `vllm`, `sglang`, `megatron_lm`, `openai` (OpenAI-compatible API) |
 | `API_BASE_URL` | (unset) | `openai` backend only, **required**: the OpenAI-compatible endpoint. Bare host / `/v1` root / full endpoint URL all accepted. |
 | `API_MODEL_NAME` | same as model | `openai` backend only: the `model` field sent in requests, when the server registers the model under a different id |
@@ -661,7 +661,7 @@ Base models take the launcher's `--no-chat-template` (Apertus base checkpoints a
 
 ### Model Registry
 
-See `configs/models.md` for a reference list of models with their HF paths, local checkpoint paths, and required special flags. Key model families:
+See `configs/archive/models.md` for a reference list of models with their HF paths, local checkpoint paths, and required special flags. Key model families:
 
 - **Apertus** (1.0, 1.5, and aligned checkpoints)
 - **Meta Llama** (3.1, 3.3)

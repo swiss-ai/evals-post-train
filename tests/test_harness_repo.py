@@ -8,7 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 class BenchmarkConfigTests(unittest.TestCase):
     def test_posttrain_includes_alignment_benchmarks(self) -> None:
         tasks = (
-            REPO_ROOT / "configs" / "apertus" / "tasks_posttrain_final.txt"
+            REPO_ROOT / "configs" / "archive" / "apertus" / "tasks_posttrain_final.txt"
         ).read_text(encoding="utf-8")
 
         self.assertIn("\nbfcl_v3\n", tasks)
@@ -36,14 +36,14 @@ class BenchmarkConfigTests(unittest.TestCase):
         tasks = [
             line
             for line in (
-                REPO_ROOT / "configs" / "apertus" / "tasks_gpt.txt"
+                REPO_ROOT / "configs" / "archive" / "apertus" / "tasks_gpt.txt"
             ).read_text(encoding="utf-8").splitlines()
             if line and not line.startswith("#")
         ]
         metrics = [
             line.split("/", 1)[0]
             for line in (
-                REPO_ROOT / "configs" / "apertus" / "tasks_gpt_main_table.txt"
+                REPO_ROOT / "configs" / "archive" / "apertus" / "tasks_gpt_main_table.txt"
             ).read_text(encoding="utf-8").splitlines()
             if line and not line.startswith("#")
         ]
