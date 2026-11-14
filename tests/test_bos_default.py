@@ -1,3 +1,4 @@
+import ast
 import json
 import tempfile
 import unittest
@@ -101,6 +102,13 @@ class BosDefaultTests(unittest.TestCase):
 
     def test_gemma4_still_wins_without_a_chat_template(self):
         self.assertTrue(needs_bos("/nonexistent/models/gemma-4-31B-it", chat_template=False))
+
+    def test_the_helper_runs_on_the_python_3_6_of_the_cluster_nodes(self):
+        # run_lm_eval.sbatch calls it with the node's bare python3, which is 3.6 on Clariden: no future-annotations
+        # import (3.7), nothing a 3.6 grammar rejects; the helper then answered "false" silently
+        source = (Path(__file__).resolve().parent.parent / "scripts/lm_eval_harness/bos_default.py").read_text()
+        ast.parse(source, feature_version=(3, 6))
+        self.assertNotIn("from __future__ import annotations", source)
 
 
 if __name__ == "__main__":

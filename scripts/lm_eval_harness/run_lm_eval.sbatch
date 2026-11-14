@@ -904,7 +904,12 @@ resolve_pass_bos() {
     if [[ "$PASS_BOS" == "auto" ]]; then
         local no_template=""
         [[ $1 == true ]] || no_template="--no-chat-template"
-        PASS_BOS=$(python3 -m scripts.lm_eval_harness.bos_default "$TOKENIZER" $no_template 2>/dev/null || echo false)
+        # Not silent: the node's bare python3 can be too old for the helper (Clariden: 3.6), and "false" would then
+        # look like a decision.
+        if ! PASS_BOS=$(python3 -m scripts.lm_eval_harness.bos_default "$TOKENIZER" $no_template); then
+            echo "WARNING: BOS=auto could not be resolved (bos_default.py failed above), using false" >&2
+            PASS_BOS=false
+        fi
         [[ "$PASS_BOS" == "true" ]] \
             && echo "BOS=auto: prepending the BOS token for $TOKENIZER (a tokenizer that adds it itself is left alone); BOS=false / --no-bos turns this off"
     fi

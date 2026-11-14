@@ -219,6 +219,23 @@ class LaunchFlowTests(unittest.TestCase):
             self.assertEqual(pass_bos("true", template, added), "[true]")
             self.assertEqual(pass_bos("false", template, not_added), "[false]")
 
+    def test_a_failing_bos_helper_is_reported_and_does_not_kill_the_job(self) -> None:
+        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
+        block = sbatch[sbatch.index("# bos per pass begin"): sbatch.index("# bos per pass end")]
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "python3"  # the node's python3 too old for the helper
+            stub.write_text("#!/bin/sh\necho 'SyntaxError: future feature annotations is not defined' >&2\nexit 1\n")
+            stub.chmod(0o755)
+            script = (
+                f"set -euo pipefail\nPATH={tmp}:$PATH; BOS_REQUESTED=auto; TOKENIZER=t\n{block}\n"
+                'resolve_pass_bos false\necho "[$PASS_BOS]"\n'
+            )
+            out = subprocess.run(["bash", "-c", script], text=True, capture_output=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("[false]", out.stdout)
+        self.assertIn("BOS=auto could not be resolved", out.stderr)
+        self.assertIn("SyntaxError", out.stderr)
+
     def test_bos_by_client_applies_to_commands_with_a_chat_template(self) -> None:
         sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
         block = sbatch[sbatch.index("# bos per pass begin"): sbatch.index("# bos per pass end")]
