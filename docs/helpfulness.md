@@ -29,6 +29,18 @@ what a server actually loaded. Do not approve a profile based on its alias alone
 Profiles and their card hashes enter the run fingerprint; changing them prevents
 resume. Target and judge cannot be aliases/revisions of the same model repository.
 Reference baselines for adapted Arena-Hard also require open-weight profiles.
+For already released answers, a reference-only profile may use
+`kind = "released_answers"` instead of inventing a live endpoint or generation
+weights revision. It retains the reviewed model identity/license/card and
+requires `reference_model`, a public `answers_url` containing the immutable
+`answers_revision`, and profile-relative `answers_file`/`cases_file` with their
+`answers_sha256`/`cases_sha256`. The original v2 response's
+`messages[-1].content.answer` is judged, not `thought`. The port checks exact
+question UIDs, prompts, model IDs and coverage, and the runner binds prepared
+cases to those verified answers. Publisher attribution does **not** establish
+the precise weights or serving configuration used to generate them. This mode
+cannot satisfy target/judge deployment provenance; those requirements remain
+unchanged. Unselected Arena references do not block other teacher benchmarks.
 
 Gemma/Phi are candidate families, not calibrated judges. Verified public examples
 are [`google/gemma-3-27b-it`](https://huggingface.co/google/gemma-3-27b-it)

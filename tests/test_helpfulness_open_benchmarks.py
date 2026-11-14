@@ -11,8 +11,8 @@ from contextlib import redirect_stderr
 import io
 
 from scripts.helpfulness import acceptance_scoring, eqbench, litbench, open_benchmarks as ob, open_models
-from scripts.helpfulness.cli import custom_run
-from scripts.helpfulness.core import read_jsonl, write_json
+from scripts.helpfulness.cli import custom_run, run as run_suite
+from scripts.helpfulness.core import digest, read_jsonl, write_json
 from scripts.helpfulness.eqbench_worker import bridge, valid_native_cases
 
 
@@ -68,6 +68,94 @@ class OpenBenchmarkTests(unittest.TestCase):
         suite = {"purpose": "helpfulness_chitchat_teacher", "model_policy": "open_weights_only", "judge": judge}
         with self.assertRaisesRegex(ValueError, "independent"):
             open_models.validate_suite(suite, [{"name": "teacher", "endpoint": target}], [{"name": "mt_bench"}])
+
+    def released_profile(self):
+        config, record = self.profile("reference", "Qwen/Qwen3-32B")
+        questions = [{"uid": "q1", "prompt": "Question", "category": "hard_prompt"}]
+        answers = [{"uid": "q1", "model": record["model_id"], "messages": [
+            {"role": "user", "content": "Question"},
+            {"role": "assistant", "content": {"thought": "Not judged", "answer": " Final answer.\n"}},
+        ]}]
+        cases = ob.arena_references(questions, answers, record["model_id"])
+        for key, rows in (("answers", answers), ("cases", cases)):
+            path = self.root / (key + ".jsonl")
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+            record[key + "_file"] = path.name
+            record[key + "_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        for key in ("revision", "served_model", "base_url", "capabilities"):
+            del record[key]
+        record.update(kind="released_answers", reference_model=record["model_id"],
+                      answers_revision="b" * 40,
+                      answers_url="https://example.invalid/data/" + "b" * 40 + "/answers.jsonl")
+        write_json(Path(config["provenance_file"]), record)
+        return {"provenance_file": config["provenance_file"]}, record, cases
+
+    def test_released_arena_reference_uses_native_final_answer_not_thought(self):
+        _, _, cases = self.released_profile()
+        self.assertEqual(cases[0]["reference_answer"], " Final answer.\n")
+        question = {"uid": "q1", "prompt": "Question", "category": "hard_prompt"}
+        valid = {"uid": "q1", "model": "Qwen/Qwen3-32B", "messages": [
+            {"role": "user", "content": "Question"},
+            {"role": "assistant", "content": {"answer": "Answer", "thought": "Not judged"}},
+        ]}
+        for bad in (
+            {**valid, "uid": "other"}, {**valid, "model": "other-model"},
+            {**valid, "messages": [{"role": "user", "content": "Changed"}, valid["messages"][1]]},
+            {**valid, "messages": [valid["messages"][0], {"role": "assistant", "content": "Legacy shape"}]},
+        ):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                ob.arena_references([question], [bad], "Qwen/Qwen3-32B")
+        with self.assertRaisesRegex(ValueError, "Duplicate"):
+            ob.arena_references([question], [valid, valid], "Qwen/Qwen3-32B")
+
+    def test_released_reference_is_checksum_bound_and_not_a_live_model_profile(self):
+        config, record, cases = self.released_profile()
+        verified = open_models.reference_provenance(config)
+        self.assertEqual(verified["cases_digest"], digest(ob.normalize("arena_hard_v2", cases, {})))
+        self.assertFalse(verified["generation_weights_revision_verified"])
+        with self.assertRaisesRegex(ValueError, "reference-only"):
+            open_models.provenance(config, {"chat"})
+        (self.root / record["answers_file"]).write_text("{}\n")
+        with self.assertRaisesRegex(ValueError, "checksum"):
+            open_models.reference_provenance(config)
+
+    def test_released_reference_cannot_fabricate_ported_answers_with_new_case_hash(self):
+        config, record, cases = self.released_profile()
+        cases[0]["reference_answer"] = "Fabricated answer"
+        path = self.root / record["cases_file"]
+        path.write_text(json.dumps(cases[0]) + "\n")
+        record["cases_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        write_json(Path(config["provenance_file"]), record)
+        with self.assertRaisesRegex(ValueError, "native final answers"):
+            open_models.reference_provenance(config)
+
+    def test_released_reference_requires_an_immutable_public_source(self):
+        config, record, _ = self.released_profile()
+        for fields in ({"answers_revision": "main"}, {"answers_url": record["answers_url"] + "?token=secret"},
+                       {"cases_file": "../outside.jsonl"}, {"model_id": "openai/gpt-4o"}):
+            with self.subTest(fields=fields):
+                write_json(Path(config["provenance_file"]), {**record, **fields})
+                with self.assertRaises(ValueError):
+                    open_models.reference_provenance(config)
+
+    def test_unselected_arena_does_not_require_its_reference_profile(self):
+        target, _ = self.profile("target")
+        suite = {"purpose": "helpfulness_chitchat_teacher", "model_policy": "open_weights_only",
+                 "reference_models": {"unused": {"provenance_file": str(self.root / "absent.json")}}}
+        result = open_models.validate_suite(
+            suite, [{"name": "target", "endpoint": target}], [{"name": "or_bench"}])
+        self.assertEqual(result["references"], {})
+
+    def test_arena_prepared_cases_must_match_the_released_reference_profile(self):
+        config, record, cases = self.released_profile()
+        verified = open_models.reference_provenance(config)
+        prepared = ob.normalize("arena_hard_v2", cases, {})
+        prepared[0]["reference_answer"] = "Unrelated prepared answer"
+        with patch.object(open_models, "validate_suite",
+                          return_value={"references": {record["model_id"]: verified}}):
+            with self.assertRaisesRegex(ValueError, "Prepared Arena cases"):
+                run_suite({"model_policy": "open_weights_only"}, {"arena_hard_v2": {"cases": prepared}},
+                          self.root / "output", [], [{"name": "arena_hard_v2"}])
 
     def test_assets_reject_changed_bytes_before_import(self):
         with patch.dict(ob.SPECS, {"fixture": ("owner/repo", "a" * 40,

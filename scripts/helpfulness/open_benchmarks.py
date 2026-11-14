@@ -167,6 +167,38 @@ def normalize(name: str, rows: list[dict], options: dict) -> list[dict]:
     return cases
 
 
+def arena_references(questions: list[dict], answers: list[dict], model_id: str) -> list[dict]:
+    """Port released v2 final answers using the native judge's content['answer']."""
+    by_id = {}
+    for row in answers:
+        uid = text(row, "uid")
+        if uid in by_id:
+            raise ValueError("Duplicate released Arena answer UID")
+        by_id[uid] = row
+    question_ids = [text(row, "uid") for row in questions]
+    if not question_ids or len(set(question_ids)) != len(question_ids) or set(question_ids) != set(by_id):
+        raise ValueError("Released Arena answers must cover exactly the selected question UIDs")
+    result = []
+    for question in questions:
+        row = by_id[question["uid"]]
+        history = row.get("messages")
+        if row.get("model") != model_id:
+            raise ValueError("Released Arena answer model differs from its declared reference")
+        if (
+            not isinstance(history, list) or len(history) != 2
+            or any(not isinstance(item, dict) for item in history)
+            or [item.get("role") for item in history] != ["user", "assistant"]
+            or history[0].get("content") != text(question, "prompt")
+        ):
+            raise ValueError("Released Arena answer must preserve the exact single-turn question")
+        content = history[1].get("content")
+        if not isinstance(content, dict):
+            raise ValueError("Released Arena v2 requires structured content.answer")
+        result.append({**question, "reference_model": model_id, "reference_answer": text(content, "answer")})
+    normalize("arena_hard_v2", result, {})
+    return result
+
+
 def prepare(name: str, source: Path, options: dict) -> dict:
     if options["upstream_terms"].startswith("REPLACE_WITH"):
         raise ValueError(f"{name}: confirm upstream code/prompt/data terms before preparation")

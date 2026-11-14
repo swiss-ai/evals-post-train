@@ -321,6 +321,11 @@ def run(
             required = {case["reference_model"] for case in data["arena_hard_v2"]["cases"]}
             if required - references.keys():
                 raise ValueError("Arena-Hard adapted baselines require explicit open-weight reference provenance")
+            for model in required:
+                record = references[model]
+                cases = [case for case in data["arena_hard_v2"]["cases"] if case["reference_model"] == model]
+                if record.get("kind") == "released_answers" and digest(cases) != record["cases_digest"]:
+                    raise ValueError("Prepared Arena cases differ from the verified released reference source")
     resolved_targets = {
         checkpoint["name"]: public_endpoint(checkpoint["endpoint"]) for checkpoint in checkpoints
     }
