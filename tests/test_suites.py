@@ -1,5 +1,11 @@
 import copy
+import os
+import shutil
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 from scripts.common import suites
 
@@ -88,6 +94,73 @@ class SuiteTests(unittest.TestCase):
         suite["setups"]["qwen3-32b-thinking"]["flags"]["inspect"].append("--epochs")
         with self.assertRaisesRegex(ValueError, "--epochs"):
             suites.validate(suite)
+
+    def test_a_pinned_tokenizer_becomes_the_lm_eval_tokenizer_flag(self):
+        suite = suites.load(SUITE)
+        spec = suite["setups"]["apertus-2-chonk-sft"]["tokenizer"]
+        with mock.patch.dict(os.environ, {"EVAL_ENV_CACHE_ROOT": "/cache"}):
+            flags = suites.flags_for(suite, "apertus-2-chonk-sft", "ifbench")
+            self.assertEqual(flags[flags.index("--tokenizer") + 1], f"/cache/tokenizers/{spec['revision']}/{spec['path']}")
+            self.assertNotIn("--tokenizer", suites.flags_for(suite, "apertus-2-chonk-sft", "aime2024"))
+        suite["setups"]["apertus-2-chonk-sft"]["flags"]["lm_eval"] += ["--tokenizer", "x"]
+        with self.assertRaisesRegex(ValueError, "--tokenizer"):
+            suites.validate(suite)
+
+    def test_malformed_tokenizer_pins_are_refused(self):
+        base = suites.load(SUITE)
+        for mutate, message in (
+            (lambda t: t.update(revision="main"), "full commit sha"),
+            (lambda t: t.update(path="../x"), "relative directory"),
+            (lambda t: t.pop("repo"), "repo, revision and path"),
+        ):
+            suite = copy.deepcopy(base)
+            mutate(suite["setups"]["apertus-2-chonk-sft"]["tokenizer"])
+            with self.assertRaisesRegex(ValueError, message):
+                suites.validate(suite)
+
+    @unittest.skipUnless(shutil.which("git"), "needs git")
+    def test_fetch_tokenizer_copies_the_pinned_directory_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, cache = Path(tmp) / "repo", Path(tmp) / "cache"
+            (repo / "tok" / "a").mkdir(parents=True)
+            (repo / "tok" / "a" / "tokenizer.json").write_text("{}")
+            git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run([*git, "add", "-A"], check=True)
+            subprocess.run([*git, "commit", "-q", "-m", "x"], check=True)
+            sha = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+            spec = {"repo": str(repo), "revision": sha, "path": "tok/a"}
+            with mock.patch.dict(os.environ, {"EVAL_ENV_CACHE_ROOT": str(cache)}):
+                path = suites.fetch_tokenizer(spec)
+                self.assertTrue((path / "tokenizer.json").is_file())
+                with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("fetched twice")):
+                    self.assertEqual(suites.fetch_tokenizer(spec), path)
+                with self.assertRaisesRegex(ValueError, "could not fetch"):
+                    suites.fetch_tokenizer({**spec, "revision": "0" * 40})
+
+    def test_one_launch_per_model_and_benchmark(self):
+        suite = suites.load(SUITE)
+        models = {"apertus-2-chonk-sft": "chonk", "qwen3-32b-thinking": "qwen"}
+        rows = suites.commands(suite, models, api_base_url="http://x/v1", limit=5, no_wandb=True,
+                               qos="highprio", partition="highprio")
+        self.assertEqual(len(rows), len(models) * len(suite["benchmarks"]))
+        self.assertEqual([(r["setup"], r["label"]) for r in rows[:2]], [("apertus-2-chonk-sft", "MMLU"), ("apertus-2-chonk-sft", "GPQA")])
+        inspect_row, lm_eval_row = rows[0]["argv"], rows[1]["argv"]
+        self.assertEqual(inspect_row[:3], ["sbatch", "--qos=highprio", "--partition=highprio"])
+        self.assertEqual(inspect_row[-3:], ["--", "--epochs", "4"])
+        self.assertIn("--task-arg", inspect_row)
+        self.assertEqual(lm_eval_row[:3], ["bash", "scripts/lm_eval_harness/launch_evaluations.sh", "single"])
+        self.assertEqual(lm_eval_row[lm_eval_row.index("--task") + 1], "gpqa_main_cot_zeroshot")
+        self.assertEqual(lm_eval_row.count("--backend"), 1)  # the Chonk setup already names it
+        qwen_lm_eval = next(r["argv"] for r in rows if r["setup"] == "qwen3-32b-thinking" and r["framework"] == "lm_eval")
+        self.assertEqual(qwen_lm_eval[qwen_lm_eval.index("--backend") + 1], "openai")
+        self.assertEqual(qwen_lm_eval[qwen_lm_eval.index("--api-model-name") + 1], "qwen")
+
+    def test_run_prints_by_default_and_checks_its_arguments(self):
+        with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")):
+            self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m"]), 0)
+        for bad in (["--model", "m"], ["--model", "nope=m"], ["--model", f"{THINK}=a", "--model", f"{THINK}=b"]):
+            self.assertEqual(suites.main(["run", SUITE, *bad]), 1)
 
     def test_cli(self):
         for argv in (["list"], ["show", SUITE], ["plan", SUITE, "--setup", THINK],
