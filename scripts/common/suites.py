@@ -5,8 +5,10 @@ configs/suites/<name>.json holds two things:
   benchmarks  rows in table order: label, task, framework, repeats {n, via}, metric {label, key},
               optionally sampling (a profile name that overrides the setup's) and task_args
               (inspect only: -T arguments of the task, e.g. {"cot": "true"})
-  setups      named kinds of model setup: max_length, sampling (a profile name) and flags, the
-              launcher flags of each framework the suite uses (thinking, chat format, ...)
+  setups      named kinds of model setup: max_length, sampling (a profile name), flags (the
+              launcher flags of each framework the suite uses: thinking, chat format, ...) and
+              optionally serving (the arguments the server itself needs, e.g. a reasoning parser;
+              nothing here runs them, whoever launches the model passes them to `vllm serve`)
 
 Profiles are the ones of configs/sampling_defaults.json; a suite names one and holds no temperature.
 
@@ -14,10 +16,10 @@ Profiles are the ones of configs/sampling_defaults.json; a suite names one and h
 "task" (the task already repeats n times, nothing is passed). max_length is the lm_eval --max-length;
 inspect has no such flag, the server's --max-model-len is the window. The code only reads the file and knows no model.
 
-    python -m scripts.common.suites list            # names, e.g. table25 or apertus2/chonk_sft
-    python -m scripts.common.suites show table25    # title and setups
-    python -m scripts.common.suites plan table25 --setup apertus-1.5-70b-thinking
-    python -m scripts.common.suites flags table25 --setup apertus-1.5-70b-thinking --task ifbench
+    python -m scripts.common.suites list            # names, e.g. apertus2/chonk_sft
+    python -m scripts.common.suites show apertus2/chonk_sft    # title and setups
+    python -m scripts.common.suites plan apertus2/chonk_sft --setup apertus-1.5-70b-thinking
+    python -m scripts.common.suites flags apertus2/chonk_sft --setup apertus-1.5-70b-thinking --task ifbench
 """
 
 import argparse
@@ -96,6 +98,9 @@ def validate(suite):
     for name, setup in suite["setups"].items():
         _positive_int(f"setup {name} max_length", setup.get("max_length"))
         _profile(f"setup {name} sampling", setup.get("sampling"), profiles)
+        serving = setup.get("serving", [])
+        if not isinstance(serving, list) or not all(isinstance(a, str) for a in serving):
+            raise ValueError(f"setup {name}: serving must be a list of strings")
         flags = setup.get("flags")
         if not isinstance(flags, dict) or set(flags) - set(FRAMEWORKS):
             raise ValueError(f"setup {name}: flags must be an object keyed by framework ({', '.join(FRAMEWORKS)})")
@@ -197,6 +202,8 @@ def main(argv=None):
                 print(f"{name}: window {s['max_length']}, sampling {s['sampling']}\n  {s.get('description', '')}")
                 for framework, items in s["flags"].items():
                     print(f"  {framework}: {shlex.join(items) or '(none)'}")
+                if s.get("serving"):
+                    print(f"  server: {shlex.join(s['serving'])}")
         elif args.command == "plan":
             suite = load(args.suite)
             print(_table([[r["label"], r["task"], shlex.join(r["flags"]), r["sampling"], r["metric"],

@@ -49,11 +49,12 @@
       }
     },
     "apertus-2-chonk-sft": {
-      "description": "Apertus 2 Chonk SFT, native format (no Jinja template). The window 16384 is the checkpoint's name, not yet the maximal window.",
+      "description": "Apertus 2 Chonk SFT. No Jinja template exists: apertus-common renders the format, in lm_eval (--chat-format apertus2, completions endpoint, needs --backend openai and a verified tokenizer directory) and on the server for the other frameworks (vLLM plugin of apertus-common PR #5, see docs/thinking.md). The window 16384 is the checkpoint's name, not yet the maximal window.",
       "max_length": 16384,
       "sampling": "thinking",
+      "serving": ["--tokenizer-mode", "apertus2", "--reasoning-parser", "apertus2", "--enable-auto-tool-choice", "--tool-call-parser", "apertus2"],
       "flags": {
-        "lm_eval": ["--chat-format", "apertus2", "--tokenizer", "apertus-2-instruct-tokenizer"],
+        "lm_eval": ["--backend", "openai", "--chat-format", "apertus2", "--tokenizer", "apertus-2-instruct-tokenizer"],
         "inspect": []
       }
     }
