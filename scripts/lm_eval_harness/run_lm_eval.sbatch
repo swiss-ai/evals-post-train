@@ -908,6 +908,7 @@ resolve_pass_bos() {
         [[ "$PASS_BOS" == "true" ]] \
             && echo "BOS=auto: prepending the BOS token for $TOKENIZER (a tokenizer that adds it itself is left alone); BOS=false / --no-bos turns this off"
     fi
+    return 0  # the && list above fails when the rule says false, which set -e must not take for a failed call
 }
 
 # resolve_pass_bos_by_client <chat template: true|false>: --bos-by-client for one lm-eval command, in PASS_BOS_BY_CLIENT.
@@ -922,6 +923,7 @@ resolve_pass_bos_by_client() {
             echo "--bos-by-client applies to commands with a chat template: ignored for this one (no chat template)"
         fi
     fi
+    return 0
 }
 
 # append_bos_probe <chat template: true|false>: the BOS probe of the command make_cmd just built, in TIMED_CMD.
@@ -934,7 +936,12 @@ append_bos_probe() {
     [[ $1 == true ]] && flags="$flags --chat-template"
     [[ "$PASS_BOS_BY_CLIENT" == "true" ]] && flags="$flags --bos-by-client"
     TIMED_CMD="$TIMED_CMD
+<<<<<<< HEAD
 cd $PWD && python -m scripts.lm_eval_harness.bos_probe --url '$API_BASE_URL' --model '$API_MODEL_NAME' --tokenizer '$TOKENIZER' --bos '$PASS_BOS' --bos-requested '$BOS_REQUESTED'$flags"
+=======
+cd $PWD && python -m scripts.lm_eval_harness.bos_probe --url '$API_BASE_URL' --model '$API_MODEL_NAME' --tokenizer '$TOKENIZER' --bos '$PASS_BOS' --bos-requested '$BOS_REQUESTED'"
+    return 0
+>>>>>>> bos-from-tokenizer
 }
 # bos per pass end
 

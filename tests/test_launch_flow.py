@@ -201,7 +201,7 @@ class LaunchFlowTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 (Path(tmp) / "tokenizer_config.json").write_text(json.dumps(config))
                 script = (
-                    f"BOS_REQUESTED={requested}; TOKENIZER={tmp}\n{block}\n"
+                    f"set -euo pipefail\nBOS_REQUESTED={requested}; TOKENIZER={tmp}\n{block}\n"
                     f'resolve_pass_bos {template}\necho "[$PASS_BOS]"\n'
                 )
                 out = subprocess.run(["bash", "-c", script], cwd=REPO_ROOT, text=True, capture_output=True)
@@ -225,7 +225,7 @@ class LaunchFlowTests(unittest.TestCase):
 
         def by_client(requested: str, template: str) -> tuple[str, str]:
             script = (
-                f"BOS_BY_CLIENT={requested}\n{block}\n"
+                f"set -euo pipefail\nBOS_BY_CLIENT={requested}\n{block}\n"
                 f'resolve_pass_bos_by_client {template}\necho "$PASS_BOS_BY_CLIENT"\n'
             )
             out = subprocess.run(["bash", "-c", script], text=True, capture_output=True).stdout.strip().splitlines()
@@ -246,8 +246,12 @@ class LaunchFlowTests(unittest.TestCase):
             template: str, backend: str = "openai", model: str = "local-completions", check: str = "", by_client: str = "false"
         ) -> str:
             script = (
+<<<<<<< HEAD
                 f"LM_EVAL_BACKEND={backend}; API_LM_EVAL_MODEL={model}; BOS_CHECK={check}; PASS_BOS=true; BOS_REQUESTED=auto\n"
                 f"PASS_BOS_BY_CLIENT={by_client}\n"
+=======
+                f"set -euo pipefail\nLM_EVAL_BACKEND={backend}; API_LM_EVAL_MODEL={model}; BOS_CHECK={check}; PASS_BOS=true; BOS_REQUESTED=auto\n"
+>>>>>>> bos-from-tokenizer
                 "API_BASE_URL=http://x/v1/completions; API_MODEL_NAME=m; TOKENIZER=t; TIMED_CMD=start\n"
                 f"{block}\nappend_bos_probe {template}\necho \"$TIMED_CMD\"\n"
             )
