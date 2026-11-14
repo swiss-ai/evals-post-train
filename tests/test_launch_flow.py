@@ -135,9 +135,12 @@ def _openai_model(**env: str) -> subprocess.CompletedProcess:
 
 
 class LaunchFlowTests(unittest.TestCase):
-    def test_omitted_mode_defaults_to_posttrain(self) -> None:
-        output = _dry_run("--model", "test/model")
-        self.assertIn("Mode:   posttrain", output)
+    def test_mode_is_required_and_only_single_and_custom_exist(self) -> None:
+        for arguments, message in ((["--model", "test/model"], "a mode is required"),
+                                   (["posttrain", "--model", "test/model"], "invalid mode 'posttrain'")):
+            completed = _launch(*arguments)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn(message, completed.stdout + completed.stderr)
 
     def test_openai_backend_selects_cpu_only_sbatch_wrapper(self) -> None:
         output = _dry_run(
@@ -804,7 +807,6 @@ class LaunchFlowTests(unittest.TestCase):
         cases = {
             "not openai": (["--model", "m", "--chat-format", "apertus2", "--tokenizer", "/ckpt",
                             "--max-length", "65536"], "needs --backend openai"),
-            "preset suite": (["posttrain", *apertus2], "runs generative tasks only"),
             "no tokenizer": ([*api, "--chat-format", "apertus2", "--max-length", "65536"],
                              "needs --backend openai, --tokenizer"),
             "no max length": ([*api, "--chat-format", "apertus2", "--tokenizer", "/ckpt"],

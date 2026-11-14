@@ -4,39 +4,18 @@ Launching lm-evaluation-harness evaluations on Clariden: the launcher, resumable
 
 ## The Launch Script
 
-`scripts/lm_eval_harness/launch_evaluations.sh` is the primary entry point for running evaluations. It supports three model selection modes and multiple benchmark suites.
+`scripts/lm_eval_harness/launch_evaluations.sh` is the primary entry point for running evaluations. It supports three model selection modes and two task modes (`single`, `custom`).
 
-### Benchmark Suites
+### Modes
 
-The launcher selects a benchmark suite from its optional first positional argument (`<mode>`); omitting it defaults to `posttrain`. Apertus suites are defined in `configs/apertus/`, OLMo3 suites in `configs/olmo/`.
+The launcher takes a required first positional argument, `<mode>`:
 
-**Apertus suites** (`configs/apertus/`)
+| Mode | Tasks from | Description |
+|------|------------|-------------|
+| `single` | `--task` | One task, or a comma-separated list |
+| `custom` | `--task-file` | A task list, with an optional `--table-metrics` file (default: the task list) |
 
-| Mode | Task list | Tasks | Description |
-|------|-----------|-------|-------------|
-| `default` | `tasks_default.txt` | 48 | Full Apertus 1.5 post-training suite: knowledge, math, code, reasoning, multilingual, instruction following, bias, cultural knowledge, safety |
-| `posttrain` | `tasks_posttrain_final.txt` | 50 | Post-training suite incl. chat/arena (alpaca_eval, arena_hard_v01/v2), AIME, MATH-500, BFCL v3, Swiss AI Charter Alignment, o(r)bench, and system-prompt adherence (RealGuardrails: S-IFEval, TensorTrust, S-RuLES) |
-| `best-of-k` | `tasks_best_of_k.txt` | 7 | Multi-repeat/self-consistency suite for math and code, with mean@k, majority-vote, and pass@k metrics |
-| `gpt` | `tasks_gpt.txt` | 3 | Experimental AlpacaEval and Arena-Hard path for a future OpenAI GPT judge type in the Swiss-AI harness |
-| `multi-lingual` | `tasks_multilingual.txt` | 12 | Multilingual-only subset (global_mmlu, mgsm, hellaswag_multilingual, include, cultural_bench, multi-if, aya_redteaming, ...) |
-| `apertus-previous` | `tasks_english.txt` | 19 | Previous (Apertus 1.0) English benchmark suite |
-| `pretrain` | `tasks_pretrain.txt` | 30 | Pretraining suite (base-model loglikelihood/MC variants, few-shot MMLU); logs to W&B project `apertus-1.5-pre-training-v0.0` |
-| `eval-debug` | `eval_debug.txt` | 8 | Small mix of loglikelihood + generative tasks to smoke-test the eval pipeline |
-| `custom` | `--task-file` | — | User-specified task file and optional `--table-metrics` file |
-| `single` | `--task` | 1 | One task, user-specified through `--task` (comma-separated tasks allowed) |
-
-**OLMo3 suites** (`configs/olmo/`)
-
-| Mode | Tasks | Description |
-|------|-------|-------------|
-| `olmo-easy` | 17 tasks | Base Easy Suite: perplexity/BPB-style evaluation (mmlu, hellaswag, arc, etc.) |
-| `olmo-main` | 21 tasks | Base Main Suite: generation + MC (gsm8k_cot, humaneval, drop, etc.) |
-| `olmo-heldout` | 2 tasks | Held-out Suite: mmlu_pro, bbh |
-| `olmo-safety` | 4 tasks | Safety Suite: harmbench, toxigen, wmdp, bbq |
-| `olmo-longcontext` | 1 task | Long-Context: RULER (8192 tokens) |
-| `olmo-complete` | 24 tasks | Curated combined suite (excludes long-context; see the task file for intentionally omitted tasks) |
-
-Each mode maps to a task list and a metric config (`*_main_table.txt`) in the same directory. OLMo3 modes log to a per-mode W&B project (the base `WANDB_PROJECT` with a `-olmo-<suite>` suffix, e.g. `<project>-olmo-easy`); the `single` mode appends `-single`. The launcher defaults `WANDB_PROJECT` to `apertus-1.5-post-training-v0.0` (not `run_lm_eval.sbatch`'s own `swissai-evals-test` default — see [SBATCH Scripts](#sbatch-scripts)); export `WANDB_PROJECT` yourself for test/smoke runs to avoid logging into the production project.
+The task lists the former modes used are still in `configs/apertus/` and `configs/olmo/`; pass one with `custom --task-file <list> --table-metrics <list>_main_table.txt` (for OLMo3: `olmo3_<suite>.txt` and `olmo3_<suite>_main_table.txt`). The launcher defaults `WANDB_PROJECT` to `apertus-1.5-post-training-v0.0` (not `run_lm_eval.sbatch`'s own `swissai-evals-test` default; see [SBATCH Scripts](#sbatch-scripts)); export `WANDB_PROJECT` yourself for test/smoke runs to avoid logging into the production project.
 
 ### Model Selection Modes
 
@@ -47,11 +26,6 @@ bash scripts/lm_eval_harness/launch_evaluations.sh <mode> --model <hf_path_or_lo
 Automatically derives the run name; the chat template is applied by default, to every task of the run: always for post-trained models, never for base (pre-trained) models, which need `--no-chat-template`. `--chat-template-by-type` sorts the tasks instead: generative ones with the template, log-likelihood ones without.
 
 > A multiple-choice task through the chat template is scored by how likely the model is to *start its reply* with each answer, not as a raw continuation of the prompt. That is comparable across the tasks of one run and across post-trained models, not with raw-continuation numbers (base models, `--no-chat-template` or `--chat-template-by-type` runs). `--chat-template-by-type` keeps multiple choice on the raw-continuation number for a post-trained model.
-
-The mode may be omitted for the default post-training suite:
-```bash
-bash scripts/lm_eval_harness/launch_evaluations.sh --model <hf_path_or_local_path> [options]
-```
 
 **Mode 2: Model-list script** (for batch evaluation of predefined model sets)
 ```bash
@@ -120,7 +94,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 Some LLM-as-a-judge tasks require a separate model to be available through the CSCS serving API. Pass `--judge auto` to launch the required judge models after the resume scan, and only when judge-dependent tasks are still missing:
 
 ```bash
-bash scripts/lm_eval_harness/launch_evaluations.sh posttrain \
+bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/apertus/tasks_posttrain_final.txt --table-metrics configs/apertus/tasks_posttrain_final_main_table.txt \
   --model /capstor/store/.../checkpoint \
   --judge auto \
   --judge-requests-per-minute 30
@@ -168,40 +142,39 @@ By default the evaluation launcher submits a cleanup job that cancels automatica
 
 #### Experimental OpenAI GPT judge path
 
-The separate `gpt` suite reserves a stable task/config path for the planned
+The `configs/apertus/tasks_gpt.txt` list reserves a stable task/config path for the planned
 OpenAI GPT judge implementation in `swiss-ai/lm-evaluation-harness`:
 
 ```bash
 export OPENAI_API_KEY="..."
-bash scripts/lm_eval_harness/launch_evaluations.sh gpt \
+bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/apertus/tasks_gpt.txt --table-metrics configs/apertus/tasks_gpt_main_table.txt \
   --model /capstor/store/.../checkpoint
 ```
 
 The key may instead be set in `scripts/secrets.env`.
 This is experimental scaffolding: the launcher deliberately does not pass a
 speculative `--judge-type` (or similar) flag yet. Until the corresponding
-Swiss-AI harness support lands, the mode prints a warning and is not expected
-to provide the future GPT-judge behavior. The ordinary `posttrain` suite
-continues to use the CSCS judge setup described above.
+Swiss-AI harness support lands, that list is not expected to provide the future
+GPT-judge behavior. Other runs continue to use the CSCS judge setup described above.
 
 
 ### Examples
 
 ```bash
 # OLMo3 paper-faithful 5-shot evaluation
-bash scripts/lm_eval_harness/launch_evaluations.sh olmo-complete --model allenai/OLMo-2-1124-7B --num-fewshot 5 --no-chat-template
+bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/olmo/olmo3_complete.txt --table-metrics configs/olmo/olmo3_complete_main_table.txt --model allenai/OLMo-2-1124-7B --num-fewshot 5 --no-chat-template
 
 # Large model with vLLM, eight tasks per chunk and four concurrent chunks
-bash scripts/lm_eval_harness/launch_evaluations.sh default \
+bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/apertus/tasks_default.txt --table-metrics configs/apertus/tasks_default_main_table.txt \
   --model Qwen/Qwen2.5-72B-Instruct --backend vllm \
   --chunk-size 8 --max-parallel 4
 
 # Run all models from a batch script on the safety suite
-bash scripts/lm_eval_harness/launch_evaluations.sh olmo-safety \
+bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/olmo/olmo3_safety.txt --table-metrics configs/olmo/olmo3_safety_main_table.txt \
   --script scripts/lm_eval_harness/runners/example_models.sh --chunk-size 4
 
 # The SGLang backend
-bash scripts/lm_eval_harness/launch_evaluations.sh olmo-easy --model /capstor/store/../apertus-.../checkpoints/ --backend sglang
+bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/olmo/olmo3_easy.txt --table-metrics configs/olmo/olmo3_easy_main_table.txt --model /capstor/store/../apertus-.../checkpoints/ --backend sglang
 
 # Against an already-running OpenAI-compatible endpoint (vLLM serve, CSCS serving, ...) instead of
 # loading the model in the job
@@ -233,7 +206,7 @@ There are two ways to evaluate a Megatron-LM checkpoint:
 
 ```bash
 # Natively with the megatron_lm backend, no conversion; --megatron-iter defaults to latest
-bash scripts/lm_eval_harness/launch_evaluations.sh olmo-easy --model /capstor/store/../apertus-.../checkpoints/ \
+bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/olmo/olmo3_easy.txt --table-metrics configs/olmo/olmo3_easy_main_table.txt --model /capstor/store/../apertus-.../checkpoints/ \
   --backend megatron_lm --name Megatron-Test-260216 --megatron-iter 4000000
 
 # Converted to HF first, then evaluated with vLLM (recommended: supports vllm/sglang/hf and the
@@ -319,12 +292,11 @@ Use `--num-fewshot 5` to match the OLMo3 paper settings. Tasks with hardcoded ex
 
 1. Create `configs/my_suite.txt` with task names (one per line)
 2. Create `configs/my_suite_main_table.txt` with `task_name/metric_name` entries
-3. Add a new case in the `launch_evaluations.sh` mode selector, or export `TASKS` and `TABLE_METRICS` directly:
+3. Pass them to `custom`:
 
 ```bash
-export TASKS=./configs/my_suite.txt
-export TABLE_METRICS=./configs/my_suite_main_table.txt
-bash scripts/lm_eval_harness/launch_evaluations.sh olmo-complete --model my-model
+bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/my_suite.txt \
+  --table-metrics configs/my_suite_main_table.txt --model my-model
 ```
 
 Available task names can be found in the selected lm-evaluation-harness checkout under `lm_eval/tasks/` or by running `lm_eval --tasks list` in the prepared evaluation environment.
@@ -498,22 +470,22 @@ bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --mod
 bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model my/apertus-reasoner --thinking
 
 # Explicit tokens rather than template auto-detection
-bash scripts/lm_eval_harness/launch_evaluations.sh posttrain --model my/reasoner --backend vllm \
+bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model my/reasoner --backend vllm \
   --enable-thinking --think-start-token '<think>' --think-end-token '</think>' \
   --log-length-metrics
 
 # Measure format well-formedness only, no length aggregation
-bash scripts/lm_eval_harness/launch_evaluations.sh olmo-main --model my/reasoner --autodetect-think-tokens
+bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model my/reasoner --autodetect-think-tokens
 
 # Response length of a NON-reasoning model: no close token needed, since response_length_*
 # is recorded for every generative response whether the model thinks or not
-bash scripts/lm_eval_harness/launch_evaluations.sh posttrain --model meta-llama/Llama-3.1-8B-Instruct --log-length-metrics
+bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model meta-llama/Llama-3.1-8B-Instruct --log-length-metrics
 ```
 
 The main launcher forwards all of these flags to every chunk:
 
 ```bash
-bash scripts/lm_eval_harness/launch_evaluations.sh posttrain \
+bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot \
   --model /capstor/.../my-reasoner --thinking
 ```
 

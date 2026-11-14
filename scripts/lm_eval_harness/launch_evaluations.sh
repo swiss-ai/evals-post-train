@@ -5,27 +5,9 @@
 # Usage:
 #   bash scripts/lm_eval_harness/launch_evaluations.sh [mode] [options]
 #
-# Modes:
-
-# Apertus:
-#   default          - Apertus multilingual suite
-#   multi-lingual    - Multi-lingual suite (taken from 1.0)
-#   apertus-previous - Apertus previous benchmark suite (from 1.0)
-#   pretrain         - Apertus pre-training suite
-#   posttrain        - Apertus post-training suite (default)
-#   best-of-k        - Multi-repeat/self-consistency suite
-#   gpt              - Experimental OpenAI GPT-judge chat suite (future harness support)
-#   eval-debug       - Small set of loglikelihood and generative benchmarks to test eval script
+# Modes (required):
 #   single           - Run a single task (requires --task <task_name>)
-
-#
-# Olmo3:
-#   olmo-easy        - Base Easy Suite (minerva_math, mmlu, hellaswag, ...)
-#   olmo-main        - Base Main Suite (gsm8k_cot, humaneval, arc, ...)
-#   olmo-heldout     - Held-out Suite (mmlu_pro, bbh)
-#   olmo-safety      - Safety (harmbench, toxigen, wmdp, bbq)
-#   olmo-longcontext - Long-Context (RULER)
-#   olmo-complete    - All OLMo suites combined (excludes long-context)
+#   custom           - Run a task list (requires --task-file <path>, optional --table-metrics <path>)
 
 #
 # Model selection (pick one):
@@ -156,16 +138,16 @@
 #
 # Examples:
 #   # Single HF model, auto-detect everything
-#   bash scripts/lm_eval_harness/launch_evaluations.sh posttrain --model meta-llama/Llama-3.1-8B-Instruct
+#   bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model meta-llama/Llama-3.1-8B-Instruct
 #
 #   # Single model in resumable chunks
-#   bash scripts/lm_eval_harness/launch_evaluations.sh olmo-main --model allenai/OLMo-2-1124-7B --chunk-size 8
+#   bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/olmo/olmo3_main.txt --table-metrics configs/olmo/olmo3_main_main_table.txt --model allenai/OLMo-2-1124-7B --chunk-size 8
 #
 #   # Base model, explicit no chat template
-#   bash scripts/lm_eval_harness/launch_evaluations.sh olmo-easy --model Qwen/Qwen2.5-7B --no-chat-template
+#   bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/olmo/olmo3_easy.txt --table-metrics configs/olmo/olmo3_easy_main_table.txt --model Qwen/Qwen2.5-7B --no-chat-template
 #
 #   # Run a multi-model script
-#   bash scripts/lm_eval_harness/launch_evaluations.sh posttrain --script scripts/lm_eval_harness/runners/example_models.sh
+#   bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --script scripts/lm_eval_harness/runners/example_models.sh
 #
 #   # Run a single task
 #   bash scripts/lm_eval_harness/launch_evaluations.sh single --task hellaswag --model meta-llama/Llama-3.1-8B-Instruct
@@ -185,7 +167,7 @@ source scripts/common/secrets.sh
 [[ -n "${CSCS_SERVING_API:-}" ]] && export CSCS_SERVING_API
 
 # --- Argument parsing ---
-EVAL_MODE=posttrain
+EVAL_MODE=""
 if (( $# > 0 )) && [[ "$1" != --* ]]; then
     EVAL_MODE=$1
     shift
@@ -334,9 +316,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Validate mode ---
-VALID_MODES=("default" "multi-lingual" "apertus-previous" "pretrain" "posttrain" "best-of-k" "gpt" "olmo-easy" "olmo-main" "olmo-heldout" "olmo-safety" "olmo-longcontext" "olmo-complete" "eval-debug" "single" "custom")
+VALID_MODES=("single" "custom")
 if [[ ! " ${VALID_MODES[*]} " =~ " ${EVAL_MODE} " ]]; then
-    echo "Error: Invalid mode '$EVAL_MODE'"
+    echo "Error: ${EVAL_MODE:+invalid mode '$EVAL_MODE'}${EVAL_MODE:+}$([[ -z "$EVAL_MODE" ]] && echo 'a mode is required')"
     echo "Valid modes: ${VALID_MODES[*]}"
     exit 1
 fi
@@ -497,10 +479,6 @@ case "${CHAT_FORMAT_FLAG:-template}" in
         fi
         if [[ "$CONVERT_TO_HF" == "true" ]]; then
             echo "Error: --chat-format apertus2 evaluates a served model; convert and serve the checkpoint separately (drop --convert-to-hf)"
-            exit 1
-        fi
-        if [[ "$EVAL_MODE" != "custom" && "$EVAL_MODE" != "single" ]]; then
-            echo "Error: --chat-format apertus2 runs generative tasks only; use custom --task-file configs/apertus/tasks_posttrain_thinking.txt (or single), not the '$EVAL_MODE' suite"
             exit 1
         fi
         if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" || "$CHAT_TEMPLATE_OVERRIDE" == "by-type" \
@@ -785,62 +763,6 @@ export SBATCH_SCRIPT
 
 # --- Configure task suite ---
 case "$EVAL_MODE" in
-    "default")
-        export TASKS=./configs/apertus/tasks_default.txt
-        export TABLE_METRICS=./configs/apertus/tasks_default_main_table.txt
-        ;;
-    "multi-lingual")
-        export TASKS=./configs/apertus/tasks_multilingual.txt
-        export TABLE_METRICS=./configs/apertus/tasks_multilingual_main_table.txt
-        ;;
-    "apertus-previous")
-        export TASKS=./configs/apertus/tasks_english.txt
-        export TABLE_METRICS=./configs/apertus/tasks_english_main_table.txt
-        ;;
-    "pretrain")
-        export TASKS=./configs/apertus/tasks_pretrain.txt
-        export TABLE_METRICS=./configs/apertus/tasks_pretrain_main_table.txt
-        ;;
-    "posttrain")
-        export TASKS=./configs/apertus/tasks_posttrain_final.txt
-        export TABLE_METRICS=./configs/apertus/tasks_posttrain_final_main_table.txt
-        ;;
-    "best-of-k")
-        export TASKS=./configs/apertus/tasks_best_of_k.txt
-        export TABLE_METRICS=./configs/apertus/tasks_best_of_k_main_table.txt
-        ;;
-    "gpt")
-        export TASKS=./configs/apertus/tasks_gpt.txt
-        export TABLE_METRICS=./configs/apertus/tasks_gpt_main_table.txt
-        ;;
-    "olmo-easy")
-        export TASKS=./configs/olmo/olmo3_easy.txt
-        export TABLE_METRICS=./configs/olmo/olmo3_easy_main_table.txt
-        ;;
-    "olmo-main")
-        export TASKS=./configs/olmo/olmo3_main.txt
-        export TABLE_METRICS=./configs/olmo/olmo3_main_main_table.txt
-        ;;
-    "olmo-heldout")
-        export TASKS=./configs/olmo/olmo3_heldout.txt
-        export TABLE_METRICS=./configs/olmo/olmo3_heldout_main_table.txt
-        ;;
-    "olmo-safety")
-        export TASKS=./configs/olmo/olmo3_safety.txt
-        export TABLE_METRICS=./configs/olmo/olmo3_safety_main_table.txt
-        ;;
-    "olmo-longcontext")
-        export TASKS=./configs/olmo/olmo3_longcontext.txt
-        export TABLE_METRICS=./configs/olmo/olmo3_longcontext_main_table.txt
-        ;;
-    "olmo-complete")
-        export TASKS=./configs/olmo/olmo3_complete.txt
-        export TABLE_METRICS=./configs/olmo/olmo3_complete_main_table.txt
-        ;;
-    "eval-debug")
-        export TASKS=./configs/apertus/eval_debug.txt
-        export TABLE_METRICS=./configs/apertus/eval_debug_main_table.txt
-        ;;
     "single")
         export TASKS="$SINGLE_TASK"
         export TABLE_METRICS="$SINGLE_TASK"
@@ -855,17 +777,6 @@ case "$EVAL_MODE" in
         export TABLE_METRICS=${TABLE_METRICS:-$TASKS}
         ;;
 esac
-
-# The GPT path is deliberately only a suite/config placeholder for now. It uses
-# the normal Swiss-AI harness and will gain an explicit judge selector once that
-# support lands upstream; do not pass a speculative flag today.
-if [[ "$EVAL_MODE" == "gpt" ]]; then
-    echo "WARNING: gpt mode is experimental; no judge-type flag is passed to lm-eval yet." >&2
-    echo "         It requires the corresponding GPT-judge support to exist in the Swiss-AI harness." >&2
-    if [[ -z "${OPENAI_API_KEY:-}" ]]; then
-        echo "WARNING: OPENAI_API_KEY is set neither in the environment nor in scripts/secrets.env." >&2
-    fi
-fi
 
 # --- Auto-derive name and chat template for --model mode ---
 auto_detect_chat_template() {
@@ -959,7 +870,7 @@ export JUDGE_JOB_IDS=""
 JUDGE_TASKS_PATTERN="alpaca_eval|multijail|aya_redteaming|arena_hard_v01|arena_hard_v2|harmbench|hallulens|realtoxicitypromptsllama"
 
 # warn if tasks are detected but judge is explicitly disabled (mode=none)
-if [[ "$JUDGE_MODE" == "none" && "$EVAL_MODE" != "gpt" ]]; then
+if [[ "$JUDGE_MODE" == "none" ]]; then
     if [[ -f "$TASKS" ]]; then
         if grep -qE "$JUDGE_TASKS_PATTERN" "$TASKS"; then
             echo "WARNING: Detected judge-dependent tasks but judge model launching is disabled (--judge none)"
