@@ -130,6 +130,13 @@ def harness_prompts(
         # an older harness ignores it: the probe then reports what the server received
         **({"bos_by_client": True} if bos_by_client else {}),
     )
+    if bos_by_client and getattr(harness, "bos_by_client", None) is not True:
+        # an older harness swallows the argument: its requests would still let the server add a BOS,
+        # while this probe's own request (add_special_tokens=false) would pass
+        raise SystemExit(
+            "BOS check FAILED: --bos-by-client needs a lm-evaluation-harness with bos_by_client "
+            "(this one ignores it): bump requirements/lm-eval-harness.txt, or drop --bos-by-client"
+        )
     context = CONTEXT
     if chat_template:
         context = harness.apply_chat_template([{"role": "user", "content": CONTEXT}], add_generation_prompt=True)
