@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 from scripts.helpfulness.core import digest, mean, number, read_jsonl
+from scripts.helpfulness import abstention_subset
 
 SPECS = {
     "abstention_bench": ("facebookresearch/AbstentionBench",
@@ -99,6 +100,7 @@ def messages(value) -> list[dict]:
 
 
 def normalize(name: str, rows: list[dict], options: dict) -> list[dict]:
+    scope = abstention_subset.metadata(options) if name == "abstention_bench" else {}
     cases = []
     for index, row in enumerate(rows):
         case = {"id": str(row.get("id", row.get("session_id", row.get("QUESTION_ID", digest(row)))))}
@@ -113,6 +115,8 @@ def normalize(name: str, rows: list[dict], options: dict) -> list[dict]:
                 raise ValueError("reference_answers must be a list of nonempty text or null")
             if not case["should_abstain"] and not refs:
                 raise ValueError("Answerable cases require references for correctness scoring")
+            if scope and case["dataset"] not in abstention_subset.INCLUDED:
+                raise ValueError("GPQA/unknown component in without_gpqa export; use canonical retained component IDs")
         elif name == "or_bench":
             if options.get("keyword_profile") not in ("opensource", "qwen"):
                 raise ValueError("Choose the upstream opensource or qwen prefix profile explicitly")
@@ -209,7 +213,10 @@ def prepare(name: str, source: Path, options: dict) -> dict:
         rows = read_jsonl(source)
     assets = staged_assets(name, Path(options["upstream_directory"]))
     cases = normalize(name, rows, options)
-    return {"cases": cases, "assets": assets}
+    scope = abstention_subset.metadata(options) if name == "abstention_bench" else {}
+    if scope and {case["dataset"] for case in cases} != set(abstention_subset.INCLUDED):
+        raise ValueError("without_gpqa requires exported data for all 19 retained components")
+    return {"cases": cases, "assets": assets, **scope}
 
 
 def generate(name: str, case: dict, target, max_tokens: int) -> list[str]:
@@ -384,7 +391,7 @@ def score(name: str, case: dict, answer: str, judge, assets: dict, options: dict
     raise ValueError(f"Unsupported teacher benchmark {name}")
 
 
-def summarize(name: str, records: list[dict], total: int) -> dict:
+def summarize(name: str, records: list[dict], total: int, options: dict | None = None) -> dict:
     complete = [row for row in records if row["status"] == "succeeded"]
     result = {
         "status": "succeeded" if len(complete) == total else "incomplete",
@@ -434,6 +441,14 @@ def summarize(name: str, records: list[dict], total: int) -> dict:
             "value": mean([group["f1"] for group in result["groups"].values()]),
             "denominator": len(grouped),
         }
+        scope = abstention_subset.metadata(options or {})
+        if scope:
+            result.update(scope)
+            scored = sorted({row["case"]["dataset"] for row in complete})
+            result["component_coverage"] = {
+                "scored_components": scored,
+                "all_retained_components_represented": set(scored) == set(abstention_subset.INCLUDED),
+            }
     if name == "wildbench_v2":
         metrics["task_macro_wb_score"] = {
             "value": mean([group["wb_score"]["value"] for group in result["groups"].values()]),

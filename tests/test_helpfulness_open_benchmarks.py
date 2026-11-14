@@ -6,11 +6,11 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from contextlib import redirect_stderr
 import io
 
-from scripts.helpfulness import acceptance_scoring, eqbench, litbench, open_benchmarks as ob, open_models
+from scripts.helpfulness import abstention_subset, acceptance_scoring, eqbench, litbench, open_benchmarks as ob, open_models
 from scripts.helpfulness.cli import custom_run, run as run_suite
 from scripts.helpfulness.core import digest, read_jsonl, write_json
 from scripts.helpfulness.eqbench_worker import bridge, valid_native_cases
@@ -165,6 +165,94 @@ class OpenBenchmarkTests(unittest.TestCase):
             (self.root / "prompt.py").write_bytes(b"TEXT = 'changed'\n")
             with self.assertRaisesRegex(ValueError, "differs"):
                 ob.staged_assets("fixture", self.root)
+
+    def subset_builder(self):
+        declarations = [
+            f'        "{name}": ' + ('GPQA(),' if name == "gpqa_abstain" else f'load_component("{name}"),')
+            for name in abstention_subset.COMPONENTS
+        ]
+        return ("def load():\n    dataset_name_to_dataset = {\n"
+                + "\n".join(declarations) + "\n    }\n    return dataset_name_to_dataset\n").encode()
+
+    def test_gpqa_excluded_before_any_component_constructor(self):
+        original = self.subset_builder()
+        with patch.dict(abstention_subset.PINS,
+                        {"AbstentionBench.py": hashlib.sha256(original).hexdigest()}):
+            modified = abstention_subset.without_gpqa(original)
+        gpqa = Mock(side_effect=AssertionError("GPQA must not be constructed"))
+        retained = Mock(side_effect=lambda name: name)
+        namespace = {"GPQA": gpqa, "load_component": retained}
+        exec(compile(modified, "<synthetic subset fixture>", "exec"), namespace)
+        result = namespace["load"]()
+        gpqa.assert_not_called()
+        self.assertEqual(set(result), set(abstention_subset.INCLUDED))
+        self.assertEqual(retained.call_count, 19)
+        self.assertIn(b'"gpqa_abstain": GPQA(),', original)
+        with self.assertRaisesRegex(ValueError, "pinned original"):
+            abstention_subset.without_gpqa(original + b"\n")
+
+    def test_subset_stage_checks_all_source_bytes_and_preserves_originals(self):
+        source = self.root / "source"
+        source.mkdir()
+        contents = {name: b"synthetic metadata\n" for name in abstention_subset.PINS}
+        contents["AbstentionBench.py"] = self.subset_builder()
+        for name, content in contents.items():
+            (source / name).write_bytes(content)
+        license_file = self.root / "LICENSE"
+        license_file.write_text("Synthetic unit-test license, not upstream permission.")
+        pins = {name: hashlib.sha256(content).hexdigest() for name, content in contents.items()}
+        output = self.root / "subset"
+        with patch.dict(abstention_subset.PINS, pins, clear=True):
+            manifest = abstention_subset.stage(source, output, license_file)
+            self.assertFalse(manifest["data_export_complete"])
+            self.assertFalse(manifest["upstream_loader_executed"])
+            self.assertEqual(manifest["component_scope"]["excluded_components"], ["gpqa_abstain"])
+            self.assertEqual((source / "AbstentionBench.py").read_bytes(), contents["AbstentionBench.py"])
+            with self.assertRaises(FileExistsError):
+                abstention_subset.stage(source, output, license_file)
+            (source / "data.py").write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "data.py"):
+                abstention_subset.stage(source, self.root / "bad", license_file)
+            self.assertFalse((self.root / "bad").exists())
+
+    def abstention_rows(self):
+        return [{"question": name, "reference_answers": ["Answer"], "should_abstain": False,
+                 "dataset": name, "scenario": "synthetic"} for name in abstention_subset.INCLUDED]
+
+    def test_without_gpqa_export_rejects_excluded_or_unknown_components(self):
+        options = {"component_scope": "without_gpqa"}
+        for name in ("gpqa_abstain", "GPQA", "unrecognized"):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "GPQA/unknown"):
+                ob.normalize("abstention_bench", [{**self.abstention_rows()[0], "dataset": name}], options)
+        with self.assertRaisesRegex(ValueError, "component_scope"):
+            ob.normalize("abstention_bench", self.abstention_rows(), {"component_scope": "typo"})
+
+    def test_without_gpqa_preparation_requires_all_19_retained_components(self):
+        source = self.root / "export.jsonl"
+        options = {"component_scope": "without_gpqa", "upstream_terms": "synthetic fixture",
+                   "upstream_directory": str(self.root)}
+        rows = self.abstention_rows()
+        with patch.object(ob, "staged_assets", return_value={}):
+            source.write_text(json.dumps(rows[0]) + "\n")
+            with self.assertRaisesRegex(ValueError, "all 19"):
+                ob.prepare("abstention_bench", source, options)
+            source.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            result = ob.prepare("abstention_bench", source, options)
+        self.assertEqual(len(result["cases"]), 19)
+        self.assertFalse(result["component_scope"]["full_upstream_benchmark"])
+
+    def test_subset_score_labels_and_component_coverage_distinguish_smoke_runs(self):
+        options = {"component_scope": "without_gpqa"}
+        cases = ob.normalize("abstention_bench", self.abstention_rows(), options)
+        records = [{"status": "succeeded", "case": case,
+                    "scores": {"abstained": False, "correct": True}} for case in cases]
+        result = ob.summarize("abstention_bench", records, 19, options)
+        self.assertEqual(result["protocol"], abstention_subset.PROTOCOL)
+        self.assertTrue(result["component_coverage"]["all_retained_components_represented"])
+        smoke = ob.summarize("abstention_bench", records[:1], 1, options)
+        self.assertFalse(smoke["component_coverage"]["all_retained_components_represented"])
+        self.assertEqual(smoke["metrics"]["macro_dataset_scenario_f1"]["denominator"], 1)
+        self.assertNotIn("component_scope", ob.summarize("abstention_bench", records, 19))
 
     def test_conversation_preserves_context_and_rejects_missing_turns(self):
         history = [{"role": "user", "content": "remember"},

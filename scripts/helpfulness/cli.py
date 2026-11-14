@@ -10,7 +10,7 @@ import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts.helpfulness import native
+from scripts.helpfulness import abstention_subset, native
 from scripts.helpfulness.adapters import (
     CUSTOM_TASKS, EXTERNAL_TASKS, JUDGED, NATIVE_TASKS, PROTOCOLS, generate_case, load_custom,
     score_case, summarize_custom, summarize_native, validate_benchmark,
@@ -66,6 +66,8 @@ def load_suite(path: Path) -> dict:
     for benchmark in benchmarks:
         name = benchmark["name"]
         validate_benchmark(name)
+        if name == "abstention_bench":
+            abstention_subset.metadata(benchmark)
         from scripts.helpfulness import open_benchmarks
 
         if name in open_benchmarks.NAMES | EXTERNAL_TASKS:
@@ -284,7 +286,7 @@ def custom_run(
         append_jsonl(path, row)
         by_id[case["id"]] = row
     if name in open_benchmarks.NAMES:
-        return open_benchmarks.summarize(name, list(by_id.values()), len(cases))
+        return open_benchmarks.summarize(name, list(by_id.values()), len(cases), options)
     return summarize_custom(name, list(by_id.values()), len(cases), mode)
 
 
@@ -416,6 +418,7 @@ def run(
             checkpoint["name"]: {
                 benchmark["name"]: {
                     "status": "unprocessed", "protocol": PROTOCOLS[benchmark["name"]],
+                    **(abstention_subset.metadata(benchmark) if benchmark["name"] == "abstention_bench" else {}),
                     "mode": benchmark.get("mode", "generate"),
                 }
                 for benchmark in benchmarks
@@ -440,6 +443,7 @@ def run(
                     continue
                 summary = {
                     "protocol": PROTOCOLS[name], "status": "running",
+                    **(abstention_subset.metadata(benchmark) if name == "abstention_bench" else {}),
                     "mode": mode, "sample_limit": limit,
                     "categories": benchmark.get("categories", []),
                 }

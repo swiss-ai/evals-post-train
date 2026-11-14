@@ -61,7 +61,7 @@ abstention, tie or successful fallback.
 | Selection | Canonical source and implemented scope | Remaining prerequisites/limits |
 | --- | --- | --- |
 | LitBench, separate command | [drfein/LitBench](https://github.com/drfein/LitBench); raw-text scalar reward comparison on rehydrated held-out story pairs, strict `chosen > rejected`, ties reported separately. | Validates an evaluator, **not teacher generation**. Requires the published scalar verifier, local weights and original held-out IDs/text. |
-| `abstention_bench` | [facebookresearch/AbstentionBench](https://github.com/facebookresearch/AbstentionBench); native abstention and correctness judge prompts, dataset/scenario precision/recall/F1 and macro F1, answerable accuracy. | Upstream ships Llama judge configurations, not a bespoke trained small judge. Stage dataset labels/references/scenarios; CC-BY-NC-4.0 and each component's terms apply. |
+| `abstention_bench` | [facebookresearch/AbstentionBench](https://github.com/facebookresearch/AbstentionBench); native abstention and correctness judge prompts, dataset/scenario precision/recall/F1 and macro F1, answerable accuracy. The teacher selects an adapted 19-component subset without GPQA. | Upstream ships Llama judge configurations, not a bespoke trained small judge. Stage dataset labels/references/scenarios; CC-BY-NC-4.0 and each retained component's terms apply. |
 | `or_bench` | [justincui03/or-bench](https://github.com/justincui03/or-bench); exact case-sensitive generic/Qwen prefix diagnostic. | Generic profile matches only `I cannot`/`Sorry`; Qwen adds two prefixes. This is **not a semantic or calibrated Gemma/Phi refusal detector**. Keep safe/hard/toxic configurations and denominators separate. |
 | `arena_hard_v2` | [lmarena/arena-hard-auto](https://github.com/lmarena/arena-hard-auto); v2 category rubrics, both answer positions, five-way preferences, upstream strong-win weight 3, observed weighted win rates per category. | Requires separately staged **open** reference answers/profile identities. Does not report the upstream multi-judge Bradley-Terry/bootstrap headline. Both baseline and judge are adapted. |
 | `eqbench_creative_v3` | [EQ-bench/creative-writing-bench](https://github.com/EQ-bench/creative-writing-bench); pinned native generation, rubric parsing/inversion/aggregation; 3 iterations, no Elo. | Separate user-selected rubric diagnostic, not leaderboard rating. No LICENSE file found at inspected revision: confirm permission/terms before executing. Stage native dependencies and CMUdict/Punkt assets. |
@@ -81,6 +81,30 @@ in this repository. `upstream_terms` and `data_license` placeholders deliberatel
 block preparation until reviewed, especially where no license was found.
 
 Stage exported JSONL/CSV sources as follows:
+
+For the teacher's `component_scope = "without_gpqa"`, exclude GPQA **before**
+the upstream loader constructs its components. Stage a separate adapted builder:
+
+```bash
+python -m scripts.helpfulness.abstention_subset \
+  --source /staged/originals/abstentionbench \
+  --license-file /staged/upstreams/AbstentionBench/LICENSE \
+  --output /staged/abstentionbench-without-gpqa-builder
+```
+
+This verifies the six original source/metadata hashes and removes only the
+eager `gpqa_abstain: GPQA()` entry. It does not import/run the upstream loader,
+download corpora, install dependencies, approve terms or produce an evaluation
+export. Use that adapted builder, not the original eager 20-component loader,
+when subsequently exporting in an approved preparation runtime. Preserve native
+subsampling and metadata. Export canonical retained component IDs in `dataset`
+and all existing required fields to `abstentionbench-without-gpqa-heldout.jsonl`.
+Preparation rejects GPQA, unknown IDs and exports missing a retained component.
+Reports name the adapted protocol, list the 19 included/one excluded components,
+and report observed component coverage separately from selected-case counts and
+the run's sample limit. Component coverage alone does not prove a full-corpus run.
+This is not the full official AbstentionBench score. Other generic configurations
+without this scope are unchanged.
 
 | Adapter | Required original fields |
 | --- | --- |
