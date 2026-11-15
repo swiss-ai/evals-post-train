@@ -141,10 +141,13 @@ def native_model(args):
     )
 
 
-def generate_native(model, case: dict, messages: list[dict], task: str, index: int, decoding: dict) -> dict:
+def generate_native(
+    model, case: dict, messages: list[dict], task: str, index: int, decoding: dict,
+    *, rendered_context: str | list[dict] | None = None,
+) -> dict:
     from lm_eval.api.instance import Instance
 
-    context = model.apply_chat_template(messages)
+    context = model.apply_chat_template(messages) if rendered_context is None else rendered_context
     request = Instance(
         request_type="generate_until", doc=case, idx=0,
         arguments=(context, decoding), metadata=(task, index, 1),

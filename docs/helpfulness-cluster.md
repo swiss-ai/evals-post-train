@@ -429,6 +429,36 @@ output. Keep raw and length-controlled preference metrics separate, show both
 answers, and label a twenty-case result as a small adapted pilot, not a full
 leaderboard or independent judge-accuracy result.
 
+### MT-Bench non-code twenty-conversation pilot
+
+`scripts.helpfulness.mt_bench_pilot` provides separate `preflight-target`,
+`generate`, `preflight-judge` and `judge` actions. Freeze twenty original
+conversations across all seven non-code categories before generation. The native
+task controls category temperatures and the two-turn state machine; turn two
+receives Chonk's actual first answer. Each turn has the native 1024-token ceiling,
+seed 1234 and the established Apertus2 low-reasoning renderer. Explicit
+`--allow-truncated` retains and flags cutoffs without rerolling or excluding them.
+
+The pinned harness omits the released reference answers required for math and
+reasoning. Stage both reference turns from FastChat revision
+`587d5cfa1609a43d192cedb8441cac3c17db105d`, its matching questions and license;
+the runner verifies question/reference hashes before joining original IDs.
+References assist the native grader and are not certified gold answers.
+
+Keep the established sequential limits: one Chonk allocation of at most
+two nodes/eight GPUs/45 minutes, followed by one Gemma allocation of at most
+one node/four reserved GPUs/20 minutes. Do not download weights or submit
+automatic replacement jobs. Render all forty native judge prompts and require
+each prompt plus its 2048-token grading allowance to fit the 8192-token context.
+Use Gemma's staged canonical template with thinking disabled.
+
+The native grader emits written reasoning and a 1–10 score for each turn.
+Retain the actual SDK requests/responses and all forty judgments. Any invalid
+grade suppresses aggregate metrics rather than silently averaging fewer cases.
+Report overall, turn-one and **turn-two** means with denominators 40/20/20.
+This non-code subset with an open-weight replacement judge is an adapted pilot,
+not the standard MT-Bench headline or evidence of long-term preference retention.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID
