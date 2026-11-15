@@ -292,6 +292,16 @@ GPU; a full Clariden node allocation reserves four. Do not modify shared weights
 or claim their contents match a publisher snapshot merely because the
 configuration and weight index match.
 
+This local Gemma path has completed a three-answer pilot: the model loaded,
+all three chat-completion requests returned, and all verdicts passed schema and
+verbatim-quote checks. The first attempt stopped because Gemma fenced its JSON;
+reusing the existing strict JSON helper fixed that formatting issue. The
+replacement completed in 3m43s with one refusal, two compliance outcomes and no
+partial/unclear outcomes. These match the original prefix labels on the same
+three frozen replies. This verifies execution, **not judge accuracy**: the
+first-three-case sample has no independent human ground truth. The target
+was not reloaded and no weight shards were downloaded.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID
