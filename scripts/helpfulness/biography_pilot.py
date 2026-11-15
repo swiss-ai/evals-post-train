@@ -133,12 +133,17 @@ def replay_response(response, plan):
     if (
         usage.get("prompt_tokens") != len(ids) or usage.get("completion_tokens") != 1
         or choice.get("finish_reason") not in ("length", "stop")
-        or not choice.get("text", "").startswith(plan["prompt_text"])
     ):
-        raise ValueError("Echoed native prompt/token budget mismatch")
+        raise ValueError("Native prompt/generated token budget mismatch")
+    # Token-ID prompts can echo IDs/logprobs without echoing prompt text.
     reported_ids = choice.get("prompt_token_ids", response.get("prompt_token_ids"))
     if reported_ids is not None and reported_ids != ids:
         raise ValueError("Server-reported prompt IDs differ from the frozen IDs")
+    text = choice.get("text")
+    if reported_ids is None and not (
+        isinstance(text, str) and text.startswith(plan["prompt_text"])
+    ):
+        raise ValueError("Missing echoed prompt text or exact prompt token IDs")
     logs = choice.get("logprobs", {})
     arrays = [logs.get(key) for key in ("tokens", "token_logprobs", "top_logprobs", "text_offset")]
     if any(not isinstance(items, list) or len(items) != len(ids) + 1 for items in arrays):

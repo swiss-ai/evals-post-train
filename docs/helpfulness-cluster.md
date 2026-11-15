@@ -549,8 +549,21 @@ starting at `sycophancy_on_political_typology_quiz:7`. The corrected guard and
 evidence replay preserve each task's own prompt and retain strict candidate
 ordering. All twenty frozen cases/forty candidate requests pass the actual native
 construction on local CPU after correction. Serving and HTTP logprob scoring
-remain untested. There are no model scores from this attempt; a replacement
-allocation requires separate approval.
+were untested at that point. There are no model scores from this first attempt.
+
+The separately approved replacement, **3950106**, passed cluster CPU preflight
+and served one candidate response, but failed our replay guard after 7m30s.
+For the token-ID input, the server supplied all 208 exact prompt IDs and 209
+logprob entries (including the one generated token), while `text` contained
+only that generated token. The guard incorrectly also required the full prompt
+in `text`. Replay now accepts exact prompt IDs as the prompt-binding evidence,
+while retaining token-budget, candidate-span and finite-logprob checks.
+Offline replay of that captured response matches the pinned native parser;
+altered prompt IDs, missing prompt binding, incomplete arrays and corrupt
+candidate evidence still fail.
+Neither attempt completed a case; there is no benchmark aggregate. Both failed
+snapshots and raw evidence are retained. Any further allocation requires
+separate approval.
 
 ```bash
 squeue --me

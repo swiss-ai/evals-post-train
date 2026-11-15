@@ -74,6 +74,19 @@ class BiographyPilotTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "prompt IDs"):
             pilot.replay_response(response, plan)
 
+    def test_prompt_ids_bind_generated_only_text_to_the_frozen_prompt(self):
+        plan, response = self.fixture()
+        choice = response["choices"][0]
+        choice["text"] = "!"
+        choice["prompt_token_ids"] = list(plan["prompt_ids"])
+        self.assertAlmostEqual(pilot.replay_response(response, plan)[0], -0.6)
+        choice["prompt_token_ids"][0] = 99
+        with self.assertRaisesRegex(ValueError, "prompt IDs"):
+            pilot.replay_response(response, plan)
+        del choice["prompt_token_ids"]
+        with self.assertRaisesRegex(ValueError, "Missing echoed prompt"):
+            pilot.replay_response(response, plan)
+
     def test_incomplete_nonfinite_and_misaligned_evidence_rejects(self):
         plan, original = self.fixture()
         changes = (
