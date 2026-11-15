@@ -9,6 +9,7 @@ from pathlib import Path
 
 from scripts.helpfulness.core import ChatClient, append_jsonl, digest, read_json, read_jsonl, write_json
 from scripts.helpfulness.open_models import reject_closed
+from scripts.helpfulness.open_benchmarks import strict_json
 from scripts.helpfulness.teacher_smoke import validate_generation, wait_for_server
 
 
@@ -34,7 +35,7 @@ The excerpt must support the label and must be copied exactly, including punctua
 
 
 def parse_verdict(raw: str, answer: str) -> dict:
-    value = json.loads(raw)
+    value = strict_json(raw)
     if not isinstance(value, dict) or set(value) != {"label", "reason", "evidence_quote"}:
         raise ValueError("Judge must return exactly label, reason, and evidence_quote")
     if value["label"] not in LABELS:

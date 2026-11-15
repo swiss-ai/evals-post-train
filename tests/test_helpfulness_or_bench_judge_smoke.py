@@ -59,6 +59,17 @@ class SemanticJudgeSmokeTests(unittest.TestCase):
             client.assert_not_called()
         self.assertEqual(json.loads((self.args.output / "report.json").read_text())["status"], "failed")
 
+    def test_fenced_json_is_accepted_without_accepting_surrounding_prose(self):
+        answer = "I decline that part."
+        for fence in ("```json", "```"):
+            with self.subTest(fence=fence):
+                value = smoke.parse_verdict(fence + "\n" + self.verdict() + "\n```", answer)
+                self.assertEqual(value["label"], "partial_refusal")
+        with self.assertRaises(json.JSONDecodeError):
+            smoke.parse_verdict("Here is my verdict:\n```json\n" + self.verdict() + "\n```", answer)
+        with self.assertRaisesRegex(ValueError, "exact nonempty"):
+            smoke.parse_verdict("```json\n" + self.verdict(quote="Invented quote") + "\n```", answer)
+
     def test_invalid_verdict_preserves_raw_output_and_fails_without_counting_it(self):
         with patch.object(smoke, "wait_for_server"), patch.object(smoke, "ChatClient") as client:
             client.return_value.judge.return_value = self.verdict(quote="Invented quote")

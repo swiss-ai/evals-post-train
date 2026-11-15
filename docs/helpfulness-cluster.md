@@ -277,6 +277,8 @@ The protocol is **adapted-or-bench-semantic-refusal-v1**, not the original
 prefix metric or a published OR-Bench score. It preserves original prefix results
 alongside separate refusal, partial-refusal, compliance and unclear counts.
 Invalid JSON, invented evidence quotes and truncated responses fail explicitly.
+The existing strict JSON helper accepts a single fenced JSON object, but not
+surrounding prose or an invalid verdict schema.
 Returned judge text is retained before verdict parsing. The pilot establishes
 judge execution only: no human-label calibration or full-suite acceptance.
 
