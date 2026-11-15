@@ -10,7 +10,7 @@ Usage:
     python3 scripts/lm_eval_harness/launch_judge.py --preset qwen3.5-27b
 
     # Auto-detect from task list
-    python3 scripts/lm_eval_harness/launch_judge.py --detect-from-tasks configs/apertus/tasks_default.txt
+    python3 scripts/lm_eval_harness/launch_judge.py --detect-from-tasks configs/archive/apertus/tasks_default.txt
 
     # Cancel a running judge
     python3 scripts/lm_eval_harness/launch_judge.py --cancel-job-id 12345

@@ -151,6 +151,14 @@ scripts/inspect_ai/run_inspect_eval.sh --task scripts/aaii/aa_lcr.py \
 scripts/inspect_ai/run_inspect_eval.sh --task scripts/aaii/aa_critpt.py \
   --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --limit 2 -- --epochs 1
+
+# IFEval (inspect_evals/ifeval, 541 prompts, no judge): its scorer is the GitHub-only package
+# instruction_following_eval, pinned in requirements/inspect-ifeval.txt and installed without
+# dependencies after the lock (locked_venv.sh, Dockerfile.eval). The package looks for NLTK's data
+# only in ~/.cache/nltk_data, so run_inspect_eval.sh links the data baked into the prebuilt image
+# there instead of downloading it at the start of every run.
+scripts/inspect_ai/run_inspect_eval.sh --task ifeval \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 --limit 5
 ```
 
 The model under test is either passed straight through as an Inspect-native model string, or -- when `--api-base-url` is given -- wrapped through Inspect's generic `openai-api` provider (the same OpenAI-compatible endpoints this pipeline already evaluates against with `--backend openai`). Model roles (`--model-role role=model`, repeatable) and extra task parameters (`--task-arg key=value`, repeatable) cover benchmark-specific needs like tau2's user-simulator or an LLM-as-judge grader; each role's own provider credentials (e.g. `OPENAI_API_KEY`) are your responsibility. See `scripts/inspect_ai/run_inspect_eval.sh --help` for all options.

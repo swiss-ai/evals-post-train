@@ -1179,7 +1179,7 @@ class EvalExportTests(unittest.TestCase):
     def test_posttrain_final_inventory_is_fully_exported(self):
         task_file = (
             Path(__file__).resolve().parents[1]
-            / "configs/apertus/tasks_posttrain_final.txt"
+            / "configs/archive/apertus/tasks_posttrain_final.txt"
         )
         task_names = [
             line.strip()

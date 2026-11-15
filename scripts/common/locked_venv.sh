@@ -1,7 +1,10 @@
 # shellcheck shell=bash
 # locked_venv.sh - Source this for locked_venv: the cached venv of a requirements lock.
 #
-#   locked_venv <lock file> <minimum Python>   sets LOCKED_VENV; non-zero on failure
+#   locked_venv <lock file> <minimum Python> [<no-deps pin file>]   sets LOCKED_VENV; non-zero on failure
+#
+# The optional pin file lists packages that cannot be hash-locked (a git install); they are installed
+# without dependencies after the lock, and the venv is keyed by both files.
 #
 # Standalone runs get their packages this way; the prebuilt image (containers/Dockerfile.eval) bakes
 # in the same locks. Venvs live in ${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs} (~/.cache/evals-post-train
@@ -9,7 +12,7 @@
 # built it. Deleting one only costs time: the lock rebuilds the same versions.
 
 locked_venv() {
-    local lock=$1 min_python=$2 python root name key venv
+    local lock=$1 min_python=$2 extra=${3:-} python root name key venv
     if command -v uv >/dev/null 2>&1; then
         python=$(uv python find ">=$min_python" 2>/dev/null) ||
             { uv python install --quiet "$min_python" && python=$(uv python find ">=$min_python"); } ||
@@ -20,7 +23,7 @@ locked_venv() {
 
     root=${EVAL_ENV_CACHE_ROOT:-${SCRATCH:-${XDG_CACHE_HOME:-$HOME/.cache}/evals-post-train}/eval-envs}
     name=$(basename "$lock" .lock)
-    key=$({ cat "$lock" && "$python" -VV && uname -m; } | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-20) ||
+    key=$({ cat "$lock" ${extra:+"$extra"} && "$python" -VV && uname -m; } | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-20) ||
         return 1
     venv="$root/$name/$key"
     mkdir -p "$root/$name" "$root/locks" || return 1
@@ -35,9 +38,11 @@ locked_venv() {
         if command -v uv >/dev/null 2>&1; then
             uv venv --quiet --python "$python" "$venv" &&
                 uv pip install --quiet --python "$venv/bin/python" -r "$lock" || return 1
+            [[ -z "$extra" ]] || uv pip install --quiet --python "$venv/bin/python" --no-deps -r "$extra" || return 1
         else
             "$python" -m venv "$venv" &&
                 "$venv/bin/python" -m pip install --quiet --no-cache-dir -r "$lock" || return 1
+            [[ -z "$extra" ]] || "$venv/bin/python" -m pip install --quiet --no-cache-dir --no-deps -r "$extra" || return 1
         fi
     fi
     # Also refreshes a reused venv for age-based scratch retention.

@@ -1,7 +1,7 @@
 #!/bin/bash
 # example_models.sh - Model list for launch_evaluations.sh --script: copy it, list your models.
 #
-#   bash scripts/lm_eval_harness/launch_evaluations.sh posttrain --script scripts/lm_eval_harness/runners/example_models.sh
+#   bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --script scripts/lm_eval_harness/runners/example_models.sh
 #
 # Per-run settings come from the launcher flags, e.g. base models: --no-chat-template, plus
 # --tokenizer alehc/swissai-tokenizer for Apertus base checkpoints (no --bos: that tokenizer adds it). Optional per-model

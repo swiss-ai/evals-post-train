@@ -331,7 +331,7 @@ headers in the metrics file.
 
 ```bash
 python scripts/results/make_html_table.py \
-  --metrics-file configs/apertus/tasks_posttrain_final_main_table.txt \
+  --metrics-file configs/archive/apertus/tasks_posttrain_final_main_table.txt \
   --entity apertus --project apertus-1.5-post-training-v0.0 \
   --models my-run-a my-run-b \
   --output eval_table.html
@@ -363,7 +363,7 @@ with `--absolute`). Writes `eval_table.png` **and** `eval_table.csv` into the `-
 python scripts/results/make_table.py \
   --base-model-path /path/to/sweep_runs \
   --entity apertus --project apertus-1.5-post-training-v0.0 \
-  --metrics-file configs/apertus/tasks_posttrain_main_table.txt \
+  --metrics-file configs/archive/apertus/tasks_posttrain_main_table.txt \
   --output ./eval_tables
 ```
 

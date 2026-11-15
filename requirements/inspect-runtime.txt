@@ -34,3 +34,9 @@ wandb>=0.20.1
 opensandbox==1.2.0
 # Its Dockerfile replay (scripts/common/dockerfile_replay.py), at Harbor's version.
 dockerfile-parse==2.0.1
+# inspect_evals/ifeval's scorer package (requirements/inspect-ifeval.txt, a git install installed
+# without dependencies) needs these.
+immutabledict
+langdetect
+nltk
+typer
