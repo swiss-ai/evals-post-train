@@ -341,6 +341,13 @@ quotes, retains the raw selections, and applies the same strict label-consistenc
 checks. Invalid indices or contradictory labels still fail. This avoids
 accepting invented or stitched evidence without relying on model-perfect copying.
 
+`v4-lines` permits candidate passages for an `ambiguous` fulfillment decision:
+their presence does not establish substantive help or change an `unclear` label.
+Earlier versions retain their stricter shape. Use `--keep-going` for diagnostic
+batches to attempt later cases after a rejected verdict. Every rejection is
+recorded; any such rejection produces `completed_with_errors`, a nonzero exit,
+and no aggregate rates. It never silently relabels or counts an invalid judgment.
+
 This local Gemma path has completed a three-answer pilot: the model loaded,
 all three chat-completion requests returned, and all verdicts passed schema and
 verbatim-quote checks. The first attempt stopped because Gemma fenced its JSON;

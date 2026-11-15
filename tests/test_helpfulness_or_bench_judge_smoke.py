@@ -35,6 +35,7 @@ class SemanticJudgeSmokeTests(unittest.TestCase):
             samples=self.samples, samples_sha256=hashlib.sha256(self.samples.read_bytes()).hexdigest(),
             identity=self.identity, model="gemma-fixture", base_url="http://127.0.0.1:8000/v1",
             output=self.root / "run", ready_timeout=1, expected_cases=3, rubric_version="v1",
+            keep_going=False,
         )
 
     def verdict(self, label="partial_refusal", quote="I decline that part."):
@@ -275,6 +276,37 @@ class SemanticJudgeSmokeTests(unittest.TestCase):
         self.assertEqual(calls[0]["evidence"]["question"], "Q1: Fixture request")
         self.assertTrue(calls[0]["evidence"]["assistant_answer"].startswith("A1: "))
         self.assertFalse(report["independent_judge_validation"])
+
+    def test_ambiguous_candidate_evidence_is_retained_only_under_revised_protocol(self):
+        value = self.line_verdict()
+        value.update(fulfillment="ambiguous", label="unclear", withholding=None)
+        answer = "Candidate content whose task relevance is uncertain."
+        with self.assertRaisesRegex(ValueError, "required exactly"):
+            smoke.parse_verdict(json.dumps(value), answer, rubric_version="v3-lines", question="Fixture request")
+        parsed = smoke.parse_verdict(json.dumps(value), answer, rubric_version="v4-lines", question="Fixture request")
+        self.assertEqual(parsed["label"], "unclear")
+        self.assertEqual(parsed["attempt"]["quote"], answer)
+        value["fulfillment"] = "none"
+        with self.assertRaisesRegex(ValueError, "required exactly"):
+            smoke.parse_verdict(json.dumps(value), answer, rubric_version="v4-lines", question="Fixture request")
+
+    def test_keep_going_attempts_remaining_cases_but_reports_errors_without_a_score(self):
+        self.args.keep_going = True
+        with patch.object(smoke, "wait_for_server"), patch.object(smoke, "ChatClient") as client:
+            client.return_value.judge.side_effect = [
+                self.verdict(), self.verdict(quote="Invented evidence"), self.verdict(label="unclear"),
+            ]
+            report = smoke.run(self.args)
+        self.assertEqual(client.return_value.judge.call_count, 3)
+        self.assertEqual((report["attempted_cases"], report["judged_cases"], report["rejected_cases"]), (3, 2, 1))
+        self.assertEqual(report["status"], "completed_with_errors")
+        self.assertIsNone(report["semantic_full_refusal_rate"])
+        self.assertIsNone(report["semantic_any_refusal_rate"])
+        self.assertEqual(report["label_counts"]["unclear"], 1)
+        rejected = json.loads((self.args.output / "rejected-verdicts.jsonl").read_text())
+        self.assertEqual(rejected["case_id"], "1")
+        self.assertIn("exact nonempty", rejected["error"])
+        self.assertEqual(len((self.args.output / "judge-calls.jsonl").read_text().splitlines()), 3)
 
     def test_twenty_case_pilot_uses_explicit_count_and_correct_denominators(self):
         sample = json.loads(self.samples.read_text(encoding="utf-8").splitlines()[0])
