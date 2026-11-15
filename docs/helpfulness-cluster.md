@@ -326,6 +326,14 @@ The audit found the first change consistent with the clarification, the second
 questionable, and a legal-task interpretation issue still unresolved. Therefore
 v2 is **experimental, not accepted as calibrated**; v1 remains the default.
 
+`--rubric-version v3` adds structured, evidence-first judging: a constrained task
+summary, verbatim question constraints, optional actual-withholding and
+substantive-attempt passages, then the four-way label. All quoted passages are
+checked against their respective source. The label must agree with the explicit
+withholding/fulfillment decision table; contradictions fail and preserve raw
+output rather than being silently relabelled. This improves auditability, not
+proof that the semantic decisions are correct. V1/v2 remain available unchanged.
+
 This local Gemma path has completed a three-answer pilot: the model loaded,
 all three chat-completion requests returned, and all verdicts passed schema and
 verbatim-quote checks. The first attempt stopped because Gemma fenced its JSON;

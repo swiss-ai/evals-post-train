@@ -149,6 +149,79 @@ class SemanticJudgeSmokeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not bound"):
             smoke.preflight(self.args)
 
+    def structured(self, label="partial_refusal", fulfillment="substantive", withholding=True):
+        return {
+            "requested_task": "Fixture request", "constraints": ["Fixture request"],
+            "withholding": {"requested_part": "Declined part", "quote": "I decline that part."}
+            if withholding else None,
+            "fulfillment": fulfillment,
+            "attempt": {"requested_part": "Requested remainder", "quote": "Here is the requested remainder."}
+            if fulfillment == "substantive" else None,
+            "label": label, "reason": "Evidence-linked classification.",
+            "evidence_quote": "I decline that part.",
+        }
+
+    def test_structured_labels_must_follow_grounded_component_table(self):
+        answer = "I decline that part. Here is the requested remainder."
+        for label, fulfillment, withholding in (
+                ("refusal", "none", True), ("partial_refusal", "substantive", True),
+                ("compliance", "substantive", False), ("unclear", "none", False),
+                ("unclear", "ambiguous", True), ("unclear", "ambiguous", False)):
+            with self.subTest(label=label, fulfillment=fulfillment, withholding=withholding):
+                value = self.structured(label, fulfillment, withholding)
+                self.assertEqual(smoke.parse_verdict(
+                    json.dumps(value), answer, rubric_version="v3", question="Fixture request"
+                ), value)
+        value = self.structured(label="refusal", fulfillment="substantive", withholding=False)
+        with self.assertRaisesRegex(ValueError, "conflicts"):
+            smoke.parse_verdict(json.dumps(value), answer, rubric_version="v3", question="Fixture request")
+
+    def test_structured_quotes_are_bound_to_the_correct_source_and_presence(self):
+        answer = "I decline that part. Here is the requested remainder."
+        for mutation, error in (
+                ({"constraints": ["Invented constraint"]}, "question excerpts"),
+                ({"constraints": "Fixture request"}, "question excerpts"),
+                ({"withholding": {"requested_part": "Part", "quote": "Not in answer"}}, "exact answer quote"),
+                ({"attempt": {"requested_part": "", "quote": "Here is the requested remainder."}}, "requested part"),
+                ({"attempt": None}, "required exactly"),
+                ({"fulfillment": "none"}, "required exactly"),
+                ({"requested_task": ""}, "requested task")):
+            with self.subTest(mutation=mutation):
+                with self.assertRaisesRegex(ValueError, error):
+                    smoke.parse_verdict(json.dumps({**self.structured(), **mutation}), answer,
+                                        rubric_version="v3", question="Fixture request")
+
+    def test_structured_run_preserves_both_evidence_passages_and_separate_protocol(self):
+        self.args.rubric_version = "v3"
+        value = self.structured()
+        with patch.object(smoke, "wait_for_server"), patch.object(smoke, "ChatClient") as client:
+            client.return_value.judge.return_value = json.dumps(value)
+            report = smoke.run(self.args)
+        self.assertEqual(report["protocol"], "adapted-or-bench-semantic-refusal-v3")
+        self.assertEqual(report["label_counts"]["partial_refusal"], 3)
+        self.assertEqual(report["outcomes"][0]["withholding"], value["withholding"])
+        self.assertEqual(report["outcomes"][0]["attempt"], value["attempt"])
+        self.assertFalse(report["independent_judge_validation"])
+        self.assertEqual(report["rubric_sha256"], smoke.digest(smoke.RUBRIC_V3))
+        client.return_value.judge.assert_called_with(
+            smoke.RUBRIC_V3, {"question": "Fixture request",
+                             "assistant_answer": "I decline that part. Here is the requested remainder."},
+            max_tokens=2048,
+        )
+
+    def test_inconsistent_structured_output_fails_without_silently_relabeling(self):
+        self.args.rubric_version = "v3"
+        value = self.structured(label="refusal")
+        with patch.object(smoke, "wait_for_server"), patch.object(smoke, "ChatClient") as client:
+            client.return_value.judge.return_value = json.dumps(value)
+            with self.assertRaisesRegex(ValueError, "conflicts"):
+                smoke.run(self.args)
+        self.assertIn('"label": "refusal"', json.loads(
+            (self.args.output / "judge-calls.jsonl").read_text().splitlines()[0])["raw_judge_output"])
+        self.assertFalse((self.args.output / "verdicts.jsonl").exists())
+        report = json.loads((self.args.output / "report.json").read_text())
+        self.assertEqual((report["status"], report["judged_cases"]), ("failed", 0))
+
     def test_twenty_case_pilot_uses_explicit_count_and_correct_denominators(self):
         sample = json.loads(self.samples.read_text(encoding="utf-8").splitlines()[0])
         rows = [{**sample, "case": {**sample["case"], "id": str(i)},
