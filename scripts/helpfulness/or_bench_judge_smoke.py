@@ -1,4 +1,4 @@
-"""Judge three frozen OR-Bench answers locally; not full benchmark acceptance."""
+"""Judge up to twenty frozen OR-Bench answers locally; not full benchmark acceptance."""
 
 import argparse
 import hashlib
@@ -48,12 +48,14 @@ def parse_verdict(raw: str, answer: str) -> dict:
     return value
 
 
-def load_samples(path: Path, expected_sha256: str) -> list[dict]:
+def load_samples(path: Path, expected_sha256: str, expected_cases: int = 3) -> list[dict]:
+    if type(expected_cases) is not int or not 1 <= expected_cases <= 20:
+        raise ValueError("Pilot requires an expected case count between one and twenty")
     if hashlib.sha256(path.read_bytes()).hexdigest() != expected_sha256:
         raise ValueError("Frozen Chonk samples checksum mismatch")
     samples = read_jsonl(path)
-    if len(samples) != 3 or len({row["case"]["id"] for row in samples}) != 3:
-        raise ValueError("Pilot requires three distinct frozen samples")
+    if len(samples) != expected_cases or len({row["case"]["id"] for row in samples}) != expected_cases:
+        raise ValueError(f"Pilot requires exactly {expected_cases} distinct frozen samples")
     for sample in samples:
         if sample["status"] != "succeeded" or type(sample["scores"]["refused"]) is not bool:
             raise ValueError("Saved sample did not pass the original smoke scorer")
@@ -62,7 +64,7 @@ def load_samples(path: Path, expected_sha256: str) -> list[dict]:
 
 
 def preflight(args) -> tuple[list[dict], dict]:
-    samples = load_samples(args.samples, args.samples_sha256)
+    samples = load_samples(args.samples, args.samples_sha256, args.expected_cases)
     identity = read_json(args.identity)
     if identity["served_model"] != args.model or identity["base_url"] != args.base_url:
         raise ValueError("Judge identity is not bound to this endpoint and model")
@@ -82,7 +84,7 @@ def run(args) -> dict:
         "calibration": "not_performed", "human_ground_truth": "not_available",
         "target_regenerated": False, "model_weights_downloaded": False,
         "judge_model": args.model, "base_url": args.base_url,
-        "temperature": 0, "max_tokens": 2048, "selected_cases": 3, "judged_cases": 0,
+        "temperature": 0, "max_tokens": 2048, "selected_cases": args.expected_cases, "judged_cases": 0,
         "source_samples_sha256": args.samples_sha256, "rubric_sha256": digest(RUBRIC),
     }
     write_json(args.output / "report.json", report)
@@ -119,14 +121,17 @@ def run(args) -> dict:
             report["judged_cases"] = len(outcomes)
             write_json(args.output / "report.json", report)
         counts = {label: sum(row["label"] == label for row in outcomes) for label in LABELS}
+        total = len(samples)
         report.update(
             status="succeeded", phase="completed", outcomes=outcomes, label_counts=counts,
             original_prefix_refusal_rate={
-                "value": sum(row["original_prefix_refused"] for row in outcomes) / 3, "denominator": 3,
+                "value": sum(row["original_prefix_refused"] for row in outcomes) / total,
+                "denominator": total,
             },
-            semantic_full_refusal_rate={"value": counts["refusal"] / 3, "denominator": 3},
+            semantic_full_refusal_rate={"value": counts["refusal"] / total, "denominator": total},
             semantic_any_refusal_rate={
-                "value": (counts["refusal"] + counts["partial_refusal"]) / 3, "denominator": 3,
+                "value": (counts["refusal"] + counts["partial_refusal"]) / total,
+                "denominator": total,
             },
         )
     except Exception as error:
@@ -142,6 +147,7 @@ def main(argv=None) -> int:
     parser.add_argument("action", choices=("preflight", "run"))
     parser.add_argument("--samples", type=Path, required=True)
     parser.add_argument("--samples-sha256", required=True)
+    parser.add_argument("--expected-cases", type=int, choices=range(1, 21), default=3)
     parser.add_argument("--identity", type=Path, required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")

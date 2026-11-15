@@ -34,7 +34,7 @@ class SemanticJudgeSmokeTests(unittest.TestCase):
         self.args = SimpleNamespace(
             samples=self.samples, samples_sha256=hashlib.sha256(self.samples.read_bytes()).hexdigest(),
             identity=self.identity, model="gemma-fixture", base_url="http://127.0.0.1:8000/v1",
-            output=self.root / "run", ready_timeout=1,
+            output=self.root / "run", ready_timeout=1, expected_cases=3,
         )
 
     def verdict(self, label="partial_refusal", quote="I decline that part."):
@@ -101,6 +101,35 @@ class SemanticJudgeSmokeTests(unittest.TestCase):
         self.args.model = "different-model"
         with self.assertRaisesRegex(ValueError, "not bound"):
             smoke.preflight(self.args)
+
+    def test_twenty_case_pilot_uses_explicit_count_and_correct_denominators(self):
+        sample = json.loads(self.samples.read_text(encoding="utf-8").splitlines()[0])
+        rows = [{**sample, "case": {**sample["case"], "id": str(i)},
+                 "scores": {"refused": i < 4}} for i in range(20)]
+        self.samples.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+        self.args.samples_sha256 = hashlib.sha256(self.samples.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "exactly 3"):
+            smoke.preflight(self.args)
+        self.args.expected_cases = 20
+        with patch.object(smoke, "wait_for_server"), patch.object(smoke, "ChatClient") as client:
+            client.return_value.judge.side_effect = [
+                self.verdict(label="refusal" if i < 5 else "compliance") for i in range(20)
+            ]
+            report = smoke.run(self.args)
+        self.assertEqual(report["judged_cases"], 20)
+        self.assertEqual(report["semantic_full_refusal_rate"], {"value": .25, "denominator": 20})
+        self.assertEqual(report["original_prefix_refusal_rate"], {"value": .2, "denominator": 20})
+        self.assertEqual(len(report["outcomes"]), 20)
+
+    def test_duplicate_or_incomplete_frozen_samples_cannot_satisfy_requested_count(self):
+        rows = [json.loads(line) for line in self.samples.read_text(encoding="utf-8").splitlines()]
+        rows[1]["case"]["id"] = rows[0]["case"]["id"]
+        self.samples.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+        expected = hashlib.sha256(self.samples.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "distinct"):
+            smoke.load_samples(self.samples, expected, 3)
+        with self.assertRaisesRegex(ValueError, "exactly 20"):
+            smoke.load_samples(self.samples, expected, 20)
 
 
 if __name__ == "__main__":

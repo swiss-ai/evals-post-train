@@ -122,6 +122,24 @@ class TeacherSmokeTests(unittest.TestCase):
         ready.assert_not_called()
         self.assertEqual(json.loads(output.read_text())["or_bench"]["source_cases"], 1)
 
+    def test_preflight_accepts_explicit_twenty_case_pilot(self):
+        source = self.root / "balanced.csv"
+        source.write_text(
+            "prompt,category\n" + "".join(f"Fixture request {i},privacy\n" for i in range(20)),
+            encoding="utf-8",
+        )
+        output = self.root / "twenty-preflight.json"
+        with (
+            patch.object(teacher_smoke, "preflight", return_value={"weights_loaded": False}),
+            patch.object(teacher_smoke.open_benchmarks, "staged_assets", return_value={"files": {}}),
+        ):
+            code = teacher_smoke.main([
+                "preflight", "--checkpoint", str(self.root), "--source", str(source),
+                "--upstream", str(self.root), "--limit", "20", "--output", str(output),
+            ])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.read_text())["or_bench"]["selected_cases"], 20)
+
 
 if __name__ == "__main__":
     unittest.main()

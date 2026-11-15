@@ -210,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--upstream", type=Path)
     parser.add_argument("--model")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
-    parser.add_argument("--limit", type=int, choices=range(1, 6), default=3)
+    parser.add_argument("--limit", type=int, choices=range(1, 21), default=3)
     parser.add_argument("--max-tokens", type=int, choices=range(1, 16385), default=8192)
     parser.add_argument("--max-model-len", type=int, choices=range(1, 16385), default=16384)
     parser.add_argument("--ready-timeout", type=int, choices=range(1, 1801), default=1200)

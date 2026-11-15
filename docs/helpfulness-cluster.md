@@ -267,8 +267,9 @@ infrastructure path, not full benchmark coverage or teacher quality.
 
 ### Local semantic OR-Bench judge pilot
 
-`scripts.helpfulness.or_bench_judge_smoke` judges exactly three frozen, validated
-native replies without reloading the target. Stage the samples, their expected
+`scripts.helpfulness.or_bench_judge_smoke` judges a bounded set of frozen, validated
+native replies without reloading the target (three by default, up to twenty with
+`--expected-cases`). Stage the samples, their expected
 SHA256 and the judge identity first; use `preflight` before starting the server
 and `run` against the allocation-local `/v1` endpoint. It uses `ChatClient.judge`
 with untrusted evidence separated from the frozen system rubric.
@@ -291,6 +292,13 @@ defaults rather than unreviewed cached generation defaults. The pilot needs one
 GPU; a full Clariden node allocation reserves four. Do not modify shared weights
 or claim their contents match a publisher snapshot merely because the
 configuration and weight index match.
+
+For a broader diagnostic, `teacher_smoke --limit 20` accepts a separately frozen
+twenty-row source CSV. Preserve its selection manifest and original source hash.
+Two prompts per category covers the ten hard-split categories but is not a
+proportional sample of the full dataset. Keep the refusal rubric frozen while
+auditing the judge; model-assisted review is not independent human gold or
+scientific calibration acceptance.
 
 This local Gemma path has completed a three-answer pilot: the model loaded,
 all three chat-completion requests returned, and all verdicts passed schema and
