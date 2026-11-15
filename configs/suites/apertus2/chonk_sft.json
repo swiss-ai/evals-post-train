@@ -1,7 +1,7 @@
 {
   "name": "apertus2-chonk-sft",
   "title": "Compare Chonk to other post-trained thinking models",
-  "description": "Benchmarks for Apertus 2 Chonk SFT and the models it is compared with (Apertus 1.5 70B and 8B, Qwen3 32B), in table order. Mean@8 for AIME, mean@4 for the rest. MATH is not listed yet: its task (hendrycks_math or minerva_math) is undecided.",
+  "description": "Benchmarks for Apertus 2 Chonk SFT and the models it is compared with (Apertus 1.5 70B and 8B, Qwen3 32B), in table order. Mean@8 for AIME, mean@4 for the rest. MATH is not listed yet: its task (hendrycks_math or minerva_math) is undecided. HLE is judged by GLM-5.3 (plain-text judge prompt), SciCode and GDPval run their code in OpenSandbox (Kata); GDPval only generates, its grading is a separate submission.",
   "benchmarks": [
     {"label": "MMLU", "task": "mmlu_0_shot", "framework": "inspect",
      "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null},
@@ -22,7 +22,17 @@
     {"label": "AIME 25", "task": "aime2025", "framework": "inspect",
      "repeats": {"n": 8, "via": "flag"}, "metric": {"label": "mean@8", "key": null}},
     {"label": "BFCL v3 (FC)", "task": "bfcl_v3_fc", "framework": "lm_eval",
-     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null}}
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null}},
+    {"label": "HLE", "task": "hle", "framework": "inspect",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null},
+     "flags": ["--model-role", "grader=openai-api/swissai/CSCS-Inference/zai-org/GLM-5.3", "--model-role", "grader_2=openai-api/swissai/CSCS-Inference/zai-org/GLM-5.3"],
+     "task_args": {"judge_prompt": "grade_c_i"}},
+    {"label": "SciCode", "task": "scicode", "framework": "inspect",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null},
+     "flags": ["--sandbox", "opensandbox"]},
+    {"label": "GDPval", "task": "gdpval", "framework": "inspect",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null},
+     "flags": ["--sandbox", "opensandbox"]}
   ],
   "setups": {
     "apertus-1.5-70b-thinking": {
