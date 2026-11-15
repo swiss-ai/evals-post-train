@@ -398,6 +398,24 @@ stopped when the Okinawa travel answer repeated a bullet until the 8192-token
 limit. That is observed model degeneration, not a serving crash. Retain the
 failed attempt separately when resuming under an explicitly changed policy.
 
+The user-approved continuation `3948425` completed in 10m10s: nine unchanged
+answers plus eleven new outputs capped at 2048 tokens. Only the Okinawa output
+was truncated; it remained flagged and included. Gemma job `3948592` completed
+in 5m33s with twenty real classifier calls: **22.81% raw weighted preference**
+and **25.46% length-controlled preference** against the released GPT-4-1106
+references. Saved raw logprobs reproduce all twenty preferences; saved GLM
+coefficients and original instruction indices reproduce the LC aggregate.
+Five responses omitted one m/M label from their top-five logprobs, for which the
+native parser assigns zero probability. Do not interpret saturated signals as
+literal certainty.
+
+This verifies the adapted execution path, not judge accuracy. A post-judgment
+AI spot review flags the invented discount promise in case eleven despite a
+strong Chonk preference, and the correct short ESRB answer in case eighteen
+despite a strong reference preference. These are calibration cautions, not
+human gold, measured error rates or native judge rationales. No additional GPU
+job was needed when a Windows result-reader UTF-8 decoding error was recovered.
+
 Original corpus indices survive sampling and annotation so the length-control
 features still match their questions. Stage the pinned `df_gamed.csv`; no
 runtime downloads or shared-environment changes are performed.
