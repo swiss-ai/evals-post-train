@@ -70,13 +70,16 @@ def checkpoint_inventory(directory: Path) -> dict:
     }
 
 
-def validate_generation(answer: str, info: dict) -> None:
+def validate_generation(answer: str, info: dict, *, allow_truncated: bool = False) -> None:
     if not isinstance(answer, str) or not answer.strip():
         raise ValueError("Native generation produced no final reply")
     required = FAILURE_FLAGS[:5]
     if not isinstance(info, dict) or any(flag not in info for flag in required):
         raise ValueError("Native generation did not retain required failure evidence")
-    failed = [flag for flag in FAILURE_FLAGS if info.get(flag)]
+    failed = [
+        flag for flag in FAILURE_FLAGS
+        if info.get(flag) and not (flag == "generation_truncated" and allow_truncated)
+    ]
     if failed:
         raise ValueError("Native generation failed: " + ", ".join(failed))
     if not isinstance(info.get("apertus2_output"), str) or not info["apertus2_output"]:

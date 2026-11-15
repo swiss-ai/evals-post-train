@@ -41,6 +41,8 @@ class BenchmarkPilotTests(unittest.TestCase):
             expected_cases=20, output=self.root / "generation", checkpoint=self.root,
             model="chonk-fixture", base_url="http://127.0.0.1:8000/v1",
             ready_timeout=1, max_tokens=128, max_model_len=16384,
+            allow_truncated=False, resume_samples=None, resume_samples_sha256=None,
+            resume_report=None, resume_report_sha256=None,
         )
         self.info = {flag: 0 for flag in FAILURE_FLAGS}
         self.info["apertus2_output"] = "Native fixture, not real checkpoint inference"
@@ -135,6 +137,90 @@ class BenchmarkPilotTests(unittest.TestCase):
         self.args.samples_sha256 = hashlib.sha256(self.args.samples.read_bytes()).hexdigest()
         with self.assertRaisesRegex(ValueError, "every frozen case"):
             pilot.load_samples(self.args, pilot.load_selection(self.args))
+
+    def test_explicit_truncation_policy_preserves_flags_and_finishes_other_cases(self):
+        self.args.allow_truncated = True
+
+        def truncated(*args):
+            row = self.record(*args)
+            if args[4] == 1:
+                row["generation_info"]["generation_truncated"] = 1
+            return row
+
+        result, generate = self.generate(truncated)
+        self.assertEqual(generate.call_count, 20)
+        self.assertEqual(result["truncated_cases"], 1)
+        self.args.samples = self.args.output / "samples.jsonl"
+        self.args.samples_sha256 = hashlib.sha256(self.args.samples.read_bytes()).hexdigest()
+        rows = pilot.load_samples(self.args, pilot.load_selection(self.args), allow_truncated=True)
+        self.assertEqual(rows[1]["status"], "generated_truncated")
+        self.assertEqual(rows[1]["generation_info"]["generation_truncated"], 1)
+        with self.assertRaisesRegex(ValueError, "generation_truncated"):
+            pilot.load_samples(self.args, pilot.load_selection(self.args))
+        self.judge_args()
+        with (
+            patch.object(pilot.native, "require_harness"),
+            patch.object(pilot.importlib, "import_module"),
+        ):
+            judged, _ = pilot.judge_preflight(self.args, pilot.load_selection(self.args))
+        self.assertEqual(len(judged), 20)
+        self.assertEqual(judged[1]["status"], "generated_truncated")
+
+    def test_allowing_truncation_does_not_hide_parse_or_transport_failures(self):
+        self.args.allow_truncated = True
+
+        def invalid(*args):
+            row = self.record(*args)
+            row["generation_info"].update(generation_truncated=1, generation_parse_failed=1)
+            return row
+
+        with self.assertRaisesRegex(ValueError, "generation_parse_failed"):
+            self.generate(invalid)
+        self.assertEqual(len(pilot.read_jsonl(self.args.output / "generation-evidence.jsonl")), 1)
+        self.assertFalse((self.args.output / "samples.jsonl").exists())
+
+    def prepare_resume(self):
+        def faulty(*args):
+            row = self.record(*args)
+            if args[4] == 9:
+                row["generation_info"]["generation_truncated"] = 1
+            return row
+
+        with self.assertRaisesRegex(ValueError, "generation_truncated"):
+            self.generate(faulty)
+        previous = self.args.output
+        self.args.resume_samples = previous / "samples.jsonl"
+        self.args.resume_samples_sha256 = hashlib.sha256(self.args.resume_samples.read_bytes()).hexdigest()
+        self.args.resume_report = previous / "report.json"
+        self.args.resume_report_sha256 = hashlib.sha256(self.args.resume_report.read_bytes()).hexdigest()
+        self.args.output = self.root / "resumed-generation"
+        self.args.max_tokens = 64
+        self.args.allow_truncated = True
+        return pilot.read_jsonl(self.args.resume_samples)
+
+    def test_resume_reuses_nine_answers_and_only_generates_the_remaining_eleven(self):
+        saved = self.prepare_resume()
+        result, generate = self.generate()
+        self.args.samples = self.args.output / "samples.jsonl"
+        self.args.samples_sha256 = hashlib.sha256(self.args.samples.read_bytes()).hexdigest()
+        rows = pilot.load_samples(self.args, pilot.load_selection(self.args), allow_truncated=True)
+        self.assertEqual(rows[:9], saved)
+        self.assertEqual(generate.call_count, 11)
+        self.assertEqual(generate.call_args_list[0].args[4], 9)
+        self.assertEqual(result["resumed_cases"], 9)
+        self.assertEqual(result["new_generations"], 11)
+        self.assertEqual([row["decoding"]["max_gen_toks"] for row in result["decoding_segments"]], [128, 64])
+        self.assertEqual(result["resume_source"]["samples_sha256"], self.args.resume_samples_sha256)
+        self.assertEqual(len(pilot.read_jsonl(self.args.output / "generation-evidence.jsonl")), 11)
+
+    def test_resume_rejects_changed_checkpoint_metadata_and_changed_sample_content(self):
+        self.prepare_resume()
+        preflight = {"fixture": "different checkpoint"}
+        with self.assertRaisesRegex(ValueError, "checkpoint and frozen"):
+            pilot.resume_samples(self.args, pilot.load_selection(self.args), preflight)
+        self.args.resume_samples.write_text("[]\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "checksum"):
+            pilot.resume_samples(self.args, pilot.load_selection(self.args), {"fixture": True})
 
     def test_native_lc_scoring_reuses_saved_answers_and_preserves_a_failed_scorer(self):
         self.generate()

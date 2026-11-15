@@ -378,7 +378,26 @@ reuses the verified native renderer, strict generation-failure checks and the
 existing AlpacaEval aggregation, not OR-Bench's refusal rubric.
 
 The pilot uses temperature zero and an explicitly adapted 8192-token generation
-ceiling rather than the pinned task's 16384-token ceiling. Truncation fails.
+ceiling rather than the pinned task's 16384-token ceiling. Truncation fails by
+default. Explicit `--allow-truncated` on both generation and judge actions
+instead retains token-limit replies as `generated_truncated`, records their
+count and includes them in the preference denominator. It does not relax parsing,
+transport or other native failure checks, remove repetition, or retry bad answers.
+This is a bounded-output adaptation, not a claim that those replies finished.
+
+To resume a failed generation, supply `--resume-samples`, `--resume-report` and
+their `--resume-samples-sha256` / `--resume-report-sha256` digests to target actions,
+using a new output directory. Only a validated, nontruncated prefix of the same
+frozen cases, model and checkpoint/harness preflight can be reused. Earlier
+answers remain unchanged; only missing cases are generated. `--max-tokens 2048`
+can bound the new attempts. Reports preserve the original and new decoding
+segments; mixed-cap resumed pilots must not be described as uniform-cap runs.
+
+The first real twenty-case job loaded Chonk and saved nine valid answers, then
+stopped when the Okinawa travel answer repeated a bullet until the 8192-token
+limit. That is observed model degeneration, not a serving crash. Retain the
+failed attempt separately when resuming under an explicitly changed policy.
+
 Original corpus indices survive sampling and annotation so the length-control
 features still match their questions. Stage the pinned `df_gamed.csv`; no
 runtime downloads or shared-environment changes are performed.

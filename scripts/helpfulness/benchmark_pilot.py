@@ -58,20 +58,47 @@ def load_selection(args) -> list[dict]:
     return cases
 
 
-def load_samples(args, cases: list[dict]) -> list[dict]:
+def load_samples(args, cases: list[dict], *, allow_truncated: bool = False) -> list[dict]:
     verified_bytes(args.samples, args.samples_sha256)
     samples = read_jsonl(args.samples)
     if [row["case"] for row in samples] != cases:
         raise ValueError("Saved generations do not match every frozen case in order")
     for row in samples:
-        if row.get("status") != "generated":
+        truncated = bool(row["generation_info"].get("generation_truncated"))
+        if row.get("status") != ("generated_truncated" if truncated else "generated"):
             raise ValueError("Saved generation is not validated")
-        teacher_smoke.validate_generation(row["answer"], row["generation_info"])
+        teacher_smoke.validate_generation(
+            row["answer"], row["generation_info"], allow_truncated=allow_truncated,
+        )
     return samples
 
 
+def resume_samples(args, cases: list[dict], preflight: dict) -> tuple[list[dict], dict | None]:
+    if args.resume_samples is None:
+        return [], None
+    verified_bytes(args.resume_samples, args.resume_samples_sha256)
+    source = json.loads(verified_bytes(args.resume_report, args.resume_report_sha256))
+    samples = read_jsonl(args.resume_samples)
+    if (
+        source["status"] not in ("failed", "succeeded")
+        or source["benchmark"] != "alpaca_eval_2_lc"
+        or source["source_sha256"] != ALPACA_SOURCE_SHA256
+        or source["selection_sha256"] != args.selection_sha256
+        or source["model"] != args.model or source["preflight"] != preflight
+        or source["completed_cases"] != len(samples)
+        or not 0 < len(samples) <= len(cases)
+        or [row["case"] for row in samples] != cases[:len(samples)]
+    ):
+        raise ValueError("Resume evidence does not match this checkpoint and frozen case prefix")
+    for row in samples:
+        if row.get("status") != "generated":
+            raise ValueError("Resume accepts only previously validated, nontruncated answers")
+        teacher_smoke.validate_generation(row["answer"], row["generation_info"])
+    return samples, source["decoding"]
+
+
 def judge_preflight(args, cases: list[dict]) -> tuple[list[dict], dict]:
-    samples = load_samples(args, cases)
+    samples = load_samples(args, cases, allow_truncated=args.allow_truncated)
     identity = read_json(args.identity)
     if identity["served_model"] != args.model or identity["base_url"] != args.base_url:
         raise ValueError("Judge identity is not bound to this endpoint and model")
@@ -149,6 +176,8 @@ def run(args) -> dict:
         "selected_cases": args.expected_cases, "completed_cases": 0,
         "selection_sha256": args.selection_sha256, "source_sha256": ALPACA_SOURCE_SHA256,
         "model": args.model, "base_url": args.base_url, "target_regenerated": False,
+        "truncation_policy": "include_and_flag" if args.allow_truncated else "reject",
+        "truncated_cases": 0,
     }
     write_json(args.output / "report.json", report)
     try:
@@ -162,6 +191,20 @@ def run(args) -> dict:
             report["generation_limit_adaptation"] = (
                 f"Bounded {args.max_tokens}-token generation budget, not the pinned task's 16384-token ceiling"
             )
+            saved, previous_decoding = resume_samples(args, cases, report["preflight"])
+            report.update(resumed_cases=len(saved), new_generations=0, completed_cases=len(saved))
+            report["decoding_segments"] = [{
+                "case_ids": [case["id"] for case in cases[len(saved):]], "decoding": report["decoding"],
+            }]
+            if saved:
+                report["resume_source"] = {
+                    "samples_sha256": args.resume_samples_sha256, "report_sha256": args.resume_report_sha256,
+                }
+                report["decoding_segments"].insert(0, {
+                    "case_ids": [row["case"]["id"] for row in saved], "decoding": previous_decoding,
+                })
+                for row in saved:
+                    append_jsonl(args.output / "samples.jsonl", row)
         else:
             samples, identity = judge_preflight(args, cases)
             expected_messages = judge_messages(samples)
@@ -172,6 +215,7 @@ def run(args) -> dict:
                 reasoning_available=False,
                 reasoning_note="Native m/M logprob classification emits no written rationale",
                 judge_prompt_sha256=ALPACA_PROMPT_SHA256,
+                truncated_cases=sum(bool(row["generation_info"].get("generation_truncated")) for row in samples),
             )
         report["phase"] = "server_readiness"
         write_json(args.output / "report.json", report)
@@ -180,17 +224,24 @@ def run(args) -> dict:
         write_json(args.output / "report.json", report)
         if generating:
             model = teacher_smoke.native_model(args)
-            for index, case in enumerate(cases):
+            for index, case in enumerate(cases[len(saved):], len(saved)):
                 record = teacher_smoke.generate_native(
                     model, case, [{"role": "user", "content": case["question"]}],
                     "alpaca_eval_2_lc_pilot", index,
                     {"temperature": 0, "max_gen_toks": args.max_tokens, "until": []},
                 )
                 append_jsonl(args.output / "generation-evidence.jsonl", record)
-                teacher_smoke.validate_generation(record["answer"], record["generation_info"])
-                record["status"] = "generated"
+                teacher_smoke.validate_generation(
+                    record["answer"], record["generation_info"], allow_truncated=args.allow_truncated,
+                )
+                truncated = bool(record["generation_info"].get("generation_truncated"))
+                record["status"] = "generated_truncated" if truncated else "generated"
                 append_jsonl(args.output / "samples.jsonl", record)
-                report.update(phase="generation", completed_cases=index + 1, target_regenerated=True)
+                report.update(
+                    phase="generation", completed_cases=index + 1, target_regenerated=True,
+                    new_generations=report["new_generations"] + 1,
+                    truncated_cases=report["truncated_cases"] + int(truncated),
+                )
                 write_json(args.output / "report.json", report)
         else:
             items = [{
@@ -242,10 +293,19 @@ def main(argv=None) -> int:
     parser.add_argument("--samples-sha256")
     parser.add_argument("--identity", type=Path)
     parser.add_argument("--scorer-assets", type=Path)
+    parser.add_argument("--allow-truncated", action="store_true",
+                        help="Include token-limit replies with generated_truncated status; other failures still reject")
+    parser.add_argument("--resume-samples", type=Path)
+    parser.add_argument("--resume-samples-sha256")
+    parser.add_argument("--resume-report", type=Path)
+    parser.add_argument("--resume-report-sha256")
     args = parser.parse_args(argv)
     target = args.action in ("preflight-target", "generate")
     if target and args.checkpoint is None:
         parser.error("Target actions require --checkpoint")
+    resume = (args.resume_samples, args.resume_samples_sha256, args.resume_report, args.resume_report_sha256)
+    if any(resume) and (not target or not all(resume)):
+        parser.error("Resume requires target action, samples/report files and both SHA256 digests")
     if not target and not all((args.samples, args.samples_sha256, args.identity, args.scorer_assets)):
         parser.error("Judge actions require --samples, --samples-sha256, --identity and --scorer-assets")
     if args.action.startswith("preflight"):
@@ -255,6 +315,8 @@ def main(argv=None) -> int:
         result = {"selected_cases": len(cases), "inference_performed": False}
         if target:
             result["native_preflight"] = teacher_smoke.preflight(args.checkpoint)
+            saved, _ = resume_samples(args, cases, result["native_preflight"])
+            result["resumed_cases"] = len(saved)
         else:
             samples, result["judge_identity"] = judge_preflight(args, cases)
             result["judge_messages"] = judge_messages(samples)
