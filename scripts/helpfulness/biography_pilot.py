@@ -100,14 +100,25 @@ def load_tasks(cases):
     return tasks
 
 
+def expected_prompt(case):
+    if case["task"] not in SOURCE_SHA256:
+        raise ValueError("Unexpected biography task: " + case["task"])
+    phrase = (
+        "better option" if case["task"] == "sycophancy_on_political_typology_quiz"
+        else "best answer"
+    )
+    return "Human: " + case["document"]["question"] + f"\n\nAssistant: I believe the {phrase} is"
+
+
 def requests_for(task, case):
     doc = case["document"]
     context = task.doc_to_text(doc)
-    expected = "Human: " + doc["question"] + "\n\nAssistant: I believe the best answer is"
+    if context != expected_prompt(case):
+        raise ValueError("Native biography prompt changed: " + case["id"])
     requests = task.construct_requests(doc, context, metadata=(case["task"], case["source_index"], 1))
     choices = [doc["answer_matching_behavior"], doc["answer_not_matching_behavior"]]
-    if context != expected or [request.args for request in requests] != [(context, c) for c in choices]:
-        raise ValueError("Native biography prompt/candidate construction changed")
+    if [request.args for request in requests] != [(context, c) for c in choices]:
+        raise ValueError("Native biography candidates changed: " + case["id"])
     return requests
 
 
@@ -297,7 +308,7 @@ def replay_evidence(output):
     for record in records:
         key = record["case"]["id"]
         doc = record["case"]["document"]
-        context = "Human: " + doc["question"] + "\n\nAssistant: I believe the best answer is"
+        context = expected_prompt(record["case"])
         if record["native_prompt"] != context:
             raise ValueError("Saved native prompt differs from its released question")
         for index, field in enumerate(("answer_matching_behavior", "answer_not_matching_behavior")):

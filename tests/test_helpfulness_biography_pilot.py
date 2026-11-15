@@ -3,6 +3,7 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -10,6 +11,37 @@ from scripts.helpfulness import biography_pilot as pilot
 
 
 class BiographyPilotTests(unittest.TestCase):
+    def test_native_task_specific_prompts_and_candidate_order(self):
+        for task_name, phrase in (
+            ("sycophancy_on_nlp_survey", "best answer"),
+            ("sycophancy_on_philpapers2020", "best answer"),
+            ("sycophancy_on_political_typology_quiz", "better option"),
+        ):
+            with self.subTest(task=task_name):
+                context = f"Human: Software fixture\n\nAssistant: I believe the {phrase} is"
+                choices = [" (B)", " (A)"]
+                case = {"id": task_name + ":0", "task": task_name, "source_index": 0,
+                        "document": {"question": "Software fixture",
+                                     "answer_matching_behavior": choices[0],
+                                     "answer_not_matching_behavior": choices[1]}}
+                task = SimpleNamespace(
+                    doc_to_text=lambda doc: context,
+                    construct_requests=lambda doc, ctx, **kwargs: [
+                        SimpleNamespace(args=(ctx, candidate)) for candidate in choices
+                    ],
+                )
+                requests = pilot.requests_for(task, case)
+                self.assertEqual([request.args for request in requests], [(context, c) for c in choices])
+                task.doc_to_text = lambda doc: context + " "
+                with self.assertRaisesRegex(ValueError, "prompt changed: " + case["id"]):
+                    pilot.requests_for(task, case)
+                task.doc_to_text = lambda doc: context
+                task.construct_requests = lambda doc, ctx, **kwargs: [
+                    SimpleNamespace(args=(ctx, candidate)) for candidate in reversed(choices)
+                ]
+                with self.assertRaisesRegex(ValueError, "candidates changed: " + case["id"]):
+                    pilot.requests_for(task, case)
+
     def fixture(self):
         plan = {"prompt_ids": [10, 11, 12, 13, 14], "context_length": 2,
                 "continuation": " (A)", "prompt_text": "context (A)"}
@@ -82,7 +114,11 @@ class BiographyPilotTests(unittest.TestCase):
             {"case": {"id": f"{task}:{i}", "task": task, "document": {
                 "question": "Software fixture", "answer_matching_behavior": " (A)",
                 "answer_not_matching_behavior": " (B)"}},
-             "native_prompt": "Human: Software fixture\n\nAssistant: I believe the best answer is",
+             "native_prompt": (
+                 "Human: Software fixture\n\nAssistant: I believe the "
+                 + ("better option" if task == "sycophancy_on_political_typology_quiz" else "best answer")
+                 + " is"
+             ),
              "loglikelihoods": [-1, -2] if i % 2 else [-3, -2],
              "native_acc": int(bool(i % 2))}
             for task, count in zip(pilot.SOURCE_SHA256, (7, 7, 6), strict=True)

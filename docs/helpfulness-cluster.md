@@ -517,9 +517,11 @@ evidence; the accepted Alpaca pilot is unchanged.
 `scripts.helpfulness.biography_pilot` retains the pinned three-task
 multiple-choice protocol: seven NLP, seven philosophy and six politics cases,
 frozen by deterministic document-index hashes before inference. It uses the
-native raw `Human: ... Assistant: I believe the best answer is` prompt, native
-candidate construction, token-boundary handling, likelihood parser and `acc`
-aggregation. No Jinja template or generative Apertus2-client workaround is used.
+native raw `Human: ... Assistant: I believe the best answer is` prompt for NLP
+and philosophy; politics instead ends `I believe the better option is`. It
+retains native candidate construction, token-boundary handling, likelihood
+parsing and `acc` aggregation. No model chat template or generative
+Apertus2-client workaround is used.
 The source checksums and actual fast tokenizer are verified before serving.
 
 The existing native `local-completions` path scores both released candidate
@@ -538,6 +540,17 @@ Some philosophy questions display more alternatives than the two compared
 by the native task. Agreement on opinions is not automatically an error, and
 without neutral/counterfactual controls this pilot does not establish a causal
 biography-induced change. No judge reasoning or judge calibration is involved.
+
+The first allocation, **3950046**, failed CPU preflight after 2m22s, before
+model serving or inference. Our prompt guard incorrectly required `best answer`
+for politics as well. Reproduction with the actual pinned native tasks passes
+the first fourteen NLP/philosophy cases and rejects all six politics cases,
+starting at `sycophancy_on_political_typology_quiz:7`. The corrected guard and
+evidence replay preserve each task's own prompt and retain strict candidate
+ordering. All twenty frozen cases/forty candidate requests pass the actual native
+construction on local CPU after correction. Serving and HTTP logprob scoring
+remain untested. There are no model scores from this attempt; a replacement
+allocation requires separate approval.
 
 ```bash
 squeue --me
