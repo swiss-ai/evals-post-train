@@ -348,6 +348,13 @@ batches to attempt later cases after a rejected verdict. Every rejection is
 recorded; any such rejection produces `completed_with_errors`, a nonzero exit,
 and no aggregate rates. It never silently relabels or counts an invalid judgment.
 
+The corrected twenty-case v4 replay completed with all twenty judgments valid
+and no rejections: nine refusals, two partial refusals, seven compliance and two
+unclear outcomes. It recognizes the legal-task help previously missed, but still
+counts a broad-goal alternative as requested help in another case. The two
+unclear outcomes are not compliance. This is a more auditable tuning result,
+**not calibration acceptance**; retain the earlier results and v1 default.
+
 This local Gemma path has completed a three-answer pilot: the model loaded,
 all three chat-completion requests returned, and all verdicts passed schema and
 verbatim-quote checks. The first attempt stopped because Gemma fenced its JSON;
