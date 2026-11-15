@@ -454,6 +454,15 @@ their empty final output and explicit failure status; the run still fails and
 grading remains blocked. It does not relax transport, parser or prompt-integrity
 checks, fabricate an answer, or produce a successful partial aggregate.
 
+Native Apertus2 `claim` messages are auxiliary to a separately parsed final
+`reply`; the pinned client deliberately omits them from the returned answer.
+MT-Bench permits this diagnostic flag while retaining the raw message and
+counting affected turns. It still rejects parser, transport and prompt-integrity
+failures. The stricter OR/Alpaca smoke defaults are unchanged. The first
+continuation exposed this distinction when an otherwise valid math reply was
+rejected by the reused smoke guard; it also confirmed that a 2048-token ceiling
+does not guarantee a final reply after repetitive thinking.
+
 The pinned harness omits the released reference answers required for math and
 reasoning. Stage both reference turns from FastChat revision
 `587d5cfa1609a43d192cedb8441cac3c17db105d`, its matching questions and license;

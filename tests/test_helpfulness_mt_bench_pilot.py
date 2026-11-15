@@ -72,7 +72,7 @@ class MTBenchPilotTests(unittest.TestCase):
         self.info["apertus2_output"] = "Synthetic native evidence, not checkpoint inference"
         self.cases = pilot.load_selection(self.args)
 
-    def generate(self, truncated=False, no_final=False, request_failed=False):
+    def generate(self, truncated=False, no_final=False, request_failed=False, claim=False):
         histories = []
 
         def answer(model, case, history, task, index, decoding, *, rendered_context):
@@ -80,6 +80,7 @@ class MTBenchPilotTests(unittest.TestCase):
             self.assertEqual(json.loads(rendered_context), history)
             info = dict(self.info)
             info["generation_truncated"] = int(truncated and len(histories) == 1)
+            info["generation_has_claim"] = int(claim and len(histories) == 1)
             text = f"Answer {len(histories) - 1}"
             if no_final and len(histories) == 1:
                 text = ""
@@ -227,13 +228,14 @@ class MTBenchPilotTests(unittest.TestCase):
     def test_opt_in_finishes_requests_but_blocks_grading_for_missing_final_reply(self):
         self.args.continue_model_failures = True
         with self.assertRaisesRegex(ValueError, "missing final replies"):
-            self.generate(no_final=True)
+            self.generate(no_final=True, claim=True)
         report = pilot.read_json(self.args.output / "report.json")
         self.assertEqual(report["status"], "failed")
         self.assertEqual(report["attempted_turns"], 40)
         self.assertEqual(report["completed_turns"], 39)
         self.assertEqual(report["completed_conversations"], 19)
         self.assertEqual(report["no_final_reply_turns"], 1)
+        self.assertEqual(report["auxiliary_claim_turns"], 1)
         self.assertNotIn("metrics", report)
         rows = pilot.read_jsonl(self.args.output / "samples.jsonl")
         self.assertEqual(rows[0]["status"], "model_no_final_reply")
@@ -242,6 +244,22 @@ class MTBenchPilotTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no final reply"):
             self.generate(no_final=True, request_failed=True)
         self.assertEqual(len(pilot.read_jsonl(self.args.output / "generation-evidence.jsonl")), 1)
+
+    def test_native_auxiliary_claim_is_retained_without_rejecting_parsed_reply(self):
+        result, calls, _ = self.generate(claim=True)
+        self.assertEqual(calls.call_count, 40)
+        self.assertEqual(result["auxiliary_claim_turns"], 1)
+        self.args.samples = self.args.output / "samples.jsonl"
+        self.args.samples_sha256 = hashlib.sha256(self.args.samples.read_bytes()).hexdigest()
+        rows = pilot.load_samples(self.args, self.cases)
+        info = rows[0]["generation_info"][0]
+        self.assertEqual(info["generation_has_claim"], 1)
+        self.assertEqual(rows[0]["answers"][0], "Answer 0")
+        with self.assertRaisesRegex(ValueError, "generation_has_claim"):
+            pilot.teacher_smoke.validate_generation("Answer 0", info)
+        invalid = {**info, "generation_parse_failed": 1}
+        with self.assertRaisesRegex(ValueError, "generation_parse_failed"):
+            pilot.teacher_smoke.validate_generation("Answer 0", invalid, allow_claim=True)
 
 
 if __name__ == "__main__":

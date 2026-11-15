@@ -97,7 +97,9 @@ def load_samples(args, cases: list[dict]) -> list[dict]:
         if len(row["answers"]) != 2 or len(row["generation_info"]) != 2:
             raise ValueError("MT-Bench requires two saved outputs and native evidence records")
         for answer, info in zip(row["answers"], row["generation_info"]):
-            teacher_smoke.validate_generation(answer, info, allow_truncated=args.allow_truncated)
+            teacher_smoke.validate_generation(
+                answer, info, allow_truncated=args.allow_truncated, allow_claim=True,
+            )
         expected = []
         for question, answer in zip(row["case"]["turns"], row["answers"]):
             expected.extend([{"role": "user", "content": question}, {"role": "assistant", "content": answer}])
@@ -152,7 +154,7 @@ def budget_exhausted_without_reply(answer, info):
         and all(flag in info for flag in teacher_smoke.FAILURE_FLAGS)
         and info["generation_truncated"] == 1 and info["generation_think_truncated"] == 1
         and not any(info[flag] for flag in teacher_smoke.FAILURE_FLAGS
-                    if flag not in ("generation_truncated", "generation_think_truncated"))
+                    if flag not in ("generation_truncated", "generation_think_truncated", "generation_has_claim"))
         and isinstance(info.get("apertus2_output"), str) and bool(info["apertus2_output"])
     )
 
@@ -210,6 +212,7 @@ def run(args):
         "truncation_policy": "include_and_flag" if args.allow_truncated else "reject",
         "target_regenerated": generating,
         "attempted_turns": 0, "no_final_reply_turns": 0,
+        "auxiliary_claim_turns": 0,
         "continue_model_failures": bool(getattr(args, "continue_model_failures", False)),
     }
     write_json(args.output / "report.json", report)
@@ -230,6 +233,8 @@ def run(args):
             report.update(
                 resumed_conversations=len(saved), completed_conversations=len(saved),
                 completed_turns=2 * len(saved), attempted_turns=2 * len(saved),
+                auxiliary_claim_turns=sum(bool(info.get("generation_has_claim"))
+                                          for row in saved for info in row["generation_info"]),
                 new_generation_attempts=0,
                 generation_limit_adaptation=args.max_tokens != 1024,
                 decoding_segments=[{"case_ids": [case["id"] for case in cases[len(saved):]],
@@ -276,7 +281,8 @@ def run(args):
                         })
                     else:
                         teacher_smoke.validate_generation(
-                            record["answer"], record["generation_info"], allow_truncated=args.allow_truncated,
+                            record["answer"], record["generation_info"],
+                            allow_truncated=args.allow_truncated, allow_claim=True,
                         )
                     task.multiturn_consume_response(state, record["answer"])
                     infos.append(record["generation_info"])
@@ -284,6 +290,7 @@ def run(args):
                     report["attempted_turns"] += 1
                     report["new_generation_attempts"] += 1
                     report["no_final_reply_turns"] += int(no_final)
+                    report["auxiliary_claim_turns"] += int(bool(record["generation_info"].get("generation_has_claim")))
                     report["truncated_turns"] += int(bool(record["generation_info"].get("generation_truncated")))
                     write_json(args.output / "report.json", report)
                 result = task.multiturn_result(state)
@@ -338,6 +345,7 @@ def run(args):
                 denominators=aggregation["denominators"], judge_success_rate=1.0,
                 source_samples_sha256=args.samples_sha256, reasoning_available=True,
                 truncated_turns=sum(bool(info.get("generation_truncated")) for row in samples for info in row["generation_info"]),
+                auxiliary_claim_turns=sum(bool(info.get("generation_has_claim")) for row in samples for info in row["generation_info"]),
             )
         report.update(status="succeeded", phase="completed")
     except Exception as error:

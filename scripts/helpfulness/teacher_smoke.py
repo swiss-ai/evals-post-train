@@ -70,7 +70,9 @@ def checkpoint_inventory(directory: Path) -> dict:
     }
 
 
-def validate_generation(answer: str, info: dict, *, allow_truncated: bool = False) -> None:
+def validate_generation(
+    answer: str, info: dict, *, allow_truncated: bool = False, allow_claim: bool = False,
+) -> None:
     if not isinstance(answer, str) or not answer.strip():
         raise ValueError("Native generation produced no final reply")
     required = FAILURE_FLAGS[:5]
@@ -78,7 +80,10 @@ def validate_generation(answer: str, info: dict, *, allow_truncated: bool = Fals
         raise ValueError("Native generation did not retain required failure evidence")
     failed = [
         flag for flag in FAILURE_FLAGS
-        if info.get(flag) and not (flag == "generation_truncated" and allow_truncated)
+        if info.get(flag) and not (
+            (flag == "generation_truncated" and allow_truncated)
+            or (flag == "generation_has_claim" and allow_claim)
+        )
     ]
     if failed:
         raise ValueError("Native generation failed: " + ", ".join(failed))
