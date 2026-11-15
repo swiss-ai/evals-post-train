@@ -222,6 +222,60 @@ class SemanticJudgeSmokeTests(unittest.TestCase):
         report = json.loads((self.args.output / "report.json").read_text())
         self.assertEqual((report["status"], report["judged_cases"]), ("failed", 0))
 
+    def line_verdict(self):
+        return {
+            "requested_task": "Fixture request", "constraint_lines": [1],
+            "withholding": {"requested_part": "Declined part", "start_line": 1, "end_line": 1},
+            "fulfillment": "substantive",
+            "attempt": {"requested_part": "Requested remainder", "start_line": 1, "end_line": 1},
+            "label": "partial_refusal", "reason": "Both withholding and requested help.",
+            "evidence_lines": {"start_line": 1, "end_line": 1},
+        }
+
+    def test_line_selection_recovers_exact_contiguous_source_without_generated_quotes(self):
+        answer = "I decline that part.\r\nHere is the requested remainder.\r\nThird line."
+        value = self.line_verdict()
+        value["attempt"].update(start_line=2, end_line=3)
+        parsed = smoke.parse_verdict(json.dumps(value), answer, rubric_version="v3-lines",
+                                     question="Fixture request")
+        self.assertEqual(parsed["withholding"]["quote"], "I decline that part.")
+        self.assertEqual(parsed["attempt"]["quote"], "Here is the requested remainder.\r\nThird line.")
+        self.assertEqual(parsed["constraints"], ["Fixture request"])
+        self.assertEqual(parsed["source_line_spans"]["attempt"], {"start_line": 2, "end_line": 3})
+        self.assertEqual(smoke.judge_evidence("Fixture request", "First\n\nThird", "v3-lines"),
+                         {"question": "Q1: Fixture request", "assistant_answer": "A1: First\nA2: \nA3: Third"})
+
+    def test_invalid_line_selection_and_label_conflicts_are_not_repaired(self):
+        answer = "I decline that part. Here is the requested remainder."
+        for start, end in ((0, 1), (1, 2), (True, 1), ("1", 1), (2, 1)):
+            with self.subTest(start=start, end=end):
+                value = self.line_verdict()
+                value["evidence_lines"] = {"start_line": start, "end_line": end}
+                with self.assertRaisesRegex(ValueError, "valid contiguous integer"):
+                    smoke.parse_verdict(json.dumps(value), answer, rubric_version="v3-lines",
+                                        question="Fixture request")
+        value = self.line_verdict()
+        value["label"] = "refusal"
+        with self.assertRaisesRegex(ValueError, "conflicts"):
+            smoke.parse_verdict(json.dumps(value), answer, rubric_version="v3-lines", question="Fixture request")
+
+    def test_line_selected_run_records_original_raw_selection_and_resolved_source_quotes(self):
+        self.args.rubric_version = "v3-lines"
+        raw = json.dumps(self.line_verdict())
+        with patch.object(smoke, "wait_for_server"), patch.object(smoke, "ChatClient") as client:
+            client.return_value.judge.return_value = raw
+            report = smoke.run(self.args)
+        self.assertEqual(report["protocol"], "adapted-or-bench-semantic-refusal-v3-lines")
+        self.assertEqual(report["label_counts"]["partial_refusal"], 3)
+        self.assertEqual(report["outcomes"][0]["source_line_spans"]["constraints"], [1])
+        self.assertEqual(report["outcomes"][0]["attempt"]["quote"],
+                         "I decline that part. Here is the requested remainder.")
+        calls = [json.loads(line) for line in (self.args.output / "judge-calls.jsonl").read_text().splitlines()]
+        self.assertEqual(calls[0]["raw_judge_output"], raw)
+        self.assertEqual(calls[0]["evidence"]["question"], "Q1: Fixture request")
+        self.assertTrue(calls[0]["evidence"]["assistant_answer"].startswith("A1: "))
+        self.assertFalse(report["independent_judge_validation"])
+
     def test_twenty_case_pilot_uses_explicit_count_and_correct_denominators(self):
         sample = json.loads(self.samples.read_text(encoding="utf-8").splitlines()[0])
         rows = [{**sample, "case": {**sample["case"], "id": str(i)},

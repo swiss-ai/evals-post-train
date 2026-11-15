@@ -334,6 +334,13 @@ withholding/fulfillment decision table; contradictions fail and preserve raw
 output rather than being silently relabelled. This improves auditability, not
 proof that the semantic decisions are correct. V1/v2 remain available unchanged.
 
+`--rubric-version v3-lines` retains that evidence-first decision rule but presents
+numbered question/answer lines and asks the judge to select contiguous source
+spans instead of copying text. The parser resolves those spans to exact source
+quotes, retains the raw selections, and applies the same strict label-consistency
+checks. Invalid indices or contradictory labels still fail. This avoids
+accepting invented or stitched evidence without relying on model-perfect copying.
+
 This local Gemma path has completed a three-answer pilot: the model loaded,
 all three chat-completion requests returned, and all verdicts passed schema and
 verbatim-quote checks. The first attempt stopped because Gemma fenced its JSON;
