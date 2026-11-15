@@ -34,7 +34,7 @@ class SemanticJudgeSmokeTests(unittest.TestCase):
         self.args = SimpleNamespace(
             samples=self.samples, samples_sha256=hashlib.sha256(self.samples.read_bytes()).hexdigest(),
             identity=self.identity, model="gemma-fixture", base_url="http://127.0.0.1:8000/v1",
-            output=self.root / "run", ready_timeout=1, expected_cases=3,
+            output=self.root / "run", ready_timeout=1, expected_cases=3, rubric_version="v1",
         )
 
     def verdict(self, label="partial_refusal", quote="I decline that part."):
@@ -96,6 +96,53 @@ class SemanticJudgeSmokeTests(unittest.TestCase):
         self.assertFalse(report["target_regenerated"])
         self.assertFalse(report["published_protocol_equivalence"])
         self.assertEqual(report["calibration"], "not_performed")
+        self.assertEqual(report["protocol"], "adapted-or-bench-semantic-refusal-v1")
+        self.assertEqual(report["rubric_sha256"], smoke.digest(smoke.RUBRIC))
+        client.return_value.judge.assert_called_with(
+            smoke.RUBRIC,
+            {"question": "Fixture request",
+             "assistant_answer": "I decline that part. Here is the requested remainder."},
+            max_tokens=2048,
+        )
+
+    def test_revised_rubric_is_explicit_and_recorded_without_claiming_validation(self):
+        self.args.rubric_version = "v2"
+        with patch.object(smoke, "wait_for_server"), patch.object(smoke, "ChatClient") as client:
+            client.return_value.judge.return_value = self.verdict()
+            report = smoke.run(self.args)
+        self.assertEqual(report["protocol"], "adapted-or-bench-semantic-refusal-v2")
+        self.assertEqual(report["rubric_sha256"], smoke.digest(smoke.RUBRIC_V2))
+        self.assertEqual(report["calibration"], "rubric_revised_not_validated")
+        self.assertFalse(report["independent_judge_validation"])
+        self.assertFalse(report["target_regenerated"])
+        self.assertEqual(report["selected_cases"], 3)
+        rubric = json.loads((self.args.output / "rubric.json").read_text())
+        self.assertEqual(rubric["instruction"], smoke.RUBRIC_V2)
+        calls = [json.loads(line) for line in
+                 (self.args.output / "judge-calls.jsonl").read_text().splitlines()]
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(call["instruction"] == smoke.RUBRIC_V2 for call in calls))
+        client.return_value.judge.assert_called_with(
+            smoke.RUBRIC_V2,
+            {"question": "Fixture request",
+             "assistant_answer": "I decline that part. Here is the requested remainder."},
+            max_tokens=2048,
+        )
+
+    def test_preflight_binds_explicit_revised_rubric_without_inference(self):
+        output = self.root / "preflight.json"
+        with patch.object(smoke, "ChatClient") as client:
+            smoke.main([
+                "preflight", "--samples", str(self.samples),
+                "--samples-sha256", self.args.samples_sha256,
+                "--identity", str(self.identity), "--model", self.args.model,
+                "--rubric-version", "v2", "--output", str(output),
+            ])
+        client.assert_not_called()
+        report = json.loads(output.read_text())
+        self.assertEqual(report["rubric_version"], "v2")
+        self.assertEqual(report["rubric_sha256"], smoke.digest(smoke.RUBRIC_V2))
+        self.assertFalse(report["inference_performed"])
 
     def test_model_identity_mismatch_is_rejected(self):
         self.args.model = "different-model"

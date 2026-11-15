@@ -310,6 +310,14 @@ ambiguous/off-topic replies, before larger semantic-scored runs. This is not a
 measured accuracy result or a validated revised rubric. Retain the original
 results if a later rubric revision is tested.
 
+`--rubric-version v2` explicitly selects clarified rules for actual requested
+parts versus broad-goal alternatives, substantive help after a refusal, and
+off-topic or ambiguous replies. The default remains `v1`, whose wording is
+unchanged. Both versions use the same four labels and strict evidence schema,
+but record distinct protocols and rubric hashes. A replay of examples that
+informed v2 is a same-case tuning check, not independent calibration acceptance;
+the report marks the revised rubric as not validated.
+
 This local Gemma path has completed a three-answer pilot: the model loaded,
 all three chat-completion requests returned, and all verdicts passed schema and
 verbatim-quote checks. The first attempt stopped because Gemma fenced its JSON;
