@@ -444,8 +444,8 @@ budget during thinking without producing a final answer. This is a model-output
 failure, not a server crash; do not expose its thinking as a completion.
 An explicitly approved continuation can use `--max-tokens 2048`, an adapted
 ceiling. Supply `--resume-samples`, `--resume-report`, `--resume-evidence` and
-their matching `--resume-<name>-sha256` arguments. Only a complete, nontruncated
-prefix matching the frozen cases, model and native preflight is reused.
+their matching `--resume-<name>-sha256` arguments. Only complete conversations
+matching the frozen cases, model, native preflight and declared output policy are reused.
 Reports preserve original/new decoding segments and the original evidence.
 
 Optional `--continue-model-failures` finishes the remaining requests after a
@@ -492,6 +492,25 @@ grade suppresses aggregate metrics rather than silently averaging fewer cases.
 Report overall, turn-one and **turn-two** means with denominators 40/20/20.
 This non-code subset with an open-weight replacement judge is an adapted pilot,
 not the standard MT-Bench headline or evidence of long-term preference retention.
+
+The first completed pilot froze target and judge execution at `adee01d`.
+Chonk job **3949365** completed in 10m38s; Gemma job **3949471** completed in
+11m54s. All forty native grades were replayed against their actual SDK responses:
+**5.15/10 overall**, **6.00/10 turn one**, **4.30/10 turn two** (40/20/20 turns).
+Every judge response ended normally. Thirty-eight turns have final replies;
+question 118 turn one and question 120 turn two exhausted their thinking budget
+without one. Both actual empty replies were graded **1/10** by Gemma, not by an
+imputed failure score. Eighteen outcomes retain the native 1024-token cap and
+twenty-two use the explicitly approved 2048-token continuation. The original
+nine-conversation prefix remains byte-identical.
+
+The standalone HTML preserves all questions, completions, written judgments,
+reference turns and missing-reply flags. Its AI spot-review flags question 107
+turn two: the released reference uses an invalid generation assumption, and the
+judge notices the flaw but still appeals to reference agreement. That grade
+remains unchanged and is not certified gold. No independent judge-accuracy
+claim follows from this pilot. Failed attempts 3948808 and 3949050 retain their
+evidence; the accepted Alpaca pilot is unchanged.
 
 ```bash
 squeue --me
