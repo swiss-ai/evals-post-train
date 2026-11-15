@@ -435,9 +435,24 @@ leaderboard or independent judge-accuracy result.
 `generate`, `preflight-judge` and `judge` actions. Freeze twenty original
 conversations across all seven non-code categories before generation. The native
 task controls category temperatures and the two-turn state machine; turn two
-receives Chonk's actual first answer. Each turn has the native 1024-token ceiling,
+receives Chonk's actual first answer. Each turn defaults to the native 1024-token ceiling,
 seed 1234 and the established Apertus2 low-reasoning renderer. Explicit
 `--allow-truncated` retains and flags cutoffs without rerolling or excluding them.
+
+The first allocation saved nine conversations before question 118 exhausted its
+budget during thinking without producing a final answer. This is a model-output
+failure, not a server crash; do not expose its thinking as a completion.
+An explicitly approved continuation can use `--max-tokens 2048`, an adapted
+ceiling. Supply `--resume-samples`, `--resume-report`, `--resume-evidence` and
+their matching `--resume-<name>-sha256` arguments. Only a complete, nontruncated
+prefix matching the frozen cases, model and native preflight is reused.
+Reports preserve original/new decoding segments and the original evidence.
+
+Optional `--continue-model-failures` finishes the remaining requests after a
+token-budget-exhausted thinking response with no final reply. Such turns retain
+their empty final output and explicit failure status; the run still fails and
+grading remains blocked. It does not relax transport, parser or prompt-integrity
+checks, fabricate an answer, or produce a successful partial aggregate.
 
 The pinned harness omits the released reference answers required for math and
 reasoning. Stage both reference turns from FastChat revision

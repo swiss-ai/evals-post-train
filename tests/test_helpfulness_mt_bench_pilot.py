@@ -72,7 +72,7 @@ class MTBenchPilotTests(unittest.TestCase):
         self.info["apertus2_output"] = "Synthetic native evidence, not checkpoint inference"
         self.cases = pilot.load_selection(self.args)
 
-    def generate(self, truncated=False):
+    def generate(self, truncated=False, no_final=False, request_failed=False):
         histories = []
 
         def answer(model, case, history, task, index, decoding, *, rendered_context):
@@ -80,7 +80,12 @@ class MTBenchPilotTests(unittest.TestCase):
             self.assertEqual(json.loads(rendered_context), history)
             info = dict(self.info)
             info["generation_truncated"] = int(truncated and len(histories) == 1)
-            return {"case": case, "answer": f"Answer {len(histories) - 1}", "generation_info": info}
+            text = f"Answer {len(histories) - 1}"
+            if no_final and len(histories) == 1:
+                text = ""
+                info.update(generation_truncated=1, generation_think_truncated=1,
+                            generation_request_failed=int(request_failed))
+            return {"case": case, "answer": text, "generation_info": info}
 
         with (
             patch.object(pilot, "preflight", return_value=({}, ScriptedTask(), None)),
@@ -186,6 +191,57 @@ class MTBenchPilotTests(unittest.TestCase):
                 self.assertEqual(requests[-1]["arguments"][0],
                                  "Default rendered context" if rendered is None else rendered)
                 self.assertEqual(result["answer"], "Native final answer")
+
+    def test_hash_bound_resume_keeps_nine_conversations_and_only_generates_missing_turns(self):
+        self.generate()
+        original = self.args.output
+        samples = pilot.read_jsonl(original / "samples.jsonl")[:9]
+        evidence = pilot.read_jsonl(original / "generation-evidence.jsonl")[:19]
+        for name, rows in (("saved.jsonl", samples), ("evidence.jsonl", evidence)):
+            for row in rows:
+                append_jsonl(self.root / name, row)
+        report = pilot.read_json(original / "report.json")
+        report.update(status="failed", completed_conversations=9, completed_turns=18)
+        write_json(self.root / "failed-report.json", report)
+        for name, filename in (("samples", "saved.jsonl"), ("report", "failed-report.json"),
+                               ("evidence", "evidence.jsonl")):
+            path = self.root / filename
+            setattr(self.args, "resume_" + name, path)
+            setattr(self.args, "resume_" + name + "_sha256", hashlib.sha256(path.read_bytes()).hexdigest())
+        self.args.output, self.args.max_tokens = self.root / "resumed", 2048
+        result, calls, _ = self.generate()
+        self.assertEqual(calls.call_count, 22)
+        self.assertEqual(calls.call_args_list[0].args[4], 9)
+        self.assertTrue(all(call.args[5]["max_gen_toks"] == 2048 for call in calls.call_args_list))
+        self.assertEqual(result["resumed_conversations"], 9)
+        self.assertEqual(result["completed_turns"], 40)
+        self.assertEqual(result["new_generation_attempts"], 22)
+        self.assertTrue((self.args.output / "samples.jsonl").read_bytes().startswith(self.args.resume_samples.read_bytes()))
+        self.assertEqual(pilot.read_jsonl(self.args.output / "generation-evidence.jsonl")[:18], evidence[:18])
+        report["model"] = "different-checkpoint"
+        write_json(self.args.resume_report, report)
+        self.args.resume_report_sha256 = hashlib.sha256(self.args.resume_report.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "model or native preflight"):
+            pilot.resume_data(self.args, self.cases, {})
+
+    def test_opt_in_finishes_requests_but_blocks_grading_for_missing_final_reply(self):
+        self.args.continue_model_failures = True
+        with self.assertRaisesRegex(ValueError, "missing final replies"):
+            self.generate(no_final=True)
+        report = pilot.read_json(self.args.output / "report.json")
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["attempted_turns"], 40)
+        self.assertEqual(report["completed_turns"], 39)
+        self.assertEqual(report["completed_conversations"], 19)
+        self.assertEqual(report["no_final_reply_turns"], 1)
+        self.assertNotIn("metrics", report)
+        rows = pilot.read_jsonl(self.args.output / "samples.jsonl")
+        self.assertEqual(rows[0]["status"], "model_no_final_reply")
+        self.assertEqual(rows[0]["answers"][0], "")
+        self.args.output = self.root / "transport-failed"
+        with self.assertRaisesRegex(ValueError, "no final reply"):
+            self.generate(no_final=True, request_failed=True)
+        self.assertEqual(len(pilot.read_jsonl(self.args.output / "generation-evidence.jsonl")), 1)
 
 
 if __name__ == "__main__":

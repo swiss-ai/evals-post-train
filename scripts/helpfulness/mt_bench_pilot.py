@@ -107,6 +107,56 @@ def load_samples(args, cases: list[dict]) -> list[dict]:
     return samples
 
 
+def resume_data(args, cases, checked):
+    names = ("resume_samples", "resume_report", "resume_evidence")
+    values = [getattr(args, name + suffix, None) for name in names for suffix in ("", "_sha256")]
+    if not any(values):
+        return [], [], None
+    if not all(values):
+        raise ValueError("Resume requires samples, report, generation evidence and all three hashes")
+    for name in names:
+        verified_bytes(getattr(args, name), getattr(args, name + "_sha256"))
+    previous = read_json(args.resume_report)
+    saved = read_jsonl(args.resume_samples)
+    if (
+        not 0 < len(saved) < len(cases) or previous["benchmark"] != "mt_bench_noncode"
+        or previous["status"] != "failed" or previous["model"] != args.model
+        or previous["selection_sha256"] != args.selection_sha256
+        or previous["source_sha256"] != SOURCE_SHA256 or previous["references_sha256"] != REFERENCES_SHA256
+        or previous["preflight"] != checked or previous["completed_conversations"] != len(saved)
+        or previous["completed_turns"] != 2 * len(saved)
+    ):
+        raise ValueError("Resume differs from the frozen cases, model or native preflight")
+    load_samples(argparse.Namespace(
+        samples=args.resume_samples, samples_sha256=args.resume_samples_sha256, allow_truncated=False,
+    ), cases[:len(saved)])
+    evidence = read_jsonl(args.resume_evidence)
+    if not 2 * len(saved) <= len(evidence) <= 2 * len(saved) + 2:
+        raise ValueError("Resume evidence does not match the saved conversation prefix")
+    evidence = evidence[:2 * len(saved)]
+    for index, row in enumerate(evidence):
+        sample, turn = saved[index // 2], index % 2
+        if (
+            row["case"] != sample["case"] or row["turn"] != turn + 1
+            or row["answer"].strip() != sample["answers"][turn]
+            or row["history"] != sample["history"][:2 * turn + 1]
+            or row["generation_info"] != sample["generation_info"][turn]
+        ):
+            raise ValueError("Resume raw generation evidence changed an answer or its history")
+    return saved, evidence, previous
+
+
+def budget_exhausted_without_reply(answer, info):
+    return (
+        isinstance(answer, str) and not answer.strip() and isinstance(info, dict)
+        and all(flag in info for flag in teacher_smoke.FAILURE_FLAGS)
+        and info["generation_truncated"] == 1 and info["generation_think_truncated"] == 1
+        and not any(info[flag] for flag in teacher_smoke.FAILURE_FLAGS
+                    if flag not in ("generation_truncated", "generation_think_truncated"))
+        and isinstance(info.get("apertus2_output"), str) and bool(info["apertus2_output"])
+    )
+
+
 def judge_messages(samples, metric):
     prompts = metric._load_judge_prompts()
     result = []
@@ -129,6 +179,7 @@ def preflight(args, cases):
         result["native_preflight"] = teacher_smoke.preflight(args.checkpoint)
         if task.config.generation_kwargs["max_gen_toks"] != 1024:
             raise ValueError("Pinned MT-Bench native generation ceiling changed")
+        resume_data(args, cases, result)
     else:
         samples = load_samples(args, cases)
         identity = read_json(args.identity)
@@ -158,6 +209,8 @@ def run(args):
         "references_sha256": REFERENCES_SHA256,
         "truncation_policy": "include_and_flag" if args.allow_truncated else "reject",
         "target_regenerated": generating,
+        "attempted_turns": 0, "no_final_reply_turns": 0,
+        "continue_model_failures": bool(getattr(args, "continue_model_failures", False)),
     }
     write_json(args.output / "report.json", report)
     try:
@@ -169,13 +222,36 @@ def run(args):
         write_json(args.output / "report.json", report)
         if generating:
             model = teacher_smoke.native_model(args)
+            saved, evidence, previous = resume_data(args, cases, checked)
+            for row in saved:
+                append_jsonl(args.output / "samples.jsonl", row)
+            for row in evidence:
+                append_jsonl(args.output / "generation-evidence.jsonl", row)
+            report.update(
+                resumed_conversations=len(saved), completed_conversations=len(saved),
+                completed_turns=2 * len(saved), attempted_turns=2 * len(saved),
+                new_generation_attempts=0,
+                generation_limit_adaptation=args.max_tokens != 1024,
+                decoding_segments=[{"case_ids": [case["id"] for case in cases[len(saved):]],
+                                    "max_gen_toks": args.max_tokens}],
+            )
+            if previous:
+                report["resume_source"] = {
+                    name + "_sha256": getattr(args, "resume_" + name + "_sha256")
+                    for name in ("samples", "report", "evidence")
+                }
+                report["decoding_segments"].insert(0, {
+                    "case_ids": [row["case"]["id"] for row in saved],
+                    "decoding_by_category": previous["decoding_by_category"],
+                })
             report["decoding_by_category"] = {}
-            for index, case in enumerate(cases):
+            for index, case in enumerate(cases[len(saved):], len(saved)):
                 state = task.init_multiturn_state(
                     case, "", {"until": [], "max_gen_toks": args.max_tokens, "seed": 1234},
                     apply_chat_template=True, chat_template=model.apply_chat_template,
                 )
                 infos = []
+                no_final_turns = []
                 report["decoding_by_category"][case["category"]] = state["gen_kwargs"]
                 while not task.multiturn_is_done(state):
                     context, decoding = task.multiturn_next_request(state)
@@ -185,13 +261,29 @@ def run(args):
                         decoding, rendered_context=context,
                     )
                     record.update(history=history, turn=len(infos) + 1, decoding=decoding)
-                    append_jsonl(args.output / "generation-evidence.jsonl", record)
-                    teacher_smoke.validate_generation(
-                        record["answer"], record["generation_info"], allow_truncated=args.allow_truncated,
+                    no_final = (
+                        report["continue_model_failures"]
+                        and budget_exhausted_without_reply(record["answer"], record["generation_info"])
                     )
+                    if no_final:
+                        record["status"] = "model_no_final_reply"
+                    append_jsonl(args.output / "generation-evidence.jsonl", record)
+                    if no_final:
+                        no_final_turns.append(len(infos) + 1)
+                        append_jsonl(args.output / "model-failures.jsonl", {
+                            "case_id": case["id"], "turn": len(infos) + 1,
+                            "error": "Native thinking exhausted the token budget without a final reply",
+                        })
+                    else:
+                        teacher_smoke.validate_generation(
+                            record["answer"], record["generation_info"], allow_truncated=args.allow_truncated,
+                        )
                     task.multiturn_consume_response(state, record["answer"])
                     infos.append(record["generation_info"])
-                    report["completed_turns"] += 1
+                    report["completed_turns"] += int(not no_final)
+                    report["attempted_turns"] += 1
+                    report["new_generation_attempts"] += 1
+                    report["no_final_reply_turns"] += int(no_final)
                     report["truncated_turns"] += int(bool(record["generation_info"].get("generation_truncated")))
                     write_json(args.output / "report.json", report)
                 result = task.multiturn_result(state)
@@ -200,9 +292,14 @@ def run(args):
                 append_jsonl(args.output / "samples.jsonl", {
                     "case": case, "answers": result["responses"], "history": result["history"],
                     "generation_info": infos,
-                    "status": "generated_truncated" if any(info.get("generation_truncated") for info in infos) else "generated",
+                    "status": (
+                        "model_no_final_reply" if no_final_turns else
+                        "generated_truncated" if any(info.get("generation_truncated") for info in infos) else "generated"
+                    ),
                 })
-                report["completed_conversations"] += 1
+                report["completed_conversations"] += int(not no_final_turns)
+            if report["no_final_reply_turns"]:
+                raise ValueError("All requests attempted, but missing final replies block complete-run grading")
         else:
             from openai import OpenAI
             from lm_eval.api.rate_limiter import JUDGE_REQUESTS_PER_MINUTE_ENV
@@ -260,13 +357,18 @@ def main(argv=None):
     parser.add_argument("--model", required=True)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--checkpoint", type=Path)
-    parser.add_argument("--max-tokens", type=int, choices=(1024,), default=1024)
+    parser.add_argument("--max-tokens", type=int, choices=(1024, 2048), default=1024)
     parser.add_argument("--max-model-len", type=int, choices=(16384,), default=16384)
     parser.add_argument("--ready-timeout", type=int, default=1200)
     parser.add_argument("--allow-truncated", action="store_true")
     parser.add_argument("--samples", type=Path)
     parser.add_argument("--samples-sha256")
     parser.add_argument("--identity", type=Path)
+    parser.add_argument("--continue-model-failures", action="store_true",
+                        help="Finish requests after budget-exhausted thinking; still fail and block grading")
+    for name in ("samples", "report", "evidence"):
+        parser.add_argument("--resume-" + name, type=Path)
+        parser.add_argument("--resume-" + name + "-sha256")
     args = parser.parse_args(argv)
     if args.action in ("preflight-target", "generate"):
         if args.checkpoint is None:
