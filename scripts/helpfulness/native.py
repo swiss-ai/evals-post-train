@@ -199,10 +199,12 @@ def alpaca_aggregation(
     candidates = [{
         "instruction": item["instruction"], "output": item["completion"],
         "generator": "candidate", "dataset": item["dataset"],
+        **({"index": item["index"]} if "index" in item else {}),
     } for item in items]
     references = [{
         "instruction": item["instruction"], "output": item["reference_output"],
         "generator": "gpt4", "dataset": item["dataset"],
+        **({"index": item["index"]} if "index" in item else {}),
     } for item in items]
     output.mkdir(parents=True, exist_ok=True)
     config_path = output / "annotator" / "configs.yaml"
@@ -238,6 +240,10 @@ def alpaca_aggregation(
         raise ValueError("AlpacaEval did not judge every selected instruction")
     for row in annotations:
         number(row.get("preference"), "AlpacaEval preference", 1, 2)
+    expected_indices = {item["instruction"]: item["index"] for item in items if "index" in item}
+    if any(row.get("index") != expected_indices[row["instruction"]]
+           for row in annotations if row["instruction"] in expected_indices):
+        raise ValueError("AlpacaEval changed the original instruction indices used by length control")
     raw = number(leaderboard["win_rate"].iloc[0], "AlpacaEval raw win rate", 0, 100) / 100
     controlled = number(
         leaderboard["length_controlled_winrate"].iloc[0], "AlpacaEval LC win rate", 0, 100

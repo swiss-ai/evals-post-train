@@ -359,15 +359,38 @@ The user selected this version for continued pilots on 15 November 2026:
 remain available unchanged for explicit replay. This operational selection does
 not erase the task-alignment caveat or certify agreement with human judgments.
 
-This local Gemma path has completed a three-answer pilot: the model loaded,
-all three chat-completion requests returned, and all verdicts passed schema and
-verbatim-quote checks. The first attempt stopped because Gemma fenced its JSON;
-reusing the existing strict JSON helper fixed that formatting issue. The
-replacement completed in 3m43s with one refusal, two compliance outcomes and no
-partial/unclear outcomes. These match the original prefix labels on the same
-three frozen replies. This verifies execution, **not judge accuracy**: the
-first-three-case sample has no independent human ground truth. The target
+The local Gemma path first completed a three-answer OR-Bench pilot: the model
+loaded, all three chat-completion requests returned, and all verdicts passed
+schema and verbatim-quote checks. The first attempt stopped because Gemma fenced
+its JSON; reusing the existing strict JSON helper fixed that formatting issue.
+The replacement completed in 3m43s with one refusal and two compliance outcomes,
+matching the prefix labels. This verifies execution, **not judge accuracy**:
+that first-three-case sample has no independent human ground truth. The target
 was not reloaded and no weight shards were downloaded.
+
+### Split AlpacaEval pilot
+
+`scripts.helpfulness.benchmark_pilot` currently supports a frozen, at-most-twenty
+case AlpacaEval 2 pilot. Use `preflight-target` / `generate` for native Apertus 2
+generation, then `preflight-judge` / `judge` on the saved answers. The pinned
+805-row source and deterministic selection are checked in both stages. This
+reuses the verified native renderer, strict generation-failure checks and the
+existing AlpacaEval aggregation, not OR-Bench's refusal rubric.
+
+The pilot uses temperature zero and an explicitly adapted 8192-token generation
+ceiling rather than the pinned task's 16384-token ceiling. Truncation fails.
+Original corpus indices survive sampling and annotation so the length-control
+features still match their questions. Stage the pinned `df_gamed.csv`; no
+runtime downloads or shared-environment changes are performed.
+
+Both possible answer orders are rendered by AlpacaEval's own utilities and
+tokenized with the judge's canonical template before serving. Actual SDK
+requests must match those messages, the declared model and allocation-local
+endpoint. Requests and full logprob responses are retained. The native m/M
+classifier emits no written rationale: do not present invented reasoning as its
+output. Keep raw and length-controlled preference metrics separate, show both
+answers, and label a twenty-case result as a small adapted pilot, not a full
+leaderboard or independent judge-accuracy result.
 
 ```bash
 squeue --me

@@ -533,7 +533,7 @@ class NativeIntegrationTests(unittest.TestCase):
             })
         items = [{
             "instruction": f"Fixture instruction {index}", "completion": "candidate " * (index + 1),
-            "reference_output": "reference output", "dataset": "test-fixture",
+            "reference_output": "reference output", "dataset": "test-fixture", "index": 100 + 3 * index,
         } for index in range(8)]
         with tempfile.TemporaryDirectory() as root, LocalAPI([], responses) as api:
             judge = {
@@ -549,6 +549,7 @@ class NativeIntegrationTests(unittest.TestCase):
             self.assertLessEqual(score, 1)
             annotations = core.read_json(Path(root) / "validated_annotations.json")
             self.assertEqual(len(annotations), 8)
+            self.assertEqual({row["index"] for row in annotations}, {item["index"] for item in items})
             self.assertEqual(len(api.requests), 8)
             self.assertTrue(all(request["model"] == "local/judge" for request in api.requests))
             self.assertTrue((Path(root) / "glm_weights").exists())

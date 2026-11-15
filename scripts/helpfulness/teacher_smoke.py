@@ -126,6 +126,34 @@ def wait_for_server(base_url: str, model_name: str, seconds: int) -> None:
         time.sleep(min(5, remaining))
 
 
+def native_model(args):
+    from lm_eval.models.apertus2 import Apertus2Completions
+
+    return Apertus2Completions(
+        base_url=args.base_url + "/completions", model=args.model,
+        tokenizer=str(args.checkpoint), max_model_len=args.max_model_len,
+        max_length=args.max_model_len, max_gen_toks=args.max_tokens,
+        num_concurrent=1, batch_size=1, max_retries=1, timeout=180,
+        reasoning_effort="low", log_native="full",
+    )
+
+
+def generate_native(model, case: dict, messages: list[dict], task: str, index: int, decoding: dict) -> dict:
+    from lm_eval.api.instance import Instance
+
+    context = model.apply_chat_template(messages)
+    request = Instance(
+        request_type="generate_until", doc=case, idx=0,
+        arguments=(context, decoding), metadata=(task, index, 1),
+    )
+    answers = model.generate_until([request], disable_tqdm=True)
+    return {
+        "case": case, "answer": answers[0] if len(answers) == 1 else "",
+        "generation_info": request.length_info[0] if request.length_info else {},
+        "status": "generated_unvalidated",
+    }
+
+
 def run(args) -> dict:
     output = args.output
     output.mkdir(parents=True, mode=0o700, exist_ok=False)
@@ -152,36 +180,20 @@ def run(args) -> dict:
         )
         write_json(output / "report.json", report)
         wait_for_server(args.base_url, args.model, args.ready_timeout)
-        from lm_eval.api.instance import Instance
-        from lm_eval.models.apertus2 import Apertus2Completions
-
-        model = Apertus2Completions(
-            base_url=args.base_url + "/completions", model=args.model,
-            tokenizer=str(args.checkpoint), max_model_len=args.max_model_len,
-            max_length=args.max_model_len, max_gen_toks=args.max_tokens,
-            num_concurrent=1, batch_size=1, max_retries=1, timeout=180,
-            reasoning_effort="low", log_native="full",
-        )
+        model = native_model(args)
         records = []
         report["phase"] = "native_generation_and_keyword_scoring"
         write_json(output / "report.json", report)
         for index, case in enumerate(cases[:args.limit]):
-            context = model.apply_chat_template([{"role": "user", "content": case["question"]}])
-            request = Instance(
-                request_type="generate_until", doc=case, idx=0,
-                arguments=(context, {"temperature": 0.6, "top_p": 0.95,
-                                     "max_gen_toks": args.max_tokens, "until": []}),
-                metadata=("or_bench_smoke", index, 1),
+            record = generate_native(
+                model, case, [{"role": "user", "content": case["question"]}],
+                "or_bench_smoke", index,
+                {"temperature": 0.6, "top_p": 0.95, "max_gen_toks": args.max_tokens, "until": []},
             )
-            answers = model.generate_until([request], disable_tqdm=True)
-            info = request.length_info[0] if request.length_info else {}
-            answer = answers[0] if len(answers) == 1 else ""
-            record = {"case": case, "answer": answer, "generation_info": info,
-                      "status": "generated_unvalidated"}
             append_jsonl(output / "generation-evidence.jsonl", record)
-            validate_generation(answer, info)
+            validate_generation(record["answer"], record["generation_info"])
             scores, _ = open_benchmarks.score(
-                "or_bench", case, answer, None, assets, OR_BENCH_OPTIONS, {},
+                "or_bench", case, record["answer"], None, assets, OR_BENCH_OPTIONS, {},
             )
             record.update(status="succeeded", scores=scores)
             append_jsonl(output / "samples.jsonl", record)
