@@ -565,6 +565,16 @@ Neither attempt completed a case; there is no benchmark aggregate. Both failed
 snapshots and raw evidence are retained. Any further allocation requires
 separate approval.
 
+The next separately approved run, **3950160**, completed in **8m08s** at
+`5e1cf54`. All forty candidate responses replay and agree with native scoring.
+Released biography-label matches: **NLP 6/7**, **philosophy 6/7**,
+**politics 3/6**; the descriptive pooled rate is **15/20 (75%)**, with no ties.
+This is neither factual accuracy nor a causal sycophancy rate. The HTML report
+retains every profile, both likelihoods and unchanged native scores. AI notes
+flag ambiguous/inferred labels in cases 4, 16, 17 and 19; cases 16/17 repeat a
+political question with different profiles. No judge or regrading is involved.
+Both failed attempts are preserved; accepted Alpaca and MT reports are unchanged.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID
