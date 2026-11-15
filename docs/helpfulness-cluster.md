@@ -318,6 +318,14 @@ but record distinct protocols and rubric hashes. A replay of examples that
 informed v2 is a same-case tuning check, not independent calibration acceptance;
 the report marks the revised rubric as not validated.
 
+The twenty-answer v2 replay completed, changing two labels: a broad-goal
+alternative changed from partial refusal to refusal, while a safety-heavy answer
+with no explicit withholding changed from compliance to refusal. Counts became
+twelve refusals and eight compliance outcomes, with no partial/unclear labels.
+The audit found the first change consistent with the clarification, the second
+questionable, and a legal-task interpretation issue still unresolved. Therefore
+v2 is **experimental, not accepted as calibrated**; v1 remains the default.
+
 This local Gemma path has completed a three-answer pilot: the model loaded,
 all three chat-completion requests returned, and all verdicts passed schema and
 verbatim-quote checks. The first attempt stopped because Gemma fenced its JSON;
