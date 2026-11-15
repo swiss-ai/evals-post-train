@@ -463,6 +463,16 @@ continuation exposed this distinction when an otherwise valid math reply was
 rejected by the reused smoke guard; it also confirmed that a 2048-token ceiling
 does not guarantee a final reply after repetitive thinking.
 
+With explicit approval, `--allow-no-final` instead preserves a budget-exhausted
+empty final answer as a benchmark outcome. Generation reports
+`succeeded_with_model_failures`, separate attempted/valid counts and the number
+of missing replies. Judge actions require the same opt-in and send the actual
+empty text to the native grader; they do not insert an apology, copy thinking
+into the reply, assign a fixed score or remove the turn from the denominator.
+All forty valid judge grades are still required. Other native failures remain
+fatal. A continuation may reuse complete conversations containing this explicitly
+permitted outcome, preserving the original mixed-cap segments and raw evidence.
+
 The pinned harness omits the released reference answers required for math and
 reasoning. Stage both reference turns from FastChat revision
 `587d5cfa1609a43d192cedb8441cac3c17db105d`, its matching questions and license;

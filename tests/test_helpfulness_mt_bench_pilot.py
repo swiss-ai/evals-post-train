@@ -125,8 +125,8 @@ class MTBenchPilotTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "history"):
             pilot.load_samples(self.args, self.cases)
 
-    def judge(self, invalid=False):
-        self.generate()
+    def judge(self, invalid=False, no_final=False):
+        self.generate(no_final=no_final)
         self.args.samples = self.args.output / "samples.jsonl"
         self.args.samples_sha256 = hashlib.sha256(self.args.samples.read_bytes()).hexdigest()
         self.args.output = self.root / "judge"
@@ -134,14 +134,18 @@ class MTBenchPilotTests(unittest.TestCase):
         self.args.model = "gemma-fixture"
         metric = SimpleNamespace(
             _load_judge_prompts=lambda: {},
-            _parse_score=lambda text: 8 if text == "[[8]]" else 4,
+            _parse_score=lambda text: float(text.removeprefix("[[").removesuffix("]]")),
         )
 
         def grade(client, model, item, turn, prompts):
+            empty = no_final and item["question_id"] == self.cases[0]["question_id"] and turn == 1
+            if empty:
+                self.assertEqual(item["responses"][0], "")
+            score = 1 if empty else 8 if turn == 1 else 4
             return {
                 "question_id": item["question_id"], "category": item["category"], "turn": turn,
-                "judge_error": None, "score": float("nan") if invalid else (8 if turn == 1 else 4),
-                "judgment": "[[8]]" if turn == 1 else "[[4]]",
+                "judge_error": None, "score": float("nan") if invalid else score,
+                "judgment": f"[[{score}]]",
             }
 
         metric._judge_one = grade
@@ -260,6 +264,24 @@ class MTBenchPilotTests(unittest.TestCase):
         invalid = {**info, "generation_parse_failed": 1}
         with self.assertRaisesRegex(ValueError, "generation_parse_failed"):
             pilot.teacher_smoke.validate_generation("Answer 0", invalid, allow_claim=True)
+
+    def test_explicit_empty_reply_policy_grades_actual_blank_without_imputing_score(self):
+        self.args.allow_no_final = True
+        result = self.judge(no_final=True)
+        generation = pilot.read_json(self.root / "generated/report.json")
+        self.assertEqual(generation["status"], "succeeded_with_model_failures")
+        self.assertEqual(generation["recorded_conversations"], 20)
+        self.assertEqual(generation["completed_turns"], 39)
+        self.assertEqual(result["no_final_reply_turns"], 1)
+        self.assertEqual(result["completed_turns"], 40)
+        self.assertEqual(result["denominators"]["score"], 40)
+        self.assertAlmostEqual(result["metrics"]["turn_1"], 7.65)
+        rows = pilot.read_jsonl(self.args.samples)
+        self.assertEqual(rows[0]["answers"][0], "")
+        self.assertEqual(rows[0]["status"], "model_no_final_reply")
+        self.args.allow_no_final = False
+        with self.assertRaisesRegex(ValueError, "no final reply"):
+            pilot.load_samples(self.args, self.cases)
 
 
 if __name__ == "__main__":
