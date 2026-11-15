@@ -63,9 +63,45 @@ if command == 'plan':
         for path in (WORKER, BATCH, ROOT / "scripts/helpfulness/prepare_regression.sh",
                      ROOT / "scripts/helpfulness/prepare_regression.sbatch",
                      ROOT / "scripts/lm_eval_harness/build_eval_env.sh",
+                     ROOT / "scripts/helpfulness/supervise_smoke.sh",
                      ROOT / "scripts/helpfulness/runtime_isolation.sh"):
             result = subprocess.run(["bash", "-n", str(path)], text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_smoke_supervisor_propagates_failures_without_waiting_for_dead_server(self):
+        helper = ROOT / "scripts/helpfulness/supervise_smoke.sh"
+        for server, client, expected, client_still_running in (
+            ("exec sleep 10", "exit 0", 0, False),
+            ("exec sleep 10", "sleep 0.1; exit 9", 9, False),
+            ("exit 7", "exec sleep 10", 7, True),
+            ("exit 0", "exec sleep 10", 1, True),
+        ):
+            with self.subTest(server=server, client=client):
+                script = f"""
+source "{helper}"
+({server}) &
+server_pid=$!
+({client}) &
+client_pid=$!
+cleanup() {{
+    code=$?
+    trap - EXIT
+    kill "$server_pid" "$client_pid" 2>/dev/null || true
+    wait "$server_pid" "$client_pid" 2>/dev/null || true
+    exit "$code"
+}}
+trap cleanup EXIT
+wait_for_smoke_client "$server_pid" "$client_pid"
+code=$?
+"""
+                if client_still_running:
+                    script += 'kill -0 "$client_pid" 2>/dev/null || exit 98\n'
+                script += 'exit "$code"\n'
+                result = subprocess.run(["bash", "-c", script], text=True, capture_output=True,
+                                        timeout=15)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                if client_still_running:
+                    self.assertIn("Smoke server exited", result.stderr)
 
     def test_ifeval_preparation_rejects_excluded_benchmark_before_installation(self):
         suite = self.directory / "teacher.toml"

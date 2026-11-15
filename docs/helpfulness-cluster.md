@@ -199,6 +199,22 @@ pins CUDA image digest
 Do not use the similarly named ROCm image on GH200. Provisioning/importing an
 image and submitting GPU jobs require the operator's authorization.
 
+For the bounded two-node Chonk SFT smoke, use
+`--gpu-memory-utilization 0.90`, not the upstream recipe's `0.95`.
+On the inspected 95 GiB devices, a worker had only 90.0 GiB free when vLLM
+requested 90.25 GiB at 95%; startup failed before loading completed. The
+90% reservation requests 85.5 GiB, leaving room for initialization overhead.
+Record per-device free/total memory in the serving preflight. This headroom
+adjustment does not establish that the model or KV cache will fit.
+
+Run the server and bounded scorer as separate tracked child processes and
+source `scripts/helpfulness/supervise_smoke.sh` in the allocation launcher.
+Call `wait_for_smoke_client "$server_pid" "$client_pid"` so a failed server
+ends the job instead of leaving the scorer waiting for the readiness timeout.
+The launcher's EXIT trap must terminate and wait for both tracked processes.
+Diagnose the first worker exception in the full server log: subsequent
+PyTorch cleanup errors or NCCL peer-disconnection errors can mask it.
+
 `scripts.helpfulness.teacher_smoke` reuses the repository-pinned harness's
 `apertus2-completions` renderer/parser and the separately pinned
 `requirements/apertus2.txt` library. Its scorer environment remains separate
