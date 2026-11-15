@@ -260,6 +260,10 @@ The regular teacher runner still requires its reviewed model/deployment
 provenance and benchmark permissions. The smoke does not bypass those gates or
 make the current chat-completions teacher transport native-format compatible.
 Resolve that transport explicitly before scheduling the complete suite.
+With the pinned CUDA image and 90% memory reservation above, the two-node
+Chonk SFT `iter_0019374` smoke has completed weight loading and three validated
+native-format generations with keyword scoring. This establishes that bounded
+infrastructure path, not full benchmark coverage or teacher quality.
 
 ```bash
 squeue --me
@@ -287,8 +291,9 @@ python -m scripts.helpfulness.cli run \
 This command is for an allocated compute session/job, not a long-running login
 node experiment. Actual served teacher/judge IDs and credentials are still
 required. Serving compatibility for the custom Apertus2KDA checkpoints has not
-been established. Never assume a generic container or successful SSH connection
-proves it. The original proprietary judges/checkpoints are not reproducible
+been established beyond the specific Chonk SFT smoke configuration above.
+Never assume a generic container or successful SSH connection proves it.
+The original proprietary judges/checkpoints are not reproducible
 simply by substituting Swiss AI models.
 
 The reusable agent procedure is
