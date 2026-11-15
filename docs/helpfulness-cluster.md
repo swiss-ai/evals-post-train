@@ -265,6 +265,31 @@ Chonk SFT `iter_0019374` smoke has completed weight loading and three validated
 native-format generations with keyword scoring. This establishes that bounded
 infrastructure path, not full benchmark coverage or teacher quality.
 
+### Local semantic OR-Bench judge pilot
+
+`scripts.helpfulness.or_bench_judge_smoke` judges exactly three frozen, validated
+native replies without reloading the target. Stage the samples, their expected
+SHA256 and the judge identity first; use `preflight` before starting the server
+and `run` against the allocation-local `/v1` endpoint. It uses `ChatClient.judge`
+with untrusted evidence separated from the frozen system rubric.
+
+The protocol is **adapted-or-bench-semantic-refusal-v1**, not the original
+prefix metric or a published OR-Bench score. It preserves original prefix results
+alongside separate refusal, partial-refusal, compliance and unclear counts.
+Invalid JSON, invented evidence quotes and truncated responses fail explicitly.
+Returned judge text is retained before verdict parsing. The pilot establishes
+judge execution only: no human-label calibration or full-suite acceptance.
+
+An existing `google/gemma-4-31B-it` cache can serve this diagnostic with the pinned
+CUDA image above, TP1, BF16, an 8192-token context and 90% GPU memory reservation.
+Its architecture is `Gemma4ForConditionalGeneration`, not Apertus2. Use a private
+publisher-pinned tokenizer directory and canonical chat template, explicitly set
+`enable_thinking=false`, disable image/video inputs and use vLLM generation
+defaults rather than unreviewed cached generation defaults. The pilot needs one
+GPU; a full Clariden node allocation reserves four. Do not modify shared weights
+or claim their contents match a publisher snapshot merely because the
+configuration and weight index match.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID
