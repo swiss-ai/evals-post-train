@@ -161,7 +161,7 @@ class SuiteTests(unittest.TestCase):
         with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
             self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m", "--model", "qwen3-32b-thinking=q"]), 0)
-        self.assertIn("18 launches: 2 models x 9 benchmarks", err.getvalue())
+        self.assertIn("24 launches: 2 models x 12 benchmarks", err.getvalue())
         for bad in (["--model", "m"], ["--model", "nope=m"], ["--model", f"{THINK}=a", "--model", f"{THINK}=b"]):
             self.assertEqual(suites.main(["run", SUITE, *bad]), 1)
 
@@ -195,6 +195,17 @@ class SuiteTests(unittest.TestCase):
             suites.validate(suite)
         suite["setups"][chonk]["task_flags"] = {"nope": []}
         with self.assertRaisesRegex(ValueError, "task_flags"):
+            suites.validate(suite)
+
+    def test_a_benchmarks_flags_follow_the_setups_and_come_before_the_epochs(self):
+        suite = suites.load(SUITE)
+        flags = suites.flags_for(suite, THINK, "hle")
+        self.assertEqual(flags[:1], ["--enable-thinking"])
+        self.assertEqual(flags.count("--model-role"), 2)
+        self.assertEqual(flags[-2:], ["--task-arg", "judge_prompt=grade_c_i"])
+        self.assertEqual(suites.flags_for(suite, THINK, "scicode"), ["--enable-thinking", "--sandbox", "opensandbox"])
+        next(b for b in suite["benchmarks"] if b["task"] == "bfcl_v3_fc")["flags"] = ["--repeats", "2"]
+        with self.assertRaisesRegex(ValueError, "--repeats"):
             suites.validate(suite)
 
     def test_reasoning_effort_is_validated_and_not_a_flag_of_the_setup(self):

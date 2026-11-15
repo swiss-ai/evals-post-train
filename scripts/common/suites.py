@@ -4,7 +4,8 @@ configs/suites/<name>.json holds two things:
 
   benchmarks  rows in table order: label, task, framework, repeats {n, via}, metric {label, key},
               optionally sampling (a profile name that overrides the setup's) and task_args
-              (inspect only: -T arguments of the task, e.g. {"cot": "true"})
+              (inspect only: -T arguments of the task, e.g. {"cot": "true"}) and flags (launcher
+              flags of this row under every setup, e.g. a sandbox or judge roles)
   setups      named kinds of model setup: max_length, sampling (a profile name), flags (the
               launcher flags of each framework the suite uses: thinking, chat format, ...) and
               optionally serving (the arguments the server itself needs, e.g. a reasoning parser;
@@ -164,6 +165,10 @@ def validate(suite):
                 raise ValueError(f"{where}: task_args is for the inspect framework only")
             if not isinstance(args, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in args.items()):
                 raise ValueError(f"{where}: task_args must be an object of strings")
+        if "flags" in bench:
+            if not isinstance(bench["flags"], list) or not all(isinstance(f, str) for f in bench["flags"]):
+                raise ValueError(f"{where}: flags must be a list of strings")
+            _no_reserved(f"{where}: flags", bench["framework"], {}, bench["flags"])
         if "key" not in bench["metric"]:
             raise ValueError(f"{where}: metric.key is required (null if not checked yet)")
     if not suite["setups"]:
@@ -233,6 +238,7 @@ def flags_for(suite, setup_name, task, fetch=False):
     flags = list(chosen.get("task_flags", {}).get(task, chosen["flags"][bench["framework"]]))
     if "reasoning_effort" in chosen and bench["framework"] in ("lm_eval", "inspect"):
         flags += ["--reasoning-effort", chosen["reasoning_effort"]]
+    flags += bench.get("flags", [])
     repeat = bench["repeats"]["via"] == "flag"
     if bench["framework"] == "lm_eval":
         if "tokenizer" in chosen:
