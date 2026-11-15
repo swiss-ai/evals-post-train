@@ -20,7 +20,9 @@
     {"label": "AIME 24", "task": "aime2024", "framework": "inspect",
      "repeats": {"n": 8, "via": "flag"}, "metric": {"label": "mean@8", "key": null}},
     {"label": "AIME 25", "task": "aime2025", "framework": "inspect",
-     "repeats": {"n": 8, "via": "flag"}, "metric": {"label": "mean@8", "key": null}}
+     "repeats": {"n": 8, "via": "flag"}, "metric": {"label": "mean@8", "key": null}},
+    {"label": "BFCL v3 (FC)", "task": "bfcl_v3_fc", "framework": "lm_eval",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null}}
   ],
   "setups": {
     "apertus-1.5-70b-thinking": {
@@ -30,6 +32,9 @@
       "flags": {
         "lm_eval": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>"],
         "inspect": ["--enable-thinking"]
+      },
+      "task_flags": {
+        "bfcl_v3_fc": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>", "--api-endpoint", "chat-completions"]
       }
     },
     "apertus-1.5-8b-thinking": {
@@ -39,6 +44,9 @@
       "flags": {
         "lm_eval": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>"],
         "inspect": ["--enable-thinking"]
+      },
+      "task_flags": {
+        "bfcl_v3_fc": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>", "--api-endpoint", "chat-completions"]
       }
     },
     "qwen3-32b-thinking": {
@@ -48,6 +56,9 @@
       "flags": {
         "lm_eval": ["--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>"],
         "inspect": ["--enable-thinking"]
+      },
+      "task_flags": {
+        "bfcl_v3_fc": ["--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>", "--api-endpoint", "chat-completions"]
       }
     },
     "chonk-lc-16k-v0.2-sft": {
@@ -60,6 +71,24 @@
       "flags": {
         "lm_eval": ["--backend", "openai", "--chat-format", "apertus2"],
         "inspect": []
+      },
+      "task_flags": {
+        "bfcl_v3_fc": ["--backend", "openai", "--api-endpoint", "chat-completions", "--enable-thinking"]
+      }
+    },
+    "chonk-lc-16k-v0.1-ep1": {
+      "description": "Same settings as chonk-lc-16k-v0.2-sft (apertus-common format, 16k window, effort high, tokenizer and serving options), for the earlier chonk-lc-16k-v0.1-ep1 checkpoint.",
+      "max_length": 16384,
+      "sampling": "thinking",
+      "reasoning_effort": "high",
+      "tokenizer": {"repo": "https://github.com/swiss-ai/apertus-omni-tokenizer.git", "revision": "b801ff1b00d933d10bba90b0c22307157299faa7", "path": "tokenizers/Apertus_2_instruct"},
+      "serving": ["--tokenizer-mode", "apertus2", "--reasoning-parser", "apertus2", "--enable-auto-tool-choice", "--tool-call-parser", "apertus2"],
+      "flags": {
+        "lm_eval": ["--backend", "openai", "--chat-format", "apertus2"],
+        "inspect": []
+      },
+      "task_flags": {
+        "bfcl_v3_fc": ["--backend", "openai", "--api-endpoint", "chat-completions", "--enable-thinking"]
       }
     }
   }

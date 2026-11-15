@@ -10,7 +10,9 @@ configs/suites/<name>.json holds two things:
               optionally serving (the arguments the server itself needs, e.g. a reasoning parser;
               nothing here runs them, whoever launches the model passes them to `vllm serve`) and
               tokenizer {repo, revision, path} (a tokenizer pinned in a git repository; lm_eval
-              gets --tokenizer <local copy>, which `flags` fetches once into the cache)
+              gets --tokenizer <local copy>, which `flags` fetches once into the cache) and
+              task_flags {task: [flags]} (replaces the setup's flags of that one task, e.g. the
+              chat-completions endpoint that native function calling needs)
 
 `run` starts every (model, benchmark) pair as its own launch, so each one is its own Slurm job (lm_eval: the
 launcher's `single` mode; inspect: `sbatch run_inspect_eval.sbatch`). --model SETUP=SERVED_NAME names a
@@ -116,6 +118,12 @@ def fetch_tokenizer(spec):
     return tokenizer_dir(spec)
 
 
+def _no_reserved(where, framework, setup, items):
+    reserved = (RESERVED[framework] | ({"--tokenizer"} if framework == "lm_eval" and "tokenizer" in setup else set())) & set(items)
+    if reserved:
+        raise ValueError(f"{where} may not contain {sorted(reserved)[0]}: it comes from max_length, the benchmark's repeats or task_args")
+
+
 def validate(suite):
     """Raise ValueError naming the broken field; return the suite otherwise."""
     profiles = sampling.read_config()["profiles"]
@@ -178,12 +186,19 @@ def validate(suite):
         for framework, items in flags.items():
             if not isinstance(items, list) or not all(isinstance(f, str) for f in items):
                 raise ValueError(f"setup {name}: flags.{framework} must be a list of strings")
-            reserved = (RESERVED[framework] | ({"--tokenizer"} if framework == "lm_eval" and "tokenizer" in setup else set())) & set(items)
-            if reserved:
-                raise ValueError(f"setup {name}: flags.{framework} may not contain {sorted(reserved)[0]}: it comes from max_length, the benchmark's repeats or task_args")
+            _no_reserved(f"setup {name}: flags.{framework}", framework, setup, items)
+        task_flags = setup.get("task_flags", {})
+        if not isinstance(task_flags, dict) or set(task_flags) - tasks:
+            raise ValueError(f"setup {name}: task_flags must be an object keyed by a task of the suite")
+        for task, items in task_flags.items():
+            if not isinstance(items, list) or not all(isinstance(f, str) for f in items):
+                raise ValueError(f"setup {name}: task_flags.{task} must be a list of strings")
+            framework = next(b["framework"] for b in suite["benchmarks"] if b["task"] == task)
+            _no_reserved(f"setup {name}: task_flags.{task}", framework, setup, items)
         for bench in suite["benchmarks"]:
             profile = bench.get("sampling", setup["sampling"])
-            if any(f in THINKING_FLAGS for f in flags[bench["framework"]]) and profiles[profile].get("temperature") == 0:
+            row_flags = task_flags.get(bench["task"], flags[bench["framework"]])
+            if any(f in THINKING_FLAGS for f in row_flags) and profiles[profile].get("temperature") == 0:
                 raise ValueError(f"setup {name}: thinking runs are not deterministic, but {bench['task']} samples with {profile!r}")
     return suite
 
@@ -215,7 +230,7 @@ def flags_for(suite, setup_name, task, fetch=False):
     A setup's pinned tokenizer becomes lm_eval's --tokenizer <local copy>; fetch=True downloads the
     copy first (once), otherwise the flag names where it will be."""
     bench, chosen = benchmark(suite, task), setup(suite, setup_name)
-    flags = list(chosen["flags"][bench["framework"]])
+    flags = list(chosen.get("task_flags", {}).get(task, chosen["flags"][bench["framework"]]))
     if "reasoning_effort" in chosen and bench["framework"] in ("lm_eval", "inspect"):
         flags += ["--reasoning-effort", chosen["reasoning_effort"]]
     repeat = bench["repeats"]["via"] == "flag"

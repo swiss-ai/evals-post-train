@@ -161,22 +161,41 @@ class SuiteTests(unittest.TestCase):
         with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
             self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m", "--model", "qwen3-32b-thinking=q"]), 0)
-        self.assertIn("16 launches: 2 models x 8 benchmarks", err.getvalue())
+        self.assertIn("18 launches: 2 models x 9 benchmarks", err.getvalue())
         for bad in (["--model", "m"], ["--model", "nope=m"], ["--model", f"{THINK}=a", "--model", f"{THINK}=b"]):
             self.assertEqual(suites.main(["run", SUITE, *bad]), 1)
 
     def test_a_setups_reasoning_effort_reaches_all_its_lm_eval_and_inspect_rows(self):
         suite = suites.load(SUITE)
         chonk = "chonk-lc-16k-v0.2-sft"
-        self.assertEqual(suite["setups"][chonk]["reasoning_effort"], "high")
-        for bench in suite["benchmarks"]:
-            flags = suites.flags_for(suite, chonk, bench["task"])
-            self.assertEqual(flags.count("--reasoning-effort"), 1, bench["label"])
-            self.assertEqual(flags[flags.index("--reasoning-effort") + 1], "high")
+        for name in (chonk, "chonk-lc-16k-v0.1-ep1"):
+            self.assertEqual(suite["setups"][name]["reasoning_effort"], "high")
+            for bench in suite["benchmarks"]:
+                flags = suites.flags_for(suite, name, bench["task"])
+                self.assertEqual(flags.count("--reasoning-effort"), 1, (name, bench["label"]))
+                self.assertEqual(flags[flags.index("--reasoning-effort") + 1], "high")
+                self.assertEqual(suites.sampling_for(suite, name, bench["task"]), "thinking")
         self.assertEqual(suites.flags_for(suite, chonk, "aime2024"), ["--reasoning-effort", "high", "--", "--epochs", "8"])
-        for other in set(suite["setups"]) - {chonk}:
+        for other in set(suite["setups"]) - {chonk, "chonk-lc-16k-v0.1-ep1"}:
             for bench in suite["benchmarks"]:
                 self.assertNotIn("--reasoning-effort", suites.flags_for(suite, other, bench["task"]))
+
+    def test_task_flags_replace_the_setups_flags_of_that_task_only(self):
+        suite = suites.load(SUITE)
+        chonk, v1 = "chonk-lc-16k-v0.2-sft", "chonk-lc-16k-v0.1-ep1"
+        fc = suites.flags_for(suite, chonk, "bfcl_v3_fc")
+        self.assertIn("--api-endpoint", fc)
+        self.assertNotIn("--chat-format", fc)
+        self.assertEqual(fc.count("--max-length"), 1)
+        self.assertIn("--chat-format", suites.flags_for(suite, chonk, "ifbench"))
+        for task in (b["task"] for b in suite["benchmarks"]):
+            self.assertEqual(suites.flags_for(suite, v1, task), suites.flags_for(suite, chonk, task))
+        suite["setups"][chonk]["task_flags"]["bfcl_v3_fc"] += ["--max-length", "1"]
+        with self.assertRaisesRegex(ValueError, "task_flags.bfcl_v3_fc"):
+            suites.validate(suite)
+        suite["setups"][chonk]["task_flags"] = {"nope": []}
+        with self.assertRaisesRegex(ValueError, "task_flags"):
+            suites.validate(suite)
 
     def test_reasoning_effort_is_validated_and_not_a_flag_of_the_setup(self):
         suite = suites.load(SUITE)
