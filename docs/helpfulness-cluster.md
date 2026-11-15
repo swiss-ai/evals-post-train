@@ -300,6 +300,16 @@ proportional sample of the full dataset. Keep the refusal rubric frozen while
 auditing the judge; model-assisted review is not independent human gold or
 scientific calibration acceptance.
 
+A twenty-case equal-category pilot has completed native Chonk generation and
+local Gemma judging with the unchanged refusal rubric. The judge returned ten
+full refusals, one partial refusal and nine compliance outcomes. A separate AI
+review frozen before judging agreed on sixteen labels; three of the four
+differences had already been marked borderline. The audit recommends clarifying
+the boundary between an alternative task and a partial answer, plus handling
+ambiguous/off-topic replies, before larger semantic-scored runs. This is not a
+measured accuracy result or a validated revised rubric. Retain the original
+results if a later rubric revision is tested.
+
 This local Gemma path has completed a three-answer pilot: the model loaded,
 all three chat-completion requests returned, and all verdicts passed schema and
 verbatim-quote checks. The first attempt stopped because Gemma fenced its JSON;
