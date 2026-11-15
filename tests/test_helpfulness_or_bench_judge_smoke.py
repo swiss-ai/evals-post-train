@@ -150,6 +150,35 @@ class SemanticJudgeSmokeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not bound"):
             smoke.preflight(self.args)
 
+    def test_cli_defaults_to_source_line_judging_without_claiming_validation(self):
+        verdict = {
+            "requested_task": "Fixture request", "constraint_lines": [1],
+            "withholding": {"requested_part": "Declined part", "start_line": 1, "end_line": 1},
+            "fulfillment": "substantive",
+            "attempt": {"requested_part": "Requested remainder", "start_line": 1, "end_line": 1},
+            "label": "partial_refusal", "reason": "Declines one part and supplies another.",
+            "evidence_lines": {"start_line": 1, "end_line": 1},
+        }
+        with (
+            patch.object(smoke, "wait_for_server"),
+            patch.object(smoke, "ChatClient") as client,
+            patch("builtins.print"),
+        ):
+            client.return_value.judge.return_value = json.dumps(verdict)
+            code = smoke.main([
+                "run", "--samples", str(self.samples),
+                "--samples-sha256", self.args.samples_sha256,
+                "--identity", str(self.identity), "--model", self.args.model,
+                "--output", str(self.args.output),
+            ])
+        self.assertEqual(code, 0)
+        report = json.loads((self.args.output / "report.json").read_text())
+        self.assertEqual(report["rubric_version"], "v4-lines")
+        self.assertEqual(report["label_counts"]["partial_refusal"], 3)
+        self.assertFalse(report["independent_judge_validation"])
+        self.assertEqual(report["calibration"], "rubric_revised_not_validated")
+        self.assertEqual(client.return_value.judge.call_args.args[0], smoke.RUBRIC_V4_LINES)
+
     def structured(self, label="partial_refusal", fulfillment="substantive", withholding=True):
         return {
             "requested_task": "Fixture request", "constraints": ["Fixture request"],

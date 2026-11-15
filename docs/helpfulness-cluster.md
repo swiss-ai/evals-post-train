@@ -274,7 +274,7 @@ SHA256 and the judge identity first; use `preflight` before starting the server
 and `run` against the allocation-local `/v1` endpoint. It uses `ChatClient.judge`
 with untrusted evidence separated from the frozen system rubric.
 
-The protocol is **adapted-or-bench-semantic-refusal-v1**, not the original
+The protocol is **adapted-or-bench-semantic-refusal-<rubric-version>**, not the original
 prefix metric or a published OR-Bench score. It preserves original prefix results
 alongside separate refusal, partial-refusal, compliance and unclear counts.
 Invalid JSON, invented evidence quotes and truncated responses fail explicitly.
@@ -312,8 +312,8 @@ results if a later rubric revision is tested.
 
 `--rubric-version v2` explicitly selects clarified rules for actual requested
 parts versus broad-goal alternatives, substantive help after a refusal, and
-off-topic or ambiguous replies. The default remains `v1`, whose wording is
-unchanged. Both versions use the same four labels and strict evidence schema,
+off-topic or ambiguous replies. V1's wording remains unchanged and is available
+with `--rubric-version v1`. Both versions use the same four labels and strict evidence schema,
 but record distinct protocols and rubric hashes. A replay of examples that
 informed v2 is a same-case tuning check, not independent calibration acceptance;
 the report marks the revised rubric as not validated.
@@ -324,7 +324,7 @@ with no explicit withholding changed from compliance to refusal. Counts became
 twelve refusals and eight compliance outcomes, with no partial/unclear labels.
 The audit found the first change consistent with the clarification, the second
 questionable, and a legal-task interpretation issue still unresolved. Therefore
-v2 is **experimental, not accepted as calibrated**; v1 remains the default.
+v2 was **experimental, not accepted as calibrated**, and was not promoted.
 
 `--rubric-version v3` adds structured, evidence-first judging: a constrained task
 summary, verbatim question constraints, optional actual-withholding and
@@ -353,7 +353,11 @@ and no rejections: nine refusals, two partial refusals, seven compliance and two
 unclear outcomes. It recognizes the legal-task help previously missed, but still
 counts a broad-goal alternative as requested help in another case. The two
 unclear outcomes are not compliance. This is a more auditable tuning result,
-**not calibration acceptance**; retain the earlier results and v1 default.
+**not independent calibration acceptance**; retain the earlier results.
+The user selected this version for continued pilots on 15 November 2026:
+**`v4-lines` is now the CLI default**. Earlier versions and their rubric text
+remain available unchanged for explicit replay. This operational selection does
+not erase the task-alignment caveat or certify agreement with human judgments.
 
 This local Gemma path has completed a three-answer pilot: the model loaded,
 all three chat-completion requests returned, and all verdicts passed schema and

@@ -459,8 +459,8 @@ def main(argv=None) -> int:
     parser.add_argument("--samples", type=Path, required=True)
     parser.add_argument("--samples-sha256", required=True)
     parser.add_argument("--expected-cases", type=int, choices=range(1, 21), default=3)
-    parser.add_argument("--rubric-version", choices=tuple(RUBRICS), default="v1",
-                        help="v1 preserves the original; v2 clarifies rules; v3 requires structured evidence")
+    parser.add_argument("--rubric-version", choices=tuple(RUBRICS), default="v4-lines",
+                        help="Default: v4-lines source-grounded evidence; earlier versions remain replayable")
     parser.add_argument("--keep-going", action="store_true",
                         help="Continue after rejected verdicts; return nonzero and withhold rates if any fail")
     parser.add_argument("--identity", type=Path, required=True)
