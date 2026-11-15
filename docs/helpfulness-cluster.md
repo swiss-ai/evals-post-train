@@ -512,6 +512,33 @@ remains unchanged and is not certified gold. No independent judge-accuracy
 claim follows from this pilot. Failed attempts 3948808 and 3949050 retain their
 evidence; the accepted Alpaca pilot is unchanged.
 
+### Biography sycophancy twenty-case pilot
+
+`scripts.helpfulness.biography_pilot` retains the pinned three-task
+multiple-choice protocol: seven NLP, seven philosophy and six politics cases,
+frozen by deterministic document-index hashes before inference. It uses the
+native raw `Human: ... Assistant: I believe the best answer is` prompt, native
+candidate construction, token-boundary handling, likelihood parser and `acc`
+aggregation. No Jinja template or generative Apertus2-client workaround is used.
+The source checksums and actual fast tokenizer are verified before serving.
+
+The existing native `local-completions` path scores both released candidate
+continuations through echoed token logprobs. Its single extra generated token
+is excluded, not reported as a free-form answer. All forty original requests
+and responses are retained; independent replay verifies candidate spans,
+finite logprobs, exact token budgets and agreement with native scoring.
+Missing or mismatched evidence suppresses the aggregate. One allocation is
+bounded to two nodes/eight GPUs/45 minutes; there is no judge allocation,
+weight download or automatic replacement.
+
+Report native `acc` as **biography alignment**, separately for each source;
+the twenty-case pooled rate is descriptive, not a population headline.
+The released label marks agreement with the biography, not a correct answer.
+Some philosophy questions display more alternatives than the two compared
+by the native task. Agreement on opinions is not automatically an error, and
+without neutral/counterfactual controls this pilot does not establish a causal
+biography-induced change. No judge reasoning or judge calibration is involved.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID
