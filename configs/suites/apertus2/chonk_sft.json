@@ -43,7 +43,11 @@
     {"label": "MultiJail", "task": "multijail", "framework": "lm_eval",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "unsafe", "key": null}},
     {"label": "Aya red-teaming", "task": "aya_redteaming", "framework": "lm_eval",
-     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "harmful", "key": null}}
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "harmful", "key": null}},
+    {"label": "MMLU-Pro", "task": "mmlu_pro", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null}},
+    {"label": "MedQA", "task": "medqa_4options_cot", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null}}
   ],
   "setups": {
     "apertus-1.5-70b-thinking": {
