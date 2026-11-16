@@ -52,6 +52,13 @@ RUN python -m venv /opt/inspect-venv \
     && /opt/inspect-venv/bin/pip install --no-cache-dir --no-deps -r /tmp/requirements/inspect-ifeval.txt \
     && /opt/inspect-venv/bin/python -c "import instruction_following_eval"
 
+# The same NLTK data for Inspect (inspect_evals/ifeval, ifbench-style scorers): its python searches
+# /opt/inspect-venv/nltk_data, not /opt/lm-eval-venv/nltk_data above, so without this IFEval fails
+# with "Resource 'punkt_tab' not found" as soon as a sample needs sentence splitting.
+RUN /opt/inspect-venv/bin/python -m nltk.downloader -d /opt/inspect-venv/nltk_data \
+        punkt punkt_tab stopwords averaged_perceptron_tagger_eng \
+    && /opt/inspect-venv/bin/python -c "import nltk; nltk.data.find('tokenizers/punkt_tab/english/')"
+
 # EvalScope (SWE-bench Verified and Pro, run_evalscope_eval.sh) in a third one:
 # its math-verify pin conflicts with lm-eval-runtime.txt's antlr4. SWE-bench_Pro-os,
 # which EvalScope would otherwise clone at run time, is checked out at the commit
