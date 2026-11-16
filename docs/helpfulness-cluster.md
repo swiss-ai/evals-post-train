@@ -596,8 +596,9 @@ its native Apertus2 renderer, temperature zero, low reasoning effort and a
 final replies or other native generation failures block successful scoring.
 Gemma uses the pinned native abstention prompt and the default general
 reference-correctness prompt (`math_mode=false`), with thinking disabled and a
-16-token binary-verdict ceiling. The frozen selection requires 33 judge calls:
-20 abstention classifications and 13 reference-based correctness judgments.
+16-token binary-verdict ceiling. With twenty valid replies, the frozen selection
+would require 33 judge calls: 20 abstention classifications and 13 reference-based
+correctness judgments. Verified model failures are omitted from both call types.
 Correctness is still reported separately on the ten answerable cases.
 
 Both CLI phases require the frozen selection hash and pinned upstream assets.
@@ -635,6 +636,32 @@ In addition to accuracy on judged answerable cases, a separately named
 failure-adjusted accuracy keeps failed answerable cases in the denominator
 and counts them incorrect. A finished workflow with such outcomes is labelled
 `succeeded_with_model_failures`, not an all-successful or complete native score.
+
+Continuation **3958281** completed with exit code zero in **9m42s**. All seven
+previously unattempted cases produced final replies, giving **19 valid replies
+and one recorded model failure** across twenty outcomes. The original twelve
+sample records and thirteen raw-evidence records remain byte-identical.
+The failed thirteenth request was not regenerated.
+
+Judge **3958325** completed with exit code zero in **4m56s**. All **31** actual
+binary calls replay against the pinned native formatter/parser: nineteen
+abstention classifications and twelve reference-correctness judgments.
+Pooled abstention counts are **TP 4, FP 0, FN 6, TN 9**, giving precision
+**100%**, recall **40%** and F1 **57.14%** over nineteen judged replies.
+Reference accuracy is **7/9 (77.78%)** on judged answerable cases, or
+**7/10 (70%)** when the failed answerable case counts incorrect. The observed
+ten-cell dataset/scenario macro F1 is **40%**, not a full-corpus headline.
+The scientific summary remains incomplete because only nineteen cases were scored.
+
+The self-contained HTML retains all twenty exact questions, nineteen full
+replies, the failed outcome, references and actual binary verdicts. Gemma gives
+no written rationale; separate assistant comments are not independent gold.
+In particular, case eleven is graded correct despite false historical claims
+in its explanation. Case seventeen is graded correct despite a conflicting
+yes/no reference, while the paper describes both separate and joint paragraph
+encodings. Subjective, forward-looking and forced-choice labels need additional
+policy scrutiny. Native scores are unchanged; no judge-calibration claim follows.
+Earlier accepted reports remain unchanged, and no next benchmark starts automatically.
 
 ```bash
 squeue --me
