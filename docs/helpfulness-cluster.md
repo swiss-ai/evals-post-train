@@ -575,6 +575,41 @@ flag ambiguous/inferred labels in cases 4, 16, 17 and 19; cases 16/17 repeat a
 political question with different profiles. No judge or regrading is involved.
 Both failed attempts are preserved; accepted Alpaca and MT reports are unchanged.
 
+### Partial AbstentionBench pilot
+
+The user skipped LitBench and explicitly selected a twenty-case pilot on the
+seven available GPQA-free components. This is **not** the configured nineteen-
+component evaluation. Full-corpus preparation still rejects missing components;
+the separate `scripts.helpfulness.abstention_pilot` runner does not relax it.
+
+The frozen pilot contains ten answerable and ten unanswerable cases across
+BigBench known unknowns, GSM8K, KUQ, MMLU history/math, MoralChoice and QASPER,
+covering five native scenario labels. Original questions, labels and reference
+answers are preserved. Native KUQ counterfactual/missing-category exclusions
+apply. Questions over 10,000 characters are ineligible, not truncated; this
+substantially restricts QASPER and is another explicit selection adaptation.
+Component/label/scenario quotas and seeded hashes are frozen before generation.
+
+Run target generation and judging as separate bounded allocations. Chonk uses
+its native Apertus2 renderer, temperature zero, low reasoning effort and a
+2,048-token ceiling. Nonempty truncated final replies remain flagged; empty
+final replies or other native generation failures block successful scoring.
+Gemma uses the pinned native abstention prompt and the default general
+reference-correctness prompt (`math_mode=false`), with thinking disabled and a
+16-token binary-verdict ceiling. The frozen selection requires 33 judge calls:
+20 abstention classifications and 13 reference-based correctness judgments.
+Correctness is still reported separately on the ten answerable cases.
+
+Both CLI phases require the frozen selection hash and pinned upstream assets.
+Judge preflight additionally verifies the response-file hash and open-weight
+model identity, and emits every exact prompt for tokenizer/context checks.
+Raw SDK requests/responses are retained and replayed against the pinned
+formatter/parser before accepting any aggregate. Report component/scenario
+denominators, confusion counts, pooled precision/recall/F1 and answerable
+accuracy; the existing dataset/scenario macro is descriptive for this tiny
+selection only. This does not certify judge accuracy or leaderboard equivalence.
+No replacement allocation, model download or next benchmark is automatic.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID
