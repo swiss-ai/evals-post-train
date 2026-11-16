@@ -91,6 +91,17 @@ def validate_generation(
         raise ValueError("Missing raw native output evidence")
 
 
+def budget_exhausted_without_reply(answer, info):
+    return (
+        isinstance(answer, str) and not answer.strip() and isinstance(info, dict)
+        and all(flag in info for flag in FAILURE_FLAGS)
+        and info["generation_truncated"] == 1 and info["generation_think_truncated"] == 1
+        and not any(info[flag] for flag in FAILURE_FLAGS
+                    if flag not in ("generation_truncated", "generation_think_truncated", "generation_has_claim"))
+        and isinstance(info.get("apertus2_output"), str) and bool(info["apertus2_output"])
+    )
+
+
 def preflight(checkpoint: Path) -> dict:
     inventory = checkpoint_inventory(checkpoint)
     native.require_harness()

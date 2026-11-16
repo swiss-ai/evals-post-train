@@ -11,6 +11,7 @@ from scripts.helpfulness import acceptance_scoring, native, teacher_smoke
 from scripts.helpfulness.benchmark_pilot import record_sdk_calls, verified_bytes
 from scripts.helpfulness.core import append_jsonl, digest, read_json, read_jsonl, write_json
 from scripts.helpfulness.open_models import reject_closed
+from scripts.helpfulness.teacher_smoke import budget_exhausted_without_reply
 
 
 SOURCE_SHA256 = "119565adbab82227089cefdb44c8d7e2cf04dc0a0ec233634c82e7d4e2a944f7"
@@ -157,17 +158,6 @@ def resume_data(args, cases, checked):
         ):
             raise ValueError("Resume raw generation evidence changed an answer or its history")
     return saved, evidence, previous
-
-
-def budget_exhausted_without_reply(answer, info):
-    return (
-        isinstance(answer, str) and not answer.strip() and isinstance(info, dict)
-        and all(flag in info for flag in teacher_smoke.FAILURE_FLAGS)
-        and info["generation_truncated"] == 1 and info["generation_think_truncated"] == 1
-        and not any(info[flag] for flag in teacher_smoke.FAILURE_FLAGS
-                    if flag not in ("generation_truncated", "generation_think_truncated", "generation_has_claim"))
-        and isinstance(info.get("apertus2_output"), str) and bool(info["apertus2_output"])
-    )
 
 
 def judge_messages(samples, metric):

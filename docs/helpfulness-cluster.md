@@ -610,6 +610,32 @@ accuracy; the existing dataset/scenario macro is descriptive for this tiny
 selection only. This does not certify judge accuracy or leaderboard equivalence.
 No replacement allocation, model download or next benchmark is automatic.
 
+The initial target job **3953024** failed after twelve valid replies because
+case thirteen exhausted its 2,048-token thinking budget without a final reply.
+The user subsequently requested failure skipping and continuation.
+`--continue-model-failures` now records precisely this native failure signature
+and proceeds. Missing evidence, request/transport errors, prompt mismatches and
+other malformed outputs remain fatal; the default without the flag stays strict.
+The failure-signature guard is shared with the existing MT-Bench pilot.
+
+Resumption requires the original samples, report and raw generation evidence,
+each with its own SHA256. The frozen selection, checkpoint/preflight, decoding,
+case order and saved replies must match. A known budget-exhausted request
+journaled just before the old failure is adopted as a failed outcome, not
+retried. Original sample/evidence byte prefixes are copied unchanged; only
+unattempted cases are generated. For this continuation that means twelve valid
+replies plus the failed thirteenth are retained, and only seven new requests
+are needed. The generation cap remains 2,048 tokens.
+
+Judging omits these verified empty replies rather than labelling them valid
+abstentions. Every selected case still has an outcome: model failures retain
+`status=failed`, no judge score and no trace. Reports distinguish recorded,
+valid and failed counts; abstention metrics explicitly use only judged replies.
+In addition to accuracy on judged answerable cases, a separately named
+failure-adjusted accuracy keeps failed answerable cases in the denominator
+and counts them incorrect. A finished workflow with such outcomes is labelled
+`succeeded_with_model_failures`, not an all-successful or complete native score.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID

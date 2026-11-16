@@ -4,6 +4,7 @@ import argparse
 from collections import Counter
 import json
 from pathlib import Path
+import shutil
 
 from scripts.helpfulness import abstention_subset, open_benchmarks, teacher_smoke
 from scripts.helpfulness.benchmark_pilot import record_sdk_calls, verified_bytes
@@ -41,19 +42,78 @@ def load_selection(args):
     return cases
 
 
+def outcome_status(row, allow_model_failures):
+    if allow_model_failures and teacher_smoke.budget_exhausted_without_reply(
+        row["answer"], row["generation_info"],
+    ):
+        return "model_no_final_reply"
+    teacher_smoke.validate_generation(
+        row["answer"], row["generation_info"], allow_truncated=True, allow_claim=True,
+    )
+    return "generated_truncated" if row["generation_info"].get("generation_truncated") else "generated"
+
+
 def load_samples(args, cases):
     verified_bytes(args.samples, args.samples_sha256)
     rows = read_jsonl(args.samples)
     if [row["case"] for row in rows] != cases:
         raise ValueError("Saved responses differ from the frozen cases")
     for row in rows:
-        teacher_smoke.validate_generation(
-            row["answer"], row["generation_info"], allow_truncated=True, allow_claim=True,
-        )
-        expected = "generated_truncated" if row["generation_info"].get("generation_truncated") else "generated"
+        expected = outcome_status(row, getattr(args, "continue_model_failures", False))
         if row["status"] != expected:
             raise ValueError("Saved response has inconsistent generation status")
     return rows
+
+
+def resume_data(args, cases, checked):
+    names = ("samples", "report", "evidence")
+    values = [getattr(args, "resume_" + name + suffix, None)
+              for name in names for suffix in ("", "_sha256")]
+    if not any(values):
+        return [], []
+    if not all(values):
+        raise ValueError("Resume requires samples, report, evidence and all three hashes")
+    for name in names:
+        verified_bytes(getattr(args, "resume_" + name), getattr(args, "resume_" + name + "_sha256"))
+    previous = read_json(args.resume_report)
+    saved = load_samples(argparse.Namespace(
+        samples=args.resume_samples, samples_sha256=args.resume_samples_sha256,
+        continue_model_failures=getattr(args, "continue_model_failures", False),
+    ), cases[:len(read_jsonl(args.resume_samples))])
+    evidence = read_jsonl(args.resume_evidence)
+    if (
+        previous["status"] != "failed" or previous["benchmark"] != BENCHMARK
+        or previous["model"] != args.model or previous["base_url"] != args.base_url
+        or previous["selection_sha256"] != args.selection_sha256
+        or previous["target_max_tokens"] != args.max_tokens
+        or previous["preflight"] != checked
+        or previous["completed_cases"] != sum(row["status"] != "model_no_final_reply" for row in saved)
+        or not 0 < len(evidence) < len(cases)
+        or len(evidence) not in (len(saved), len(saved) + 1)
+        or [row["case"] for row in evidence] != cases[:len(evidence)]
+    ):
+        raise ValueError("Resume differs from the frozen checkpoint, preflight or attempted prefix")
+    for sample, raw in zip(saved, evidence):
+        if any(sample[key] != raw[key] for key in ("case", "answer", "generation_info")):
+            raise ValueError("Resume raw evidence differs from the saved response")
+    if len(evidence) > len(saved):
+        raw = evidence[-1]
+        if outcome_status(raw, getattr(args, "continue_model_failures", False)) != "model_no_final_reply":
+            raise ValueError("Uncommitted resume outcome is not a known budget-exhausted model failure")
+        saved.append({**raw, "status": "model_no_final_reply"})
+    for name in ("samples", "evidence"):
+        if not getattr(args, "resume_" + name).read_bytes().endswith(b"\n"):
+            raise ValueError("Resume JSONL prefix must end at a complete record boundary")
+    return saved, evidence
+
+
+def failed_judgment(sample):
+    if outcome_status(sample, True) != "model_no_final_reply":
+        raise ValueError("Only verified budget-exhausted replies may be excluded from judging")
+    return {
+        "case": sample["case"], "answer": sample["answer"], "status": "failed",
+        "error": "model_no_final_reply", "scores": {}, "trace": [],
+    }
 
 
 class PromptCollector:
@@ -68,6 +128,9 @@ class PromptCollector:
 def judge_messages(samples, assets):
     expected = []
     for sample in samples:
+        if sample["status"] == "model_no_final_reply":
+            failed_judgment(sample)
+            continue
         collector = PromptCollector()
         open_benchmarks.score(
             "abstention_bench", sample["case"], sample["answer"], collector, assets, OPTIONS, {},
@@ -89,6 +152,7 @@ def preflight(args, cases):
     }
     if args.action in ("preflight-target", "generate"):
         result["native_preflight"] = teacher_smoke.preflight(args.checkpoint)
+        resume_data(args, cases, result)
     else:
         samples = load_samples(args, cases)
         identity = read_json(args.identity)
@@ -104,6 +168,8 @@ def preflight(args, cases):
             judge_identity=identity, judge_messages=judge_messages(samples, assets),
             source_samples_sha256=args.samples_sha256,
         )
+        if not result["judge_messages"]:
+            raise ValueError("No valid final replies to judge; model failures are not abstentions")
     return result, assets
 
 
@@ -139,6 +205,10 @@ def replay_judgments(samples, judgments, calls, assets, model):
 
     client = Replay()
     for sample, row in zip(samples, judgments):
+        if sample["status"] == "model_no_final_reply":
+            if row != failed_judgment(sample):
+                raise ValueError("A model failure was altered or credited as an abstention")
+            continue
         scores, trace = open_benchmarks.score(
             "abstention_bench", sample["case"], sample["answer"], client, assets, OPTIONS, {},
         )
@@ -150,22 +220,33 @@ def replay_judgments(samples, judgments, calls, assets, model):
 
 def summary(rows):
     result = open_benchmarks.summarize("abstention_bench", rows, 20, OPTIONS)
-    tp = sum(row["case"]["should_abstain"] and row["scores"]["abstained"] for row in rows)
-    fp = sum(not row["case"]["should_abstain"] and row["scores"]["abstained"] for row in rows)
-    fn = sum(row["case"]["should_abstain"] and not row["scores"]["abstained"] for row in rows)
-    tn = len(rows) - tp - fp - fn
-    answerable = [row for row in rows if not row["case"]["should_abstain"]]
+    valid = [row for row in rows if row["status"] == "succeeded"]
+    failed = [row for row in rows if row["status"] == "failed"]
+    tp = sum(row["case"]["should_abstain"] and row["scores"]["abstained"] for row in valid)
+    fp = sum(not row["case"]["should_abstain"] and row["scores"]["abstained"] for row in valid)
+    fn = sum(row["case"]["should_abstain"] and not row["scores"]["abstained"] for row in valid)
+    tn = len(valid) - tp - fp - fn
+    answerable = [row for row in valid if not row["case"]["should_abstain"]]
+    selected_answerable = [row for row in rows if not row["case"]["should_abstain"]]
+    correct = sum(row["scores"]["correct"] for row in answerable)
     result.update(
         benchmark=BENCHMARK, full_benchmark=False, pilot_only=True,
         missing_retained_components=sorted(set(abstention_subset.INCLUDED) - set(COMPONENTS)),
+        model_failure_cases=len(failed), unscored_failed_case_ids=[row["case"]["id"] for row in failed],
+        valid_reply_coverage={"value": len(valid) / 20, "denominator": 20},
         pooled_diagnostics={
+            "abstention_denominator": len(valid),
             "confusion": {"tp": tp, "fp": fp, "fn": fn, "tn": tn},
             "precision": tp / (tp + fp) if tp + fp else 0.0,
             "recall": tp / (tp + fn) if tp + fn else 0.0,
             "f1": 2 * tp / (2 * tp + fp + fn) if 2 * tp + fp + fn else 0.0,
             "answerable_accuracy": {
-                "value": sum(row["scores"]["correct"] for row in answerable) / len(answerable) if answerable else None,
+                "value": correct / len(answerable) if answerable else None,
                 "denominator": len(answerable),
+            },
+            "selected_answerable_accuracy_failures_incorrect": {
+                "value": correct / len(selected_answerable) if selected_answerable else None,
+                "denominator": len(selected_answerable),
             },
         },
     )
@@ -183,6 +264,8 @@ def run(args):
         "model_weights_downloaded": False, "target_regenerated": generating,
         "target_max_tokens": 2048, "judge_max_tokens": OPTIONS["judge_max_tokens"],
         "truncation_policy": "retain_nonempty_final_reply_and_flag; block_scoring_empty_reply",
+        "continue_model_failures": bool(getattr(args, "continue_model_failures", False)),
+        "recorded_cases": 0, "model_failure_cases": 0, "new_generation_attempts": 0,
     }
     write_json(args.output / "report.json", report)
     try:
@@ -193,19 +276,33 @@ def run(args):
         report["phase"] = "generation" if generating else "judging"
         write_json(args.output / "report.json", report)
         if generating:
+            saved, evidence = resume_data(args, cases, checked)
+            if evidence:
+                shutil.copyfile(args.resume_samples, args.output / "samples.jsonl")
+                shutil.copyfile(args.resume_evidence, args.output / "generation-evidence.jsonl")
+                for row in saved[len(read_jsonl(args.resume_samples)):]:
+                    append_jsonl(args.output / "samples.jsonl", row)
+                report.update(
+                    resume_source_sha256={name: getattr(args, "resume_" + name + "_sha256")
+                                          for name in ("samples", "report", "evidence")},
+                    resumed_cases=len(saved), recorded_cases=len(saved),
+                    completed_cases=sum(row["status"] != "model_no_final_reply" for row in saved),
+                    model_failure_cases=sum(row["status"] == "model_no_final_reply" for row in saved),
+                )
+                write_json(args.output / "report.json", report)
             model = teacher_smoke.native_model(args)
-            for index, case in enumerate(cases):
+            for index, case in enumerate(cases[len(saved):], len(saved)):
                 row = teacher_smoke.generate_native(
                     model, case, [{"role": "user", "content": case["question"]}], BENCHMARK, index,
                     {"temperature": 0, "max_gen_toks": 2048, "until": [], "seed": 1234},
                 )
                 append_jsonl(args.output / "generation-evidence.jsonl", row)
-                teacher_smoke.validate_generation(
-                    row["answer"], row["generation_info"], allow_truncated=True, allow_claim=True,
-                )
-                row["status"] = "generated_truncated" if row["generation_info"].get("generation_truncated") else "generated"
+                row["status"] = outcome_status(row, report["continue_model_failures"])
                 append_jsonl(args.output / "samples.jsonl", row)
-                report["completed_cases"] += 1
+                report["completed_cases"] += int(row["status"] != "model_no_final_reply")
+                report["model_failure_cases"] += int(row["status"] == "model_no_final_reply")
+                report["recorded_cases"] += 1
+                report["new_generation_attempts"] += 1
                 write_json(args.output / "report.json", report)
         else:
             from openai import OpenAI
@@ -227,6 +324,12 @@ def run(args):
 
                 judge = Judge()
                 for sample in samples:
+                    if sample["status"] == "model_no_final_reply":
+                        append_jsonl(args.output / "judgments.jsonl", failed_judgment(sample))
+                        report["model_failure_cases"] += 1
+                        report["recorded_cases"] += 1
+                        write_json(args.output / "report.json", report)
+                        continue
                     scores, trace = open_benchmarks.score(
                         "abstention_bench", sample["case"], sample["answer"], judge, assets, OPTIONS, {},
                     )
@@ -235,12 +338,16 @@ def run(args):
                         "scores": scores, "trace": trace,
                     })
                     report["completed_cases"] += 1
+                    report["recorded_cases"] += 1
                     write_json(args.output / "report.json", report)
             report["summary"] = replay_judgments(
                 samples, read_jsonl(args.output / "judgments.jsonl"),
                 read_jsonl(args.output / "judge-calls.jsonl"), assets, args.model,
             )
-        report.update(status="succeeded", phase="completed")
+        report.update(
+            status="succeeded_with_model_failures" if report["model_failure_cases"] else "succeeded",
+            phase="completed",
+        )
     except Exception as error:
         report.update(status="failed", error_type=type(error).__name__, error=str(error))
         raise
@@ -264,6 +371,11 @@ def main(argv=None):
     parser.add_argument("--samples", type=Path)
     parser.add_argument("--samples-sha256")
     parser.add_argument("--identity", type=Path)
+    parser.add_argument("--continue-model-failures", action="store_true",
+                        help="Record verified thinking-budget failures and continue; never judge them as abstentions")
+    for name in ("samples", "report", "evidence"):
+        parser.add_argument("--resume-" + name, type=Path)
+        parser.add_argument("--resume-" + name + "-sha256")
     args = parser.parse_args(argv)
     if args.action in ("preflight-target", "generate"):
         if args.checkpoint is None:
