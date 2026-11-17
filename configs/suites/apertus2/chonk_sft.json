@@ -32,6 +32,9 @@
      "flags": ["--sandbox", "opensandbox"]},
     {"label": "GDPval", "task": "gdpval", "framework": "inspect",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null},
+     "flags": ["--sandbox", "opensandbox"]},
+    {"label": "SWE-bench Verified", "task": "swe_bench", "framework": "harbor",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "resolved", "key": null},
      "flags": ["--sandbox", "opensandbox"]}
   ],
   "setups": {
@@ -41,7 +44,8 @@
       "sampling": "thinking",
       "flags": {
         "lm_eval": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>"],
-        "inspect": ["--enable-thinking"]
+        "inspect": ["--enable-thinking"],
+        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       },
       "task_flags": {
         "bfcl_v3_fc": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>", "--api-endpoint", "chat-completions"]
@@ -53,7 +57,8 @@
       "sampling": "thinking",
       "flags": {
         "lm_eval": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>"],
-        "inspect": ["--enable-thinking"]
+        "inspect": ["--enable-thinking"],
+        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       },
       "task_flags": {
         "bfcl_v3_fc": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>", "--api-endpoint", "chat-completions"]
@@ -65,7 +70,8 @@
       "sampling": "thinking",
       "flags": {
         "lm_eval": ["--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>"],
-        "inspect": ["--enable-thinking"]
+        "inspect": ["--enable-thinking"],
+        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       },
       "task_flags": {
         "bfcl_v3_fc": ["--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>", "--api-endpoint", "chat-completions"]
@@ -80,7 +86,8 @@
       "serving": ["--tokenizer-mode", "apertus2", "--reasoning-parser", "apertus2", "--enable-auto-tool-choice", "--tool-call-parser", "apertus2"],
       "flags": {
         "lm_eval": ["--backend", "openai", "--chat-format", "apertus2"],
-        "inspect": []
+        "inspect": [],
+        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 16384}"]
       },
       "task_flags": {
         "bfcl_v3_fc": ["--backend", "openai", "--api-endpoint", "chat-completions", "--enable-thinking"]
@@ -95,7 +102,8 @@
       "serving": ["--tokenizer-mode", "apertus2", "--reasoning-parser", "apertus2", "--enable-auto-tool-choice", "--tool-call-parser", "apertus2"],
       "flags": {
         "lm_eval": ["--backend", "openai", "--chat-format", "apertus2"],
-        "inspect": []
+        "inspect": [],
+        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 16384}"]
       },
       "task_flags": {
         "bfcl_v3_fc": ["--backend", "openai", "--api-endpoint", "chat-completions", "--enable-thinking"]
