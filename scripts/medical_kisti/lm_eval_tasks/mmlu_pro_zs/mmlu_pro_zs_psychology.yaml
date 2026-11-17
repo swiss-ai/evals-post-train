@@ -1,0 +1,5 @@
+include: "_default_template_yaml"
+task: "mmlu_pro_zs_psychology"
+task_alias: "psychology"
+process_docs: !function utils.process_psychology
+doc_to_text: !function utils.doc_to_text_psychology

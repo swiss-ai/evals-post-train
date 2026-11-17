@@ -1,0 +1,24 @@
+# MMLU-Pro zero-shot, instruction in the user turn (utils.py); for chat endpoints
+group: mmlu_pro_zs
+task:
+  - mmlu_pro_zs_biology
+  - mmlu_pro_zs_business
+  - mmlu_pro_zs_chemistry
+  - mmlu_pro_zs_computer_science
+  - mmlu_pro_zs_economics
+  - mmlu_pro_zs_engineering
+  - mmlu_pro_zs_health
+  - mmlu_pro_zs_history
+  - mmlu_pro_zs_law
+  - mmlu_pro_zs_math
+  - mmlu_pro_zs_other
+  - mmlu_pro_zs_philosophy
+  - mmlu_pro_zs_physics
+  - mmlu_pro_zs_psychology
+aggregate_metric_list:
+  - aggregation: mean
+    metric: exact_match
+    weight_by_size: true
+    filter_list: custom-extract
+metadata:
+  version: 1.0

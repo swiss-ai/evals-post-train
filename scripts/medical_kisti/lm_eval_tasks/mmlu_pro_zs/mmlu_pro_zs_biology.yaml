@@ -1,0 +1,5 @@
+include: "_default_template_yaml"
+task: "mmlu_pro_zs_biology"
+task_alias: "biology"
+process_docs: !function utils.process_biology
+doc_to_text: !function utils.doc_to_text_biology

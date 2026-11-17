@@ -1,0 +1,5 @@
+include: "_default_template_yaml"
+task: "mmlu_pro_zs_math"
+task_alias: "math"
+process_docs: !function utils.process_math
+doc_to_text: !function utils.doc_to_text_math

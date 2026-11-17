@@ -1,0 +1,5 @@
+include: "_default_template_yaml"
+task: "mmlu_pro_zs_other"
+task_alias: "other"
+process_docs: !function utils.process_other
+doc_to_text: !function utils.doc_to_text_other

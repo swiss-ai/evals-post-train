@@ -1,0 +1,5 @@
+include: "_default_template_yaml"
+task: "mmlu_pro_zs_history"
+task_alias: "history"
+process_docs: !function utils.process_history
+doc_to_text: !function utils.doc_to_text_history

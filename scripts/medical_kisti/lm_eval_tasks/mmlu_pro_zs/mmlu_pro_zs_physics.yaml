@@ -1,0 +1,5 @@
+include: "_default_template_yaml"
+task: "mmlu_pro_zs_physics"
+task_alias: "physics"
+process_docs: !function utils.process_physics
+doc_to_text: !function utils.doc_to_text_physics
