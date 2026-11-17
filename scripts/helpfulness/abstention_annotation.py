@@ -6,6 +6,7 @@ from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
+import sys
 
 from scripts.helpfulness import abstention_pilot, open_benchmarks, teacher_smoke
 from scripts.helpfulness.benchmark_pilot import record_sdk_calls
@@ -221,7 +222,7 @@ def parse_annotation(raw, sample):
     return value
 
 
-def outcome(sample, response):
+def outcome(sample, response, *, parser=None):
     base = {"case": sample["case"], "answer": sample["answer"], "annotation": None}
     if sample["status"] == "model_no_final_reply":
         abstention_pilot.failed_judgment(sample)
@@ -233,7 +234,7 @@ def outcome(sample, response):
         raw = choices[0]["message"]["content"]
         if not isinstance(raw, str):
             raise ValueError("Annotation response is not text")
-        annotation = parse_annotation(raw, sample)
+        annotation = (parser or parse_annotation)(raw, sample)
     except (ValueError, KeyError, TypeError) as error:
         return {**base, "status": "annotation_failure", "error": type(error).__name__ + ": " + str(error)}
     return {**base, "status": "annotated", "annotation": annotation}
@@ -259,24 +260,25 @@ def summarize(rows):
     }
 
 
-def replay(samples, rows, calls, model):
-    expected = judge_messages(samples)
+def replay(samples, rows, calls, model, *, protocol=None):
+    p = protocol or sys.modules[__name__]
+    expected = p.judge_messages(samples)
     if len(rows) != len(samples) or len(calls) != 2 * len(expected):
         raise ValueError("Incomplete annotation evidence")
     responses = []
     for entry, sent, returned in zip(expected, calls[::2], calls[1::2]):
         if (
-            sent != {"phase": "requested", "request": request(entry["messages"], model)}
+            sent != {"phase": "requested", "request": p.request(entry["messages"], model)}
             or returned.get("phase") != "returned" or returned["response"]["model"] != model
         ):
             raise ValueError("Annotation raw request/model differs from frozen preflight")
         responses.append(returned["response"])
     iterator = iter(responses)
     for sample, row in zip(samples, rows):
-        expected_row = outcome(sample, None if sample["status"] == "model_no_final_reply" else next(iterator))
+        expected_row = p.outcome(sample, None if sample["status"] == "model_no_final_reply" else next(iterator))
         if row != expected_row:
             raise ValueError("Saved annotation differs from actual SDK response and strict parser")
-    return summarize(rows)
+    return p.summarize(rows)
 
 
 def preflight(args):
@@ -304,20 +306,21 @@ def preflight(args):
     }
 
 
-def run(args):
+def run(args, *, protocol=None):
     from openai import OpenAI
 
+    p = protocol or sys.modules[__name__]
     args.output.mkdir(parents=True, mode=0o700, exist_ok=False)
     report = {
-        "protocol": PROTOCOL, "status": "running", "phase": "preflight",
+        "protocol": p.PROTOCOL, "status": "running", "phase": "preflight",
         "target_regenerated": False, "original_native_annotations_changed": False,
-        "rubric_sha256": RUBRIC_SHA256, "source_samples_sha256": args.samples_sha256,
-        "schema_sha256": SCHEMA_SHA256,
+        "rubric_sha256": p.RUBRIC_SHA256, "source_samples_sha256": args.samples_sha256,
+        "schema_sha256": p.SCHEMA_SHA256,
         "independent_judge_validation": False,
     }
     write_json(args.output / "report.json", report)
     try:
-        samples, checked = preflight(args)
+        samples, checked = p.preflight(args)
         report["preflight"] = {key: value for key, value in checked.items() if key != "judge_messages"}
         teacher_smoke.wait_for_server(args.base_url, args.model, args.ready_timeout)
         report["phase"] = "annotating"
@@ -329,13 +332,13 @@ def run(args):
             for sample in samples:
                 response = None
                 if sample["status"] != "model_no_final_reply":
-                    response = client.chat.completions.create(**request(messages(sample), args.model)).model_dump(mode="json")
-                row = outcome(sample, response)
+                    response = client.chat.completions.create(**p.request(p.messages(sample), args.model)).model_dump(mode="json")
+                row = p.outcome(sample, response)
                 append_jsonl(args.output / "annotations.jsonl", row)
                 rows.append(row)
-                report["progress"] = summarize(rows)
+                report["progress"] = p.summarize(rows)
                 write_json(args.output / "report.json", report)
-        report["summary"] = replay(samples, rows, read_jsonl(args.output / "judge-calls.jsonl"), args.model)
+        report["summary"] = p.replay(samples, rows, read_jsonl(args.output / "judge-calls.jsonl"), args.model)
         report.update(
             phase="completed",
             status="completed_with_model_exclusions" if report["summary"]["model_failure_case_ids"] else "completed",
@@ -350,7 +353,8 @@ def run(args):
     return report
 
 
-def main(argv=None):
+def main(argv=None, *, protocol=None):
+    p = protocol or sys.modules[__name__]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("preflight", "annotate"))
     for name in ("source", "selection", "samples", "identity", "output"):
@@ -359,14 +363,16 @@ def main(argv=None):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--ready-timeout", type=int, default=1200)
+    if protocol is not None:
+        p.add_arguments(parser)
     args = parser.parse_args(argv)
     if args.action == "preflight":
         if args.output.exists():
             raise FileExistsError("Annotation preflight already exists")
-        _, checked = preflight(args)
+        _, checked = p.preflight(args)
         write_json(args.output, checked)
     else:
-        run(args)
+        return p.run(args)
 
 
 if __name__ == "__main__":

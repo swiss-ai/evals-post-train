@@ -716,6 +716,31 @@ remaining judge limitation, not independent gold or successful calibration.
 The separate evidence report preserves original native verdicts, all full
 questions/replies, actual new outputs and explicitly separate assistant comments.
 
+#### Evidence-ID calibration pilot
+
+`scripts.helpfulness.abstention_calibration` reuses the saved-reply execution
+and raw SDK replay engine without changing v2 interpretation or original outputs.
+It replaces generated quotations with per-input constrained evidence IDs. Each
+ID resolves to an exact bounded span of the original text, including Markdown;
+wrong-source, invented, blank or duplicate IDs fail. Both the schema template
+and each actual per-input schema are bound to identity/preflight/raw replay.
+
+The judge must explicitly inspect unresolved interpretations before factuality.
+Two source-supported interpretations require an ambiguity flag; a named method
+can resolve the scope. A supported interpretation is not false merely because
+the released reference picks another. References, whole-answer factuality,
+abstention, unsupported assumptions and unverified model knowledge remain distinct.
+
+For this pilot, keep nineteen previously inspected replies as development
+diagnostics and freeze twenty **new assistant-authored, constructively
+source-grounded controls** before changing the candidate rubric. Freeze expected
+labels separately; never include them in judge messages or derive them from
+candidate outputs. Score control-case agreement separately from teacher results.
+The declared regression gate requires every control to satisfy all frozen
+accepted verdicts and flags, with no invalid annotation. Report each disagreement.
+Even perfect agreement on these controlled checks is not independent human
+calibration or real-distribution judge accuracy. No new target generation is needed.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID
