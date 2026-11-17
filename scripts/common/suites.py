@@ -62,7 +62,7 @@ THINKING_FLAGS = ("--thinking", "--enable-thinking")
 # Flags the suite itself produces, so a setup may not list them.
 RESERVED = {"lm_eval": {"--max-length", "--repeats", "--reasoning-effort"},
             "inspect": {"--task-arg", "--epochs", "--", "--reasoning-effort"},
-            "evalscope": set(), "harbor": set(), "tau2": set()}
+            "evalscope": set(), "harbor": {"--reasoning-effort"}, "tau2": set()}
 
 
 def _profile(where, name, profiles):
@@ -236,7 +236,7 @@ def flags_for(suite, setup_name, task, fetch=False):
     copy first (once), otherwise the flag names where it will be."""
     bench, chosen = benchmark(suite, task), setup(suite, setup_name)
     flags = list(chosen.get("task_flags", {}).get(task, chosen["flags"][bench["framework"]]))
-    if "reasoning_effort" in chosen and bench["framework"] in ("lm_eval", "inspect"):
+    if "reasoning_effort" in chosen and bench["framework"] in ("lm_eval", "inspect", "harbor"):
         flags += ["--reasoning-effort", chosen["reasoning_effort"]]
     flags += bench.get("flags", [])
     repeat = bench["repeats"]["via"] == "flag"
@@ -259,6 +259,7 @@ def flags_for(suite, setup_name, task, fetch=False):
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LM_EVAL = ["bash", "scripts/lm_eval_harness/launch_evaluations.sh", "single"]
 INSPECT = "scripts/inspect_ai/run_inspect_eval.sbatch"
+HARBOR = "scripts/harbor/run_harbor_eval.sbatch"
 
 
 def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, no_wandb=False,
@@ -266,7 +267,7 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
     """One launch per (model, benchmark), models in the order given, benchmarks in table order.
 
     `models` maps a setup name to the name the model is served under. Every launch is its own Slurm job
-    (lm_eval: one `single` launch; inspect: one sbatch). api_model_name only applies to lm_eval, which
+    (lm_eval: one `single` launch; inspect and harbor: one sbatch). api_model_name only applies to lm_eval, which
     takes the served name separately from the model; qos and partition go to the lm_eval launcher or to
     sbatch. Returns [{"setup", "label", "framework", "argv"}]."""
     rows = []
@@ -291,6 +292,9 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
             elif framework == "inspect":
                 scheduling = ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])
                 argv = ["sbatch", *scheduling, INSPECT, *common, *flags]
+            elif framework == "harbor":
+                scheduling = ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])
+                argv = ["sbatch", *scheduling, HARBOR, "--benchmark", bench["task"], *common[2:], *flags]
             else:
                 raise ValueError(f"{bench['task']}: no launcher for the {framework} framework yet")
             rows.append({"setup": setup_name, "label": bench["label"], "framework": framework, "argv": argv})
