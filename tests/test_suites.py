@@ -25,8 +25,16 @@ class SuiteTests(unittest.TestCase):
         suite = suites.load(SUITE)
         self.assertEqual(suites.flags_for(suite, THINK, "ifbench"),
                          ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>",
-                          "--max-length", "32768", "--repeats", "4"])
+                          "--api-num-concurrent", "256", "--max-length", "32768", "--repeats", "4"])
         self.assertNotIn("--repeats", suites.flags_for(suite, THINK, "minerva_math500_self_consistency"))
+
+    def test_apertus_15_70b_runs_with_high_client_concurrency_on_every_lm_eval_row(self):
+        # Its two replicas sit idle at the launcher's default of 8; bfcl_v3_fc's task_flags replace the setup's flags.
+        suite = suites.load(SUITE)
+        for task in ("ifbench", "bfcl_v3_fc"):
+            flags = suites.flags_for(suite, THINK, task)
+            self.assertEqual(flags[flags.index("--api-num-concurrent") + 1], "256", task)
+        self.assertNotIn("--api-num-concurrent", suites.flags_for(suite, "apertus-1.5-8b-thinking", "ifbench"))
 
     def test_setup_sets_window_and_format(self):
         suite = suites.load("apertus2/chonk_sft")
