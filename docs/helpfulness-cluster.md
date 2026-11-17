@@ -687,8 +687,16 @@ Missing/truncated/malformed annotations are preserved as explicit failures and
 the remaining cases are attempted; any such failure leaves the final report
 failed, not silently successful. Transport errors remain fatal. Verified empty
 target failures get no annotation request or score. Raw SDK calls replay against
-the frozen rubric, JSON-mode decoding, original replies and strict parser.
-The rubric hash is bound to the open-weight model identity. One call per valid
+the frozen rubric, schema-constrained decoding, original replies and strict parser.
+Both rubric and JSON Schema hashes are bound to the open-weight model identity.
+The v2 protocol requests strict `json_schema` output, requiring nonempty dimension
+explanations and a basis on every error; evidence and cross-field checks remain
+local and mandatory. Unsupported schema decoding is fatal, not silently downgraded.
+The first v1 JSON-object-only attempt made all nineteen requests, but fifteen
+outputs failed validation, mostly for blank explanations copied from the JSON
+template. Its four valid annotations and all failed raw outputs remain preserved;
+do not reinterpret that attempt as a successful run or loosen the parser to accept it.
+One call per valid
 reply uses temperature zero, seed 1234 and a 1,024-token annotation ceiling,
 with exact prompt/context checks before loading weights. This post-hoc pilot
 is not independent judge calibration; its dimension counts are not native scores.

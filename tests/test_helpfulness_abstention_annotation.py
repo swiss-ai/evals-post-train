@@ -106,6 +106,21 @@ class AbstentionAnnotationTests(unittest.TestCase):
         broken["whole_answer_factuality"]["verdict"] = "verified_correct"
         self.assertEqual(annotation.outcome(self.sample, self.response(broken))["status"], "annotation_failure")
 
+    def test_blank_dimension_reasons_and_missing_error_basis_stay_failures(self):
+        for key in ("abstention", "reference_agreement", "whole_answer_factuality"):
+            with self.subTest(dimension=key):
+                broken = deepcopy(self.value)
+                broken[key]["reason"] = ""
+                self.assertEqual(annotation.outcome(self.sample, self.response(broken))["status"], "annotation_failure")
+        broken = deepcopy(self.value)
+        broken["whole_answer_factuality"].update(
+            verdict="contains_error", errors=[{
+                "quote": "No.", "explanation": "Contradicts the supplied claim.",
+                "source_quote": "The supplied material says Yes.",
+            }],
+        )
+        self.assertEqual(annotation.outcome(self.sample, self.response(broken))["status"], "annotation_failure")
+
     def test_model_failure_never_gets_a_judge_request_or_annotation(self):
         failed = deepcopy(self.sample)
         failed.update(answer="", status="model_no_final_reply", generation_info={key: 0 for key in FAILURE_FLAGS})
@@ -140,6 +155,11 @@ class AbstentionAnnotationTests(unittest.TestCase):
         calls[0]["request"]["max_tokens"] += 1
         with self.assertRaisesRegex(ValueError, "preflight"):
             annotation.replay(samples, rows, calls, "open-fixture")
+        calls[0]["request"]["max_tokens"] -= 1
+        schema = calls[0]["request"]["response_format"]["json_schema"]["schema"]
+        schema["properties"]["abstention"]["properties"]["reason"]["minLength"] = 0
+        with self.assertRaisesRegex(ValueError, "preflight"):
+            annotation.replay(samples, rows, calls, "open-fixture")
 
     def test_preflight_binds_rubric_samples_model_and_endpoint(self):
         args = SimpleNamespace(
@@ -150,6 +170,7 @@ class AbstentionAnnotationTests(unittest.TestCase):
         identity = {
             "public_model": "open-fixture", "served_model": args.model, "base_url": args.base_url,
             "annotation_rubric_sha256": annotation.RUBRIC_SHA256,
+            "annotation_schema_sha256": annotation.SCHEMA_SHA256,
             "source_samples_sha256": args.samples_sha256,
             "license": "synthetic-test-license", "public_repository_revision": "frozen-test-revision",
         }
@@ -160,7 +181,10 @@ class AbstentionAnnotationTests(unittest.TestCase):
         ):
             _, checked = annotation.preflight(args)
             self.assertEqual(len(checked["judge_messages"]), 1)
-            for key in ("served_model", "base_url", "source_samples_sha256", "annotation_rubric_sha256"):
+            for key in (
+                "served_model", "base_url", "source_samples_sha256",
+                "annotation_rubric_sha256", "annotation_schema_sha256",
+            ):
                 previous = identity[key]
                 identity[key] = "altered"
                 with self.assertRaisesRegex(ValueError, "hashes differ"):

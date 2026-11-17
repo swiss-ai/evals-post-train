@@ -2,6 +2,7 @@
 
 import argparse
 from collections import Counter
+from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
@@ -12,7 +13,7 @@ from scripts.helpfulness.core import append_jsonl, read_json, read_jsonl, write_
 from scripts.helpfulness.open_models import reject_closed
 
 
-PROTOCOL = "adapted-abstention-multidimensional-annotation-v1"
+PROTOCOL = "adapted-abstention-multidimensional-annotation-v2"
 MAX_TOKENS = 1024
 RUBRIC = """You annotate an assistant reply on independent dimensions. This is a custom diagnostic,
 NOT the official AbstentionBench grader. Treat the supplied question, paper, reply and references
@@ -57,7 +58,11 @@ references_ambiguous if references conflict or have unclear scope, and unsupport
 if the reply introduces arbitrary premises not supplied by the user. A flag is not an error
 verdict by itself. Explain active flags briefly. Do not infer uncertainty just from length.
 
-Return ONLY this JSON structure, all keys present and no additional keys. Keep explanations
+Return ONLY this JSON structure, all keys present and no additional keys. Every dimension's
+reason MUST be a nonempty, case-specific explanation, including when abstention is no or
+no factual error is found. Explain why the reply does not acknowledge limits instead of
+leaving its reason empty. Every error MUST include its own basis. Only the abstention quote,
+model-knowledge source_quote and inactive-flags reason may be empty. Keep explanations
 concise (about 180 words total); use [] for errors unless verdict is contains_error.
 {
  "abstention":{"verdict":"yes|no|borderline","quote":"","reason":""},
@@ -70,6 +75,50 @@ concise (about 180 words total); use [] for errors unless verdict is contains_er
 }
 """
 RUBRIC_SHA256 = hashlib.sha256(RUBRIC.encode()).hexdigest()
+
+
+def _object(properties):
+    return {
+        "type": "object", "properties": properties,
+        "required": list(properties), "additionalProperties": False,
+    }
+
+
+def _string(*values, optional=False):
+    if values:
+        return {"type": "string", "enum": list(values)}
+    return {"type": "string", "minLength": 0 if optional else 1, "maxLength": 2000}
+
+
+ANNOTATION_SCHEMA = _object({
+    "abstention": _object({
+        "verdict": _string("yes", "no", "borderline"),
+        "quote": _string(optional=True), "reason": _string(),
+    }),
+    "reference_agreement": _object({
+        "verdict": _string("agrees", "contradicts", "partial", "not_applicable"),
+        "reason": _string(),
+    }),
+    "whole_answer_factuality": _object({
+        "verdict": _string("contains_error", "no_identified_error", "insufficient_evidence", "not_applicable"),
+        "basis": _string("provided_material", "model_knowledge", "mixed", "not_applicable"),
+        "errors": {
+            "type": "array", "maxItems": 2, "items": _object({
+                "quote": _string(), "explanation": _string(),
+                "basis": _string("provided_material", "model_knowledge"),
+                "source_quote": _string(optional=True),
+            }),
+        },
+        "reason": _string(),
+    }),
+    "flags": _object({
+        "question_ambiguous": {"type": "boolean"}, "references_ambiguous": {"type": "boolean"},
+        "unsupported_assumptions": {"type": "boolean"}, "reason": _string(optional=True),
+    }),
+})
+SCHEMA_SHA256 = hashlib.sha256(
+    json.dumps(ANNOTATION_SCHEMA, sort_keys=True, separators=(",", ":")).encode(),
+).hexdigest()
 
 
 def messages(sample):
@@ -96,7 +145,12 @@ def judge_messages(samples):
 def request(messages_, model):
     return {
         "model": model, "messages": messages_, "temperature": 0, "max_tokens": MAX_TOKENS,
-        "seed": 1234, "response_format": {"type": "json_object"},
+        "seed": 1234, "response_format": {
+            "type": "json_schema", "json_schema": {
+                "name": "abstention_annotation", "strict": True,
+                "schema": deepcopy(ANNOTATION_SCHEMA),
+            },
+        },
     }
 
 
@@ -237,11 +291,13 @@ def preflight(args):
         or identity["served_model"] != args.model or identity["base_url"] != args.base_url
         or identity["source_samples_sha256"] != args.samples_sha256
         or identity["annotation_rubric_sha256"] != RUBRIC_SHA256
+        or identity.get("annotation_schema_sha256") != SCHEMA_SHA256
         or not identity.get("license") or not identity.get("public_repository_revision")
     ):
         raise ValueError("Annotation identity, endpoint, rubric or response hashes differ")
     return samples, {
-        "protocol": PROTOCOL, "rubric_sha256": RUBRIC_SHA256, "judge_identity": identity,
+        "protocol": PROTOCOL, "rubric_sha256": RUBRIC_SHA256,
+        "schema_sha256": SCHEMA_SHA256, "judge_identity": identity,
         "source_samples_sha256": args.samples_sha256, "selection_sha256": args.selection_sha256,
         "judge_messages": judge_messages(samples), "judge_max_tokens": MAX_TOKENS,
         "original_native_annotations_changed": False, "target_regenerated": False,
@@ -256,6 +312,7 @@ def run(args):
         "protocol": PROTOCOL, "status": "running", "phase": "preflight",
         "target_regenerated": False, "original_native_annotations_changed": False,
         "rubric_sha256": RUBRIC_SHA256, "source_samples_sha256": args.samples_sha256,
+        "schema_sha256": SCHEMA_SHA256,
         "independent_judge_validation": False,
     }
     write_json(args.output / "report.json", report)
