@@ -696,10 +696,25 @@ The first v1 JSON-object-only attempt made all nineteen requests, but fifteen
 outputs failed validation, mostly for blank explanations copied from the JSON
 template. Its four valid annotations and all failed raw outputs remain preserved;
 do not reinterpret that attempt as a successful run or loosen the parser to accept it.
-One call per valid
-reply uses temperature zero, seed 1234 and a 1,024-token annotation ceiling,
+One call per valid reply uses temperature zero, seed 1234 and a 1,024-token annotation ceiling,
 with exact prompt/context checks before loading weights. This post-hoc pilot
 is not independent judge calibration; its dimension counts are not native scores.
+
+The explicitly approved v2 job `3961983` made all nineteen requests in 6m11s.
+All outputs passed an independent JSON Schema check; **seventeen** passed the
+complete parser. Cases seven and ten omitted Markdown bold markers from quoted
+reply text and failed literal evidence checks. Their raw judgments remain
+visible and excluded from counts; the job and coverage remain failed/incomplete,
+not silently repaired by stripping formatting. Original case thirteen still
+receives no judge request. No further allocation was started.
+
+Among the validated outputs, case eleven now distinguishes a matching final
+option from a false historical explanation, and case eighteen accepts the sum
+matching one reference. Case seventeen still fails to flag the paper's separate
+LSTM/joint BERT ambiguity and labels the reply factually wrong. Treat that as a
+remaining judge limitation, not independent gold or successful calibration.
+The separate evidence report preserves original native verdicts, all full
+questions/replies, actual new outputs and explicitly separate assistant comments.
 
 ```bash
 squeue --me
