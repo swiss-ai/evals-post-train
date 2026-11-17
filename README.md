@@ -7,7 +7,7 @@ Evaluation infrastructure for LLMs on CSCS Alps (Clariden), with results in W&B.
 | [lm-evaluation-harness](https://github.com/swiss-ai/lm-evaluation-harness) | Standard benchmarks (MMLU, GSM8K, ...), task suites, LLM judges | `scripts/lm_eval_harness/launch_evaluations.sh` | [docs/lm-eval-harness.md](docs/lm-eval-harness.md) |
 | [Inspect AI](https://inspect.aisi.org.uk/) | Benchmarks with their own scorer, judge or simulated user (tau2-bench, HLE, AA-LCR, ...) | `scripts/inspect_ai/run_inspect_eval.sh` | [docs/inspect-ai.md](docs/inspect-ai.md) |
 | [Harbor](https://github.com/harbor-framework/harbor) | Agentic coding and terminal benchmarks (SWE-bench, Terminal-Bench, DeepSWE, Aider Polyglot, ...) | `scripts/harbor/run_harbor_eval.sh` | [docs/harbor.md](docs/harbor.md) |
-| [EvalScope](https://github.com/modelscope/evalscope) | SWE-bench Verified / Pro | `scripts/evalscope/run_evalscope_eval.sh` | [docs/evalscope.md](docs/evalscope.md) |
+| [EvalScope](https://github.com/modelscope/evalscope) | SWE-bench Verified / Pro, BFCL v4 (tool calls) | `scripts/evalscope/run_evalscope_eval.sh` | [docs/evalscope.md](docs/evalscope.md) |
 
 `scripts/aaii/` has Artificial Analysis's versions of some benchmarks ([docs/inspect-ai.md](docs/inspect-ai.md)). Results: [docs/results.md](docs/results.md) (W&B, tables, Every Eval Ever / Hugging Face exports). Every launcher takes the same sampling flags (`--temperature`, `--top-p`, `--top-k`, `--min-p`, `--repetition-penalty`) over one default policy: [docs/sampling.md](docs/sampling.md). The same goes for thinking and reasoning effort (`--enable-thinking`, `--no-enable-thinking`, `--reasoning-effort`): [docs/thinking.md](docs/thinking.md). A comparison's benchmarks, repeats and per-setup flags are written down in a suite file: [docs/suites.md](docs/suites.md).
 
@@ -82,9 +82,16 @@ scripts/evalscope/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --li
   --model <served model with tool calling> --api-base-url https://api.swissai.svc.cscs.ch/v1
 ```
 
+**Suites**: a whole comparison (every benchmark, for each model setup) from one suite file. Without `--submit` it only prints the launch commands ([docs/suites.md](docs/suites.md)).
+
+```bash
+python -m scripts.common.suites run apertus2/chonk_sft --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --model chonk-lc-16k-v0.2-sft=<served name> --limit 5 --no-wandb      # add --submit to launch
+```
+
 `--limit N` is a random subset of N samples per task (seed 42, so the same subset on every run) in all four frameworks, not the first N. lm-eval, EvalScope and Harbor also take a fraction below 1 (`--limit 0.5`: a random half); Inspect takes whole numbers only.
 
-The examples above are smoke tests, hence `--no-wandb`. Otherwise all four frameworks upload the results to W&B whenever a W&B key is available, by default to `apertus/apertus-1.5-post-training-v0.1` (change it with `--wandb-entity`/`--wandb-project`, skip it with `--no-wandb` or `WANDB_MODE=disabled`; `--gold` runs are never uploaded). Each doc has more: Clariden jobs, checkpoints, reference-solution (gold) checks, judges, reasoning metrics.
+The examples above are smoke tests, hence `--no-wandb`. Otherwise all four frameworks upload the results to W&B whenever a W&B key is available, by default to `apertus/e-p-t-pool` (change it with `--wandb-entity`/`--wandb-project`, skip it with `--no-wandb` or `WANDB_MODE=disabled`; `--gold` runs are never uploaded). Each doc has more: Clariden jobs, checkpoints, reference-solution (gold) checks, judges, reasoning metrics.
 
 ---
 
@@ -126,11 +133,11 @@ evals-post-train/
 │   ├── harbor/            # run_harbor_eval.sh/.sbatch, run.py (benchmarks), k8s/docker/opensandbox environments, task_patches.py
 │   ├── evalscope/         # run_evalscope_eval.sh/.sbatch, run.py, SWE-bench scorer
 │   ├── aaii/              # Artificial Analysis protocol: Inspect tasks (*.py) and standalone runners (run_*.sh)
-│   ├── common/            # k8s_sandbox.py (task containers as pods: Harbor, EvalScope), opensandbox_sandbox.py (as Kata microVMs: EvalScope; Harbor's cleanup), dockerfile_replay.py (Dockerfiles replayed where images can't be built: Harbor, Inspect), wandb.sh (the W&B upload rule), lock_requirements.sh and locked_venv.sh (dependency locks)
+│   ├── common/            # suites.py (suite files: `plan`, `flags`, `run`), sampling.py and thinking.py (the shared sampling and thinking policy), k8s_sandbox.py (task containers as pods: Harbor, EvalScope), opensandbox_sandbox.py (as Kata microVMs: EvalScope; Harbor's cleanup), dockerfile_replay.py (Dockerfiles replayed where images can't be built: Harbor, Inspect), wandb.sh (the W&B upload rule), lock_requirements.sh and locked_venv.sh (dependency locks)
 │   └── results/           # W&B upload, tables, exports
-├── configs/               # lm-eval task lists, main-table metrics, model registry, export mappings
+├── configs/               # sampling_defaults.json, suites/ (comparison definitions), export mappings; archive/: lm-eval task lists, main-table metrics, model registry
 ├── containers/            # Enroot/Pyxis configs and the prebuilt evaluation image (Dockerfile.eval)
 ├── requirements/          # Dependencies per framework environment: .txt (edited) and .lock (generated; see CONTRIBUTING.md for what installs which)
-├── docs/                  # One doc per framework, plus results.md, sampling.md, thinking.md and suites.md
+├── docs/                  # One doc per framework, plus results.md, sampling.md, thinking.md, suites.md and repeated_sampling.md
 └── tests/
 ```

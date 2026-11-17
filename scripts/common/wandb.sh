@@ -4,12 +4,12 @@
 #
 # Uploads are on by default, as for lm-evaluation-harness (launch_evaluations.sh): to
 # WANDB_ENTITY/WANDB_PROJECT (--wandb-entity/--wandb-project), by default
-# apertus/apertus-1.5-post-training-v0.1, whenever WANDB_API_KEY is set (in the environment or
+# apertus/e-p-t-pool, whenever WANDB_API_KEY is set (in the environment or
 # scripts/secrets.env, read by scripts/common/secrets.sh). Off with --no-wandb or WANDB_MODE=disabled, and for --gold runs
 # (a pipeline check, not a model score).
 
 WANDB_DEFAULT_ENTITY=apertus
-WANDB_DEFAULT_PROJECT=apertus-1.5-post-training-v0.1
+WANDB_DEFAULT_PROJECT=e-p-t-pool
 
 # wandb_setup [<reason to skip>]: sets WANDB_UPLOAD (1 or 0) and the WANDB_ENTITY/WANDB_PROJECT to
 # upload to, and exports WANDB_API_KEY. Fails when an entity or project was given but there is

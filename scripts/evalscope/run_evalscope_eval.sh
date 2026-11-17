@@ -94,7 +94,7 @@
 #                               --model/--api-base-url): a check of the scoring pipeline, where every
 #                               instance should come out resolved.
 #   --wandb-entity <entity>     W&B entity and project to upload the results to (also WANDB_ENTITY,
-#   --wandb-project <project>   WANDB_PROJECT; default apertus/apertus-1.5-post-training-v0.1): one
+#   --wandb-project <project>   WANDB_PROJECT; default apertus/e-p-t-pool): one
 #                               run named --name, per benchmark its accuracy (share resolved),
 #                               n_samples, n_errors and a few sample instances. Uploaded whenever a
 #                               W&B key is available, also when some evaluations failed (n_errors >

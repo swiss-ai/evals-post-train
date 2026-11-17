@@ -69,7 +69,7 @@
 #                              replayed in the sandbox, as for Harbor). Leftover sandboxes of
 #                              the run are deleted at the end.
 #   --wandb-entity <entity>    W&B entity and project to upload the results to (also WANDB_ENTITY,
-#   --wandb-project <project>  WANDB_PROJECT; default apertus/apertus-1.5-post-training-v0.1).
+#   --wandb-project <project>  WANDB_PROJECT; default apertus/e-p-t-pool).
 #                              Uploaded whenever a W&B key is available, like lm-eval-harness runs.
 #   --no-wandb                 Don't upload (also WANDB_MODE=disabled), e.g. for a smoke test.
 #   --temperature V, --top-p V, --top-k V, --min-p V, --repetition-penalty V
