@@ -54,7 +54,8 @@ no_identified_error means no error found, NOT independently verified truth. Pure
 choices may be not_applicable. An explicitly conditional example is not an asserted fact,
 but flag unsupported_assumptions for its arbitrary premises. Check its calculations separately.
 
-Return ONLY the requested JSON Schema. Give a nonempty case-specific reason for each dimension.
+Return ONLY the requested JSON Schema. Emit unresolved_interpretations FIRST, before verdicts.
+Give a nonempty case-specific reason for each dimension.
 The flags reason may be empty only if all flags are false. unresolved_interpretations must have
 zero or two entries, never one. Each error needs its own basis; overall basis must agree.
 Keep explanations to about 150 words plus brief interpretation descriptions.
@@ -77,12 +78,13 @@ def schema(reply_ids, source_ids):
     error["properties"]["reply_evidence_ids"] = _ids(reply_ids, 1)
     error["properties"]["source_evidence_ids"] = _ids(source_ids)
     error["required"] = list(error["properties"])
-    value["properties"]["unresolved_interpretations"] = {
+    interpretations = {
         "type": "array", "maxItems": 2, "items": base._object({
             "reading": base._string(), "answer_under_reading": base._string(),
             "source_evidence_ids": _ids(source_ids, 1),
         }),
     }
+    value["properties"] = {"unresolved_interpretations": interpretations, **value["properties"]}
     value["required"] = list(value["properties"])
     return value
 
