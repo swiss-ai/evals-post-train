@@ -174,7 +174,7 @@ Inspect never renders a prompt itself. With `--api-base-url` it sends chat messa
 
 #### W&B upload
 
-Like every framework here, it uploads whenever `WANDB_API_KEY` is set (in the environment or `scripts/secrets.env`), by default to `apertus/apertus-1.5-post-training-v0.1`; `--wandb-entity`/`--wandb-project` change that, and `--no-wandb` (or `WANDB_MODE=disabled`) skips the upload, e.g. for a smoke test.
+Like every framework here, it uploads whenever `WANDB_API_KEY` is set (in the environment or `scripts/secrets.env`), by default to `apertus/e-p-t-pool`; `--wandb-entity`/`--wandb-project` change that, and `--no-wandb` (or `WANDB_MODE=disabled`) skips the upload, e.g. for a smoke test.
 
 ```bash
 scripts/inspect_ai/run_inspect_eval.sh --task tau2_retail --model Qwen/Qwen3-8B \

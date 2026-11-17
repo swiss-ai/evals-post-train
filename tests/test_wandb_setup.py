@@ -24,7 +24,7 @@ class WandbSetupTest(unittest.TestCase):
     def test_uploads_to_the_defaults_when_a_key_is_available(self):
         code, _, s = wandb_setup(env={"WANDB_API_KEY": "k"})
         self.assertEqual((code, s["UPLOAD"], s["ENTITY"], s["PROJECT"]),
-                         (0, "1", "apertus", "apertus-1.5-post-training-v0.1"))
+                         (0, "1", "apertus", "e-p-t-pool"))
 
     def test_given_entity_or_project_overrides_one_default(self):
         _, _, s = wandb_setup(env={"WANDB_API_KEY": "k", "WANDB_PROJECT": "p"})

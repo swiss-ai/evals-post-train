@@ -32,7 +32,7 @@
 # Options:
 #   --name <name>        - Override the eval run name (default: auto-derived from model path)
 #   --task <task>         - Task name for 'single' mode (e.g. hellaswag, gsm8k_cot)
-#   --wandb-project <name> - Override the W&B project name (default: apertus-1.5-post-training-v0.1)
+#   --wandb-project <name> - Override the W&B project name (default: e-p-t-pool)
 #   --no-wandb           - Don't upload the results to W&B (exports WANDB_MODE=disabled)
 #   --chat-template      - Apply the chat template to every task (the default)
 #   --no-chat-template   - Apply it to none (base models)
@@ -742,7 +742,7 @@ fi
 [[ -n "$QOS_FLAG" ]] && export SBATCH_QOS="$QOS_FLAG"
 [[ -n "$PARTITION_FLAG" ]] && export SBATCH_PARTITION="$PARTITION_FLAG"
 export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
-export WANDB_PROJECT=${WANDB_PROJECT:-apertus-1.5-post-training-v0.1}
+export WANDB_PROJECT=${WANDB_PROJECT:-e-p-t-pool}
 export LOGS_ROOT=${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}
 [[ -n "$WANDB_ENTITY_FLAG" ]] && export WANDB_ENTITY="$WANDB_ENTITY_FLAG"
 [[ -n "$WANDB_PROJECT_FLAG" ]] && export WANDB_PROJECT="$WANDB_PROJECT_FLAG"
