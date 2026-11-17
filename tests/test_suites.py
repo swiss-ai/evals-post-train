@@ -172,7 +172,7 @@ class SuiteTests(unittest.TestCase):
         with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
             self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m", "--model", "qwen3-32b-thinking=q"]), 0)
-        self.assertIn("26 launches: 2 models x 13 benchmarks", err.getvalue())
+        self.assertIn("28 launches: 2 models x 14 benchmarks", err.getvalue())
         for bad in (["--model", "m"], ["--model", "nope=m"], ["--model", f"{THINK}=a", "--model", f"{THINK}=b"]):
             self.assertEqual(suites.main(["run", SUITE, *bad]), 1)
 
@@ -183,6 +183,9 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(suite["setups"][name]["reasoning_effort"], "high")
             for bench in suite["benchmarks"]:
                 flags = suites.flags_for(suite, name, bench["task"])
+                if bench["framework"] == "evalscope":  # bfcl_v4: bfcl-eval's handler sends only the temperature
+                    self.assertNotIn("--reasoning-effort", flags)
+                    continue
                 self.assertEqual(flags.count("--reasoning-effort"), 1, (name, bench["label"]))
                 self.assertEqual(flags[flags.index("--reasoning-effort") + 1], "high")
                 self.assertEqual(suites.sampling_for(suite, name, bench["task"]), "thinking")

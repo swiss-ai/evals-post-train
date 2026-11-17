@@ -260,6 +260,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 LM_EVAL = ["bash", "scripts/lm_eval_harness/launch_evaluations.sh", "single"]
 INSPECT = "scripts/inspect_ai/run_inspect_eval.sbatch"
 HARBOR = "scripts/harbor/run_harbor_eval.sbatch"
+EVALSCOPE = "scripts/evalscope/run_evalscope_eval.sbatch"
 
 
 def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, no_wandb=False,
@@ -267,7 +268,7 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
     """One launch per (model, benchmark), models in the order given, benchmarks in table order.
 
     `models` maps a setup name to the name the model is served under. Every launch is its own Slurm job
-    (lm_eval: one `single` launch; inspect and harbor: one sbatch). api_model_name only applies to lm_eval, which
+    (lm_eval: one `single` launch; inspect, harbor and evalscope: one sbatch). api_model_name only applies to lm_eval, which
     takes the served name separately from the model; qos and partition go to the lm_eval launcher or to
     sbatch. Returns [{"setup", "label", "framework", "argv"}]."""
     rows = []
@@ -295,6 +296,9 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
             elif framework == "harbor":
                 scheduling = ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])
                 argv = ["sbatch", *scheduling, HARBOR, "--benchmark", bench["task"], *common[2:], *flags]
+            elif framework == "evalscope":
+                scheduling = ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])
+                argv = ["sbatch", *scheduling, EVALSCOPE, "--benchmark", bench["task"], *common[2:], *flags]
             else:
                 raise ValueError(f"{bench['task']}: no launcher for the {framework} framework yet")
             rows.append({"setup": setup_name, "label": bench["label"], "framework": framework, "argv": argv})

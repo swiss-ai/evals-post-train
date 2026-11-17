@@ -68,7 +68,30 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
         "pool": True,
         "completions": True,
     },
+    # BFCL v4: EvalScope's adapter wraps the bfcl-eval package (requirements/evalscope-bfcl.txt), which
+    # carries the test data and the scorer, so there is no dataset revision: the package version is the
+    # pin (recorded in summary.json). The default subsets are the leaderboard's without web_search_*
+    # (they need a SerpAPI key) and memory_vector (its embeddings need torch, left out of the venv), so
+    # `overall` is not the leaderboard's. bfcl-eval's own OpenAI handler calls the model (native function
+    # calling on /v1/chat/completions) and takes only the temperature from the generation config.
+    # No sandbox, no reference solutions.
+    "bfcl_v4": {
+        "evalscope": "bfcl_v4",
+        "revision": None,
+        "subsets": [
+            "simple_python", "simple_java", "simple_javascript", "multiple", "parallel", "parallel_multiple",
+            "irrelevance", "live_simple", "live_multiple", "live_parallel", "live_parallel_multiple",
+            "live_irrelevance", "live_relevance", "multi_turn_base", "multi_turn_miss_func",
+            "multi_turn_miss_param", "multi_turn_long_context", "memory_kv", "memory_rec_sum",
+        ],
+        "extra_params": {},
+        "gold": False,
+        "sandbox": False,
+    },
 }
+
+# Generation settings bfcl-eval's handler does not send (it passes only the temperature).
+BFCL_IGNORED_SETTINGS = ("top_p", "top_k", "repetition_penalty", "max_tokens", "reasoning_effort", "extra_body")
 
 HUB_REVISION_KEY = {"huggingface": "hf_dataset_revision", "modelscope": "dataset_revision"}
 
@@ -197,7 +220,12 @@ def resolved_revisions(names: List[str], overrides: List[str]) -> Dict[str, str]
     stray = sorted(set(given) - set(names))
     if stray:
         raise SystemExit(f"--dataset-revision for a benchmark that is not selected: {', '.join(stray)}")
-    return {n: given.get(n, BENCHMARKS[n]["revision"]) for n in names}
+    return {n: given.get(n, BENCHMARKS[n]["revision"]) for n in names if given.get(n, BENCHMARKS[n]["revision"])}
+
+
+def needs_sandbox(names: List[str]) -> bool:
+    """Whether any selected benchmark runs or scores in a sandbox (BFCL v4 does not)."""
+    return any(BENCHMARKS[n].get("sandbox", True) for n in names)
 
 
 def sandbox_config(args: argparse.Namespace) -> Dict[str, Any]:
@@ -291,7 +319,7 @@ def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dic
     hub = dataset_hub(names)
     dataset_args = {
         BENCHMARKS[n]["evalscope"]: {
-            HUB_REVISION_KEY[hub]: revisions[n],
+            **({HUB_REVISION_KEY[hub]: revisions[n]} if n in revisions else {}),
             **({"subset_list": subset_list(n, args)} if subset_list(n, args) else {}),
             "extra_params": {**BENCHMARKS[n]["extra_params"], **environment_extra_params(n), **extra_params},
             **({"shuffle": True} if args.shuffle or args.limit is not None else {}),
@@ -326,10 +354,22 @@ def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dic
         "generation_config": generation_config(args),
         "work_dir": args.work_dir,
         "no_timestamp": True,
+    }
+    if needs_sandbox(names):
         # Every sandbox (agent loop and scorer) reads this; the engine stays "docker"
         # either way -- with --sandbox k8s or opensandbox, the Docker manager itself is swapped out.
-        "sandbox": {"enabled": True, "engine": "docker", "default_config": sandbox_config(args)},
-    }
+        cfg["sandbox"] = {"enabled": True, "engine": "docker", "default_config": sandbox_config(args)}
+    if "bfcl_v4" in names:
+        # Only the temperature reaches the model (BFCL_IGNORED_SETTINGS): say so, for settings the
+        # user asked for, rather than let a thinking or top_p flag look applied.
+        asked = {
+            "top_p": args.top_p, "top_k": args.top_k, "repetition_penalty": args.repetition_penalty,
+            "reasoning_effort": args.reasoning_effort, "enable_thinking": args.enable_thinking,
+            **json.loads(args.generation_config),
+        }
+        ignored = [key for key in (*BFCL_IGNORED_SETTINGS, "enable_thinking") if asked.get(key) is not None]
+        if ignored:
+            print(f"Warning: bfcl_v4 sends only the temperature to the model; ignoring {', '.join(ignored)}.", file=sys.stderr)
     if agent:
         # Only explicitly given fields: EvalScope keeps the benchmark's own
         # strategy/max_steps for anything left unset.
@@ -450,28 +490,35 @@ def main(argv: Optional[List[str]] = None) -> int:
         raise SystemExit(f"{', '.join(no_pool)} score in a sandbox pool, which --sandbox k8s does not have: use docker or opensandbox")
     os.makedirs(args.work_dir, exist_ok=True)
 
-    from scripts.evalscope import swe_bench_scoring
+    if needs_sandbox(names):  # BFCL v4 alone runs and scores nothing in a sandbox
+        from scripts.evalscope import swe_bench_scoring
 
-    swe_bench_scoring.install(sandbox_config(args))
-    if args.sandbox == "k8s":
-        from scripts.common import k8s_sandbox
+        swe_bench_scoring.install(sandbox_config(args))
+        if args.sandbox == "k8s":
+            from scripts.common import k8s_sandbox
 
-        if "memory_limit" not in json.loads(args.sandbox_config) and not k8s_sandbox.setting("MEMORY_REQUEST"):
-            os.environ["SANDBOX_K8S_MEMORY_REQUEST"] = K8S_MEMORY_REQUEST
-        k8s_sandbox.install()
-    elif args.sandbox == "opensandbox":
-        from scripts.common import opensandbox_sandbox
+            if "memory_limit" not in json.loads(args.sandbox_config) and not k8s_sandbox.setting("MEMORY_REQUEST"):
+                os.environ["SANDBOX_K8S_MEMORY_REQUEST"] = K8S_MEMORY_REQUEST
+            k8s_sandbox.install()
+        elif args.sandbox == "opensandbox":
+            from scripts.common import opensandbox_sandbox
 
-        # One label for the whole run, so its leftovers can be deleted at the end.
-        os.environ.setdefault(opensandbox_sandbox.RUN_LABEL_ENV, f"evalscope-{uuid.uuid4().hex[:12]}")
-        opensandbox_sandbox.install(agent_allowed_hosts(args))
-        signal.signal(signal.SIGTERM, exit_on_sigterm)
+            # One label for the whole run, so its leftovers can be deleted at the end.
+            os.environ.setdefault(opensandbox_sandbox.RUN_LABEL_ENV, f"evalscope-{uuid.uuid4().hex[:12]}")
+            opensandbox_sandbox.install(agent_allowed_hosts(args))
+            signal.signal(signal.SIGTERM, exit_on_sigterm)
     if args.gold:
         install_gold()
     if args.completions:
         from scripts.evalscope import completions_model, lcb_base  # noqa: F401 (registers openai_completions)
 
         lcb_base.install()
+
+    if "bfcl_v4" in names:
+        # EvalScope imports the scorer (every provider SDK, httpx2 among them) lazily in a worker
+        # thread, while other workers parse their first OpenAI response: they then see a half-imported
+        # httpx2 ("partially initialized module 'httpx2'") and the sample is lost. Import it up front.
+        import bfcl_eval.eval_checker.eval_runner  # noqa: F401
 
     import evalscope
     from evalscope.run import run_task
@@ -483,7 +530,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         run_task(cfg)
     finally:
-        if args.sandbox == "opensandbox":
+        if args.sandbox == "opensandbox" and needs_sandbox(names):
             delete_leftover_sandboxes()
 
     summary = {
@@ -505,6 +552,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     }
     if "swe_bench_pro" in names:
         summary["swe_bench_pro_os_commit"] = swe_bench_pro_os_commit()
+    if "bfcl_v4" in names:
+        from importlib.metadata import version
+
+        summary["bfcl_eval_version"] = version("bfcl-eval")
+        summary["is_fc_model"] = parse_pairs(args.extra_param, "--extra-param", as_json=True).get("is_fc_model", True)
     with open(os.path.join(args.work_dir, "summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
     print(json.dumps(summary, indent=2))
