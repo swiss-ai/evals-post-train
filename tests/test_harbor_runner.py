@@ -148,6 +148,21 @@ class HarborCommandTest(unittest.TestCase):
             run.keep_random_tasks(Path(w), 100)  # a limit above the size keeps everything
             self.assertEqual(sorted(p.name for p in Path(w).iterdir()), kept)
 
+    def test_fraction_limit_keeps_a_share_of_the_tasks(self):
+        with tempfile.TemporaryDirectory() as w:
+            for i in range(10):
+                Path(w, f"t{i}").mkdir()
+            run.keep_random_tasks(Path(w), 0.25)
+            self.assertEqual(len(list(Path(w).iterdir())), 3)  # ceil(2.5)
+
+    def test_limit_values(self):
+        base = ["--benchmark", "terminal_bench_2", "--gold", "--work-dir", "w", "--sandbox", "docker"]
+        self.assertEqual(run.parse_args(base + ["--limit", "3"]).limit, 3)
+        self.assertEqual(run.parse_args(base + ["--limit", "0.5"]).limit, 0.5)
+        for bad in (["--limit", "0"], ["--limit", "2.5"], ["--limit", "0.5", "--task", "x"]):
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                run.parse_args(base + bad)
+
     def test_limit_without_task_runs_a_random_subset_of_a_local_copy(self):
         def download(cmd, check):
             for i in range(20):

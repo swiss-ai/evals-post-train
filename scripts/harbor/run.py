@@ -25,6 +25,7 @@ import argparse
 import asyncio
 import glob
 import json
+import math
 import os
 import platform
 import random
@@ -119,7 +120,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--agent", default="terminus-2", help="Harbor agent (default: terminus-2).")
     p.add_argument("--work-dir", required=True)
     p.add_argument("--sandbox", choices=tuple(ENVIRONMENTS), required=True)
-    p.add_argument("--limit", type=int, help="A random subset of n tasks per benchmark (seeded, 42).")
+    p.add_argument("--limit", type=float, help="A random subset of n tasks per benchmark (seeded, 42); a fraction below 1 is a share of the tasks.")
     p.add_argument("--task", action="append", default=[], help="Task name (glob) to include; repeatable.")
     p.add_argument("--max-concurrency", type=int, default=4)
     p.add_argument("--attempts", type=int, default=1, help="Attempts per task (Harbor's -k).")
@@ -143,6 +144,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "published tasks have it). Other benchmarks keep their own policies.",
     )
     args = p.parse_args(argv)
+    if args.limit is not None:
+        if args.limit <= 0 or (args.limit >= 1 and args.limit != int(args.limit)):
+            p.error("--limit is a number of tasks (1 or more, whole) or a fraction below 1")
+        if args.limit >= 1:
+            args.limit = int(args.limit)
+        elif args.task:
+            p.error("--limit as a fraction needs no --task (a share of which tasks?)")
     names = [n.strip() for n in args.benchmark.split(",") if n.strip()]
     unknown = [n for n in names if n not in BENCHMARKS]
     if unknown:
@@ -196,7 +204,7 @@ def download_dataset(repo: str, revision: str) -> Path:
 
 
 def generate_adapter_tasks(
-    adapter: str, work_dir: Path, limit: Optional[int], tasks: List[str], dataset: Optional[Path] = None
+    adapter: str, work_dir: Path, limit: Optional[float], tasks: List[str], dataset: Optional[Path] = None
 ) -> Path:
     """Tasks for a benchmark that is an adapter, not a published dataset: Harbor's adapter at
     the pinned Harbor version, installed under HARBOR_ADAPTERS_ROOT (the prebuilt image) or
@@ -217,14 +225,15 @@ def generate_adapter_tasks(
 LIMIT_SEED = 42
 
 
-def keep_random_tasks(tasks: Path, limit: int) -> None:
+def keep_random_tasks(tasks: Path, limit: float) -> None:
     """Leave only a random subset of `limit` task directories in a local copy of the tasks (the
     same subset on every run), instead of Harbor's first n (-l), which are often one repo or
     one category."""
     dirs = sorted(p for p in tasks.iterdir() if p.is_dir())
-    if limit >= len(dirs):
+    count = math.ceil(limit * len(dirs)) if limit < 1 else int(limit)  # a fraction is a share
+    if count >= len(dirs):
         return
-    keep = set(random.Random(LIMIT_SEED).sample(dirs, limit))
+    keep = set(random.Random(LIMIT_SEED).sample(dirs, count))
     for p in dirs:
         if p not in keep:
             shutil.rmtree(p)
