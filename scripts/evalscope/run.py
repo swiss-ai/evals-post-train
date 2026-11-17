@@ -21,8 +21,10 @@ from __future__ import annotations
 
 import argparse
 import glob
+import importlib.util
 import json
 import os
+import re
 import signal
 import sys
 import uuid
@@ -221,6 +223,39 @@ def resolved_revisions(names: List[str], overrides: List[str]) -> Dict[str, str]
     if stray:
         raise SystemExit(f"--dataset-revision for a benchmark that is not selected: {', '.join(stray)}")
     return {n: given.get(n, BENCHMARKS[n]["revision"]) for n in names if given.get(n, BENCHMARKS[n]["revision"])}
+
+
+def bfcl_subset_problems(subsets: List[str], extra_params: Dict[str, Any], environ: Dict[str, str]) -> List[str]:
+    """Why some BFCL v4 subsets cannot run here. They would not fail the run: memory_vector without its
+    embeddings errors on every sample (scored 0, exit 0, no evaluation_errors), and a web search without
+    a key does the same, so they are refused up front. The key is read from the environment only."""
+    problems = []
+    if "memory_vector" in subsets and importlib.util.find_spec("sentence_transformers") is None:
+        problems.append("memory_vector needs sentence-transformers and faiss, which this environment leaves out (torch)")
+    web = [s for s in subsets if s.startswith("web_search")]
+    if "SERPAPI_API_KEY" in extra_params:
+        problems.append("SERPAPI_API_KEY goes in the environment, not --extra-param: EvalScope writes extra params "
+                        "to its log and task_config.yaml")
+    elif web and not environ.get("SERPAPI_API_KEY"):
+        problems.append(f"{', '.join(web)} need a SerpAPI key (SERPAPI_API_KEY in the environment)")
+    return problems
+
+
+def printable_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """The task config for the log: without the model's api_key, and with the value of every extra_param
+    that looks like a secret (SERPAPI_API_KEY for BFCL web search) masked."""
+    shown = {k: v for k, v in cfg.items() if k != "api_key"}
+    shown["dataset_args"] = {
+        name: {
+            **dataset,
+            "extra_params": {
+                k: "***" if re.search(r"KEY|TOKEN|SECRET|PASSWORD", k, re.I) else v
+                for k, v in dataset.get("extra_params", {}).items()
+            },
+        }
+        for name, dataset in cfg.get("dataset_args", {}).items()
+    }
+    return shown
 
 
 def needs_sandbox(names: List[str]) -> bool:
@@ -484,6 +519,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     revisions = resolved_revisions(names, args.dataset_revision)
     if args.gold and (no_gold := [n for n in names if BENCHMARKS[n].get("gold", True) is False]):
         raise SystemExit(f"--gold has no reference solutions to score for {', '.join(no_gold)}")
+    if "bfcl_v4" in names and (
+        problems := bfcl_subset_problems(
+            subset_list("bfcl_v4", args), parse_pairs(args.extra_param, "--extra-param", as_json=True), dict(os.environ)
+        )
+    ):
+        raise SystemExit("bfcl_v4: " + "; ".join(problems))
     if args.completions and (chat_only := [n for n in names if not BENCHMARKS[n].get("completions")]):
         raise SystemExit(f"--completions has no base-model prompt for {', '.join(chat_only)}: only live_code_bench")
     if args.sandbox == "k8s" and (no_pool := [n for n in names if BENCHMARKS[n].get("pool")]):
@@ -524,7 +565,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     from evalscope.run import run_task
 
     cfg = build_task_config(args, names, revisions)
-    printable = {k: v for k, v in cfg.items() if k != "api_key"}
+    printable = printable_config(cfg)
     print("EvalScope task config:", json.dumps(printable, indent=2), flush=True)
 
     try:

@@ -660,3 +660,29 @@ class BfclV4Test(unittest.TestCase):
         with mock.patch("sys.stderr") as err:
             self._cfg()
         self.assertEqual(err.write.call_args_list, [])
+
+    def test_subsets_that_would_silently_score_zero_are_refused(self):
+        with mock.patch("importlib.util.find_spec", return_value=None):
+            problems = run.bfcl_subset_problems(["memory_vector", "web_search_base", "simple_python"], {}, {})
+        self.assertEqual(len(problems), 2)
+        self.assertIn("sentence-transformers", problems[0])
+        self.assertIn("web_search_base need a SerpAPI key", problems[1])
+        self.assertIn("not --extra-param", run.bfcl_subset_problems(["web_search_base"], {"SERPAPI_API_KEY": "k"}, {})[0])
+        self.assertEqual(run.bfcl_subset_problems(["web_search_base"], {}, {"SERPAPI_API_KEY": "k"}), [])
+        self.assertEqual(run.bfcl_subset_problems(["simple_python", "memory_kv"], {}, {}), [])
+        with mock.patch("importlib.util.find_spec", return_value=object()):
+            self.assertEqual(run.bfcl_subset_problems(["memory_vector"], {}, {}), [])
+
+    def test_main_refuses_them_before_running(self):
+        with mock.patch.dict(os.environ, {}, clear=False), self.assertRaises(SystemExit) as refused:
+            run.main(["--benchmark", "bfcl_v4", "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1",
+                      "--subset", "web_search_base"])
+        self.assertIn("SerpAPI", str(refused.exception))
+
+    def test_the_logged_config_masks_secret_extra_params(self):
+        cfg = self._cfg("--extra-param", "SERPAPI_API_KEY=secret", "--extra-param", "is_fc_model=false")
+        shown = run.printable_config({**cfg, "api_key": "k"})
+        self.assertNotIn("secret", json.dumps(shown))
+        self.assertNotIn("api_key", shown)
+        self.assertEqual(shown["dataset_args"]["bfcl_v4"]["extra_params"], {"SERPAPI_API_KEY": "***", "is_fc_model": False})
+        self.assertEqual(cfg["dataset_args"]["bfcl_v4"]["extra_params"]["SERPAPI_API_KEY"], "secret")
