@@ -663,6 +663,36 @@ encodings. Subjective, forward-looking and forced-choice labels need additional
 policy scrutiny. Native scores are unchanged; no judge-calibration claim follows.
 Earlier accepted reports remain unchanged, and no next benchmark starts automatically.
 
+#### Separate, adapted multidimensional re-annotation
+
+`scripts.helpfulness.abstention_annotation` is an explicitly custom annotation
+pass, not a replacement for the pinned native metrics above. The user selected
+separate reference agreement, whole-answer factuality and abstention, with
+ambiguity flags. Reuse the exact saved reply file; never generate new target
+answers or overwrite the original native annotations.
+
+The generic rubric receives question/context, reference answers and the reply,
+not case IDs, desired abstention labels, previous verdicts or assistant review
+notes. Reference agreement cannot be rescued by disagreeing with the reference:
+opposite yes/no answers and different selected options are contradictions.
+Whole-answer factuality inspects explanations as well as final answers, with
+explicit `insufficient_evidence` and `no_identified_error` outcomes rather than
+a claim of verified truth. Model-knowledge findings are labelled unverified;
+provided-material findings must quote exact supplied evidence. Conditional
+examples can be unsupported assumptions without being false assertions.
+Weak uncertainty can be `borderline`, independently of the other dimensions.
+
+All structured fields, enums, booleans and evidence quotes are validated.
+Missing/truncated/malformed annotations are preserved as explicit failures and
+the remaining cases are attempted; any such failure leaves the final report
+failed, not silently successful. Transport errors remain fatal. Verified empty
+target failures get no annotation request or score. Raw SDK calls replay against
+the frozen rubric, JSON-mode decoding, original replies and strict parser.
+The rubric hash is bound to the open-weight model identity. One call per valid
+reply uses temperature zero, seed 1234 and a 1,024-token annotation ceiling,
+with exact prompt/context checks before loading weights. This post-hoc pilot
+is not independent judge calibration; its dimension counts are not native scores.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID
