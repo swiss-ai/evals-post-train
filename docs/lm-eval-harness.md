@@ -65,7 +65,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--merge-only` | Skip evaluation and aggregate the already completed task outputs |
 | `--debug` | Resolve and print the orchestration plan without submitting jobs |
 | `--max-length N` | Backend context limit in tokens, exported as `MAX_LENGTH` (vLLM/SGLang `max_model_len`, Megatron `seq_length`, hf/openai `max_length`). Default: the backend's own. `loglikelihood_rolling` tasks such as `uncheatable_eval` cut each document into windows of this size, so set it to the model's context to score documents whole. |
-| `--limit N` | Limit number of samples per task (forwarded as `--limit` to lm-eval-harness; default: no limit). Useful for quick sanity checks. |
+| `--limit N` | Evaluate a random subset of N samples per task (forwarded as `--limit` to lm-eval-harness, which picks the subset with seed 42: the same one on every run; default: no limit). Useful for quick sanity checks and for subsampling long runs. |
 | `--megatron-iter <iter>` | For Megatron-LM checkpoints, the iteration to evaluate (e.g. `8926`); defaults to `latest`. Exported as `CKPT_ITERATION`. |
 | `--convert-to-hf` | Convert the Megatron checkpoint at `--model` to HF first, then evaluate the result (needs `--megatron-iter`). See [Megatron checkpoints](#megatron-checkpoints). |
 | `--hf-output-dir <path>` | Where `--convert-to-hf` writes the converted checkpoint. |
@@ -618,7 +618,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `THINK_TOP_K` / `THINK_MIN_P` | (unset) | Optional sampling of thinking runs, sent only when set |
 | `CHAT_FORMAT` / `PREFILL_MODE` | `template` / `after_think` | Set by `--chat-format` / `--prefill-mode` |
 | `NOTHINK_TEMPERATURE` / `NOTHINK_TOP_P` | (unset) / `0.95` | Optional sampling for NO-think runs (greedy-vs-sampling ablations); inert unless `NOTHINK_TEMPERATURE` is set |
-| `HARNESS_LIMIT` | (unset) | Limit number of samples per task (set by launcher flag `--limit`) |
+| `HARNESS_LIMIT` | (unset) | Random subset of this many samples per task (set by launcher flag `--limit`) |
 | `NUM_FEWSHOT` | (unset) | Global few-shot override |
 | `EVAL_ENV_MANIFEST` | required | Immutable base-environment and harness-overlay paths produced by `prepare_eval_env.sbatch` |
 | `EVAL_PREBUILT_ENV` | (unset) | `1` in the prebuilt image: no environment preparation or installs; the launcher writes the manifest (see [Prebuilt evaluation image](#prebuilt-evaluation-image-no-installs-at-run-time)) |

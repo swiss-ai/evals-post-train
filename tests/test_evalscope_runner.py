@@ -396,7 +396,8 @@ class TaskConfigTest(unittest.TestCase):
         self.assertEqual(cfg["agent_config"], {"mode": "native", "strategy": "swe_bench_backticks", "max_steps": 100})
         self.assertEqual(cfg["limit"], 2)
         self.assertEqual(
-            cfg["dataset_args"]["swe_bench_pro"], {"hf_dataset_revision": "abc123", "extra_params": {"eval_timeout": 7200}}
+            cfg["dataset_args"]["swe_bench_pro"],
+            {"hf_dataset_revision": "abc123", "extra_params": {"eval_timeout": 7200}, "shuffle": True},  # --limit shuffles
         )
         self.assertEqual(cfg["sandbox"]["default_config"], {"memory_limit": "8g"})
 
@@ -407,6 +408,7 @@ class TaskConfigTest(unittest.TestCase):
 
     def test_shuffle(self):
         self.assertNotIn("shuffle", self._cfg("swe_bench")["dataset_args"]["swe_bench_verified_agentic"])
+        self.assertTrue(self._cfg("swe_bench", "--limit", "2")["dataset_args"]["swe_bench_verified_agentic"]["shuffle"])
         self.assertTrue(self._cfg("swe_bench", "--shuffle")["dataset_args"]["swe_bench_verified_agentic"]["shuffle"])
 
     def test_generation_config_uses_the_sampling_defaults(self):

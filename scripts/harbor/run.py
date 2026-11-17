@@ -27,6 +27,8 @@ import glob
 import json
 import os
 import platform
+import random
+import shutil
 import signal
 import subprocess
 import sys
@@ -117,7 +119,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--agent", default="terminus-2", help="Harbor agent (default: terminus-2).")
     p.add_argument("--work-dir", required=True)
     p.add_argument("--sandbox", choices=tuple(ENVIRONMENTS), required=True)
-    p.add_argument("--limit", type=int, help="First n tasks per benchmark.")
+    p.add_argument("--limit", type=int, help="A random subset of n tasks per benchmark (seeded, 42).")
     p.add_argument("--task", action="append", default=[], help="Task name (glob) to include; repeatable.")
     p.add_argument("--max-concurrency", type=int, default=4)
     p.add_argument("--attempts", type=int, default=1, help="Attempts per task (Harbor's -k).")
@@ -205,11 +207,27 @@ def generate_adapter_tasks(
         cmd += ["--dataset-path", str(dataset)]
     if tasks:
         cmd += ["--no-all", "--task-ids", *tasks]
-    elif limit:
-        cmd += ["--limit", str(limit)]
     print("Generating tasks:", " ".join(cmd), flush=True)
     subprocess.run(cmd, check=True)
+    if limit and not tasks:
+        keep_random_tasks(out, limit)
     return out
+
+
+LIMIT_SEED = 42
+
+
+def keep_random_tasks(tasks: Path, limit: int) -> None:
+    """Leave only a random subset of `limit` task directories in a local copy of the tasks (the
+    same subset on every run), instead of Harbor's first n (-l), which are often one repo or
+    one category."""
+    dirs = sorted(p for p in tasks.iterdir() if p.is_dir())
+    if limit >= len(dirs):
+        return
+    keep = set(random.Random(LIMIT_SEED).sample(dirs, limit))
+    for p in dirs:
+        if p not in keep:
+            shutil.rmtree(p)
 
 
 def patched_tasks(dataset: str, patch: Callable[[Path], None], out: Path) -> Path:
@@ -303,9 +321,14 @@ def harbor_command(args: argparse.Namespace, name: str, jobs_dir: Path) -> List[
         cmd += ["-p", str(generate_adapter_tasks(spec["adapter"], Path(args.work_dir), args.limit, args.task, dataset))]
     else:
         patches = task_patches(args, name)
-        if patches:
+        # A limit without --task is a random subset: of a local copy of the tasks, since Harbor's
+        # own -l takes the first n.
+        random_subset = bool(args.limit) and not args.task
+        if patches or random_subset:
 
             def patch(tasks: Path) -> None:
+                if random_subset:
+                    keep_random_tasks(tasks, args.limit)
                 for one in patches:
                     one(tasks)
 
@@ -314,7 +337,7 @@ def harbor_command(args: argparse.Namespace, name: str, jobs_dir: Path) -> List[
             cmd += ["-d", spec["dataset"]]
         for pattern in args.task:
             cmd += ["-i", pattern]
-    if args.limit:
+    if args.limit and args.task:  # without --task, the limit already picked the subset
         cmd += ["-l", str(args.limit)]
     if args.gold:
         cmd += ["-a", "oracle"]

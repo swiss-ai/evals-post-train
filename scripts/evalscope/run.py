@@ -104,7 +104,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "(public). Scoring keeps its network. Other sandboxes are always public.",
     )
     p.add_argument("--limit", type=float, default=None)
-    p.add_argument("--shuffle", action="store_true", help="Shuffle (seed 42) before --limit.")
+    p.add_argument("--shuffle", action="store_true", help="Shuffle the dataset (seed 42); a --limit always does.")
     p.add_argument("--max-concurrency", type=int, default=4)
     p.add_argument("--max-steps", type=int, default=None)
     p.add_argument("--strategy", default=None)
@@ -294,7 +294,7 @@ def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dic
             HUB_REVISION_KEY[hub]: revisions[n],
             **({"subset_list": subset_list(n, args)} if subset_list(n, args) else {}),
             "extra_params": {**BENCHMARKS[n]["extra_params"], **environment_extra_params(n), **extra_params},
-            **({"shuffle": True} if args.shuffle else {}),
+            **({"shuffle": True} if args.shuffle or args.limit is not None else {}),
         }
         for n in names
     }
