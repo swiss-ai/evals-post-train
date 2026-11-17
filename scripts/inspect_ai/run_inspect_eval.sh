@@ -46,7 +46,9 @@
 #                             are your responsibility to set.
 #   --task-arg <key=value>   Extra `-T key=value` task parameter, e.g. --task-arg message_limit=10
 #                             or --task-arg retrieval_config=full_kb. Repeatable.
-#   --limit <n>               Restrict to n samples per task (useful for smoke-testing).
+#   --limit <n>               Restrict to a random subset of n samples per task (seeded, 42: the same
+#                             subset on every run; `-- --sample-shuffle <seed>` picks another).
+#                             A whole number only: Inspect has no fractions.
 #   --eval-set                Run all --task names as one `inspect eval-set` (parallel, with
 #                              automatic retry of failed samples) instead of one `inspect eval`
 #                              call per task.
@@ -298,7 +300,12 @@ done
 COMMON_ARGS=(--model "$TASK_MODEL" --log-dir "$LOGS_DIR")
 for role in ${MODEL_ROLES[@]+"${MODEL_ROLES[@]}"}; do COMMON_ARGS+=(--model-role "$role"); done
 for arg in ${TASK_ARGS[@]+"${TASK_ARGS[@]}"}; do COMMON_ARGS+=(-T "$arg"); done
-[[ -n "$LIMIT" ]] && COMMON_ARGS+=(--limit "$LIMIT")
+# A limit is a random subset (Inspect shuffles, then limits), not the first n samples. A
+# `-- --sample-shuffle <seed>` in EXTRA_ARGS comes later and wins.
+if [[ -n "$LIMIT" ]]; then
+    [[ "$LIMIT" =~ ^[1-9][0-9]*$ ]] || die "--limit must be a whole number of samples (got '$LIMIT'): Inspect has no fractions, since a share needs each task's dataset size"
+    COMMON_ARGS+=(--limit "$LIMIT" --sample-shuffle 42)
+fi
 [[ -n "$SANDBOX" ]] && COMMON_ARGS+=(--sandbox "$SANDBOX")
 
 # Default to a plain-text display when not attached to a terminal (see --eval-set note above) --

@@ -82,6 +82,8 @@ scripts/evalscope/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --li
   --model <served model with tool calling> --api-base-url https://api.swissai.svc.cscs.ch/v1
 ```
 
+`--limit N` is a random subset of N samples per task (seed 42, so the same subset on every run) in all four frameworks, not the first N. lm-eval, EvalScope and Harbor also take a fraction below 1 (`--limit 0.5`: a random half); Inspect takes whole numbers only.
+
 The examples above are smoke tests, hence `--no-wandb`. Otherwise all four frameworks upload the results to W&B whenever a W&B key is available, by default to `apertus/apertus-1.5-post-training-v0.1` (change it with `--wandb-entity`/`--wandb-project`, skip it with `--no-wandb` or `WANDB_MODE=disabled`; `--gold` runs are never uploaded). Each doc has more: Clariden jobs, checkpoints, reference-solution (gold) checks, judges, reasoning metrics.
 
 ---

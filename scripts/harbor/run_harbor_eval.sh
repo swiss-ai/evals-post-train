@@ -63,7 +63,8 @@
 #   --work-dir <path>          Output dir (default: logs/harbor/<name>): jobs/<benchmark>/ (Harbor's
 #                               trials) and summary.json.
 #   --sandbox docker|k8s|opensandbox  See above.
-#   --limit <n>                 First n tasks per benchmark (smoke tests).
+#   --limit <n>                 A random subset of n tasks per benchmark (seeded, 42); a fraction < 1 is a
+#                               share of the tasks (not with --task).
 #   --task <glob>               Only tasks matching this name (repeatable).
 #   --max-concurrency <n>       Trials in flight at once = containers alive at once (default: 4).
 #   --attempts <n>              Attempts per task (default: 1; more add Harbor's pass@k to summary.json).

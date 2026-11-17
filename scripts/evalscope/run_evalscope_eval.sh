@@ -55,10 +55,9 @@
 #                               other hosts that have each task's fix, as SWE-bench's leaderboard
 #                               checklist asks; public is open internet. Scoring keeps its network
 #                               (scripts/common/swe_bench_egress.py).
-#   --limit <n>                 First n samples per benchmark (smoke tests); a fraction < 1 is a
-#                               share of the dataset.
-#   --shuffle                   Shuffle each dataset (EvalScope's seed 42) before --limit, so a small
-#                               --limit covers several repos (SWE-bench Verified is sorted by repo).
+#   --limit <n>                 A random subset of n samples per benchmark (EvalScope's seed 42: the
+#                               same subset on every run); a fraction < 1 is a share of the dataset.
+#   --shuffle                   Shuffle the whole dataset, also without --limit (a limit always shuffles).
 #   --max-concurrency <n>       Samples in flight at once = sandboxes alive at once (default: 4).
 #   --max-steps <n>             Agent loop step cap (default: the benchmark's, 250 for both).
 #   --strategy <name>           swe_bench_toolcall (the default, function calling) or

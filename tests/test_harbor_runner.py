@@ -118,16 +118,64 @@ class HarborCommandTest(unittest.TestCase):
         self.assertNotIn("-m", cmd)
 
     def test_adapter_tasks_are_generated(self):
-        args = run.parse_args(["--benchmark", "multi_swe_bench", "--gold", "--work-dir", "w", "--sandbox", "docker", "--limit", "3"])
-        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(run.subprocess, "run") as sub, \
-                mock.patch.object(run, "download_dataset", return_value=Path("/hf/msb")) as download:
-            cmd = run.harbor_command(args, "multi_swe_bench", Path("w/jobs"))
+        def generate_all(cmd, check):  # the adapter writes one directory per task
+            for i in range(10):
+                Path(cmd[cmd.index("--output-dir") + 1], f"task-{i}").mkdir(parents=True, exist_ok=True)
+
+        with tempfile.TemporaryDirectory() as w:
+            args = run.parse_args(["--benchmark", "multi_swe_bench", "--gold", "--work-dir", w, "--sandbox", "docker", "--limit", "3"])
+            with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(run.subprocess, "run", side_effect=generate_all) as sub, \
+                    mock.patch.object(run, "download_dataset", return_value=Path("/hf/msb")) as download:
+                cmd = run.harbor_command(args, "multi_swe_bench", Path(w, "jobs"))
+            tasks = Path(w, "tasks", "multi-swe-bench")
+            self.assertEqual(len(list(tasks.iterdir())), 3)  # a random subset of the 10
         download.assert_called_once_with("ByteDance-Seed/Multi-SWE-bench", run.BENCHMARKS["multi_swe_bench"]["hf_dataset"][1])
         generate = sub.call_args[0][0]
         self.assertEqual(generate[:2], ["uvx", "--from"])
         self.assertIn(f"@v{run.HARBOR_VERSION}#subdirectory=adapters/multi-swe-bench", generate[2])
-        self.assertEqual(generate[-4:], ["--dataset-path", "/hf/msb", "--limit", "3"])
-        self.assertEqual(cmd[cmd.index("-p") + 1], str(Path("w/tasks/multi-swe-bench")))
+        self.assertEqual(generate[-2:], ["--dataset-path", "/hf/msb"])  # all tasks; the limit prunes them
+        self.assertEqual(cmd[cmd.index("-p") + 1], str(tasks))
+        self.assertNotIn("-l", cmd)
+
+    def test_keep_random_tasks(self):
+        with tempfile.TemporaryDirectory() as w:
+            for i in range(50):
+                Path(w, f"t{i}").mkdir()
+            run.keep_random_tasks(Path(w), 5)
+            kept = sorted(p.name for p in Path(w).iterdir())
+            self.assertEqual(len(kept), 5)
+            self.assertNotEqual(kept, [f"t{i}" for i in range(5)])  # not the first five
+            run.keep_random_tasks(Path(w), 100)  # a limit above the size keeps everything
+            self.assertEqual(sorted(p.name for p in Path(w).iterdir()), kept)
+
+    def test_fraction_limit_keeps_a_share_of_the_tasks(self):
+        with tempfile.TemporaryDirectory() as w:
+            for i in range(10):
+                Path(w, f"t{i}").mkdir()
+            run.keep_random_tasks(Path(w), 0.25)
+            self.assertEqual(len(list(Path(w).iterdir())), 3)  # ceil(2.5)
+
+    def test_limit_values(self):
+        base = ["--benchmark", "terminal_bench_2", "--gold", "--work-dir", "w", "--sandbox", "docker"]
+        self.assertEqual(run.parse_args(base + ["--limit", "3"]).limit, 3)
+        self.assertEqual(run.parse_args(base + ["--limit", "0.5"]).limit, 0.5)
+        for bad in (["--limit", "0"], ["--limit", "2.5"], ["--limit", "0.5", "--task", "x"]):
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                run.parse_args(base + bad)
+
+    def test_limit_without_task_runs_a_random_subset_of_a_local_copy(self):
+        def download(cmd, check):
+            for i in range(20):
+                Path(cmd[cmd.index("-o") + 1], "terminal-bench", f"t{i}").mkdir(parents=True, exist_ok=True)
+
+        with tempfile.TemporaryDirectory() as w:
+            args = run.parse_args(["--benchmark", "terminal_bench_2", "--gold", "--work-dir", w, "--sandbox", "docker", "--limit", "4"])
+            with mock.patch.object(run.subprocess, "run", side_effect=download):
+                cmd = run.harbor_command(args, "terminal_bench_2", Path(w, "jobs"))
+            tasks = Path(cmd[cmd.index("-p") + 1])
+            self.assertEqual(len(list(tasks.iterdir())), 4)
+        self.assertNotIn("-l", cmd)
+        self.assertNotIn("-d", cmd)
 
     def test_patched_dataset_is_downloaded_and_run_locally(self):
         def download(cmd, check):  # harbor download --export: <out>/<dataset name>/<task>/
