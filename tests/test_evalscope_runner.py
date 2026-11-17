@@ -619,3 +619,44 @@ class CompletionsFlagTest(unittest.TestCase):
         with self.assertRaises(SystemExit) as refused:
             run.main(["--benchmark", "swe_bench", "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", "--completions"])
         self.assertIn("only live_code_bench", str(refused.exception))
+
+
+class BfclV4Test(unittest.TestCase):
+    def _cfg(self, *extra):
+        args = run.parse_args(["--benchmark", "bfcl_v4", "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", *extra])
+        return run.build_task_config(args, ["bfcl_v4"], run.resolved_revisions(["bfcl_v4"], []))
+
+    def test_has_no_dataset_revision_and_no_sandbox(self):
+        cfg = self._cfg()
+        self.assertEqual(cfg["datasets"], ["bfcl_v4"])
+        args = cfg["dataset_args"]["bfcl_v4"]
+        self.assertNotIn("hf_dataset_revision", args)
+        self.assertNotIn("dataset_revision", args)
+        self.assertNotIn("sandbox", cfg)
+        self.assertFalse(run.needs_sandbox(["bfcl_v4"]))
+        self.assertTrue(run.needs_sandbox(["bfcl_v4", "swe_bench"]))
+
+    def test_default_subsets_leave_out_the_ones_that_need_serpapi_or_torch(self):
+        subsets = self._cfg()["dataset_args"]["bfcl_v4"]["subset_list"]
+        self.assertFalse([s for s in subsets if s.startswith("web_search") or s == "memory_vector"])
+        self.assertEqual(len(subsets), 19)
+        self.assertEqual(self._cfg("--subset", "simple_python")["dataset_args"]["bfcl_v4"]["subset_list"], ["simple_python"])
+
+    def test_extra_params_pass_through(self):
+        cfg = self._cfg("--extra-param", "is_fc_model=false")
+        self.assertEqual(cfg["dataset_args"]["bfcl_v4"]["extra_params"], {"is_fc_model": False})
+
+    def test_gold_is_refused(self):
+        with self.assertRaises(SystemExit) as gold:
+            run.main(["--benchmark", "bfcl_v4", "--work-dir", "/w", "--gold"])
+        self.assertIn("reference solutions", str(gold.exception))
+
+    def test_settings_the_handler_does_not_send_are_warned_about(self):
+        with mock.patch("sys.stderr") as err:
+            self._cfg("--top-p", "0.9")
+        self.assertIn("ignoring top_p", "".join(c.args[0] for c in err.write.call_args_list))
+
+    def test_the_sampling_defaults_do_not_warn(self):
+        with mock.patch("sys.stderr") as err:
+            self._cfg()
+        self.assertEqual(err.write.call_args_list, [])

@@ -23,6 +23,8 @@
      "repeats": {"n": 8, "via": "flag"}, "metric": {"label": "mean@8", "key": null}},
     {"label": "BFCL v3 (FC)", "task": "bfcl_v3_fc", "framework": "lm_eval",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null}},
+    {"label": "BFCL v4 (tool-call signal)", "task": "bfcl_v4", "framework": "evalscope",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null}},
     {"label": "HLE", "task": "hle", "framework": "inspect",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null},
      "flags": ["--model-role", "grader=openai-api/swissai/CSCS-Inference/zai-org/GLM-5.3", "--model-role", "grader_2=openai-api/swissai/CSCS-Inference/zai-org/GLM-5.3"],
@@ -45,6 +47,7 @@
       "flags": {
         "lm_eval": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>"],
         "inspect": ["--enable-thinking"],
+        "evalscope": [],
         "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       },
       "task_flags": {
@@ -58,6 +61,7 @@
       "flags": {
         "lm_eval": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>"],
         "inspect": ["--enable-thinking"],
+        "evalscope": [],
         "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       },
       "task_flags": {
@@ -71,6 +75,7 @@
       "flags": {
         "lm_eval": ["--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>"],
         "inspect": ["--enable-thinking"],
+        "evalscope": [],
         "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       },
       "task_flags": {
@@ -87,6 +92,7 @@
       "flags": {
         "lm_eval": ["--backend", "openai", "--chat-format", "apertus2"],
         "inspect": [],
+        "evalscope": [],
         "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 16384}"]
       },
       "task_flags": {
@@ -103,6 +109,7 @@
       "flags": {
         "lm_eval": ["--backend", "openai", "--chat-format", "apertus2"],
         "inspect": [],
+        "evalscope": [],
         "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 16384}"]
       },
       "task_flags": {
