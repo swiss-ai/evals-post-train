@@ -912,6 +912,19 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertTrue(template.startswith("local-completions "))
         self.assertTrue(template.endswith(",max_length=65536,clamp_gen_toks=True 'chat_template_args={...}'"))
 
+    def test_chat_completions_clamp_has_a_tokenizer_to_count_with(self) -> None:
+        # clamp_gen_toks counts the prompt with the client tokenizer; chat-completions used to
+        # have none, so nothing was clamped and a 32768 thinking budget got a 400 on a 16k window.
+        def model(**env: str) -> str:
+            return _openai_model(**env).stdout.splitlines()[-1]
+
+        chat = model(API_CHAT_ENDPOINT="true")
+        self.assertTrue(chat.startswith("local-chat-completions "))
+        self.assertIn(",max_length=65536,clamp_gen_toks=True,tokenizer_backend=huggingface,tokenizer=/ckpt", chat)
+        # The server still renders the template; with no window there is no clamp and no tokenizer.
+        self.assertIn(",tokenized_requests=False,", chat)
+        self.assertNotIn("tokenizer_backend", model(API_CHAT_ENDPOINT="true", BACKEND_MAX_LENGTH=""))
+
     def test_apertus2_samples_like_a_thinking_run(self) -> None:
         self.assertEqual(
             _gen_kwargs(CHAT_FORMAT="apertus2", REASONING_EFFORT="medium"),

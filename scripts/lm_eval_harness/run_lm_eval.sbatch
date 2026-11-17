@@ -782,6 +782,12 @@ if [[ -n "$BACKEND_MAX_LENGTH" ]]; then
                 # minus the budget gets the server's 400. clamp_gen_toks lowers that
                 # request's budget to what is left (the openai models only).
                 [[ "$LM_EVAL_BACKEND" == "openai" ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,clamp_gen_toks=True"
+                # The clamp counts the prompt with a client tokenizer; without one it clamps
+                # nothing (every request keeps the full budget, e.g. 32768 against a 16384
+                # window = 400). local-completions has one already; chat-completions needs it
+                # only for counting (tokenized_requests=False: the server renders the template).
+                [[ "${API_LM_EVAL_MODEL:-}" == "local-chat-completions" ]] \
+                    && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER"
             fi
             ;;
     esac
