@@ -16,8 +16,9 @@
 # vLLM serves the export (NeMo-RL Apertus 2 image, TP1 DP4 expert parallel) behind a2_gateway.py, which encodes chats
 # in the Apertus 2 format (system frame {"thinking": THINKING_LEVEL, "tools": []}) and returns the reply frame as the
 # message content. lm-eval (local-chat-completions) runs pubmedqa_g, medmcqa_g, medqa_g, medxpertqa_g (the medbench
-# step-by-step prompt ending in "Final Answer: X", scored on the reply), mmlu_pro_zs (instruction in the user turn,
-# no few-shot; lm_eval_tasks/mmlu_pro_zs) and ifeval, at T 0.6 / top-p 0.95 (the Apertus thinking-mode convention),
+# step-by-step prompt ending in "Final Answer: X", scored on the reply), mmlu_pro_zs_health (instruction in the user
+# turn, no few-shot; lm_eval_tasks/mmlu_pro_zs; the health subject only: all 14 subjects add 11k questions, about 2 h
+# with thinking) and ifeval, at T 0.6 / top-p 0.95 (the Apertus thinking-mode convention),
 # 8,192 new tokens with thinking (the gateway's budget is max(client max_tokens, 8,192)). Then claim_score.py scores
 # the same samples on the claim frame (the verifiable-answer channel), from the gateway log.
 #
@@ -81,7 +82,7 @@ export HF_HOME=$E/hf XDG_CACHE_HOME=$E/cache NLTK_DATA=$E/cache/nltk_data HF_HUB
 export HF_DATASETS_CACHE=$E/hf/datasets-lmeval
 export OPENAI_API_KEY=none OPENBLAS_NUM_THREADS=4 TOKENIZERS_PARALLELISM=false PYTHONNOUSERSITE=1
 LIMIT=(); [ "$SMOKE" = 1 ] && LIMIT=(--limit 20)
-TASKS=${TASKS:-pubmedqa_g,medmcqa_g,medqa_g,medxpertqa_g,mmlu_pro_zs,ifeval}
+TASKS=${TASKS:-pubmedqa_g,medmcqa_g,medqa_g,medxpertqa_g,mmlu_pro_zs_health,ifeval}
 echo "##### $(date) lm-eval: $TASKS"
 "$E/lmeval/bin/python" -m lm_eval --model local-chat-completions --apply_chat_template \
     --model_args "model=$NAME,base_url=http://127.0.0.1:8000/v1/chat/completions,num_concurrent=${CONCURRENT:-384},max_retries=3,timeout=7200,max_gen_toks=4096,tokenized_requests=False" \
