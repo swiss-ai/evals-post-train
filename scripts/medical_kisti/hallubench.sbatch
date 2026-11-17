@@ -72,7 +72,7 @@ export TOKENIZERS_PARALLELISM=false HF_HOME=$ROOT/cache/hf VLLM_CACHE_ROOT=$ROOT
 export FLASHINFER_WORKSPACE_BASE=$ROOT/cache/flashinfer-8100 TRITON_CACHE_DIR=/tmp/triton-8100 PYTHONNOUSERSITE=1
 exec vllm serve $MODEL --served-model-name chonk --port 8100 --seed 0 \
     --tensor-parallel-size 1 --data-parallel-size 4 --enable-expert-parallel \
-    --max-model-len 16384 --gpu-memory-utilization 0.88 --max-num-seqs 256 --max-num-batched-tokens 16384 \
+    --max-model-len 16384 --gpu-memory-utilization ${GPU_UTIL:-0.93} --max-num-seqs 256 --max-num-batched-tokens 16384 \
     --trust-remote-code
 EOF
 target_pid=$!
