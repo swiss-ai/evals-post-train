@@ -170,10 +170,10 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(suites.benchmark(suite, "swe_bench")["framework"], "harbor")
         chonk = suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "swe_bench")
         self.assertEqual(chonk, ["--agent-kwarg", 'model_info={"max_input_tokens": 16384}', "--reasoning-effort", "high",
-                                 "--sandbox", "opensandbox"])
+                                 "--sandbox", "opensandbox", "--limit", "0.25"])
         think = suites.flags_for(suite, "apertus-1.5-70b-thinking", "swe_bench")
         self.assertEqual(think, ["--enable-thinking", "--agent-kwarg", 'model_info={"max_input_tokens": 32768}',
-                                 "--sandbox", "opensandbox"])
+                                 "--sandbox", "opensandbox", "--limit", "0.25"])
         self.assertNotIn("--reasoning-effort", think)
 
     def test_run_prints_by_default_and_checks_its_arguments(self):

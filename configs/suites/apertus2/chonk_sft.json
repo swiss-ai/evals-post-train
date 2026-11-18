@@ -1,7 +1,7 @@
 {
   "name": "apertus2-chonk-sft",
   "title": "Compare Chonk to other post-trained thinking models",
-  "description": "Benchmarks for Apertus 2 Chonk SFT and the models it is compared with (Apertus 1.5 70B and 8B, Qwen3 32B), in table order. Mean@8 for AIME, mean@4 for the rest. MATH is not listed yet: its task (hendrycks_math or minerva_math) is undecided. HLE is judged by GLM-5.3 (plain-text judge prompt), SciCode and GDPval run their code in OpenSandbox (Kata); GDPval only generates, its grading is a separate submission. HarmBench, MultiJail and Aya red-teaming are lm-eval groups judged by a fixed model through the SwissAI API (HarmBench's classifier cais/HarmBench-Llama-2-13b-cls, Llama-3.3-70B-Instruct for the other two; lower is safer); only HarmBench repeats in the harness, the other two score once.",
+  "description": "Benchmarks for Apertus 2 Chonk SFT and the models it is compared with (Apertus 1.5 70B and 8B, Qwen3 32B), in table order. Mean@8 for AIME, mean@4 for the rest. MATH is not listed yet: its task (hendrycks_math or minerva_math) is undecided. HLE is judged by GLM-5.3 (plain-text judge prompt), SciCode and GDPval run their code in OpenSandbox (Kata); GDPval only generates, its grading is a separate submission. SWE-bench Verified runs a seeded random 25% of its 500 tasks (--limit 0.25), so a run fits the 4 h highprio limit. HarmBench, MultiJail and Aya red-teaming are lm-eval groups judged by a fixed model through the SwissAI API (HarmBench's classifier cais/HarmBench-Llama-2-13b-cls, Llama-3.3-70B-Instruct for the other two; lower is safer); only HarmBench repeats in the harness, the other two score once.",
   "benchmarks": [
     {"label": "MMLU", "task": "mmlu_0_shot", "framework": "inspect",
      "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null},
@@ -37,7 +37,7 @@
      "flags": ["--sandbox", "opensandbox"]},
     {"label": "SWE-bench Verified", "task": "swe_bench", "framework": "harbor",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "resolved", "key": null},
-     "flags": ["--sandbox", "opensandbox"]},
+     "flags": ["--sandbox", "opensandbox", "--limit", "0.25"]},
     {"label": "HarmBench", "task": "harmbench", "framework": "lm_eval",
      "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null}},
     {"label": "MultiJail", "task": "multijail", "framework": "lm_eval",
