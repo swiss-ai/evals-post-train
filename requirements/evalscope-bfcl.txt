@@ -2,7 +2,7 @@
 # data and the scorer. Installed without dependencies after requirements/evalscope-runtime.lock
 # (scripts/common/locked_venv.sh, containers/Dockerfile.eval) because it pins numpy==1.26.4, which
 # the lock's pyarrow (datasets) cannot import; it works with the lock's numpy 2. The dependencies the
-# adapter needs are in evalscope-runtime.txt; sentence-transformers and faiss-cpu (memory_vector's
-# embeddings, which would pull in torch) are left out, so memory_vector is not supported.
+# adapter needs are in evalscope-runtime.txt, including sentence-transformers and faiss-cpu (memory_vector's
+# embeddings, with CPU torch).
 # EvalScope 1.14.0 and 1.15.0 pin 2025.10.27.1; this is the newest release (2026-03-23).
 bfcl-eval==2026.3.23

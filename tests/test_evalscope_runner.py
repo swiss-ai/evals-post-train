@@ -636,10 +636,11 @@ class BfclV4Test(unittest.TestCase):
         self.assertFalse(run.needs_sandbox(["bfcl_v4"]))
         self.assertTrue(run.needs_sandbox(["bfcl_v4", "swe_bench"]))
 
-    def test_default_subsets_leave_out_the_ones_that_need_serpapi_or_torch(self):
+    def test_default_subsets_leave_out_the_ones_that_need_serpapi(self):
         subsets = self._cfg()["dataset_args"]["bfcl_v4"]["subset_list"]
-        self.assertFalse([s for s in subsets if s.startswith("web_search") or s == "memory_vector"])
-        self.assertEqual(len(subsets), 19)
+        self.assertFalse([s for s in subsets if s.startswith("web_search")])
+        self.assertIn("memory_vector", subsets)
+        self.assertEqual(len(subsets), 20)
         self.assertEqual(self._cfg("--subset", "simple_python")["dataset_args"]["bfcl_v4"]["subset_list"], ["simple_python"])
 
     def test_extra_params_pass_through(self):

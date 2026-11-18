@@ -65,7 +65,8 @@ RUN /opt/inspect-venv/bin/python -m nltk.downloader -d /opt/inspect-venv/nltk_da
 # the installed EvalScope pins (EVALSCOPE_SWE_BENCH_PRO_REPO).
 COPY requirements/evalscope-runtime.lock requirements/evalscope-bfcl.txt /tmp/requirements/
 RUN python -m venv /opt/evalscope-venv \
-    && /opt/evalscope-venv/bin/pip install --no-cache-dir -r /tmp/requirements/evalscope-runtime.lock \
+    && /opt/evalscope-venv/bin/pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
+        -r /tmp/requirements/evalscope-runtime.lock \
     && /opt/evalscope-venv/bin/pip install --no-cache-dir --no-deps -r /tmp/requirements/evalscope-bfcl.txt \
     && /opt/evalscope-venv/bin/python -c "import bfcl_eval.model_handler.api_inference.openai_completion" \
     && pro=$(/opt/evalscope-venv/bin/python -c \
