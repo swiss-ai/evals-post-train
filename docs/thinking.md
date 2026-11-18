@@ -30,12 +30,11 @@ servers differ in which one they read. The on/off switch is a template kwarg onl
 
 lm-eval renders Apertus 2 itself (`--chat-format apertus2`). The other frameworks send ordinary chat
 requests, so for them the **server** has to render the Apertus 2 format and split the reasoning from
-the reply. That is the vLLM plugin of `apertus-common` PR #5, which is **not merged yet**:
-`requirements/apertus2-vllm-plugin.txt` pins the PR head we tested. When the PR merges, replace
-that commit with the merged one (or drop the file if the server image ships the plugin).
+the reply. That is the vLLM plugin of `apertus-common` (PRs #5 and #7, merged), the same commit
+`requirements/apertus2.txt` pins for lm-eval. Drop this section if the server image ships the plugin.
 
-1. **Build the wheel** where your git access is (the repository is private):
-   `scripts/lm_eval_harness/prepare_apertus_common.sh requirements/apertus2-vllm-plugin.txt`
+1. **Build the wheel**:
+   `scripts/lm_eval_harness/prepare_apertus_common.sh`
    prints the directory it keeps the wheel in, under `$EVAL_ENV_CACHE_ROOT`.
 2. **Serve the model with the plugin.** The `vllm-apertus2-cuda` image does not contain it, so every
    node installs the wheel before `vllm serve`, and the server gets the four `apertus2` options.

@@ -51,7 +51,7 @@ bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/ar
   --name Llama-Baseline --limit 10 --no-wandb
 ```
 
-**lm-evaluation-harness, Apertus 2 native format**: a served Apertus 2 checkpoint through the CSCS serving API, 5 samples. `--tokenizer` is a local directory with the verified Apertus 2 instruct tokenizer that `apertus-common` names: [`tokenizers/Apertus_2_instruct`](https://github.com/swiss-ai/apertus-omni-tokenizer/tree/b801ff1b00d933d10bba90b0c22307157299faa7/tokenizers/Apertus_2_instruct) in `swiss-ai/apertus-omni-tokenizer` (evals-svc's Chonk/Megachonk evaluation tokenizer lacks the control tokens and is rejected), `--max-length` is the server's `--max-model-len`. Needs read access to the private `apertus-common` repository ([details](docs/lm-eval-harness.md#apertus-2-native-format)).
+**lm-evaluation-harness, Apertus 2 native format**: a served Apertus 2 checkpoint through the CSCS serving API, 5 samples. `--tokenizer` is a local directory with the verified Apertus 2 instruct tokenizer that `apertus-common` names: [`tokenizers/Apertus_2_instruct`](https://github.com/swiss-ai/apertus-omni-tokenizer/tree/b801ff1b00d933d10bba90b0c22307157299faa7/tokenizers/Apertus_2_instruct) in `swiss-ai/apertus-omni-tokenizer` (evals-svc's Chonk/Megachonk evaluation tokenizer lacks the control tokens and is rejected), `--max-length` is the server's `--max-model-len`. Installs the pinned `apertus-common` commit ([details](docs/lm-eval-harness.md#apertus-2-native-format)).
 
 ```bash
 bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k --limit 5 --no-wandb \

@@ -393,8 +393,8 @@ _eval_use_prebuilt_environment() {
             "name one with --harness-branch" >&2
         return 1
     fi
-    # apertus-common is private and not in the image: build its pinned wheel here, where the launcher's
-    # git access is, and let the job install that offline (see prepare_apertus_common.sh).
+    # apertus-common is not in the image: build its pinned wheel here and let the job install that
+    # offline (see prepare_apertus_common.sh).
     local apertus_common_wheels=""
     if [[ "${CHAT_FORMAT:-template}" == "apertus2" ]]; then
         apertus_common_wheels=$(bash scripts/lm_eval_harness/prepare_apertus_common.sh) || return 1

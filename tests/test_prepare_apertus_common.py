@@ -1,5 +1,4 @@
 import os
-import re
 import subprocess
 import tempfile
 import unittest
@@ -7,7 +6,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = "scripts/lm_eval_harness/prepare_apertus_common.sh"
-PLUGIN_PIN = "requirements/apertus2-vllm-plugin.txt"
 
 
 def _prepare(*arguments: str, cache: str) -> subprocess.CompletedProcess:
@@ -25,13 +23,6 @@ class PrepareApertusCommonTest(unittest.TestCase):
             done = _prepare(cache=cache)
             self.assertEqual(done.returncode, 0, done.stderr)
             self.assertEqual(done.stdout.strip(), f"{cache}/apertus-common/{_commit('requirements/apertus2.txt')}")
-
-    def test_the_vllm_plugin_pin_names_its_own_wheel(self):
-        self.assertRegex(_commit(PLUGIN_PIN), re.compile(r"^[0-9a-f]{40}$"))
-        with tempfile.TemporaryDirectory() as cache:
-            done = _prepare(PLUGIN_PIN, cache=cache)
-            self.assertEqual(done.returncode, 0, done.stderr)
-            self.assertEqual(done.stdout.strip(), f"{cache}/apertus-common/{_commit(PLUGIN_PIN)}")
 
     def test_a_file_without_a_commit_pin_is_refused(self):
         with tempfile.TemporaryDirectory() as cache:

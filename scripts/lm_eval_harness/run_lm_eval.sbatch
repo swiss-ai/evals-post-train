@@ -802,8 +802,8 @@ echo "Using lm-evaluation-harness: $EVAL_RESOLVED_HARNESS_REPO@$EVAL_RESOLVED_HA
 if [[ "${EVAL_ENV_KIND:-}" == "prebuilt" ]]; then
 # EVAL_PREBUILT_ENV=1: the container (containers/Dockerfile.eval) already has
 # every package and the pinned harness. Check it, never install: a mismatch means the job runs
-# in an image built from a different commit. The one exception is apertus-common (a private
-# repository, so not in the image): an apertus2 run installs the wheel the launcher built from the
+# in an image built from a different commit. The one exception is apertus-common (not in the
+# image): an apertus2 run installs the wheel the launcher built from the
 # commit requirements/apertus2.txt pins (prepare_apertus_common.sh), offline and --no-deps like
 # the harness, into a directory of its own ahead of the overlay.
 APERTUS_COMMON_INSTALL=""
