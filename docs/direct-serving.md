@@ -24,10 +24,29 @@ python -m scripts.direct_serving.job \
   --submit
 ```
 
-Without `--submit` it prints the job script instead, to submit another way. Each `--eval` is a command run with `bash -c` from this checkout inside the eval image, in the order given; give it as many as you like. Every command finds the server's URL in `$EVAL_API_BASE_URL`. The commands run inline in the job, so use the runners that do (`run_inspect_eval.sh`, `run_harbor_eval.sh`, `run_evalscope_eval.sh`); lm-eval's `launch_evaluations.sh` submits Slurm jobs of its own.
+Without `--submit` it prints the job script instead, to submit another way. Each `--eval` is a command run with `bash -c` from this checkout inside the eval image, in the order given; give it as many as you like, from any framework. Every command finds the server's URL in `$EVAL_API_BASE_URL`.
+
+## The frameworks' commands
+
+Use each framework's own launcher with `--api-base-url "$EVAL_API_BASE_URL"` and the name the server answers to (`--served-model-name`):
+
+| Framework | Command |
+|---|---|
+| lm-eval-harness | `bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k --model <name> --backend openai --api-base-url "$EVAL_API_BASE_URL" --api-model-name <name> --tokenizer <HF name or path> --failure-policy fail-fast` |
+| Inspect AI | `scripts/inspect_ai/run_inspect_eval.sh --task gsm8k --model <name> --api-base-url "$EVAL_API_BASE_URL"` |
+| EvalScope | `scripts/evalscope/run_evalscope_eval.sh --benchmark bfcl_v4 --model <name> --api-base-url "$EVAL_API_BASE_URL"` |
+| Harbor | `scripts/harbor/run_harbor_eval.sh --benchmark swe_bench --sandbox <k8s or opensandbox> --model <name> --api-base-url "$EVAL_API_BASE_URL"` |
+
+- **lm-eval submits Slurm jobs of its own**, and a job on another node could not reach the server on `127.0.0.1`. Every command therefore finds `sbatch` and `srun` stand-ins first on `PATH` (`scripts/direct_serving/inline_slurm/`): they run the batch script or command in place, in the job's allocation. They can't emulate job arrays, so give lm-eval `--failure-policy fail-fast`. With `--backend openai` the tokenizer must be a Hugging Face name or a path: the served name is not one.
+- **Harbor and EvalScope's SWE-bench** run their task containers in a sandbox, which the compute node must be able to reach (Kubernetes access, or an OpenSandbox key in the environment or `scripts/secrets.env`, as for any run). The job does not provide one.
+- **Keys:** the runners want a key for `--api-base-url`, and the server in the job has none, so the job sets `TARGET_API_KEY=local` (the runners' variable for that endpoint's key). `CSCS_SERVING_API` is not needed to serve or evaluate; it stays what it was, the key of a judge model on the CSCS serving API, read from the environment or `scripts/secrets.env`.
+- **Apertus 2 over chat requests** needs the `apertus-common` plugin in the server ([setup](thinking.md#apertus-2-on-v1chatcompletions-temporary)).
+
+## Options
 
 | Option | |
 |---|---|
+| `--account`, `--partition`, `--qos`, `--reservation` | The job's Slurm options: e.g. `--partition highprio --qos highprio`. The account defaults to your primary group. |
 | `--environment` | EDF of the serving image. `containers/env_vllm_apertus2.toml` has the Apertus 2 vLLM image; `containers/env_vllm.toml` is the default one. |
 | `--framework-args` | After `--model`, `--served-model-name` and `--host`, which the launcher sets. The layout above is the validated 2-node one for Chonk: it needs `--api-server-count 4` (more front ends race at startup) and the engine takes about 8.5 minutes to be ready. |
 | `--eval-image-commit` | The [prebuilt eval image](lm-eval-harness.md#prebuilt-evaluation-image-no-installs-at-run-time) the commands run in. Default: the last commit of this checkout that changed what the image is built from (`containers/Dockerfile.eval`, `requirements/`, the workflow), since CI builds an image only for those. The job refuses to start when ghcr does not have it yet (the push of that commit is still building, or was never pushed), and writes the EDF that starts it. |
