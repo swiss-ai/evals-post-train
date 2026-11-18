@@ -565,8 +565,7 @@ bash scripts/lm_eval_harness/launch_evaluations.sh custom \
   `--convert-to-hf`.
 - **Environment:** `apertus-common` (`requirements/apertus2.txt`) is installed `--no-deps` into a
   separate harness overlay in built environments, and into the venv of the prebuilt image.
-  (`prepare_apertus_common.sh` builds a wheel of the same commit for the vLLM server, see
-  [`thinking.md`](thinking.md).) Both pins (harness and `apertus-common`)
+  (The vLLM server installs the same commit, see [`thinking.md`](thinking.md).) Both pins (harness and `apertus-common`)
   are in the run config, so bumping one reruns earlier results of the same run name.
 - **Tables:** `make_html_table.py --thinking --length-unit words` (API models report no token
   lengths), with truncation and parse-failure rates.
@@ -679,7 +678,7 @@ The pipeline runs inside containers managed by enroot/pyxis on SLURM. The availa
 | `env_vllm.toml` | CSCS vLLM 0.22.1 runtime image | vLLM and Megatron-LM evals |
 | `env_sglang.toml` | CSCS SGLang CUDA 13 image | SGLang evals |
 
-Hugging Face caches are on scratch for every runner (lm-eval, Inspect, the aggregation job, EvalScope, Harbor), set in one place, `scripts/common/cache_dirs.sh`: datasets in `$SCRATCH/.cache/huggingface/datasets` (`HF_DATASETS_CACHE`), hub and models in `$SCRATCH/huggingface` (`HF_HOME`, which a caller may set). A dataset is therefore downloaded once for all of them, and a job in the prebuilt image needs only the scratch mount. The same file puts `XDG_CACHE_HOME` (`$SCRATCH/.cache`) and `XDG_DATA_HOME` (`$SCRATCH/.local/share`) on scratch: Inspect writes its trace log and dataset downloads there, and in the prebuilt image `$HOME` is on the container's `fuse-overlayfs` root, where Inspect jobs hung forever ([#158](https://github.com/swiss-ai/evals-post-train/issues/158)). The pinned artifacts (environments, the `apertus-common` wheel for the vLLM server, tokenizers) are separate, under `$EVAL_ENV_CACHE_ROOT` below.
+Hugging Face caches are on scratch for every runner (lm-eval, Inspect, the aggregation job, EvalScope, Harbor), set in one place, `scripts/common/cache_dirs.sh`: datasets in `$SCRATCH/.cache/huggingface/datasets` (`HF_DATASETS_CACHE`), hub and models in `$SCRATCH/huggingface` (`HF_HOME`, which a caller may set). A dataset is therefore downloaded once for all of them, and a job in the prebuilt image needs only the scratch mount. The same file puts `XDG_CACHE_HOME` (`$SCRATCH/.cache`) and `XDG_DATA_HOME` (`$SCRATCH/.local/share`) on scratch: Inspect writes its trace log and dataset downloads there, and in the prebuilt image `$HOME` is on the container's `fuse-overlayfs` root, where Inspect jobs hung forever ([#158](https://github.com/swiss-ai/evals-post-train/issues/158)). The pinned artifacts (environments, tokenizers) are separate, under `$EVAL_ENV_CACHE_ROOT` below.
 
 Evaluation dependencies use a shared two-tier cache under `${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}`:
 

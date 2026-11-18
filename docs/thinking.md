@@ -33,24 +33,22 @@ requests, so for them the **server** has to render the Apertus 2 format and spli
 the reply. That is the vLLM plugin of `apertus-common` (PRs #5 and #7, merged), the same commit
 `requirements/apertus2.txt` pins for lm-eval. Drop this section if the server image ships the plugin.
 
-1. **Build the wheel**:
-   `scripts/lm_eval_harness/prepare_apertus_common.sh`
-   prints the directory it keeps the wheel in, under `$EVAL_ENV_CACHE_ROOT`.
-2. **Serve the model with the plugin.** The `vllm-apertus2-cuda` image does not contain it, so every
-   node installs the wheel before `vllm serve`, and the server gets the four `apertus2` options.
+1. **Serve the model with the plugin.** The `vllm-apertus2-cuda` image does not contain it, so every
+   node installs the pinned commit (`requirements/apertus2.txt`) from GitHub before `vllm serve`
+   (compute nodes reach it), and the server gets the four `apertus2` options.
    With model-launch's `sml advanced`, for a launch like `examples/clariden/cli/swiss-ai/apertus2/chonk/`:
 
    ```bash
    sml advanced ... \
-     --pre-launch-cmds "pip install -q --no-deps --force-reinstall --ignore-requires-python <wheel dir>/apertus_common-*.whl" \
+     --pre-launch-cmds "pip install -q --no-deps --force-reinstall --ignore-requires-python 'git+https://github.com/swiss-ai/apertus-common.git@fa5f4568515bf237885472bbfa6dff98682e135b'" \
      --framework-args "--model <checkpoint> ... --tokenizer-mode apertus2 --reasoning-parser apertus2 \
        --enable-auto-tool-choice --tool-call-parser apertus2"
    ```
 
-   The wheel directory must be one the job's container mounts. Without the install the server exits
+   Without the install the server exits
    at startup with `invalid tool call parser: apertus2`. `sml advanced` does not set a QoS: for
    `highprio`, render the job with `--output-script`, add the `#SBATCH --qos` line, and `sbatch` it.
-3. **Point the framework at it** like any served model: `--model <served name> --api-base-url ...`.
+2. **Point the framework at it** like any served model: `--model <served name> --api-base-url ...`.
 
 The server answers with the reasoning in a separate `reasoning` field. Notes:
 
