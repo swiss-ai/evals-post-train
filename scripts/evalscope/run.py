@@ -73,8 +73,7 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
     # BFCL v4: EvalScope's adapter wraps the bfcl-eval package (requirements/evalscope-bfcl.txt), which
     # carries the test data and the scorer, so there is no dataset revision: the package version is the
     # pin (recorded in summary.json). The default subsets are the leaderboard's without web_search_*
-    # (they need a SerpAPI key) and memory_vector (its embeddings need torch, left out of the venv), so
-    # `overall` is not the leaderboard's. bfcl-eval's own OpenAI handler calls the model (native function
+    # (they need a SerpAPI key), so `overall` is not the leaderboard's. bfcl-eval's own OpenAI handler calls the model (native function
     # calling on /v1/chat/completions) and takes only the temperature from the generation config.
     # No sandbox, no reference solutions.
     "bfcl_v4": {
@@ -84,7 +83,8 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
             "simple_python", "simple_java", "simple_javascript", "multiple", "parallel", "parallel_multiple",
             "irrelevance", "live_simple", "live_multiple", "live_parallel", "live_parallel_multiple",
             "live_irrelevance", "live_relevance", "multi_turn_base", "multi_turn_miss_func",
-            "multi_turn_miss_param", "multi_turn_long_context", "memory_kv", "memory_rec_sum",
+            "multi_turn_miss_param", "multi_turn_long_context", "memory_kv", "memory_vector",
+            "memory_rec_sum",
         ],
         "extra_params": {},
         "gold": False,
@@ -227,11 +227,11 @@ def resolved_revisions(names: List[str], overrides: List[str]) -> Dict[str, str]
 
 def bfcl_subset_problems(subsets: List[str], extra_params: Dict[str, Any], environ: Dict[str, str]) -> List[str]:
     """Why some BFCL v4 subsets cannot run here. They would not fail the run: memory_vector without its
-    embeddings errors on every sample (scored 0, exit 0, no evaluation_errors), and a web search without
+    embeddings (an environment older than the lock) errors on every sample (scored 0, exit 0, no evaluation_errors), and a web search without
     a key does the same, so they are refused up front. The key is read from the environment only."""
     problems = []
     if "memory_vector" in subsets and importlib.util.find_spec("sentence_transformers") is None:
-        problems.append("memory_vector needs sentence-transformers and faiss, which this environment leaves out (torch)")
+        problems.append("memory_vector needs sentence-transformers and faiss-cpu, which this environment lacks (they are in the lock)")
     web = [s for s in subsets if s.startswith("web_search")]
     if "SERPAPI_API_KEY" in extra_params:
         problems.append("SERPAPI_API_KEY goes in the environment, not --extra-param: EvalScope writes extra params "

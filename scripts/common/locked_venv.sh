@@ -13,6 +13,12 @@
 
 locked_venv() {
     local lock=$1 min_python=$2 extra=${3:-} python root name key venv
+    # A lock with CPU torch (+cpu wheels) needs PyTorch's index too; its hashes decide which file is accepted.
+    local -a uv_index=() pip_index=()
+    if grep -q '^torch==.*+cpu' "$lock"; then
+        uv_index=(--extra-index-url https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match)
+        pip_index=(--extra-index-url https://download.pytorch.org/whl/cpu)
+    fi
     if command -v uv >/dev/null 2>&1; then
         python=$(uv python find ">=$min_python" 2>/dev/null) ||
             { uv python install --quiet "$min_python" && python=$(uv python find ">=$min_python"); } ||
@@ -37,11 +43,11 @@ locked_venv() {
         if [[ -e "$venv" ]]; then mv "$venv" "$venv.incomplete.$(date +%s).$$" || return 1; fi
         if command -v uv >/dev/null 2>&1; then
             uv venv --quiet --python "$python" "$venv" &&
-                uv pip install --quiet --python "$venv/bin/python" -r "$lock" || return 1
+                uv pip install --quiet --python "$venv/bin/python" ${uv_index[@]+"${uv_index[@]}"} -r "$lock" || return 1
             [[ -z "$extra" ]] || uv pip install --quiet --python "$venv/bin/python" --no-deps -r "$extra" || return 1
         else
             "$python" -m venv "$venv" &&
-                "$venv/bin/python" -m pip install --quiet --no-cache-dir -r "$lock" || return 1
+                "$venv/bin/python" -m pip install --quiet --no-cache-dir ${pip_index[@]+"${pip_index[@]}"} -r "$lock" || return 1
             [[ -z "$extra" ]] || "$venv/bin/python" -m pip install --quiet --no-cache-dir --no-deps -r "$extra" || return 1
         fi
     fi

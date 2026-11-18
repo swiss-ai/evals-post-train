@@ -25,7 +25,8 @@ lock() {
 # the .txt (build_eval_env.sh). This lock is for the openai backend: no model is loaded, so CPU torch.
 lock lm-eval-runtime 3.11 --generate-hashes --torch-backend cpu "$@"
 lock inspect-runtime 3.11 --generate-hashes "$@"
-lock evalscope-runtime 3.11 --generate-hashes "$@"
+# CPU torch for BFCL v4's memory_vector embeddings (sentence-transformers); no model runs in this venv.
+lock evalscope-runtime 3.11 --generate-hashes --torch-backend cpu "$@"
 lock harbor-runtime 3.12 --generate-hashes "$@"
 # No hashes: the adapter is a git install, which cannot be hashed. The lock pins its commit instead.
 lock harbor-adapters 3.12 "$@"
