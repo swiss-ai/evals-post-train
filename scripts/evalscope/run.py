@@ -575,6 +575,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         bfcl_request.install(generation_config(args))
 
+        from scripts.evalscope import bfcl_history
+
+        bfcl_history.install()
+
     import evalscope
     from evalscope.run import run_task
 
