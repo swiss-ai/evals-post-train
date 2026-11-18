@@ -3,8 +3,8 @@
 # prepare_apertus_common.sh [requirements file] - Build the apertus-common wheel that
 # requirements/apertus2.txt (or the file given) pins.
 #
-# The launcher clones the pinned commit and builds a wheel once; the job only installs that wheel,
-# offline (run_lm_eval.sbatch), and so does the vLLM server (docs/thinking.md). The wheel is kept in
+# For the vLLM server (docs/thinking.md): it clones the pinned commit and builds a wheel once, which
+# every node of the server installs offline. The wheel is kept in
 # ${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}/apertus-common/<commit>/, which the job's container must
 # mount (like the rest of EVAL_ENV_CACHE_ROOT). Prints that directory; EVAL_DRY_RUN=true only prints it.
 #

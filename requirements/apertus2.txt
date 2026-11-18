@@ -1,8 +1,8 @@
 # For --chat-format apertus2 runs: installed --no-deps into the harness overlay by
 # build_eval_env.sh (with --ignore-requires-python: built environments run the container's Python
-# 3.12). On the prebuilt image (Python 3.13, as it declares) the launcher builds this commit into
-# a wheel (prepare_apertus_common.sh) and the job installs that offline. The same commit gives the
-# vLLM plugin that serves the format on /v1/chat/completions (docs/thinking.md).
+# 3.12). On the prebuilt image (Python 3.13, as it declares) the image has this commit
+# (containers/Dockerfile.eval). The same commit gives the vLLM plugin that serves the format on
+# /v1/chat/completions (docs/thinking.md; prepare_apertus_common.sh builds its wheel).
 # Its dependencies come with lm-eval-runtime.lock (jsonschema, pydantic and tokenizers are listed in
 # lm-eval-runtime.txt for that), so a bump here can need a change there.
 apertus-common @ git+https://github.com/swiss-ai/apertus-common.git@fa5f4568515bf237885472bbfa6dff98682e135b
