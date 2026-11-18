@@ -6,8 +6,10 @@ sits in front of vLLM's OpenAI server and applies the format's rules the way rl-
 does (Davit Melikidze, rl-infra c093362):
   - the request's messages go through apertus_common.from_openai (a system message becomes the system frame's
     "behavior"; earlier assistant turns become reply frames) with {"thinking": <--thinking>, "tools": []};
-  - the prompt goes to vLLM's /v1/completions as token IDs, with allowed_token_ids = every ID the format lets the
-    model write, skip_special_tokens off and return_token_ids on; generation stops at <|wait|> (generation config);
+  - the prompt goes to vLLM's /v1/completions as token IDs, with a logit bias of -100 on every ID the format forbids
+    (--constraint bias; --constraint allowed sends the equivalent allowed_token_ids list instead, which is 1.5 MB of
+    JSON per request and halves vLLM's per-answer speed); skip_special_tokens off and return_token_ids on;
+    generation stops at <|wait|> (generation config);
   - the generated IDs are parsed into frames with the library's output parser.
 The client gets the reply frame as message.content, the think frame as message.reasoning_content and the last claim
 frame as message.claim. An output without a complete reply (token limit, broken frame) comes back with empty content
@@ -24,8 +26,11 @@ Needs Python 3.13 with apertus-common (494c2be, the commit the v0.1 SFT data was
   python a2_gateway.py --upstream http://127.0.0.1:8100 --tokenizer <dir> --port 8000 --log <file>
 """
 import argparse
+import fcntl
 import hashlib
 import json
+import os
+import signal
 import threading
 import time
 import urllib.error
@@ -37,7 +42,7 @@ from apertus_common import (Call, Claim, MappingPolicy, Reply, StreamParseError,
 
 ARGS = None
 ENC = None
-ALLOWED_JSON = None
+CONSTRAINT_JSON = None  # '"logit_bias": {...}' or '"allowed_token_ids": [...]', spliced into each request
 LOG_LOCK = threading.Lock()
 COUNT = {"requests": 0, "no_reply": 0, "parse_error": 0, "length": 0}
 
@@ -81,8 +86,8 @@ def generate(prompt, budget, temperature, top_p, seed):
             "top_p": top_p, "return_token_ids": True, "skip_special_tokens": False}
     if seed is not None:
         body["seed"] = seed
-    # the 200k-ID allowed list is serialized once at start-up and spliced in
-    data = (json.dumps(body)[:-1] + ', "allowed_token_ids": ' + ALLOWED_JSON + "}").encode()
+    # the constraint is serialized once at start-up and spliced in
+    data = (json.dumps(body)[:-1] + ", " + CONSTRAINT_JSON + "}").encode()
     req = urllib.request.Request(f"{ARGS.upstream}/v1/completions", data, {"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=ARGS.timeout) as r:
         choice = json.load(r)["choices"][0]
@@ -119,6 +124,17 @@ def cut_at_stop(text, stops):
     return text[:cut]
 
 
+def write_log(line):
+    """One append per line, under an exclusive lock: the --workers processes share the log file."""
+    with open(ARGS.log, "a") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX)
+        except OSError:  # a file system without flock: a single O_APPEND write is still one piece on one node
+            pass
+        f.write(line)
+        f.flush()
+
+
 def complete(req):
     messages = req["messages"]
     system = {"thinking": ARGS.thinking, "tools": []}
@@ -134,6 +150,7 @@ def complete(req):
         seed = None if seed is None else int(seed) + k
         t0 = time.time()
         ids, finish = generate(prompt, budget, temperature, top_p, seed)
+        t_vllm = time.time() - t0
         think, claim, reply, has_call, error = frames(ids)
         usage_c += len(ids)
         content = cut_at_stop(reply, stops) if reply is not None else ""
@@ -143,21 +160,28 @@ def complete(req):
             COUNT["no_reply"] += reply is None
             COUNT["parse_error"] += error is not None
             COUNT["length"] += finish == "length"
-            with open(ARGS.log, "a") as f:
-                f.write(json.dumps({
-                    "t": round(t0, 3), "s": round(time.time() - t0, 2),
-                    "msg_hash": hashlib.sha1(json.dumps(messages, sort_keys=True).encode()).hexdigest()[:16],
-                    "messages": messages, "prompt_tokens": len(prompt), "budget": budget, "dropped": dropped,
-                    "gen_tokens": len(ids), "vllm_finish": finish, "finish": out_finish, "parse_error": error,
-                    "has_call": has_call, "temperature": temperature, "seed": seed, "think": think,
-                    "claim": claim, "reply": reply, "raw": ENC.decode_text(ids) if ARGS.log_raw else None,
-                }) + "\n")
+        line = json.dumps({
+            "t": round(t0, 3), "s": round(time.time() - t0, 2), "s_vllm": round(t_vllm, 2),
+            "msg_hash": hashlib.sha1(json.dumps(messages, sort_keys=True).encode()).hexdigest()[:16],
+            "messages": messages, "prompt_tokens": len(prompt), "budget": budget, "dropped": dropped,
+            "gen_tokens": len(ids), "vllm_finish": finish, "finish": out_finish, "parse_error": error,
+            "has_call": has_call, "temperature": temperature, "seed": seed, "think": think,
+            "claim": claim, "reply": reply, "raw": ENC.decode_text(ids) if ARGS.log_raw else None,
+        }) + "\n"
+        write_log(line)
         msg = {"role": "assistant", "content": content, "reasoning_content": think, "claim": claim}
         choices.append({"index": k, "message": msg, "finish_reason": out_finish, "logprobs": None})
     return {"id": f"chatcmpl-{time.time_ns()}", "object": "chat.completion", "created": int(time.time()),
             "model": req.get("model", ARGS.served_name), "choices": choices,
             "usage": {"prompt_tokens": len(prompt), "completion_tokens": usage_c,
                       "total_tokens": len(prompt) + usage_c}}
+
+
+class Server(ThreadingHTTPServer):
+    # the listen backlog is set when the socket is created, so it has to be a class attribute: assigning it after
+    # construction (as this script did before) left Python's default of 5, and bursts of connections were reset
+    request_queue_size = 4096
+    daemon_threads = True
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -207,7 +231,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global ARGS, ENC, ALLOWED_JSON
+    global ARGS, ENC, CONSTRAINT_JSON
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--upstream", default="http://127.0.0.1:8100", help="vLLM OpenAI server")
     ap.add_argument("--served-name", default="chonk", help="model name vLLM serves")
@@ -223,16 +247,48 @@ def main():
     ap.add_argument("--timeout", type=int, default=3600)
     ap.add_argument("--log", required=True)
     ap.add_argument("--log-raw", action="store_true", help="also log the decoded generated text with controls")
+    ap.add_argument("--constraint", default="bias", choices=["bias", "allowed"],
+                    help="forbid the IDs the format forbids with logit_bias -100 (bias), or send the full "
+                         "allowed_token_ids list (allowed: the earlier behaviour, 1.5 MB per request)")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="gateway processes sharing the port; one keeps up with vLLM on one node (18 Nov test: "
+                         "gateway and direct calls equally fast once the server is warm)")
     ARGS = ap.parse_args()
     ARGS.names = ARGS.names.split(",")
     ENC = load_encoding(ARGS.tokenizer)
     forbidden = set(ENC.generation_constraints.forbidden_token_ids)
-    ALLOWED_JSON = json.dumps([i for i in range(ENC.vocab_size) if i not in forbidden])
-    server = ThreadingHTTPServer(("0.0.0.0", ARGS.port), Handler)
-    server.daemon_threads = True
-    server.request_queue_size = 1024
+    if ARGS.constraint == "allowed":
+        CONSTRAINT_JSON = '"allowed_token_ids": ' + json.dumps([i for i in range(ENC.vocab_size) if i not in forbidden])
+    else:
+        CONSTRAINT_JSON = '"logit_bias": ' + json.dumps({str(i): -100 for i in sorted(forbidden)})
+    server = Server(("0.0.0.0", ARGS.port), Handler)
+    # --workers processes accept on the one listening socket; the first is this one. The others exit when it does
+    # (SIGTERM is passed on; a watcher thread catches a parent killed outright).
+    parent, children = os.getpid(), []
+    for _ in range(max(1, ARGS.workers) - 1):
+        pid = os.fork()
+        if pid == 0:
+            def watch():
+                while os.getppid() == parent:
+                    time.sleep(2)
+                os._exit(0)
+            threading.Thread(target=watch, daemon=True).start()
+            server.serve_forever()
+            os._exit(0)
+        children.append(pid)
+
+    def stop(signum, frame):
+        for c in children:
+            try:
+                os.kill(c, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        os._exit(0)
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
     print(f"a2_gateway on :{ARGS.port} -> {ARGS.upstream} ({ARGS.served_name}), thinking {ARGS.thinking}, "
-          f"budget floor {ARGS.min_max_tokens}, context {ARGS.max_model_len}, log {ARGS.log}", flush=True)
+          f"budget floor {ARGS.min_max_tokens}, context {ARGS.max_model_len}, constraint {ARGS.constraint} "
+          f"({len(forbidden)} forbidden IDs), {max(1, ARGS.workers)} workers, log {ARGS.log}", flush=True)
     server.serve_forever()
 
 
