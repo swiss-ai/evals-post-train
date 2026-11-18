@@ -1,19 +1,29 @@
 name: Evaluation image
 
-# Publishes containers/Dockerfile.eval for every pushed commit, on every
-# branch: a run picks the image tagged with the exact commit whose scripts it
-# runs, so packages and scripts always match. Unchanged requirements come
-# straight from the layer cache.
+# Publishes containers/Dockerfile.eval for every pushed commit that changes
+# what the image is built from (the paths below), on every branch. A run picks
+# the image tagged with the exact commit whose scripts it runs; for a commit
+# without one, evals-svc (app/services/eval_image.py, IMAGE_INPUTS) uses the
+# nearest ancestor whose image inputs are unchanged, which is the same image.
+# Keep the paths in step with what the Dockerfile COPYs. A commit that needs an
+# image anyway: run this workflow by hand (workflow_dispatch) on it.
 on:
   push:
+    paths:
+      - containers/Dockerfile.eval
+      - requirements/**
+      - .github/workflows/eval-image.yml
   workflow_dispatch:
 
 permissions:
   contents: read
   packages: write
 
+# A newer push to a branch replaces that branch's build in progress. Never on
+# main: its commits are what runs pin, and each should get its image.
 concurrency:
-  group: eval-image-${{ github.sha }}
+  group: eval-image-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   build:
