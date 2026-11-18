@@ -42,6 +42,19 @@ Use each framework's own launcher with `--api-base-url "$EVAL_API_BASE_URL"` and
 - **Keys:** the runners want a key for `--api-base-url`, and the server in the job has none, so the job sets `TARGET_API_KEY` (the runners' variable for that endpoint's key) to `local` unless it is already set. `CSCS_SERVING_API` is not needed to serve or evaluate; it stays what it was, the key of a judge model on the CSCS serving API, read from the environment or `scripts/secrets.env`.
 - **Apertus 2 over chat requests** needs the `apertus-common` plugin in the server ([setup](thinking.md#apertus-2-on-v1chatcompletions-temporary)).
 
+## From a suite
+
+A [suite](suites.md) setup with a `launch` block says how its model is served: `--suite` and `--setup` fill in the checkpoint, the serving EDF, the nodes, the time and the framework arguments (the launch block's, then the setup's `serving` arguments, then `--framework-args`). The model is served under the setup's name unless `--served-model-name` says otherwise. What the command line names wins.
+
+```bash
+python -m scripts.direct_serving.job --suite apertus2/chonk_sft --setup chonk-lc-16k-v0.2-sft \
+  --pre-launch-cmds "<install the apertus-common plugin>" \
+  --eval 'scripts/inspect_ai/run_inspect_eval.sh --task gsm8k --model chonk-lc-16k-v0.2-sft --api-base-url "$EVAL_API_BASE_URL" --limit 5' \
+  --submit
+```
+
+The Chonk setups' `serving` arguments need the `apertus-common` plugin in the server, which the Apertus 2 image does not contain: pass its install as `--pre-launch-cmds` ([how](thinking.md#apertus-2-on-v1chatcompletions-temporary)); without it the server exits at start-up with `invalid tool call parser: apertus2`.
+
 ## Options
 
 | Option | |
@@ -49,6 +62,8 @@ Use each framework's own launcher with `--api-base-url "$EVAL_API_BASE_URL"` and
 | `--account`, `--partition`, `--qos`, `--reservation` | The job's Slurm options. The partition is `normal` unless you name another; the account defaults to your primary group. |
 | `--environment` | EDF of the serving image. `containers/env_vllm_apertus2.toml` has the Apertus 2 vLLM image; `containers/env_vllm.toml` is the default one. |
 | `--framework-args` | After `--model`, `--served-model-name` and `--host`, which the launcher sets. The layout above is the validated 2-node one for Chonk: it needs `--api-server-count 4` (more front ends race at startup) and the engine takes about 8.5 minutes to be ready. |
+| `--suite`, `--setup` | A suite setup's `launch` block ([above](#from-a-suite)); then `--model`, `--environment` and `--served-model-name` are optional, and so are `--nodes` and `--time`. |
+| `--pre-launch-cmds` | A shell command every serving node runs before the server starts. |
 | `--eval-image-commit` | The [prebuilt eval image](lm-eval-harness.md#prebuilt-evaluation-image-no-installs-at-run-time) the commands run in. Default: the last commit of this checkout that changed what the image is built from (`containers/Dockerfile.eval`, `requirements/`, the workflow), since CI builds an image only for those. The job refuses to start when ghcr does not have it yet (the push of that commit is still building, or was never pushed), and writes the EDF that starts it. |
 | `--mount` | A directory to mount in the eval image besides this checkout, `/users/$USER` and the scratch directories. Repeatable. |
 | `--time` | The model's load plus every command: the job has no other limit. |

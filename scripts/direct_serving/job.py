@@ -50,6 +50,8 @@ from swiss_ai_model_launch.launchers import framework as ml_framework
 from swiss_ai_model_launch.launchers.launch_args import FRAMEWORK_PORT, LaunchArgs
 from swiss_ai_model_launch.launchers.topology import Topology
 
+from scripts.common import suites
+
 HEALTH_URL = f"http://127.0.0.1:{FRAMEWORK_PORT}/health"
 API_BASE_URL = f"http://127.0.0.1:{FRAMEWORK_PORT}/v1"
 HEALTH_POLL_SECONDS = 10
@@ -83,6 +85,7 @@ def build_launch_args(
     partition: str,
     time: str,
     job_name: str,
+    pre_launch_cmds: str = "",
 ) -> LaunchArgs:
     """model-launch's LaunchArgs for a server that nothing outside the job reaches."""
     return LaunchArgs(
@@ -100,6 +103,7 @@ def build_launch_args(
             f"--served-model-name {shlex.quote(served_model_name)} "
             f"--host 0.0.0.0 {framework_args}"
         ).strip(),
+        pre_launch_cmds=pre_launch_cmds,
         disable_opentela=True,
         disable_metrics=True,
         disable_dcgm_exporter=True,
@@ -332,12 +336,15 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Serve a model and run evals against it in one Slurm job.",
     )
-    parser.add_argument("--model", required=True, help="Checkpoint directory or model path the server loads.")
-    parser.add_argument("--served-model-name", help="Name the server answers to (default: the model's basename).")
-    parser.add_argument("--nodes", type=int, default=1, help="Nodes for the one replica (default 1).")
-    parser.add_argument("--environment", required=True, help="EDF of the serving image.")
+    parser.add_argument("--suite", help="A suite (e.g. apertus2/chonk_sft): with --setup, how its model is served.")
+    parser.add_argument("--setup", help="The suite's setup to serve. What the command line names wins over it.")
+    parser.add_argument("--model", help="Checkpoint directory or model path the server loads.")
+    parser.add_argument("--served-model-name", help="Name the server answers to (default: the setup's name, else the model's basename).")
+    parser.add_argument("--nodes", type=int, help="Nodes for the one replica (default: the setup's, else 1).")
+    parser.add_argument("--environment", help="EDF of the serving image.")
     parser.add_argument("--framework", default="vllm", help="Serving framework (default vllm).")
-    parser.add_argument("--framework-args", default="", help="Extra arguments for the serving command.")
+    parser.add_argument("--framework-args", default="", help="Extra arguments for the serving command, after the setup's.")
+    parser.add_argument("--pre-launch-cmds", default="", help="A shell command every serving node runs before the server starts.")
     parser.add_argument(
         "--eval-image-commit",
         help="Commit of the eval image the commands run in (default: the last commit here that "
@@ -362,7 +369,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--partition", default="normal")
     parser.add_argument("--reservation")
     parser.add_argument("--qos", help="Slurm QOS, e.g. highprio (with --partition highprio).")
-    parser.add_argument("--time", default="04:00:00", help="Time limit: the load plus every eval (HH:MM:SS).")
+    parser.add_argument("--time", help="Time limit: the load plus every eval (HH:MM:SS; default: the setup's, else 04:00:00).")
     parser.add_argument("--job-name", help="Slurm job name (default: serve-eval-<user>).")
     parser.add_argument(
         "--ready-timeout",
@@ -383,8 +390,31 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _apply_suite(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Fill what the command line left out from the suite's launch block, then the defaults."""
+    if bool(args.suite) != bool(args.setup):
+        parser.error("--suite and --setup go together")
+    if args.suite:
+        try:
+            launch = suites.launch_for(suites.load(args.suite), args.setup)
+        except (ValueError, OSError) as error:
+            parser.error(str(error))
+        args.model = args.model or launch["model_path"]
+        args.environment = args.environment or launch["environment"]
+        args.nodes = args.nodes or launch["nodes"]
+        args.time = args.time or launch["time"]
+        args.served_model_name = args.served_model_name or args.setup
+        args.framework_args = " ".join(filter(None, [launch["framework_args"], args.framework_args]))
+    if not (args.model and args.environment):
+        parser.error("--model and --environment are required without --suite and --setup")
+    args.nodes = args.nodes or 1
+    args.time = args.time or "04:00:00"
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    _apply_suite(args, parser)
     user = getpass.getuser()
     launch_args = build_launch_args(
         model=args.model,
@@ -397,6 +427,7 @@ def main(argv: list[str] | None = None) -> int:
         partition=args.partition,
         time=args.time,
         job_name=args.job_name or f"serve-eval-{user}",
+        pre_launch_cmds=args.pre_launch_cmds,
     )
     try:
         image_commit = args.eval_image_commit or eval_image_commit()
