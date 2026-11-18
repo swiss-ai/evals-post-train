@@ -1,0 +1,21 @@
+#!/bin/bash
+# Stand-in for sbatch inside a direct-serving job (scripts/direct_serving/job.py), which
+# already runs on the allocation: run the batch script now, here, and print a job id of 0.
+# lm-eval's launcher submits its batch script and reads the id from stdout, so the script's
+# own output goes to stderr.
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --export=*)
+            IFS=, read -ra KVS <<< "${1#--export=}"
+            for kv in "${KVS[@]}"; do case "$kv" in *=*) export "$kv" ;; esac; done
+            shift ;;
+        -J|--job-name|-o|--output|-e|--error|-d|--dependency) shift 2 ;;
+        -p|--partition|-t|--time|-N|--nodes|-n|--ntasks|-A|--account) shift 2 ;;
+        -*) shift ;;
+        *) break ;;
+    esac
+done
+bash "$@" 1>&2
+STATUS=$?
+echo 0
+exit $STATUS
