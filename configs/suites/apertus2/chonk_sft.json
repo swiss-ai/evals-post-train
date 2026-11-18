@@ -1,7 +1,7 @@
 {
   "name": "apertus2-chonk-sft",
   "title": "Compare Chonk to other post-trained thinking models",
-  "description": "Benchmarks for Apertus 2 Chonk SFT and the models it is compared with (Apertus 1.5 70B and 8B, Qwen3 32B), in table order. Mean@8 for AIME, mean@4 for the rest. MATH is not listed yet: its task (hendrycks_math or minerva_math) is undecided. HLE is judged by GLM-5.3 (plain-text judge prompt), SciCode and GDPval run their code in OpenSandbox (Kata); GDPval only generates, its grading is a separate submission. HarmBench, MultiJail and Aya red-teaming are lm-eval groups judged by a fixed model through the SwissAI API (HarmBench's classifier cais/HarmBench-Llama-2-13b-cls, Llama-3.3-70B-Instruct for the other two; lower is safer); only HarmBench repeats in the harness, the other two score once.",
+  "description": "Benchmarks for Apertus 2 Chonk SFT and the models it is compared with (Apertus 1.5 70B and 8B, Qwen3 32B), in table order. Mean@8 for AIME, mean@4 for the rest. MATH is not listed yet: its task (hendrycks_math or minerva_math) is undecided. HLE is judged by GLM-5.3 (plain-text judge prompt), SciCode and GDPval run their code in OpenSandbox (Kata); GDPval only generates, its grading is a separate submission. HarmBench, MultiJail and Aya red-teaming are lm-eval groups judged by a fixed model through the SwissAI API (HarmBench's classifier cais/HarmBench-Llama-2-13b-cls, Llama-3.3-70B-Instruct for the other two; lower is safer); only HarmBench repeats in the harness, the other two score once. MedQA and MedXpertQA (text subset) are the harness's generative step-by-step tasks scored on the last \"Final Answer: X\"; HealthBench is inspect_evals' full set (5,000 conversations), each rubric criterion judged by Gemma-4-31B-it through the SwissAI API.",
   "benchmarks": [
     {"label": "MMLU", "task": "mmlu_0_shot", "framework": "inspect",
      "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null},
@@ -43,7 +43,14 @@
     {"label": "MultiJail", "task": "multijail", "framework": "lm_eval",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "unsafe", "key": null}},
     {"label": "Aya red-teaming", "task": "aya_redteaming", "framework": "lm_eval",
-     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "harmful", "key": null}}
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "harmful", "key": null}},
+    {"label": "MedQA", "task": "medqa_4options_cot", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null}},
+    {"label": "MedXpertQA", "task": "medxpertqa_cot", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null}},
+    {"label": "HealthBench", "task": "healthbench", "framework": "inspect",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "score", "key": null},
+     "task_args": {"judge_model": "openai-api/swissai/CSCS-Inference/google/gemma-4-31B-it"}}
   ],
   "setups": {
     "apertus-1.5-70b-thinking": {
