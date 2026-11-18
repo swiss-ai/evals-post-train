@@ -326,6 +326,7 @@ No manual dependency management is needed -- the launcher handles everything via
 
 - Chunk jobs do **not** upload to W&B individually. Only the aggregation job does the upload, avoiding concurrent `wandb.init(resume="allow")` conflicts.
 - Output directories are unique per job ID (`eval_<timestamp>_$SLURM_JOBID`), so file writes never collide.
+- Each job also keeps its own stdout and stderr from the point the output directory exists in `run.log` there, next to the results (Slurm's `logs/%x_%j.out`/`.err` stay and hold the whole job, including the setup before that).
 
 ---
 

@@ -655,6 +655,9 @@ fi
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
 mkdir -p "$HARNESS_EVAL_DIR"
+# Keep the job's output from here on with the results (stdout and stderr stay separate streams
+# for Slurm). Nothing in the results pipeline reads it: the readers glob results_*.json and samples_*.jsonl.
+exec > >(tee -a "$HARNESS_EVAL_DIR/run.log") 2> >(tee -a "$HARNESS_EVAL_DIR/run.log" >&2)
 cp "$EVAL_RUN_CONFIG" "$HARNESS_EVAL_DIR/.eval-run-config.json"
 
 # Generation kwargs supplied through the CLI update every task's YAML. Thinking and
