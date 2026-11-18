@@ -59,9 +59,7 @@ IMAGE_REPOSITORY = "swiss-ai/evals-post-train-eval"
 # What the image is built from: the paths of .github/workflows/eval-image.yml. A commit
 # that changes none of them runs in the image of the last one that did.
 IMAGE_INPUTS = ("containers/Dockerfile.eval", "requirements", ".github/workflows/eval-image.yml")
-# sbatch and srun that run their script or command right here: a command that submits
-# Slurm jobs of its own (lm-eval's launcher) runs inline, in the job's allocation, where
-# 127.0.0.1 is the server.
+# sbatch/srun that run in place, so lm-eval's launcher (which submits Slurm jobs) runs inline.
 INLINE_SLURM_DIR = REPO_ROOT / "scripts" / "direct_serving" / "inline_slurm"
 # What the eval image sees: this checkout, and the places runs read and write (as
 # containers/env.toml mounts them).
@@ -111,12 +109,13 @@ def build_launch_args(
 
 def eval_image_commit(repo_root: Path = REPO_ROOT) -> str:
     """The commit whose image these scripts run in: the last one that changed the image's inputs."""
-    result = subprocess.run(
-        ["git", "-C", str(repo_root), "log", "-1", "--format=%H", "--", *IMAGE_INPUTS],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(repo_root), *args], capture_output=True, text=True, check=False)
+
+    if git("rev-parse", "--is-shallow-repository").stdout.strip() == "true":
+        raise RuntimeError(f"{repo_root} is a shallow clone, so the last commit that changed the eval image's inputs may be missing: name it with --eval-image-commit")
+    result = git("log", "-1", "--format=%H", "--", *IMAGE_INPUTS)
     commit = result.stdout.strip()
     if result.returncode != 0 or not commit:
         raise RuntimeError(f"cannot tell which eval image {repo_root} runs in: {result.stderr.strip()}")
@@ -144,8 +143,20 @@ def image_published(commit: str) -> bool | None:
             return True
     except urllib.error.HTTPError as error:
         return False if error.code == 404 else None
-    except (urllib.error.URLError, OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError):  # URLError is an OSError
         return None
+
+
+def check_eval_image(commit: str) -> None:
+    """Raise when ghcr has no eval image of `commit`; warn when it could not be asked."""
+    published = image_published(commit)
+    if published is False:
+        raise RuntimeError(
+            f"ghcr.io/{IMAGE_REPOSITORY}:{commit} does not exist: push the commit that changed the "
+            "image's inputs (CI builds it), or name another with --eval-image-commit."
+        )
+    if published is None:
+        print(f"warning: could not check that the eval image {commit} exists", file=sys.stderr)
 
 
 def eval_edf(image_commit: str, mounts: list[str]) -> str:
@@ -183,7 +194,11 @@ def _fill(template: str, **values: str) -> str:
 # Raw text with @@NAME@@ marks, so it reads as bash. `nodes`, `critical_pids` and
 # `health_checker_pid` come from model-launch's script above it.
 _FOOTER = r"""
+prefetch_pid=""
 cleanup() {
+    if [[ -n "$prefetch_pid" ]]; then
+        kill "$prefetch_pid" 2>/dev/null || true
+    fi
     if [[ -n "$health_checker_pid" ]]; then
         kill "$health_checker_pid" 2>/dev/null || true
     fi
@@ -199,6 +214,10 @@ trap 'exit 130' INT
 eval_edf="$PWD/eval_image_${SLURM_JOB_ID}.toml"
 cat > "$eval_edf" <<'EVAL_EDF_EOF'
 @@EDF@@EVAL_EDF_EOF
+
+# Pull the eval image on the head node while the model loads: minutes of waiting anyway.
+srun --overlap --nodes=1 --ntasks=1 --nodelist="${nodes[0]}" --environment="$eval_edf" true &
+prefetch_pid=$!
 
 server_alive() {
     local pid
@@ -232,11 +251,14 @@ until ready; do
     waited=$((waited + @@POLL@@))
 done
 echo "The model server is ready after ${waited}s"
+if ! wait "$prefetch_pid"; then
+    echo "The eval image could not be pulled ahead of time; the first eval tries itself" >&2
+fi
 
 export EVAL_API_BASE_URL=@@API_BASE_URL@@
-# The key the runners send to --api-base-url (TARGET_API_KEY): this server has none, but
-# they want one. Judge keys (CSCS_SERVING_API) are left alone.
-export TARGET_API_KEY=local
+# The runners send TARGET_API_KEY to --api-base-url and insist on one; this server has no
+# auth, so any value will do. A key already set is kept, and judge keys are never touched.
+export TARGET_API_KEY="${TARGET_API_KEY:-local}"
 failed=0
 
 # run_eval <number> <command>: the command in the eval image on the head node, beside
@@ -266,10 +288,8 @@ exit "$failed"
 """
 
 
-def footer(
-    edf: str, evals: list[str], ready_timeout: int, repo_root: Path = REPO_ROOT, inline_slurm_dir: Path = INLINE_SLURM_DIR
-) -> str:
-    prefix = f"cd {shlex.quote(str(repo_root))} && export PATH={shlex.quote(str(inline_slurm_dir))}:$PATH && "
+def footer(edf: str, evals: list[str], ready_timeout: int) -> str:
+    prefix = f"cd {shlex.quote(str(REPO_ROOT))} && export PATH={shlex.quote(str(INLINE_SLURM_DIR))}:$PATH && "
     calls = "\n".join(
         f"run_eval {number} {shlex.quote(prefix + command)} || failed=1"
         for number, command in enumerate(evals, start=1)
@@ -311,7 +331,6 @@ def render(
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Serve a model and run evals against it in one Slurm job.",
-        epilog="Run with `python -m scripts.direct_serving.job`.",
     )
     parser.add_argument("--model", required=True, help="Checkpoint directory or model path the server loads.")
     parser.add_argument("--served-model-name", help="Name the server answers to (default: the model's basename).")
@@ -379,15 +398,11 @@ def main(argv: list[str] | None = None) -> int:
         time=args.time,
         job_name=args.job_name or f"serve-eval-{user}",
     )
-    image_commit = args.eval_image_commit or eval_image_commit()
-    published = image_published(image_commit)
-    if published is False:
-        sys.exit(
-            f"ghcr.io/{IMAGE_REPOSITORY}:{image_commit} does not exist: push the commit that "
-            "changed the image's inputs (CI builds it), or name another with --eval-image-commit."
-        )
-    if published is None:
-        print(f"warning: could not check that the eval image {image_commit} exists", file=sys.stderr)
+    try:
+        image_commit = args.eval_image_commit or eval_image_commit()
+        check_eval_image(image_commit)
+    except RuntimeError as error:
+        sys.exit(str(error))
     script = render(
         launch_args,
         image_commit=image_commit,
@@ -405,7 +420,7 @@ def main(argv: list[str] | None = None) -> int:
     path = workdir / f"job_{launch_args.job_name}.sh"
     path.write_text(script)
     path.chmod(0o755)
-    return subprocess.run(["sbatch", "--chdir", str(workdir), str(path)], check=False).returncode
+    return subprocess.run(["sbatch", "--parsable", "--chdir", str(workdir), str(path)], check=False).returncode
 
 
 if __name__ == "__main__":
