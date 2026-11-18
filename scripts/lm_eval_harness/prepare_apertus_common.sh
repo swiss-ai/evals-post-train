@@ -5,9 +5,8 @@
 #
 # For the vLLM server (docs/thinking.md): it clones the pinned commit and builds a wheel once, which
 # every node of the server installs offline. The wheel is kept in
-# ${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}/apertus-common/<commit>/, which the job's container must
-# mount (like the rest of EVAL_ENV_CACHE_ROOT). Prints that directory; EVAL_DRY_RUN=true only prints it.
-#
+# ${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}/apertus-common/<commit>/, which the server's container
+# must mount. Prints that directory; EVAL_DRY_RUN=true only prints it.
 
 set -euo pipefail
 
