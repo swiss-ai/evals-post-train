@@ -759,7 +759,10 @@ anything. `run_inspect_eval.sh` skips its install the same way. A mismatch
 a message naming both commits, so run the image with the scripts from the
 commit it was built from. This repo's own scripts don't start the image: its
 launcher has to already be running inside it. Runs started on Clariden use the
-environment-building path, with the same locks.
+environment-building path, with the same locks, unless you point
+`EVAL_PREBUILT_CONTAINER_CONFIG` at an EDF for the image (above) and set `EVAL_PREBUILT_ENV=1`:
+the launcher then runs on the login node from a checkout of the image's commit and the jobs run in
+the image (`--chat-format apertus2` on the API endpoint, highprio: tested with `ifbench`, 2026-11-18).
 
 To ship a newer harness, bump its commit in `requirements/lm-eval-harness.txt`:
 all runs use that commit. `--harness-branch`/`LM_EVAL_HARNESS_BRANCH` overrides it
