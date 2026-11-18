@@ -4,5 +4,5 @@
 # the lock's pyarrow (datasets) cannot import; it works with the lock's numpy 2. The dependencies the
 # adapter needs are in evalscope-runtime.txt; sentence-transformers and faiss-cpu (memory_vector's
 # embeddings, which would pull in torch) are left out, so memory_vector is not supported.
-# The version is the one EvalScope's bfcl requirements.txt pins.
-bfcl-eval==2025.10.27.1
+# EvalScope 1.14.0 and 1.15.0 pin 2025.10.27.1; this is the newest release (2026-03-23).
+bfcl-eval==2026.3.23
