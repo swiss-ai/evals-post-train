@@ -12,6 +12,8 @@
 #   live_code_bench  LiveCodeBench code generation, the v6 slice by default (--subset): one prompt per
 #                  problem, the code scored in a sandbox pool. Loads from ModelScope, so it cannot
 #                  share a run with the SWE-bench benchmarks; no --gold, no --sandbox k8s.
+#   bfcl_v3        BFCL v3 through EvalScope's adapter and the bfcl-eval checkers; loads from ModelScope, so
+#                  it cannot share a run with the SWE-bench benchmarks; no sandbox, no --gold.
 #   bfcl_v4        BFCL v4 (function calling) through the bfcl-eval package, native tool calls on
 #                  /v1/chat/completions (--extra-param is_fc_model=false: prompt mode); no sandbox, no
 #                  --gold. Default subsets leave out web_search_* and memory_vector, see docs/evalscope.md.
@@ -35,7 +37,7 @@
 #     --model <served model> --api-base-url <url> [options]
 #
 # Required:
-#   --benchmark <b[,b]>        swe_bench, swe_bench_pro (comma-separated for both), live_code_bench or bfcl_v4.
+#   --benchmark <b[,b]>        swe_bench, swe_bench_pro (comma-separated for both), live_code_bench, bfcl_v3 or bfcl_v4.
 #   --model <name>             Served model name at --api-base-url. The model must serve tool
 #                               calls (vLLM --enable-auto-tool-choice + parser, sglang
 #                               --tool-call-parser) for the default toolcall strategy; else
@@ -171,11 +173,11 @@ while (( $# > 0 )); do
     esac
 done
 
-[[ -n "$BENCHMARK" ]] || die "Missing --benchmark (swe_bench, swe_bench_pro, live_code_bench, bfcl_v4). See --help."
+[[ -n "$BENCHMARK" ]] || die "Missing --benchmark (swe_bench, swe_bench_pro, live_code_bench, bfcl_v3, bfcl_v4). See --help."
 IFS=',' read -ra BENCHMARK_LIST <<< "$BENCHMARK"
 for b in "${BENCHMARK_LIST[@]}"; do
-    [[ "$b" == swe_bench || "$b" == swe_bench_pro || "$b" == live_code_bench || "$b" == bfcl_v4 ]] \
-        || die "Unknown --benchmark '$b' (swe_bench, swe_bench_pro, live_code_bench or bfcl_v4)."
+    [[ "$b" == swe_bench || "$b" == swe_bench_pro || "$b" == live_code_bench || "$b" == bfcl_v3 || "$b" == bfcl_v4 ]] \
+        || die "Unknown --benchmark '$b' (swe_bench, swe_bench_pro, live_code_bench, bfcl_v3 or bfcl_v4)."
 done
 if [[ "$GOLD" == "1" ]]; then
     [[ -z "$MODEL" ]] || die "--gold scores the reference patches; drop --model."

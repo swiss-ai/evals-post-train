@@ -621,6 +621,44 @@ class CompletionsFlagTest(unittest.TestCase):
         self.assertIn("only live_code_bench", str(refused.exception))
 
 
+class BfclV3Test(unittest.TestCase):
+    def _cfg(self, *extra):
+        args = run.parse_args(["--benchmark", "bfcl_v3", "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", *extra])
+        return run.build_task_config(args, ["bfcl_v3"], run.resolved_revisions(["bfcl_v3"], []))
+
+    def test_loads_the_pinned_modelscope_dataset_without_a_sandbox(self):
+        cfg = self._cfg()
+        args = cfg["dataset_args"]["bfcl_v3"]
+        self.assertEqual(cfg["datasets"], ["bfcl_v3"])
+        self.assertEqual(args["dataset_revision"], run.BENCHMARKS["bfcl_v3"]["revision"])
+        self.assertNotIn("hf_dataset_revision", args)
+        self.assertEqual(run.dataset_hub(["bfcl_v3"]), "modelscope")
+        self.assertNotIn("sandbox", cfg)
+        self.assertFalse(run.needs_sandbox(["bfcl_v3"]))
+
+    def test_default_subsets_are_the_v3_categories(self):
+        subsets = self._cfg()["dataset_args"]["bfcl_v3"]["subset_list"]
+        self.assertEqual(len(subsets), 17)
+        self.assertIn("simple", subsets)
+        self.assertFalse([s for s in subsets if s.startswith(("web_search", "memory"))])
+        self.assertEqual(self._cfg("--subset", "simple")["dataset_args"]["bfcl_v3"]["subset_list"], ["simple"])
+
+    def test_every_sampling_setting_reaches_the_model(self):
+        with mock.patch("sys.stderr") as err:
+            self._cfg("--top-p", "0.9")
+        self.assertEqual(err.write.call_args_list, [])
+
+    def test_gold_is_refused(self):
+        with self.assertRaises(SystemExit) as gold:
+            run.main(["--benchmark", "bfcl_v3", "--work-dir", "/w", "--gold"])
+        self.assertIn("reference solutions", str(gold.exception))
+
+    def test_cannot_share_a_run_with_a_huggingface_benchmark(self):
+        with self.assertRaises(SystemExit) as refused:
+            run.dataset_hub(["bfcl_v3", "swe_bench"])
+        self.assertIn("different dataset hubs", str(refused.exception))
+
+
 class BfclV4Test(unittest.TestCase):
     def _cfg(self, *extra):
         args = run.parse_args(["--benchmark", "bfcl_v4", "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", *extra])
