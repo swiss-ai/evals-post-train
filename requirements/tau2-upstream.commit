@@ -1,0 +1,4 @@
+# The tau2-bench that the prebuilt image (containers/Dockerfile.eval) bakes in for
+# scripts/custom/run_tau2_bench.sh: "<ref> <commit>", the ref being the name --git-ref may give.
+# Upstream's own uv.lock pins its dependencies. A bump is a deliberate change of this file.
+v2.0.0 989d3285ae669e49503324bdb9981bf14fccedeb

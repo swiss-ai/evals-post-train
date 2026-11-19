@@ -46,11 +46,9 @@ _eval_container_for_backend() {
 }
 
 _eval_prestart_dependency() {
-    # Jobs the first eval wave must wait on: an optional Megatron->HF conversion
-    # (--convert-to-hf) and the environment-preparation job. Both are one-time
-    # setup, so only the attempt==0 / fail-fast submissions need this.
+    # Jobs the first eval wave must wait on: the environment-preparation job. It is
+    # one-time setup, so only the attempt==0 / fail-fast submissions need this.
     local -a jobs=()
-    [[ -n "${EVAL_CONVERT_JOB_ID:-}" ]] && jobs+=("$EVAL_CONVERT_JOB_ID")
     [[ -n "${EVAL_PREP_JOB_ID:-}" ]] && jobs+=("$EVAL_PREP_JOB_ID")
     (( ${#jobs[@]} > 0 )) || return 0
     local IFS=:

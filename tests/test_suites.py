@@ -180,7 +180,7 @@ class SuiteTests(unittest.TestCase):
         rows = suites.commands(suite, models, api_base_url="http://x/v1", limit=5, no_wandb=True,
                                qos="highprio", partition="highprio")
         self.assertEqual(len(rows), len(models) * len(suite["benchmarks"]))
-        self.assertEqual([(r["setup"], r["label"]) for r in rows[:2]], [("chonk-lc-16k-v0.2-sft", "MMLU"), ("chonk-lc-16k-v0.2-sft", "GPQA")])
+        self.assertEqual([(r["setup"], r["label"]) for r in rows[:2]], [("chonk-lc-16k-v0.2-sft", "MMLU"), ("chonk-lc-16k-v0.2-sft", "GPQA Diamond")])
         inspect_row, lm_eval_row = rows[0]["argv"], rows[2]["argv"]
         self.assertEqual(inspect_row[:3], ["sbatch", "--qos=highprio", "--partition=highprio"])
         self.assertEqual(inspect_row[-3:], ["--", "--epochs", "4"])
@@ -207,7 +207,7 @@ class SuiteTests(unittest.TestCase):
         with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
             self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m", "--model", "qwen3-32b-thinking=q"]), 0)
-        self.assertIn("32 launches: 2 models x 16 benchmarks", err.getvalue())
+        self.assertIn("28 launches: 2 models x 14 benchmarks", err.getvalue())
         for bad in (["--model", "m"], ["--model", "nope=m"], ["--model", f"{THINK}=a", "--model", f"{THINK}=b"]):
             self.assertEqual(suites.main(["run", SUITE, *bad]), 1)
 
@@ -226,13 +226,11 @@ class SuiteTests(unittest.TestCase):
             for bench in suite["benchmarks"]:
                 self.assertNotIn("--reasoning-effort", suites.flags_for(suite, other, bench["task"]))
 
-    def test_a_benchmarks_flags_follow_the_setups_and_come_before_the_epochs(self):
+    def test_a_benchmarks_flags_follow_the_setups(self):
         suite = suites.load(SUITE)
-        flags = suites.flags_for(suite, THINK, "hle")
-        self.assertEqual(flags[:1], ["--enable-thinking"])
-        self.assertEqual(flags.count("--model-role"), 2)
-        self.assertEqual(flags[-2:], ["--task-arg", "judge_prompt=grade_c_i"])
-        self.assertEqual(suites.flags_for(suite, THINK, "scicode"), ["--enable-thinking", "--sandbox", "opensandbox"])
+        flags = suites.flags_for(suite, THINK, "swe_bench")
+        self.assertEqual(flags[-2:], ["--sandbox", "opensandbox"])
+        self.assertEqual(flags[:len(suite["setups"][THINK]["flags"]["harbor"])], suite["setups"][THINK]["flags"]["harbor"])
         next(b for b in suite["benchmarks"] if b["task"] == "ifbench")["flags"] = ["--repeats", "2"]
         with self.assertRaisesRegex(ValueError, "--repeats"):
             suites.validate(suite)

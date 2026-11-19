@@ -106,6 +106,22 @@ RUN python -m venv /opt/tau2-venv \
     && rm -rf /opt/tau2-bench/.git \
     && TAU2_DATA_DIR=/opt/tau2-bench/data /opt/tau2-venv/bin/python -c "import tau2"
 
+# Upstream tau2-bench as it ships (scripts/custom/run_tau2_bench.sh, which uses it from here instead of
+# installing at run time): its checkout at the commit requirements/tau2-upstream.commit pins, with the
+# dependencies of upstream's own uv.lock in its .venv (the image's Python 3.12, no downloads).
+COPY requirements/tau2-upstream.commit /tmp/requirements/
+RUN set -- $(grep -vE '^[[:space:]]*(#|$)' /tmp/requirements/tau2-upstream.commit) \
+    && test "$#" -eq 2 \
+    && git init --quiet /opt/tau2-upstream \
+    && git -C /opt/tau2-upstream fetch --quiet --depth 1 https://github.com/sierra-research/tau2-bench.git "$2" \
+    && git -C /opt/tau2-upstream checkout --quiet FETCH_HEAD \
+    && test "$(git -C /opt/tau2-upstream rev-parse HEAD)" = "$2" \
+    && rm -rf /opt/tau2-upstream/.git \
+    && (cd /opt/tau2-upstream && UV_PYTHON_DOWNLOADS=never uv sync --frozen --no-cache --extra knowledge --python 3.12) \
+    && grep -vE '^[[:space:]]*(#|$)' /tmp/requirements/tau2-upstream.commit > /opt/tau2-upstream.ref \
+    && TAU2_DATA_DIR=/opt/tau2-upstream/data /opt/tau2-upstream/.venv/bin/python -c "import tau2" \
+    && /opt/tau2-upstream/.venv/bin/tau2 --help >/dev/null
+
 # GDPval-AA (run_gdpval.sh) in a sixth: the Stirrup agent, the dataset download and
 # the judge-panel clients.
 COPY requirements/gdpval-runtime.lock /tmp/requirements/
@@ -140,6 +156,8 @@ ENV PATH=/opt/lm-eval-venv/bin:$PATH \
     TAU2_VENV=/opt/tau2-venv \
     TAU2_DATA_DIR=/opt/tau2-bench/data \
     TAU2_COMMIT_FILE=/opt/tau2-bench.commit \
+    TAU2_UPSTREAM_DIR=/opt/tau2-upstream \
+    TAU2_UPSTREAM_REF_FILE=/opt/tau2-upstream.ref \
     GDPVAL_VENV=/opt/gdpval-venv
 
 WORKDIR /work

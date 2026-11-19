@@ -839,8 +839,6 @@ class LaunchFlowTests(unittest.TestCase):
             "unknown format": ([*api, "--chat-format", "harmony"], "--chat-format must be"),
             "bos": ([*apertus2, "--bos"], "drop --bos"),
             "ambient bos": (apertus2, "drop --bos", {"BOS": "true"}),
-            "convert": ([*apertus2, "--model", "/meg/ckpt", "--convert-to-hf", "--megatron-iter", "1000"],
-                        "drop --convert-to-hf"),
             "effort": ([*apertus2, "--reasoning-effort", "xhigh"], "low, medium or high"),
         }
         for name, (arguments, message, *env) in cases.items():
