@@ -74,7 +74,7 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
     # carries the test data and the scorer, so there is no dataset revision: the package version is the
     # pin (recorded in summary.json). The default subsets are the leaderboard's without web_search_*
     # (they need a SerpAPI key), so `overall` is not the leaderboard's. bfcl-eval's own OpenAI handler calls the model (native function
-    # calling on /v1/chat/completions) and takes only the temperature from the generation config.
+    # calling on /v1/chat/completions) and takes only the temperature from the generation config (bfcl_request.py adds reasoning_effort and extra_body).
     # No sandbox, no reference solutions.
     "bfcl_v4": {
         "evalscope": "bfcl_v4",
@@ -92,8 +92,9 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# Generation settings bfcl-eval's handler does not send (it passes only the temperature).
-BFCL_IGNORED_SETTINGS = ("top_p", "top_k", "repetition_penalty", "max_tokens", "reasoning_effort", "extra_body")
+# Generation settings bfcl-eval's handler does not send (it passes only the temperature; scripts/evalscope/bfcl_request.py
+# adds reasoning_effort and extra_body).
+BFCL_IGNORED_SETTINGS = ("top_p", "top_k", "repetition_penalty", "max_tokens")
 
 HUB_REVISION_KEY = {"huggingface": "hf_dataset_revision", "modelscope": "dataset_revision"}
 
@@ -395,16 +396,15 @@ def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dic
         # either way -- with --sandbox k8s or opensandbox, the Docker manager itself is swapped out.
         cfg["sandbox"] = {"enabled": True, "engine": "docker", "default_config": sandbox_config(args)}
     if "bfcl_v4" in names:
-        # Only the temperature reaches the model (BFCL_IGNORED_SETTINGS): say so, for settings the
-        # user asked for, rather than let a thinking or top_p flag look applied.
+        # The temperature, reasoning_effort and extra_body reach the model (bfcl_request.py); say so for
+        # the other settings the user asked for (BFCL_IGNORED_SETTINGS), rather than let a top_p flag look applied.
         asked = {
             "top_p": args.top_p, "top_k": args.top_k, "repetition_penalty": args.repetition_penalty,
-            "reasoning_effort": args.reasoning_effort, "enable_thinking": args.enable_thinking,
             **json.loads(args.generation_config),
         }
-        ignored = [key for key in (*BFCL_IGNORED_SETTINGS, "enable_thinking") if asked.get(key) is not None]
+        ignored = [key for key in BFCL_IGNORED_SETTINGS if asked.get(key) is not None]
         if ignored:
-            print(f"Warning: bfcl_v4 sends only the temperature to the model; ignoring {', '.join(ignored)}.", file=sys.stderr)
+            print(f"Warning: bfcl_v4 sends only the temperature and the thinking settings to the model; ignoring {', '.join(ignored)}.", file=sys.stderr)
     if agent:
         # Only explicitly given fields: EvalScope keeps the benchmark's own
         # strategy/max_steps for anything left unset.
@@ -560,6 +560,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         # thread, while other workers parse their first OpenAI response: they then see a half-imported
         # httpx2 ("partially initialized module 'httpx2'") and the sample is lost. Import it up front.
         import bfcl_eval.eval_checker.eval_runner  # noqa: F401
+        from scripts.evalscope import bfcl_request
+
+        bfcl_request.install(generation_config(args))
 
     import evalscope
     from evalscope.run import run_task

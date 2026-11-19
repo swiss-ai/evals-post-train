@@ -278,7 +278,7 @@ def flags_for(suite, setup_name, task, fetch=False):
     copy first (once), otherwise the flag names where it will be."""
     bench, chosen = benchmark(suite, task), setup(suite, setup_name)
     flags = list(chosen.get("task_flags", {}).get(task, chosen["flags"][bench["framework"]]))
-    if "reasoning_effort" in chosen and bench["framework"] in ("lm_eval", "inspect", "harbor"):
+    if "reasoning_effort" in chosen and bench["framework"] in ("lm_eval", "inspect", "evalscope", "harbor"):
         flags += ["--reasoning-effort", chosen["reasoning_effort"]]
     flags += bench.get("flags", [])
     repeat = bench["repeats"]["via"] == "flag"

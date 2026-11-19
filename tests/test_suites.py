@@ -216,9 +216,6 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(suite["setups"][name]["reasoning_effort"], "high")
             for bench in suite["benchmarks"]:
                 flags = suites.flags_for(suite, name, bench["task"])
-                if bench["framework"] == "evalscope":  # bfcl_v4: bfcl-eval's handler sends only the temperature
-                    self.assertNotIn("--reasoning-effort", flags)
-                    continue
                 self.assertEqual(flags.count("--reasoning-effort"), 1, (name, bench["label"]))
                 self.assertEqual(flags[flags.index("--reasoning-effort") + 1], "high")
                 self.assertEqual(suites.sampling_for(suite, name, bench["task"]), "thinking")
