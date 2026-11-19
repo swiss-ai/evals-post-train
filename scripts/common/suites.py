@@ -57,6 +57,7 @@ VIA = ("flag", "task")
 
 
 LAUNCH_KEYS = ("model_path", "environment", "nodes", "time", "framework_args")
+LAUNCH_OPTIONAL = ("env",)
 # What scripts/direct_serving/job.py sets itself on the serving command.
 LAUNCH_OWN_FLAGS = ("--model", "--served-model-name", "--host", "--port")
 
@@ -79,8 +80,13 @@ def _profile(where, name, profiles):
 
 
 def _launch(where, launch):
-    if not isinstance(launch, dict) or set(launch) != set(LAUNCH_KEYS):
-        raise ValueError(f"{where}: launch must be an object with exactly {', '.join(LAUNCH_KEYS)}")
+    if not isinstance(launch, dict) or not set(LAUNCH_KEYS) <= set(launch) <= {*LAUNCH_KEYS, *LAUNCH_OPTIONAL}:
+        raise ValueError(f"{where}: launch must be an object with {', '.join(LAUNCH_KEYS)} and optionally {', '.join(LAUNCH_OPTIONAL)}")
+    env = launch.get("env", {})
+    if not isinstance(env, dict) or not all(
+        re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(k)) and isinstance(v, str) for k, v in env.items()
+    ):
+        raise ValueError(f"{where}: launch.env must map variable names to string values")
     for key in ("model_path", "environment"):
         if not isinstance(launch[key], str) or not launch[key]:
             raise ValueError(f"{where}: launch.{key} must be a non-empty string")
@@ -278,7 +284,7 @@ def flags_for(suite, setup_name, task, fetch=False):
     copy first (once), otherwise the flag names where it will be."""
     bench, chosen = benchmark(suite, task), setup(suite, setup_name)
     flags = list(chosen.get("task_flags", {}).get(task, chosen["flags"][bench["framework"]]))
-    if "reasoning_effort" in chosen and bench["framework"] in ("lm_eval", "inspect", "harbor"):
+    if "reasoning_effort" in chosen and bench["framework"] in ("lm_eval", "inspect", "evalscope", "harbor"):
         flags += ["--reasoning-effort", chosen["reasoning_effort"]]
     flags += bench.get("flags", [])
     repeat = bench["repeats"]["via"] == "flag"
