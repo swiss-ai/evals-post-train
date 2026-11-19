@@ -3,9 +3,7 @@
 # Dropped (scored by log-likelihood): truthfulqa_mc2, commonsense_qa, hellaswag, mathqa,
 # truthfulqa_multilingual_mc2, xnli, arc_multilingual, blend_sample, cultural_bench, bbq,
 # toxigen, wmdp, and squadv2 (its task class also scores "unanswerable" by log-likelihood).
-# agieval keeps its generative members. bfcl_v3_fc adds native tool calling (the request's
-# tools field) next to the prompt-format bfcl_v3; every other backend or endpoint must drop
-# it, as it fails its whole chunk there. ifbench (not in tasks_posttrain_final.txt) is added for
+# agieval keeps its generative members. ifbench (not in tasks_posttrain_final.txt) is added for
 # thinking runs: its yaml is greedy with 1280 tokens, which the thinking budget and sampling replace.
 # Knowledge
 mmlu_flan_cot_zeroshot
@@ -57,8 +55,5 @@ realtoxicitypromptsllama_small
 realguardrails_s_ifeval
 realguardrails_tensortrust
 realguardrails_s_rules
-# Tool Use
-bfcl_v3
-bfcl_v3_fc
 # Charter Alignment
 swiss_ai_charter_alignment

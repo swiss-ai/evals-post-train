@@ -21,8 +21,6 @@
      "repeats": {"n": 8, "via": "flag"}, "metric": {"label": "mean@8", "key": null}},
     {"label": "AIME 25", "task": "aime2025", "framework": "inspect",
      "repeats": {"n": 8, "via": "flag"}, "metric": {"label": "mean@8", "key": null}},
-    {"label": "BFCL v3 (FC)", "task": "bfcl_v3_fc", "framework": "lm_eval",
-     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null}},
     {"label": "BFCL v4 (tool-call signal)", "task": "bfcl_v4", "framework": "evalscope",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null}},
     {"label": "HLE", "task": "hle", "framework": "inspect",
@@ -55,9 +53,6 @@
         "inspect": ["--enable-thinking"],
         "evalscope": [],
         "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
-      },
-      "task_flags": {
-        "bfcl_v3_fc": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>", "--api-endpoint", "chat-completions", "--api-num-concurrent", "256"]
       }
     },
     "apertus-1.5-8b-thinking": {
@@ -69,9 +64,6 @@
         "inspect": ["--enable-thinking"],
         "evalscope": [],
         "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
-      },
-      "task_flags": {
-        "bfcl_v3_fc": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>", "--api-endpoint", "chat-completions"]
       }
     },
     "qwen3-32b-thinking": {
@@ -83,9 +75,6 @@
         "inspect": ["--enable-thinking"],
         "evalscope": [],
         "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
-      },
-      "task_flags": {
-        "bfcl_v3_fc": ["--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>", "--api-endpoint", "chat-completions"]
       }
     },
     "chonk-lc-16k-v0.2-sft": {
@@ -107,9 +96,6 @@
         "inspect": [],
         "evalscope": [],
         "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 16384}"]
-      },
-      "task_flags": {
-        "bfcl_v3_fc": ["--backend", "openai", "--api-endpoint", "chat-completions", "--enable-thinking"]
       }
     },
     "chonk-lc-16k-v0.2-sft-32k": {
@@ -132,9 +118,6 @@
         "inspect": [],
         "evalscope": [],
         "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
-      },
-      "task_flags": {
-        "bfcl_v3_fc": ["--backend", "openai", "--api-endpoint", "chat-completions", "--enable-thinking"]
       }
     },
     "chonk-lc-16k-v0.1-ep1": {
@@ -156,9 +139,6 @@
         "inspect": [],
         "evalscope": [],
         "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 16384}"]
-      },
-      "task_flags": {
-        "bfcl_v3_fc": ["--backend", "openai", "--api-endpoint", "chat-completions", "--enable-thinking"]
       }
     }
   }
