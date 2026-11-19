@@ -177,7 +177,7 @@ evals-post-train/
 │   ├── inspect_ai/        # run_inspect_eval.sh/.sbatch, sandbox_patches/, opensandbox_sandbox.py (the opensandbox sandbox provider)
 │   ├── harbor/            # run_harbor_eval.sh/.sbatch, run.py (benchmarks), k8s/docker/opensandbox environments, task_patches.py
 │   ├── evalscope/         # run_evalscope_eval.sh/.sbatch, run.py, SWE-bench scorer
-│   ├── megatron_convert/  # convert_megatron_checkpoint.sbatch: a Megatron checkpoint to an HF one (also run by lm-eval's `--convert-to-hf`)
+│   ├── megatron_convert/  # convert_megatron_checkpoint.sbatch: a Megatron checkpoint to an HF one
 │   ├── aaii/              # Artificial Analysis protocol: Inspect tasks (*.py) and standalone runners (run_*.sh)
 │   ├── common/            # suites.py (suite files: `plan`, `flags`, `run`), sampling.py and thinking.py (the shared sampling and thinking policy), k8s_sandbox.py (task containers as pods: Harbor, EvalScope), opensandbox_sandbox.py (as Kata microVMs: EvalScope; Harbor's cleanup), dockerfile_replay.py (Dockerfiles replayed where images can't be built: Harbor, Inspect), wandb.sh (the W&B upload rule), lock_requirements.sh and locked_venv.sh (dependency locks)
 │   └── results/           # W&B upload, tables, exports

@@ -17,17 +17,6 @@
 #   --script <path>           - Run a model-list script (e.g. scripts/lm_eval_harness/runners/example_models.sh)
 #   --megatron-iter <iter>    - For Megatron models, specify the iteration number to evaluate
 #                               (e.g. 8926), defaults to "latest"
-#   --convert-to-hf           - Convert the Megatron checkpoint at --model to a Hugging Face
-#                               checkpoint before evaluating (via swiss-ai/Megatron-LM's
-#                               tools/checkpoint/convert.py, loader=core saver=swissai_hf).
-#                               Requires --megatron-iter <int> (no "latest": the source tree
-#                               has no latest_checkpointed_iteration.txt). Runs as its own
-#                               sbatch job that the eval job depends on; use --backend
-#                               vllm/sglang/hf afterwards, not megatron_lm.
-#   --hf-output-dir <path>    - Destination for the converted checkpoint (only with
-#                               --convert-to-hf). Default:
-#                               /capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/<name>-iter<N>
-#                               Conversion is skipped if this already has a config.json.
 #
 # Options:
 #   --name <name>        - Override the eval run name (default: auto-derived from model path)
@@ -153,10 +142,6 @@
 #   # Run a single task
 #   bash scripts/lm_eval_harness/launch_evaluations.sh single --task hellaswag --model meta-llama/Llama-3.1-8B-Instruct
 #
-#   # Convert a Megatron checkpoint to HF, then evaluate it with vLLM
-#   bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k \
-#     --model /capstor/store/cscs/swissai/infra01/apertus_checkpoints/v1p5/megatron/8B/pretraining \
-#     --backend vllm --convert-to-hf --megatron-iter 430000
 
 set -euo pipefail
 mkdir -p logs
@@ -233,8 +218,6 @@ SBATCH_ACCOUNT_FLAG=""
 FORCE_TASKS=""
 EVAL_MERGE_ONLY="false"
 EVAL_DRY_RUN="false"
-CONVERT_TO_HF="false"
-HF_OUTPUT_DIR_FLAG=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -307,8 +290,6 @@ while [[ $# -gt 0 ]]; do
         --sampling-profile)          SAMPLING_PROFILE_FLAG="$2";            shift 2 ;;
         --sampling-config)           SAMPLING_CONFIG_FLAG="$2";             shift 2 ;;
         --log-length-metrics)        LOG_LENGTH_METRICS="true";         shift ;;
-        --convert-to-hf) CONVERT_TO_HF="true";           shift ;;
-        --hf-output-dir) HF_OUTPUT_DIR_FLAG="$2";         shift 2 ;;
         *)
             echo "Error: Unknown option '$1'"
             echo "Run with no arguments for usage."
@@ -368,29 +349,9 @@ if [[ -n "$MEGATRON_ITER" ]] && [[ "$MEGATRON_ITER" != "latest" ]] && [[ ! "$MEG
     exit 1
 fi
 
-if [[ "$CONVERT_TO_HF" == "true" ]]; then
-    if [[ ! "$MEGATRON_ITER" =~ ^[0-9]+$ ]]; then
-        echo "Error: --convert-to-hf requires --megatron-iter <integer> (the checkpoint tree" \
-             "has no latest_checkpointed_iteration.txt, so 'latest' can't be resolved automatically)."
-        if [[ -n "$MODEL_PATH" && -d "$MODEL_PATH" ]]; then
-            echo "Available iter_* snapshots under $MODEL_PATH:"
-            find "$MODEL_PATH" -maxdepth 1 -type d -name 'iter_*' -printf '  %f\n' 2>/dev/null
-        fi
-        exit 1
-    fi
-elif [[ -n "$HF_OUTPUT_DIR_FLAG" ]]; then
-    echo "Error: --hf-output-dir requires --convert-to-hf"
-    exit 1
-fi
-
 # Can't specify both --model and --script
 if [[ -n "$MODEL_PATH" && -n "$SCRIPT_PATH" ]]; then
     echo "Error: --model and --script are mutually exclusive"
-    exit 1
-fi
-
-if [[ "$CONVERT_TO_HF" == "true" && -z "$MODEL_PATH" ]]; then
-    echo "Error: --convert-to-hf requires --model <megatron_checkpoint_dir> (not --script)"
     exit 1
 fi
 
@@ -477,10 +438,6 @@ case "${CHAT_FORMAT_FLAG:-template}" in
         fi
         if [[ "$BOS_FLAG" == "true" || "${BOS:-}" == "true" ]]; then
             echo "Error: --chat-format apertus2 renders the BOS token itself; drop --bos (or BOS=true)"
-            exit 1
-        fi
-        if [[ "$CONVERT_TO_HF" == "true" ]]; then
-            echo "Error: --chat-format apertus2 evaluates a served model; convert and serve the checkpoint separately (drop --convert-to-hf)"
             exit 1
         fi
         if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" || "$CHAT_TEMPLATE_OVERRIDE" == "by-type" \
@@ -894,34 +851,6 @@ if [[ -n "$MODEL_PATH" ]]; then
         [[ "${CHAT_FORMAT:-}" == "apertus2" ]] && MODEL_NAME="${MODEL_NAME}-apertus2-${PREFILL_MODE}"
         [[ -n "$REASONING_EFFORT" ]] && MODEL_NAME="${MODEL_NAME}-effort-${REASONING_EFFORT}"
     fi
-
-    # --- Convert a Megatron checkpoint to HF before evaluating it ---
-    # Submitted as its own sbatch job; the eval job(s) below depend on it (afterok),
-    # and MODEL_PATH is rewritten to the (not-yet-populated) destination now, since
-    # that's what the conversion job will have produced by the time the dependent
-    # eval job actually runs.
-    EVAL_CONVERT_JOB_ID=""
-    if [[ "$CONVERT_TO_HF" == "true" ]]; then
-        MEGATRON_LOAD_DIR="$MODEL_PATH/iter_$(printf '%07d' "$MEGATRON_ITER")"
-        if [[ ! -d "$MEGATRON_LOAD_DIR" ]]; then
-            echo "Error: Megatron checkpoint directory not found: $MEGATRON_LOAD_DIR"
-            echo "Available iter_* snapshots under $MODEL_PATH:"
-            find "$MODEL_PATH" -maxdepth 1 -type d -name 'iter_*' -printf '  %f\n' 2>/dev/null
-            exit 1
-        fi
-        HF_SAVE_DIR="${HF_OUTPUT_DIR_FLAG:-/capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/${MODEL_NAME}-iter${MEGATRON_ITER}}"
-        echo "  Convert: $MEGATRON_LOAD_DIR -> $HF_SAVE_DIR"
-        if [[ "$EVAL_DRY_RUN" == "true" ]]; then
-            echo "[DRY RUN] sbatch scripts/megatron_convert/convert_megatron_checkpoint.sbatch $MEGATRON_LOAD_DIR $HF_SAVE_DIR" >&2
-            EVAL_CONVERT_JOB_ID="dry-convert"
-        else
-            EVAL_CONVERT_JOB_ID=$(HF_TOKENIZER="${CUSTOM_TOKENIZER:-alehc/swissai-tokenizer}" \
-                sbatch --parsable scripts/megatron_convert/convert_megatron_checkpoint.sbatch "$MEGATRON_LOAD_DIR" "$HF_SAVE_DIR")
-            echo "  Conversion job: $EVAL_CONVERT_JOB_ID"
-        fi
-        MODEL_PATH="$HF_SAVE_DIR"
-    fi
-    export EVAL_CONVERT_JOB_ID
 
     export APPLY_CHAT_TEMPLATE="${CHAT_TEMPLATE_OVERRIDE:-true}"
 
