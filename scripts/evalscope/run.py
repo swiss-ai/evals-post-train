@@ -92,6 +92,25 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
         # Nothing runs next to the model, so the server's slots are the limit: 64 gave 6% over 32 (102 samples).
         "max_concurrency": 32,
     },
+    # BFCL v3: EvalScope's own adapter (dataset AI-ModelScope/bfcl_v3 on ModelScope, pinned to its master
+    # commit as of 2026-11-19) with bfcl-eval's checkers, from the same package version as v4. Unlike v4,
+    # EvalScope's model client makes the requests, so the whole generation config reaches the model and
+    # bfcl_request.py is not needed. Same default subsets as the adapter (its v3 categories, no web search
+    # or memory). No sandbox, no reference solutions.
+    "bfcl_v3": {
+        "evalscope": "bfcl_v3",
+        "hub": "modelscope",
+        "revision": "18dfeabff5ce8412f2b27daf00f1fc72a625a974",
+        "subsets": [
+            "simple", "java", "javascript", "multiple", "parallel", "parallel_multiple",
+            "irrelevance", "live_simple", "live_multiple", "live_parallel", "live_parallel_multiple",
+            "live_irrelevance", "live_relevance", "multi_turn_base", "multi_turn_miss_func",
+            "multi_turn_miss_param", "multi_turn_long_context",
+        ],
+        "extra_params": {},
+        "gold": False,
+        "sandbox": False,
+    },
 }
 
 # Samples in flight (= sandboxes alive for the sandboxed benchmarks) unless the benchmark sets its own.
@@ -265,7 +284,7 @@ def printable_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def needs_sandbox(names: List[str]) -> bool:
-    """Whether any selected benchmark runs or scores in a sandbox (BFCL v4 does not)."""
+    """Whether any selected benchmark runs or scores in a sandbox (BFCL does not)."""
     return any(BENCHMARKS[n].get("sandbox", True) for n in names)
 
 
@@ -536,7 +555,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         raise SystemExit(f"{', '.join(no_pool)} score in a sandbox pool, which --sandbox k8s does not have: use docker or opensandbox")
     os.makedirs(args.work_dir, exist_ok=True)
 
-    if needs_sandbox(names):  # BFCL v4 alone runs and scores nothing in a sandbox
+    if needs_sandbox(names):  # BFCL alone runs and scores nothing in a sandbox
         from scripts.evalscope import swe_bench_scoring
 
         swe_bench_scoring.install(sandbox_config(args))
@@ -560,11 +579,12 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         lcb_base.install()
 
-    if "bfcl_v4" in names:
+    if bfcl := [n for n in names if n.startswith("bfcl_")]:
         # EvalScope imports the scorer (every provider SDK, httpx2 among them) lazily in a worker
         # thread, while other workers parse their first OpenAI response: they then see a half-imported
         # httpx2 ("partially initialized module 'httpx2'") and the sample is lost. Import it up front.
         import bfcl_eval.eval_checker.eval_runner  # noqa: F401
+    if "bfcl_v4" in names:
         from scripts.evalscope import bfcl_request
 
         bfcl_request.install(generation_config(args))
@@ -601,7 +621,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     }
     if "swe_bench_pro" in names:
         summary["swe_bench_pro_os_commit"] = swe_bench_pro_os_commit()
-    if "bfcl_v4" in names:
+    if bfcl:
         from importlib.metadata import version
 
         summary["bfcl_eval_version"] = version("bfcl-eval")
