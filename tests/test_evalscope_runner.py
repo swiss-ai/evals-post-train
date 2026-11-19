@@ -694,14 +694,9 @@ class BfclV4Test(unittest.TestCase):
             run.main(["--benchmark", "bfcl_v4", "--work-dir", "/w", "--gold"])
         self.assertIn("reference solutions", str(gold.exception))
 
-    def test_settings_the_handler_does_not_send_are_warned_about(self):
+    def test_the_generation_config_is_not_warned_about(self):
         with mock.patch("sys.stderr") as err:
-            self._cfg("--top-p", "0.9")
-        self.assertIn("ignoring top_p", "".join(c.args[0] for c in err.write.call_args_list))
-
-    def test_the_sampling_defaults_do_not_warn(self):
-        with mock.patch("sys.stderr") as err:
-            self._cfg()
+            self._cfg("--top-p", "0.9", "--top-k", "20", "--generation-config", '{"max_tokens": 4096}')
         self.assertEqual(err.write.call_args_list, [])
 
     def test_subsets_that_would_silently_score_zero_are_refused(self):
