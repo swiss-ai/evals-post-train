@@ -643,6 +643,10 @@ class BfclV4Test(unittest.TestCase):
         self.assertEqual(len(subsets), 20)
         self.assertEqual(self._cfg("--subset", "simple_python")["dataset_args"]["bfcl_v4"]["subset_list"], ["simple_python"])
 
+    def test_concurrency_defaults_to_32_and_the_flag_wins(self):
+        self.assertEqual(self._cfg()["eval_batch_size"], 32)
+        self.assertEqual(self._cfg("--max-concurrency", "8")["eval_batch_size"], 8)
+
     def test_extra_params_pass_through(self):
         cfg = self._cfg("--extra-param", "is_fc_model=false")
         self.assertEqual(cfg["dataset_args"]["bfcl_v4"]["extra_params"], {"is_fc_model": False})

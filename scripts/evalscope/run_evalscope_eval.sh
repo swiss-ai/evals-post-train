@@ -61,7 +61,7 @@
 #   --limit <n>                 A random subset of n samples per benchmark (EvalScope's seed 42: the
 #                               same subset on every run); a fraction < 1 is a share of the dataset.
 #   --shuffle                   Shuffle the whole dataset, also without --limit (a limit always shuffles).
-#   --max-concurrency <n>       Samples in flight at once = sandboxes alive at once (default: 4).
+#   --max-concurrency <n>       Samples in flight at once = sandboxes alive at once (default: 4; bfcl_v4: 32, it has no sandbox).
 #   --max-steps <n>             Agent loop step cap (default: the benchmark's, 250 for both).
 #   --strategy <name>           swe_bench_toolcall (the default, function calling) or
 #                               swe_bench_backticks (text-based actions, no tool-call parser needed).

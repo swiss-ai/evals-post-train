@@ -89,8 +89,13 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
         "extra_params": {},
         "gold": False,
         "sandbox": False,
+        # Nothing runs next to the model, so the server's slots are the limit: 64 gave 6% over 32 (102 samples).
+        "max_concurrency": 32,
     },
 }
+
+# Samples in flight (= sandboxes alive for the sandboxed benchmarks) unless the benchmark sets its own.
+DEFAULT_CONCURRENCY = 4
 
 # Generation settings bfcl-eval's handler does not send (it passes only the temperature; scripts/evalscope/bfcl_request.py
 # adds reasoning_effort and extra_body).
@@ -131,7 +136,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     p.add_argument("--limit", type=float, default=None)
     p.add_argument("--shuffle", action="store_true", help="Shuffle the dataset (seed 42); a --limit always does.")
-    p.add_argument("--max-concurrency", type=int, default=4)
+    p.add_argument("--max-concurrency", type=int, default=None)
     p.add_argument("--max-steps", type=int, default=None)
     p.add_argument("--strategy", default=None)
     p.add_argument("--command-timeout", type=float, default=None)
@@ -386,7 +391,7 @@ def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dic
         "datasets": [BENCHMARKS[n]["evalscope"] for n in names],
         "dataset_args": dataset_args,
         "dataset_hub": hub,
-        "eval_batch_size": args.max_concurrency,
+        "eval_batch_size": args.max_concurrency or min(BENCHMARKS[n].get("max_concurrency", DEFAULT_CONCURRENCY) for n in names),
         "generation_config": generation_config(args),
         "work_dir": args.work_dir,
         "no_timestamp": True,
