@@ -1,5 +1,6 @@
 """Offline checks of scripts/custom/run_tau2_bench.sh's argument handling (no network, model or venv)."""
 
+import json
 import subprocess
 import tempfile
 import unittest
@@ -81,6 +82,52 @@ class RetrievalDefaultTest(unittest.TestCase):
         args = self._tau2_args("banking_knowledge", "--retrieval-config", "bm25_grep")
         self.assertEqual(args[args.index("--retrieval-config") + 1], "bm25_grep")
         self.assertNotIn("--retrieval-config", self._tau2_args("retail"))
+
+
+class SummaryTest(unittest.TestCase):
+    """The summary of results.json, with a stub tau2 that writes one."""
+
+    def _run(self, sims, *extra):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d, "upstream")
+            (root / ".venv/bin").mkdir(parents=True)
+            (root / "data").mkdir()
+            (root / "data/x").write_text("")
+            results = Path(d, "results.json")
+            results.write_text(json.dumps({"simulations": sims}))
+            stub = root / ".venv/bin/tau2"
+            stub.write_text(f'#!/bin/sh\nmkdir -p "$TAU2_DATA_DIR/simulations/t" && cp {results} "$TAU2_DATA_DIR/simulations/t/results.json"\n')
+            stub.chmod(0o755)
+            ref = Path(d, "ref")
+            ref.write_text("v2.0.0 " + "a" * 40 + "\n")
+            return subprocess.run(
+                ["bash", "scripts/custom/run_tau2_bench.sh", "--domain", "retail", "--model", "m", "--api-base-url", "http://x/v1",
+                 "--workdir", f"{d}/work", "--save-to", "t", *extra],
+                cwd=REPO, capture_output=True, text=True, timeout=60,
+                env={"PATH": "/usr/bin:/bin", "HOME": d, "EVAL_PREBUILT_ENV": "1",
+                     "TAU2_UPSTREAM_DIR": str(root), "TAU2_UPSTREAM_REF_FILE": str(ref)},
+            )
+
+    @staticmethod
+    def _sim(task, reward, why="user_stop"):
+        return {"task_id": task, "termination_reason": why, "reward_info": {"reward": reward} if reward is not None else None}
+
+    def test_a_complete_result_exits_zero(self):
+        result = self._run([self._sim("0", 1.0), self._sim("1", 0.0)], "--num-tasks", "2")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout[result.stdout.index("{"):])
+        self.assertEqual((summary["avg_reward"], summary["n_unscored"], summary["n_missing"]), (0.5, 0, 0))
+
+    def test_a_task_without_a_reward_is_reported_and_fails_the_run(self):
+        result = self._run([self._sim("0", 1.0), self._sim("2", None, "infrastructure_error")], "--num-tasks", "2")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('"n_unscored": 1', result.stdout)
+        self.assertIn("task 2: no reward (infrastructure_error)", result.stderr)
+
+    def test_a_simulation_missing_from_the_file_fails_the_run(self):
+        result = self._run([self._sim("0", 1.0)], "--num-tasks", "3")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("2 of 3 simulations are not in results.json", result.stderr)
 
 
 if __name__ == "__main__":

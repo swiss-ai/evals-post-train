@@ -64,7 +64,9 @@
 #   -- <extra args>             Forwarded verbatim to `tau2 run` (e.g. a domain's own options).
 #
 # Results: <--workdir>/tau2-data/simulations/<--save-to>/results.json (every simulation, reward and
-# messages); this script prints avg_reward and pass^k computed from it.
+# messages); this script prints avg_reward and pass^k computed from it over the simulations that got a reward,
+# lists the ones that did not (tau2 gives up on a task after 4 attempts: an infrastructure error, no reward) and
+# the ones missing altogether, and exits 1 if there are any, so a lost task never passes as a score.
 #
 # Example (retail smoke test against a CSCS-served model):
 #   scripts/custom/run_tau2_bench.sh --domain retail --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
@@ -285,7 +287,9 @@ RESULTS_FILE="$VIEW/simulations/$SAVE_TO/results.json"
 [[ -n "$RESULTS_FILE" && -f "$RESULTS_FILE" ]] || die "tau2 produced no results.json"
 echo "results: $RESULTS_FILE"
 
-python3 - "$RESULTS_FILE" "$NUM_TRIALS" <<'PY'
+EXPECTED=""
+[[ -z "$NUM_TASKS" ]] || EXPECTED=$((NUM_TASKS * NUM_TRIALS))
+python3 - "$RESULTS_FILE" "$NUM_TRIALS" "$EXPECTED" <<'PY'
 import json
 import math
 import sys
@@ -294,8 +298,11 @@ from collections import defaultdict
 with open(sys.argv[1]) as f:
     data = json.load(f)
 num_trials = int(sys.argv[2])
+expected = int(sys.argv[3]) if sys.argv[3] else None
 
-sims = [s for s in data.get("simulations") or [] if (s.get("reward_info") or {}).get("reward") is not None]
+all_sims = data.get("simulations") or []
+sims = [s for s in all_sims if (s.get("reward_info") or {}).get("reward") is not None]
+unscored = [s for s in all_sims if (s.get("reward_info") or {}).get("reward") is None]
 per_task = defaultdict(list)
 for s in sims:
     per_task[s["task_id"]].append(s)
@@ -323,5 +330,16 @@ for k in range(1, num_trials + 1):
         metrics[f"pass^{k}"] = sum(vals) / len(vals)
 metrics["n_tasks"] = len(per_task)
 metrics["n_simulations"] = len(sims)
+metrics["n_unscored"] = len(unscored)
+if expected is not None:
+    metrics["n_missing"] = max(expected - len(all_sims), 0)
 print(json.dumps(metrics, indent=2))
+problems = []
+for s in unscored:
+    problems.append("task %s: no reward (%s)" % (s.get("task_id"), s.get("termination_reason")))
+if expected is not None and len(all_sims) < expected:
+    problems.append("%d of %d simulations are not in results.json" % (expected - len(all_sims), expected))
+if problems:
+    print("NOT A COMPLETE RESULT: " + "; ".join(problems), file=sys.stderr)
+    raise SystemExit(1)
 PY
