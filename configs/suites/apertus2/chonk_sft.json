@@ -21,6 +21,8 @@
      "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null}},
     {"label": "AIME 25", "task": "aime2025", "framework": "inspect",
      "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null}},
+    {"label": "BFCL v3 (tool-call signal)", "task": "bfcl_v3", "framework": "evalscope",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null}},
     {"label": "BFCL v4 (tool-call signal)", "task": "bfcl_v4", "framework": "evalscope",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null}},
     {"label": "HLE", "task": "hle", "framework": "inspect",
