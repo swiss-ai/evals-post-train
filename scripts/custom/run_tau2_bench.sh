@@ -7,10 +7,12 @@
 # is the version. The model under test is reached the way run_inspect_eval.sh reaches its model;
 # the defaults are plain tau2-bench's (nothing of any leaderboard's protocol).
 #
-# The ref is checked out into a cache keyed by its commit, and `uv sync --frozen --extra knowledge`
-# installs upstream's locked dependencies into the checkout's own .venv (Python 3.12). tau2 reads
-# its data from that checkout and writes its results to <checkout>/data/simulations/<--save-to>.
-# Needs git, uv and network access to the repository the first time a commit is used.
+# In the prebuilt image (containers/Dockerfile.eval, EVAL_PREBUILT_ENV=1) the tau2-bench checkout and its
+# dependencies are baked in at the ref of requirements/tau2-upstream.commit: nothing is installed or
+# downloaded, and --git-ref must name that ref. Elsewhere the ref is checked out into a cache keyed by its
+# commit and `uv sync --frozen --extra knowledge` installs upstream's locked dependencies into the
+# checkout's own .venv (Python 3.12); that needs git, uv and network access the first time a commit is used.
+# Either way tau2 reads its data through a writable view in --workdir and writes its results there.
 #
 # Usage:
 #   scripts/custom/run_tau2_bench.sh --domain <domain> --model <model> [--api-base-url <url>] [options]
@@ -46,16 +48,20 @@
 #   --enable-thinking, --no-enable-thinking, --reasoning-effort <level>
 #                              Thinking and reasoning effort of the agent model (scripts/common/thinking.py).
 #                              The user simulator never gets them (--user-llm-args does).
-#   --git-ref <ref>            tau2-bench tag, branch or full commit (default: v2.0.0).
-#   --repo <url>               Repository the ref is looked up in (default: upstream).
+#   --git-ref <ref>            tau2-bench tag, branch or full commit (default: v2.0.0). In the prebuilt
+#                               image only the ref (or commit) baked in is accepted.
+#   --repo <url>               Repository the ref is looked up in (default: upstream; not in the image).
 #   --save-to <name>           tau2's run name, the results subdirectory (default: <domain>-<date and time>, a new
 #                               run each time). Giving the name of an earlier run resumes it (--auto-resume):
 #                               only with the same domain, model and options, else tau2 refuses.
-#   --cache-dir <path>         Where checkouts live (default: ${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}/tau2-upstream,
+#   --workdir <path>           Where the run's data view and results go (default: a temp dir under /tmp, which
+#                               a job's container loses: give a path on storage you keep).
+#   --cache-dir <path>         Outside the image: where checkouts live (default:
+#                               ${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}/tau2-upstream,
 #                               ~/.cache/evals-post-train/eval-envs/tau2-upstream without $SCRATCH).
 #   -- <extra args>             Forwarded verbatim to `tau2 run` (e.g. a domain's own options).
 #
-# Results: <checkout>/data/simulations/<--save-to>/results.json (every simulation, reward and
+# Results: <--workdir>/tau2-data/simulations/<--save-to>/results.json (every simulation, reward and
 # messages); this script prints avg_reward and pass^k computed from it.
 #
 # Example (retail smoke test against a CSCS-served model):
@@ -87,6 +93,7 @@ TAU_GIT_REF="v2.0.0"
 TAU_REPO="https://github.com/sierra-research/tau2-bench.git"
 SAVE_TO=""
 CACHE_DIR=""
+WORKDIR=""
 SAMPLING_ARGS=(--framework tau2 --format litellm --warn-greedy)
 THINKING_ARGS=(--format json)
 EXTRA_ARGS=()
@@ -105,8 +112,9 @@ while (( $# > 0 )); do
         --num-tasks) NUM_TASKS=$2; shift 2 ;;
         --seed) SEED=$2; shift 2 ;;
         --max-concurrency) MAX_CONCURRENCY=$2; shift 2 ;;
-        --temperature|--top-p|--top-k|--min-p|--repetition-penalty|--sampling-profile)
+        --temperature|--top-p|--top-k|--min-p|--repetition-penalty)
             SAMPLING_ARGS+=("$1" "$2"); shift 2 ;;
+        --sampling-profile) SAMPLING_ARGS+=(--profile "$2"); shift 2 ;;
         --sampling-config) SAMPLING_ARGS+=(--config "$2"); shift 2 ;;
         --enable-thinking|--no-enable-thinking)
             SAMPLING_ARGS+=("$1"); THINKING_ARGS+=("$1"); shift ;;
@@ -116,6 +124,7 @@ while (( $# > 0 )); do
         --repo) TAU_REPO=$2; shift 2 ;;
         --save-to) SAVE_TO=$2; shift 2 ;;
         --cache-dir) CACHE_DIR=$2; shift 2 ;;
+        --workdir) WORKDIR=$2; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         --) shift; EXTRA_ARGS+=("$@"); break ;;
         *) die "Unknown argument: $1 (see --help)" ;;
@@ -128,8 +137,6 @@ done
 [[ "$DOMAIN" =~ ^[A-Za-z0-9_-]+$ ]] || die "--domain must be a domain name, got: $DOMAIN"
 SAVE_TO=${SAVE_TO:-"$DOMAIN-$(date +%Y%m%d-%H%M%S)"}
 [[ "$SAVE_TO" =~ ^[A-Za-z0-9_.-]+$ ]] || die "--save-to must be a plain name, got: $SAVE_TO"
-command -v git >/dev/null 2>&1 || die "git is required."
-command -v uv >/dev/null 2>&1 || die "uv is required (https://docs.astral.sh/uv/): it installs upstream's uv.lock."
 
 # The agent: through the endpoint like run_inspect_eval.sh does, or a bare litellm model string.
 AGENT_LLM_ARGS='{}'
@@ -199,32 +206,60 @@ resolve_ref() {
     [[ -n "$sha" ]] && echo "$sha"
 }
 
-COMMIT=$(resolve_ref "$TAU_GIT_REF") || die "--git-ref $TAU_GIT_REF: not found in $TAU_REPO"
-[[ -n "$COMMIT" ]] || die "--git-ref $TAU_GIT_REF: not found in $TAU_REPO"
-ROOT=${CACHE_DIR:-${EVAL_ENV_CACHE_ROOT:-${SCRATCH:-${XDG_CACHE_HOME:-$HOME/.cache}/evals-post-train}/eval-envs}/tau2-upstream}
-# A venv only works with the machine and Python that built it, so the key has the architecture too.
-CHECKOUT="$ROOT/$COMMIT-$(uname -m)"
-mkdir -p "$ROOT"
+DEFAULT_REPO="https://github.com/sierra-research/tau2-bench.git"
+if [[ "${EVAL_PREBUILT_ENV:-0}" == "1" && -n "${TAU2_UPSTREAM_DIR:-}" ]]; then
+    # The prebuilt image: upstream's checkout and its .venv are baked in at requirements/tau2-upstream.commit.
+    [[ -x "$TAU2_UPSTREAM_DIR/.venv/bin/tau2" && -f "${TAU2_UPSTREAM_REF_FILE:-}" ]] ||
+        die "EVAL_PREBUILT_ENV=1 but this image has no upstream tau2-bench (TAU2_UPSTREAM_DIR=$TAU2_UPSTREAM_DIR)." \
+            "Use the image built from a commit that has requirements/tau2-upstream.commit."
+    read -r BAKED_REF BAKED_COMMIT < "$TAU2_UPSTREAM_REF_FILE"
+    [[ "$TAU_REPO" == "$DEFAULT_REPO" ]] || die "--repo is not available in the prebuilt image (it has $DEFAULT_REPO@$BAKED_REF)."
+    [[ "$TAU_GIT_REF" == "$BAKED_REF" || "$TAU_GIT_REF" == "$BAKED_COMMIT" ]] ||
+        die "--git-ref $TAU_GIT_REF: this image has tau2-bench $BAKED_REF ($BAKED_COMMIT). Use that ref," \
+            "run outside the image (EVAL_PREBUILT_ENV unset) to install another, or bump requirements/tau2-upstream.commit."
+    COMMIT=$BAKED_COMMIT
+    CHECKOUT=$TAU2_UPSTREAM_DIR
+    echo "EVAL_PREBUILT_ENV=1: tau2-bench@$COMMIT ($BAKED_REF) from $CHECKOUT, no install"
+else
+    command -v git >/dev/null 2>&1 || die "git is required."
+    command -v uv >/dev/null 2>&1 || die "uv is required (https://docs.astral.sh/uv/): it installs upstream's uv.lock."
+    COMMIT=$(resolve_ref "$TAU_GIT_REF") || die "--git-ref $TAU_GIT_REF: not found in $TAU_REPO"
+    [[ -n "$COMMIT" ]] || die "--git-ref $TAU_GIT_REF: not found in $TAU_REPO"
+    ROOT=${CACHE_DIR:-${EVAL_ENV_CACHE_ROOT:-${SCRATCH:-${XDG_CACHE_HOME:-$HOME/.cache}/evals-post-train}/eval-envs}/tau2-upstream}
+    # A venv only works with the machine and Python that built it, so the key has the architecture too.
+    CHECKOUT="$ROOT/$COMMIT-$(uname -m)"
+    mkdir -p "$ROOT"
 
-# Simultaneous runs wait for the first builder (flock is missing on macOS, where runs rarely race).
-exec 9>"$ROOT/$COMMIT.lock"
-if command -v flock >/dev/null 2>&1; then flock 9; fi
-if [[ ! -f "$CHECKOUT/.complete" ]]; then
-    echo "Installing tau2-bench@$COMMIT ($TAU_GIT_REF) into $CHECKOUT"
-    # Built in place (a venv embeds its path); an interrupted build is kept for diagnosis.
-    if [[ -e "$CHECKOUT" ]]; then mv "$CHECKOUT" "$CHECKOUT.incomplete.$(date +%s).$$"; fi
-    git init --quiet "$CHECKOUT"
-    git -C "$CHECKOUT" fetch --quiet --depth 1 "$TAU_REPO" "$COMMIT"
-    git -C "$CHECKOUT" checkout --quiet FETCH_HEAD
-    # Upstream's own pins (uv.lock); the knowledge extra is banking_knowledge's retrieval.
-    (cd "$CHECKOUT" && uv sync --frozen --quiet --extra knowledge --python 3.12) ||
-        die "uv sync --frozen of tau2-bench@$COMMIT failed (does that ref have a uv.lock and a knowledge extra?)"
-    [[ -x "$CHECKOUT/.venv/bin/tau2" ]] || die "tau2-bench@$COMMIT installed no tau2 command."
-    touch "$CHECKOUT/.complete"
+    # Simultaneous runs wait for the first builder (flock is missing on macOS, where runs rarely race).
+    exec 9>"$ROOT/$COMMIT.lock"
+    if command -v flock >/dev/null 2>&1; then flock 9; fi
+    if [[ ! -f "$CHECKOUT/.complete" ]]; then
+        echo "Installing tau2-bench@$COMMIT ($TAU_GIT_REF) into $CHECKOUT"
+        # Built in place (a venv embeds its path); an interrupted build is kept for diagnosis.
+        if [[ -e "$CHECKOUT" ]]; then mv "$CHECKOUT" "$CHECKOUT.incomplete.$(date +%s).$$"; fi
+        git init --quiet "$CHECKOUT"
+        git -C "$CHECKOUT" fetch --quiet --depth 1 "$TAU_REPO" "$COMMIT"
+        git -C "$CHECKOUT" checkout --quiet FETCH_HEAD
+        # Upstream's own pins (uv.lock); the knowledge extra is banking_knowledge's retrieval.
+        (cd "$CHECKOUT" && uv sync --frozen --quiet --extra knowledge --python 3.12) ||
+            die "uv sync --frozen of tau2-bench@$COMMIT failed (does that ref have a uv.lock and a knowledge extra?)"
+        [[ -x "$CHECKOUT/.venv/bin/tau2" ]] || die "tau2-bench@$COMMIT installed no tau2 command."
+        touch "$CHECKOUT/.complete"
+    fi
+    exec 9>&-
+    touch "$CHECKOUT/.complete"  # also refreshes it for age-based scratch retention
+    echo "tau2-bench@$COMMIT ($TAU_GIT_REF) from $CHECKOUT"
 fi
-exec 9>&-
-touch "$CHECKOUT/.complete"  # also refreshes it for age-based scratch retention
-echo "tau2-bench@$COMMIT ($TAU_GIT_REF) from $CHECKOUT"
+
+# tau2 reads its data from TAU2_DATA_DIR and writes its results next to it: a writable view of the checkout's
+# data in the workdir (the image is read-only), the same way for both sources.
+WORKDIR=${WORKDIR:-"$(mktemp -d /tmp/tau2-custom.XXXXXX)"}
+VIEW="$WORKDIR/tau2-data"
+mkdir -p "$VIEW"
+for entry in "$CHECKOUT"/data/* "$CHECKOUT"/data/.[!.]*; do
+    [[ -e "$entry" && "$(basename "$entry")" != simulations ]] && ln -sfn "$entry" "$VIEW/"
+done
+export TAU2_DATA_DIR="$VIEW"
 
 ARGS=(run --domain "$DOMAIN"
       --agent-llm "$AGENT_LLM" --agent-llm-args "$AGENT_LLM_ARGS"
@@ -239,11 +274,10 @@ ARGS=(run --domain "$DOMAIN"
 echo "+ tau2 run --domain $DOMAIN --agent-llm $AGENT_LLM --user-llm $USER_LLM" \
      "--num-trials $NUM_TRIALS --max-steps $MAX_STEPS --seed $SEED" \
      "--max-concurrency $MAX_CONCURRENCY (llm args carry the keys; not shown)"
-# Data and results are the checkout's: tau2 resolves them relative to its own source tree.
 (cd "$CHECKOUT" && .venv/bin/tau2 "${ARGS[@]}")
 
-RESULTS_FILE="$CHECKOUT/data/simulations/$SAVE_TO/results.json"
-[[ -f "$RESULTS_FILE" ]] || RESULTS_FILE=$(find "$CHECKOUT/data" -path "*/$SAVE_TO/results.json" 2>/dev/null | head -1)
+RESULTS_FILE="$VIEW/simulations/$SAVE_TO/results.json"
+[[ -f "$RESULTS_FILE" ]] || RESULTS_FILE=$(find "$VIEW/" -path "*/$SAVE_TO/results.json" 2>/dev/null | head -1)
 [[ -n "$RESULTS_FILE" && -f "$RESULTS_FILE" ]] || die "tau2 produced no results.json"
 echo "results: $RESULTS_FILE"
 

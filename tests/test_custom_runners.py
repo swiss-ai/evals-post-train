@@ -33,6 +33,16 @@ class CustomTau2Test(unittest.TestCase):
         self.assertIn("domain name", run("--domain", "a b; rm", "--model", "m").stderr)
         self.assertIn("plain name", run("--domain", "retail", "--model", "m", "--save-to", "../x").stderr)
 
+    def test_the_sampling_flags_reach_the_sampling_helper(self):
+        # Past the sampling step the run needs uv, which this environment lacks: that is where it must stop.
+        result = run("--domain", "retail", "--model", "m", "--api-base-url", "http://x/v1", "--sampling-profile", "thinking",
+                     "--temperature", "0.6", "--top-p", "0.95", "--reasoning-effort", "high")
+        self.assertNotIn("unrecognized arguments", result.stderr)
+        self.assertIn("uv is required", result.stderr)
+        bad = run("--domain", "retail", "--model", "m", "--api-base-url", "http://x/v1", "--sampling-profile", "nope")
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertNotIn("uv is required", bad.stderr)
+
     def test_unknown_argument_is_refused(self):
         result = run("--domain", "retail", "--model", "m", "--bogus")
         self.assertNotEqual(result.returncode, 0)
