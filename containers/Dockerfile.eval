@@ -43,6 +43,12 @@ RUN /opt/lm-eval-venv/bin/python -m nltk.downloader -d /opt/lm-eval-venv/nltk_da
         punkt punkt_tab stopwords averaged_perceptron_tagger_eng \
     && /opt/lm-eval-venv/bin/python -c "import nltk; nltk.data.find('tokenizers/punkt_tab/english/')"
 
+# apertus-common (--chat-format apertus2), at the commit requirements/apertus2.txt pins: --no-deps,
+# its dependencies are in the lock above.
+COPY requirements/apertus2.txt /tmp/requirements/
+RUN /opt/lm-eval-venv/bin/pip install --no-cache-dir --no-deps -r /tmp/requirements/apertus2.txt \
+    && /opt/lm-eval-venv/bin/python -c "import apertus_common"
+
 # Inspect gets its own virtualenv: lm-eval-harness pins datasets==4.0.0, and
 # in one environment pip would resolve inspect-evals to the last release that
 # accepts it (January 2026) instead of the pinned one. run_inspect_eval.sh puts

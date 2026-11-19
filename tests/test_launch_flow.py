@@ -345,26 +345,14 @@ class LaunchFlowTests(unittest.TestCase):
                     manifest,
                 )
 
-    def test_prebuilt_apertus2_run_names_the_wheel_of_the_pinned_apertus_common(self) -> None:
-        pin = (REPO_ROOT / "requirements/apertus2.txt").read_text().rsplit("@", 1)[1].strip()
-        api = ["single", "--task", "gsm8k", "--backend", "openai", "--api-base-url", "http://localhost:8000",
-               "--api-model-name", "test-model"]
-        with tempfile.TemporaryDirectory() as cache:
-            completed, manifest = _prebuilt_dry_run(
-                *api, "--chat-format", "apertus2", "--tokenizer", "/ckpt", "--max-length", "65536",
-                EVAL_ENV_CACHE_ROOT=cache,
-            )
-            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
-            # The image has no apertus-common: the launcher names the wheel it builds for the pin
-            # (a dry run builds nothing), and the job installs that offline.
-            self.assertIn(f"EVAL_APERTUS_COMMON_WHEELS={cache}/apertus-common/{pin}", manifest)
-            self.assertFalse(list(Path(cache).rglob("*.whl")))
-            # Other runs don't need it.
-            completed, manifest = _prebuilt_dry_run(*api, EVAL_ENV_CACHE_ROOT=cache)
-            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
-            self.assertNotIn("EVAL_APERTUS_COMMON_WHEELS", manifest)
-        self.assertIn("'$EVAL_APERTUS_COMMON_WHEELS'/*.whl", SBATCH)
-        self.assertIn("--no-index", SBATCH)
+    def test_prebuilt_image_has_the_pinned_apertus_common(self) -> None:
+        # The image installs requirements/apertus2.txt and the job checks the import: the launcher
+        # builds and names no wheel.
+        dockerfile = (REPO_ROOT / "containers/Dockerfile.eval").read_text()
+        self.assertIn("-r /tmp/requirements/apertus2.txt", dockerfile)
+        self.assertIn("lm_eval, apertus_common'", SBATCH)
+        self.assertNotIn("EVAL_APERTUS_COMMON_WHEELS", SBATCH)
+        self.assertNotIn("EVAL_APERTUS_COMMON_WHEELS", (REPO_ROOT / "scripts/lm_eval_harness/evaluation_orchestrator.sh").read_text())
 
     def test_prebuilt_container_config_names_the_edf_of_the_jobs(self) -> None:
         api = ["single", "--task", "gsm8k", "--backend", "openai", "--api-base-url", "http://localhost:8000",
@@ -871,7 +859,7 @@ class LaunchFlowTests(unittest.TestCase):
     def test_evaluate_checks_apertus2_runs(self) -> None:
         accepted = _chat_format()
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
-        # The prebuilt image runs this format too (the job installs apertus-common).
+        # The prebuilt image runs this format too (the image has apertus-common).
         prebuilt = _chat_format(EVAL_ENV_KIND="prebuilt")
         self.assertEqual(prebuilt.returncode, 0, prebuilt.stderr)
         refusals = {
