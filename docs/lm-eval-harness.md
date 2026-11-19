@@ -730,8 +730,10 @@ in `requirements/lm-eval-harness.txt` (as `--no-deps` overlays under
 `/opt/lm-eval-harness/<owner>/<repo>`, the same layout `build_eval_env.sh`
 produces). lm-eval's own packages live in `/opt/lm-eval-venv` (`LM_EVAL_VENV`),
 which comes first on `PATH`, so the image's `python` is that venv's (Python 3.13, as
-`apertus-common` requires). CI (`.github/workflows/eval-image.yml`) publishes it for every
-pushed commit as `ghcr.io/swiss-ai/evals-post-train-eval:<commit>`.
+`apertus-common` requires). CI (`.github/workflows/eval-image.yml`) publishes it as
+`ghcr.io/swiss-ai/evals-post-train-eval:<commit>` for every pushed commit that changes what it is built from
+(`containers/Dockerfile.eval`, `requirements/`, the workflow). A commit that changes none of them runs in the image of the
+last one that did: `git log -1 --format=%H -- containers/Dockerfile.eval requirements .github/workflows/eval-image.yml`.
 
 On a Slurm cluster, `EVAL_PREBUILT_ENV=1` also needs the EDF that starts that image: set
 `EVAL_PREBUILT_CONTAINER_CONFIG` to a file with `image = "ghcr.io#swiss-ai/evals-post-train-eval:<commit>"`

@@ -23,6 +23,8 @@ Evaluation infrastructure for LLMs on CSCS Alps (Clariden), with results in W&B.
 
 ¹ The CSCS serving API (`https://api.swissai.svc.cscs.ch/v1`), which serves only models launched and registered there, or a server you start yourself, e.g. `vllm serve <checkpoint>` on a Clariden node, passed by its own URL (no registration).
 
+One Slurm job can also serve the model (on several nodes if it needs them) and run evals against it on the same nodes, with no gateway between: [docs/direct-serving.md](docs/direct-serving.md).
+
 Every runner except the in-job lm-eval backends can also run from the prebuilt image (`containers/Dockerfile.eval`, [details](docs/lm-eval-harness.md#prebuilt-evaluation-image-no-installs-at-run-time)), which installs nothing at run time.
 
 ### Chat template

@@ -1,0 +1,12 @@
+#!/bin/bash
+# Stand-in for srun inside a direct-serving job: drop the Slurm and container flags and
+# run the command here, already in the eval image.
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -n|-N|-c|--ntasks|--nodes|--cpus-per-task|--mpi|--environment|--export|-p|--partition|-t|--time|-o|--output|-e|--error|-J|--job-name) shift 2 ;;
+        --) shift; break ;;
+        -*) shift ;;
+        *) break ;;
+    esac
+done
+exec "$@"
