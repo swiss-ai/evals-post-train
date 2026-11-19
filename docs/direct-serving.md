@@ -12,10 +12,10 @@ The serving half is model-launch's rendering of a serving job (head and follower
 
 ## Run it
 
-On a Clariden login node, with `swiss_ai_model_launch` installed ([setup](lm-eval-harness.md#judge-model-launching)). 2-node Apertus 2 Chonk, one benchmark:
+On a Clariden login node, from the root of this checkout; `scripts/direct_serving/job.sh` runs `job.py` from a cached venv of `requirements/direct-serving.lock` (the model-launch commit it renders its serving job from, pinned; `uv` finds or fetches the Python, 3.11 or newer), so there is nothing to install by hand. `DIRECT_SERVING_VENV` points it at another venv instead. 2-node Apertus 2 Chonk, one benchmark:
 
 ```bash
-python -m scripts.direct_serving.job \
+scripts/direct_serving/job.sh \
   --model /capstor/store/cscs/swissai/infra01/apertus_checkpoints/v2/hf/chonk/<checkpoint> \
   --served-model-name chonk --nodes 2 --time 04:00:00 \
   --environment containers/env_vllm_apertus2.toml \
@@ -47,7 +47,7 @@ Use each framework's own launcher with `--api-base-url "$EVAL_API_BASE_URL"` and
 A [suite](suites.md) setup with a `launch` block says how its model is served: `--suite` and `--setup` fill in the checkpoint, the serving EDF, the nodes, the time and the framework arguments (the launch block's, then the setup's `serving` arguments, then `--framework-args`). The model is served under the setup's name unless `--served-model-name` says otherwise. What the command line names wins.
 
 ```bash
-python -m scripts.direct_serving.job --suite apertus2/chonk_sft --setup chonk-lc-16k-v0.2-sft \
+scripts/direct_serving/job.sh --suite apertus2/chonk_sft --setup chonk-lc-16k-v0.2-sft \
   --pre-launch-cmds "<install the apertus-common plugin>" \
   --eval 'scripts/inspect_ai/run_inspect_eval.sh --task gsm8k --model chonk-lc-16k-v0.2-sft --api-base-url "$EVAL_API_BASE_URL" --limit 5' \
   --submit

@@ -112,12 +112,12 @@ sbatch                       scripts/direct_serving/job.py
 - **The end:** the job ends with status 1 if the server died or any command failed; a failed command does not stop the next one.
 - **A suite** can say how its model is served: a setup's `launch` block (checkpoint, serving EDF, nodes, time, parallelism) is read by `--suite` and `--setup`, and the setup's `serving` arguments are added ([docs/suites.md](docs/suites.md)).
 
-Run it from the root of this checkout on a Clariden login node, in a Python that has `swiss_ai_model_launch` ([setup](docs/lm-eval-harness.md#judge-model-launching)); the checkout has to be on storage the compute nodes see. `--submit` submits the job and prints its id; without it the job script is printed. The job's logs are in `~/.sml/logs/<job id>/` (`--workdir` changes it): `log.out` for the commands, `replica_0.out`/`.err` for the server. Each runner writes its results where it always does.
+Run it from the root of this checkout on a Clariden login node, with `scripts/direct_serving/job.sh` (it builds and reuses its own pinned venv, nothing to install by hand); the checkout has to be on storage the compute nodes see. `--submit` submits the job and prints its id; without it the job script is printed. The job's logs are in `~/.sml/logs/<job id>/` (`--workdir` changes it): `log.out` for the commands, `replica_0.out`/`.err` for the server. Each runner writes its results where it always does.
 
 **A model by hand**: Qwen3-32B on one node, Inspect and lm-eval, 3 samples each. `--framework-args` follow `--model`, `--served-model-name` and `--host`, which the launcher sets; lm-eval needs `--failure-policy fail-fast` here, and a Hugging Face name or a path as `--tokenizer`, not the served name.
 
 ```bash
-python -m scripts.direct_serving.job \
+scripts/direct_serving/job.sh \
   --model /capstor/store/cscs/swissai/infra01/hf_models/models/Qwen/Qwen3-32B --served-model-name qwen3-32b \
   --nodes 1 --time 01:00:00 --environment containers/env_vllm.toml \
   --framework-args "--tensor-parallel-size 4 --max-model-len 32768 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser hermes" \
@@ -129,7 +129,7 @@ python -m scripts.direct_serving.job \
 **A suite setup**: Chonk (`apertus2/chonk_sft`, setup `chonk-lc-16k-v0.2-sft`) on 2 nodes. The setup's `launch` block gives the checkpoint, the Apertus 2 serving EDF, 2 nodes, 24 h and the tensor-parallel 1 x data-parallel 8 layout over Ray; its `serving` arguments make the server render the Apertus 2 format. The server needs the `apertus-common` vLLM plugin, which its image does not contain: the install is `--pre-launch-cmds` (the commit is pinned in `requirements/apertus2.txt`, [details](docs/thinking.md#apertus-2-on-v1chatcompletions-temporary)). The model is served as `chonk-lc-16k-v0.2-sft`, the setup's name; `--time` overrides the suite's 24 h.
 
 ```bash
-python -m scripts.direct_serving.job --suite apertus2/chonk_sft --setup chonk-lc-16k-v0.2-sft --time 01:00:00 \
+scripts/direct_serving/job.sh --suite apertus2/chonk_sft --setup chonk-lc-16k-v0.2-sft --time 01:00:00 \
   --pre-launch-cmds "pip install -q --no-deps --force-reinstall --ignore-requires-python 'git+https://github.com/swiss-ai/apertus-common.git@<pin of requirements/apertus2.txt>'" \
   --eval 'scripts/inspect_ai/run_inspect_eval.sh --task gsm8k --model chonk-lc-16k-v0.2-sft --api-base-url "$EVAL_API_BASE_URL" --limit 5 --no-wandb' \
   --submit
