@@ -1,6 +1,6 @@
 # Evals-Post-Train Evaluations
 
-Evaluation infrastructure for LLMs on CSCS Alps (Clariden), with results in W&B. Four evaluation frameworks run side by side, each with its own folder in `scripts/`, entry point, environment and doc:
+Evaluation infrastructure for LLMs on CSCS Alps (Clariden), with results in W&B. Five evaluation frameworks run side by side, each with its own folder in `scripts/`, entry point, environment and doc:
 
 | Framework | Benchmarks | Entry point | Docs |
 |---|---|---|---|
@@ -8,6 +8,7 @@ Evaluation infrastructure for LLMs on CSCS Alps (Clariden), with results in W&B.
 | [Inspect AI](https://inspect.aisi.org.uk/) | Benchmarks with their own scorer, judge or simulated user (tau2-bench, HLE, AA-LCR, ...) | `scripts/inspect_ai/run_inspect_eval.sh` | [docs/inspect-ai.md](docs/inspect-ai.md) |
 | [Harbor](https://github.com/harbor-framework/harbor) | Agentic coding and terminal benchmarks (SWE-bench, Terminal-Bench, DeepSWE, Aider Polyglot, ...) | `scripts/harbor/run_harbor_eval.sh` | [docs/harbor.md](docs/harbor.md) |
 | [EvalScope](https://github.com/modelscope/evalscope) | SWE-bench Verified / Pro, BFCL v4 (tool calls) | `scripts/evalscope/run_evalscope_eval.sh` | [docs/evalscope.md](docs/evalscope.md) |
+| [gaia2-runner](https://github.com/facebookresearch/meta-agents-research-environments/tree/main/gaia2-cli) | Omnilingual GAIA2 (agents on simulated phone apps, 10 languages) | `scripts/gaia2/run_gaia2_eval.sh` | [docs/gaia2.md](docs/gaia2.md) |
 
 `scripts/aaii/` has Artificial Analysis's versions of some benchmarks ([docs/inspect-ai.md](docs/inspect-ai.md)). Results: [docs/results.md](docs/results.md) (W&B, tables, Every Eval Ever / Hugging Face exports). Every launcher takes the same sampling flags (`--temperature`, `--top-p`, `--top-k`, `--min-p`, `--repetition-penalty`) over one default policy: [docs/sampling.md](docs/sampling.md). The same goes for thinking and reasoning effort (`--enable-thinking`, `--no-enable-thinking`, `--reasoning-effort`): [docs/thinking.md](docs/thinking.md). A comparison's benchmarks, repeats and per-setup flags are written down in a suite file: [docs/suites.md](docs/suites.md).
 
@@ -20,6 +21,7 @@ Evaluation infrastructure for LLMs on CSCS Alps (Clariden), with results in W&B.
 | Inspect AI | an OpenAI-compatible endpoint¹ (`--api-base-url`), or an Inspect provider (`--model anthropic/...`) | local machine, or Clariden CPU job in a CSCS container (`run_inspect_eval.sbatch`) | local Docker, `--sandbox local` without Docker, or Kata microVMs through OpenSandbox (`--sandbox opensandbox`) |
 | Harbor | an OpenAI-compatible endpoint¹; `--gold`: no model | local machine, Clariden CPU job (`run_harbor_eval.sbatch`), or a Kubernetes pod | local Docker, Kubernetes pods (`--sandbox k8s`; Breithorn from Clariden), or Kata microVMs through OpenSandbox (`--sandbox opensandbox`) |
 | EvalScope | an OpenAI-compatible endpoint¹ (tool calling for the default agent); `--gold`: no model | local machine, Clariden CPU job (`run_evalscope_eval.sbatch`), or a Kubernetes pod | local Docker, Kubernetes pods (`--sandbox k8s`; Breithorn from Clariden), or Kata microVMs through OpenSandbox (`--sandbox opensandbox`) |
+| gaia2-runner | an OpenAI-compatible endpoint¹ the sandboxes reach (the gateway; tool calling); `--gold`: no model | local machine, Clariden CPU job (`run_gaia2_eval.sbatch`), or a Kubernetes pod | Kata microVMs through OpenSandbox (always) |
 
 ¹ The CSCS serving API (`https://api.swissai.svc.cscs.ch/v1`), which serves only models launched and registered there, or a server you start yourself, e.g. `vllm serve <checkpoint>` on a Clariden node, passed by its own URL (no registration).
 
@@ -84,6 +86,13 @@ scripts/evalscope/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --li
   --model <served model with tool calling> --api-base-url https://api.swissai.svc.cscs.ch/v1
 ```
 
+**Omnilingual GAIA2**: five German execution scenarios, each in a Kata microVM on OpenSandbox (`OPENSANDBOX_API_KEY`). The agent calls the model from inside the sandbox, so the endpoint must be one the sandbox reaches, and serve tool calls.
+
+```bash
+scripts/gaia2/run_gaia2_eval.sh --model SwissAI-Research/swiss-ai/chonk-lc-16k-v0.2-sft \
+  --api-base-url https://api.swissai.svc.cscs.ch/v1 --language deu_Latn --subset execution --limit 5 --no-wandb
+```
+
 **Suites**: a whole comparison (every benchmark, for each model setup) from one suite file. Without `--submit` it only prints the launch commands ([docs/suites.md](docs/suites.md)).
 
 ```bash
@@ -91,9 +100,9 @@ python -m scripts.common.suites run apertus2/chonk_sft --api-base-url https://ap
   --model chonk-lc-16k-v0.2-sft=<served name> --limit 5 --no-wandb      # add --submit to launch
 ```
 
-`--limit N` is a random subset of N samples per task (seed 42, so the same subset on every run) in all four frameworks, not the first N. lm-eval, EvalScope and Harbor also take a fraction below 1 (`--limit 0.5`: a random half); Inspect takes whole numbers only.
+`--limit N` is a random subset of N samples per task (seed 42, so the same subset on every run) in every framework, not the first N. lm-eval, EvalScope and Harbor also take a fraction below 1 (`--limit 0.5`: a random half); Inspect takes whole numbers only.
 
-The examples above are smoke tests, hence `--no-wandb`. Otherwise all four frameworks upload the results to W&B whenever a W&B key is available, by default to `apertus/e-p-t-pool` (change it with `--wandb-entity`/`--wandb-project`, skip it with `--no-wandb` or `WANDB_MODE=disabled`; `--gold` runs are never uploaded). Each doc has more: Clariden jobs, checkpoints, reference-solution (gold) checks, judges, reasoning metrics.
+The examples above are smoke tests, hence `--no-wandb`. Otherwise every framework uploads the results to W&B whenever a W&B key is available, by default to `apertus/e-p-t-pool` (change it with `--wandb-entity`/`--wandb-project`, skip it with `--no-wandb` or `WANDB_MODE=disabled`; `--gold` runs are never uploaded). Each doc has more: Clariden jobs, checkpoints, reference-solution (gold) checks, judges, reasoning metrics.
 
 ---
 
@@ -156,7 +165,7 @@ Every runner reads it (`scripts/common/secrets.sh`). A variable already set in t
 | `OPENAI_API_KEY` | lm-eval jobs, `run_inspect_eval.sbatch` | The optional `gpt` suite (falls back to `CSCS_SERVING_API` in lm-eval jobs), and Inspect `openai/...` model roles. |
 | `WANDB_API_KEY` | all four frameworks | Uploading results to Weights & Biases. |
 | `CRITPT_API_KEY` | `run_inspect_eval.sh` | Optional: grading for CritPt (`scripts/aaii/aa_critpt.py`); ask critpt@artificialanalysis.ai for access. Without it, the submissions are written to a local file. |
-| `OPENSANDBOX_API_KEY` | `run_harbor_eval.sh`, `run_evalscope_eval.sh`, `run_inspect_eval.sh`, `run_gdpval.sh` | Optional: `--sandbox opensandbox` (`--sandbox-backend opensandbox` for `run_gdpval.sh`). |
+| `OPENSANDBOX_API_KEY` | `run_harbor_eval.sh`, `run_evalscope_eval.sh`, `run_inspect_eval.sh`, `run_gdpval.sh`, `run_gaia2_eval.sh` | `--sandbox opensandbox` (`--sandbox-backend opensandbox` for `run_gdpval.sh`); always for `run_gaia2_eval.sh`. |
 | `ANTHROPIC_API_KEY` or `PORTKEY_API_KEY` | `run_harbor_eval.sh` | Senior SWE-bench model runs: its LLM graders, part of the reward. Without either, the runner refuses such a run (`--gold` needs neither). |
 
 ---
@@ -177,12 +186,13 @@ evals-post-train/
 │   ├── inspect_ai/        # run_inspect_eval.sh/.sbatch, sandbox_patches/, opensandbox_sandbox.py (the opensandbox sandbox provider)
 │   ├── harbor/            # run_harbor_eval.sh/.sbatch, run.py (benchmarks), k8s/docker/opensandbox environments, task_patches.py
 │   ├── evalscope/         # run_evalscope_eval.sh/.sbatch, run.py, SWE-bench scorer
+│   ├── gaia2/             # run_gaia2_eval.sh/.sbatch, run.py (configs per language and subset, summary.json), opensandbox_launcher.py (gaia2-runner's containers as Kata microVMs)
 │   ├── aaii/              # Artificial Analysis protocol: Inspect tasks (*.py) and standalone runners (run_*.sh)
 │   ├── common/            # suites.py (suite files: `plan`, `flags`, `run`), sampling.py and thinking.py (the shared sampling and thinking policy), k8s_sandbox.py (task containers as pods: Harbor, EvalScope), opensandbox_sandbox.py (as Kata microVMs: EvalScope; Harbor's cleanup), dockerfile_replay.py (Dockerfiles replayed where images can't be built: Harbor, Inspect), wandb.sh (the W&B upload rule), lock_requirements.sh and locked_venv.sh (dependency locks)
 │   └── results/           # W&B upload, tables, exports
 ├── configs/               # sampling_defaults.json, suites/ (comparison definitions), export mappings; archive/: lm-eval task lists, main-table metrics, model registry
 ├── containers/            # Enroot/Pyxis configs (serving images, env_vllm_apertus2.toml for Apertus 2) and the prebuilt evaluation image (Dockerfile.eval)
 ├── requirements/          # Dependencies per framework environment: .txt (edited) and .lock (generated; see CONTRIBUTING.md for what installs which)
-├── docs/                  # One doc per framework, plus direct-serving.md, results.md, sampling.md, thinking.md, suites.md and repeated_sampling.md
+├── docs/                  # One doc per framework (gaia2.md for Omnilingual GAIA2), plus direct-serving.md, results.md, sampling.md, thinking.md, suites.md and repeated_sampling.md
 └── tests/
 ```

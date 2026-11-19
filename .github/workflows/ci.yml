@@ -98,3 +98,25 @@ jobs:
 
       - name: Run Harbor runner tests
         run: python -m unittest tests.test_harbor_runner tests.test_harbor_wandb -v
+
+  gaia2:
+    # gaia2-runner needs Python >= 3.12 and its own pinned set; the default job skips these.
+    name: GAIA2 runner tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install the GAIA2 runtime
+        run: python -m pip install -r requirements/gaia2-runtime.lock
+
+      - name: Run GAIA2 runner tests
+        run: python -m unittest tests.test_gaia2_runner tests.test_gaia2_opensandbox tests.test_gaia2_wandb -v

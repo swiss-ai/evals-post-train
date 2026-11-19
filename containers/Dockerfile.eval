@@ -119,6 +119,13 @@ RUN python -m venv /opt/gdpval-venv \
     && /opt/gdpval-venv/bin/pip install --no-cache-dir -r /tmp/requirements/gdpval-runtime.lock \
     && /opt/gdpval-venv/bin/python -c "import stirrup.tools.code_backends.e2b"
 
+# Omnilingual GAIA2 (run_gaia2_eval.sh) in a seventh: Meta's gaia2-runner (git installs of one
+# meta-agents-research-environments commit) and the OpenSandbox SDK its scenarios run through.
+COPY requirements/gaia2-runtime.lock /tmp/requirements/
+RUN python -m venv /opt/gaia2-venv \
+    && /opt/gaia2-venv/bin/pip install --no-cache-dir -r /tmp/requirements/gaia2-runtime.lock \
+    && /opt/gaia2-venv/bin/python -c "import gaia2_runner.cli, opensandbox.sync"
+
 # Each pinned harness as its own --no-deps overlay, the same layout
 # build_eval_env.sh produces, so several forks (all the lm_eval package)
 # could live side by side. run_lm_eval.sbatch checks .commit against the pin
@@ -146,6 +153,7 @@ ENV PATH=/opt/lm-eval-venv/bin:$PATH \
     TAU2_VENV=/opt/tau2-venv \
     TAU2_DATA_DIR=/opt/tau2-bench/data \
     TAU2_COMMIT_FILE=/opt/tau2-bench.commit \
-    GDPVAL_VENV=/opt/gdpval-venv
+    GDPVAL_VENV=/opt/gdpval-venv \
+    GAIA2_VENV=/opt/gaia2-venv
 
 WORKDIR /work

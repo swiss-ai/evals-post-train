@@ -13,7 +13,7 @@
 uv run --all-extras python -m unittest discover -s tests
 ```
 
-CI also runs syntax checks, ShellCheck and the Harbor tests ([ci.yml](.github/workflows/ci.yml)). Harbor's tests are skipped locally unless Harbor is installed (Python >= 3.12, `pip install -r requirements/harbor-runtime.lock`).
+CI also runs syntax checks, ShellCheck and the Harbor and GAIA2 tests ([ci.yml](.github/workflows/ci.yml)). Their tests are skipped locally unless their runtime is installed (Python >= 3.12, `pip install -r requirements/harbor-runtime.lock` or `gaia2-runtime.lock`).
 
 Smoke-test your change with a few samples (`--limit`) and `--no-wandb`, so nothing reaches the shared W&B project. For Harbor and EvalScope, `--gold` checks environments and scoring without a model.
 
@@ -45,7 +45,7 @@ EvalScope covers SWE-bench Verified and Pro, LiveCodeBench and BFCL v4. Results 
 
 ## Adding a framework
 
-Follow the layout of the existing four:
+Follow the layout of the existing ones (Harbor and GAIA2 for frameworks that run on OpenSandbox):
 
 - [ ] `scripts/<framework>/run_<framework>_eval.sh` and `.sbatch` (Clariden), taking `--model`, `--api-base-url`, `--name`, `--limit`, reading `TARGET_API_KEY` (default `CSCS_SERVING_API`; keys come from the environment or `scripts/secrets.env` via `scripts/common/secrets.sh`), and honoring `EVAL_PREBUILT_ENV=1` (no install at run time).
 - [ ] W&B through `scripts/common/wandb.sh`, with an uploader `scripts/results/update_wandb_<framework>.py`.
@@ -60,7 +60,7 @@ Edit the `requirements/*.txt`, run `scripts/common/lock_requirements.sh` (needs 
 
 | File | Installed as |
 |---|---|
-| `inspect-runtime`, `evalscope-runtime`, `harbor-runtime`, `harbor-adapters` | the `.lock` |
+| `inspect-runtime`, `evalscope-runtime`, `harbor-runtime`, `harbor-adapters`, `gaia2-runtime` | the `.lock` |
 | `lm-eval-runtime` | the `.lock` in the prebuilt image (`openai` backend); the `.txt` by in-job backends, whose containers provide torch |
 | `lm-eval-harness.txt` | no lock: the harness commit, installed `--no-deps` (its dependencies go in `lm-eval-runtime.txt`) |
 | `apertus2.txt` | no lock: the `apertus-common` commit, installed `--no-deps` for `--chat-format apertus2` runs: into the harness overlay of built environments, and into the venv of the prebuilt image; it is also the vLLM plugin of `docs/thinking.md`; its dependencies are in `lm-eval-runtime.lock` |
