@@ -324,7 +324,9 @@ def agent_kwargs(args: argparse.Namespace) -> List[str]:
 
 def harbor_command(args: argparse.Namespace, name: str, jobs_dir: Path) -> List[str]:
     spec = BENCHMARKS[name]
-    cmd = [harbor_bin(), "run", "-o", str(jobs_dir), "--job-name", name, "-y", "-q"]
+    # No -q: it hides Harbor's per-trial progress, and a run of hours then logs nothing
+    # until it ends (a trial stuck in a parse-error loop looked like any other).
+    cmd = [harbor_bin(), "run", "-o", str(jobs_dir), "--job-name", name, "-y"]
     if "adapter" in spec:
         dataset = download_dataset(*spec["hf_dataset"]) if "hf_dataset" in spec else None
         cmd += ["-p", str(generate_adapter_tasks(spec["adapter"], Path(args.work_dir), args.limit, args.task, dataset))]

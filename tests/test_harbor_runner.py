@@ -69,6 +69,15 @@ class HarborCommandTest(unittest.TestCase):
                       ["--ak", "temperature=0"], ["--env", run.K8S_ENVIRONMENT]):
             self.assertTrue(any(cmd[i : i + len(flags)] == flags for i in range(len(cmd))), flags)
 
+    def test_harbor_is_not_quiet(self):
+        args = run.parse_args(
+            ["--benchmark", "terminal_bench_2", "--model", "org/m", "--api-base-url", "https://x/v1", "--work-dir", "w",
+             "--sandbox", "k8s"]
+        )
+        cmd = run.harbor_command(args, "terminal_bench_2", Path("w/jobs"))
+        self.assertNotIn("-q", cmd)
+        self.assertNotIn("--quiet", cmd)
+
     def _aks(self, *extra):
         args = run.parse_args(
             ["--benchmark", "terminal_bench_2", "--model", "org/m", "--api-base-url", "https://x/v1", "--work-dir", "w",
