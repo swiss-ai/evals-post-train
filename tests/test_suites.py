@@ -67,7 +67,7 @@ class SuiteTests(unittest.TestCase):
             (lambda s: s["benchmarks"][6].update(framework="x"), "framework"),
             (lambda s: s["benchmarks"][6]["repeats"].update(n=0), "repeats.n"),
             (lambda s: s["benchmarks"][6]["repeats"].update(via="both"), "repeats.via"),
-            (lambda s: s["benchmarks"][6]["metric"].update(label="mean@4"), "does not match"),
+            (lambda s: s["benchmarks"][6]["metric"].update(label="mean@8"), "does not match"),
             (lambda s: s["benchmarks"][1].update(task=s["benchmarks"][0]["task"]), "unique"),
             (lambda s: s["benchmarks"][0].pop("metric"), "missing 'metric'"),
             (lambda s: s["benchmarks"][0].update(repeats=4), "repeats must be an object"),
@@ -120,7 +120,7 @@ class SuiteTests(unittest.TestCase):
         suite = suites.load("apertus2/chonk_sft")
         self.assertEqual(suites.flags_for(suite, "qwen3-32b-thinking", "mmlu_0_shot"),
                          ["--enable-thinking", "--task-arg", "cot=true", "--", "--epochs", "4"])
-        self.assertEqual(suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "aime2024"), ["--reasoning-effort", "high", "--", "--epochs", "8"])
+        self.assertEqual(suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "aime2024"), ["--reasoning-effort", "high", "--", "--epochs", "4"])
         lm_eval = suites.flags_for(suite, "qwen3-32b-thinking", "ifbench")
         self.assertIn("--max-length", lm_eval)
         self.assertNotIn("--epochs", lm_eval)
@@ -221,7 +221,7 @@ class SuiteTests(unittest.TestCase):
                 self.assertEqual(flags.count("--reasoning-effort"), 1, (name, bench["label"]))
                 self.assertEqual(flags[flags.index("--reasoning-effort") + 1], "high")
                 self.assertEqual(suites.sampling_for(suite, name, bench["task"]), "thinking")
-        self.assertEqual(suites.flags_for(suite, chonk, "aime2024"), ["--reasoning-effort", "high", "--", "--epochs", "8"])
+        self.assertEqual(suites.flags_for(suite, chonk, "aime2024"), ["--reasoning-effort", "high", "--", "--epochs", "4"])
         for other in set(suite["setups"]) - {chonk, "chonk-lc-16k-v0.1-ep1"}:
             for bench in suite["benchmarks"]:
                 self.assertNotIn("--reasoning-effort", suites.flags_for(suite, other, bench["task"]))
