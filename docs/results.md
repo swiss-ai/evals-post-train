@@ -372,7 +372,7 @@ python scripts/results/make_table.py \
 - **Baselines**: the base run defaults to `baseline-apertus-1-sft` (override `--baseline`); a DPO
   baseline row is shown unless `--no-dpo-baseline`. Add `--extra-baseline` / `--extra-run` (with
   matching `-name` flags) for extra rows.
-- **Benchmark selection**: `--include` / `--exclude` (substring match), `--metrics-file` (one or
+- **Benchmark selection**: `--include` / `--exclude` (substring match), `--metrics-file` (required, one or
   more, merged).
 - **Rows**: `--top-n` (best N by `Avg_Imp`), `--complete-only` (drop rows with any N/A),
   `--model-order`, `--raw-names` (don't parse lr/beta/ebs), `--rename`, `--label`, `--filter`.

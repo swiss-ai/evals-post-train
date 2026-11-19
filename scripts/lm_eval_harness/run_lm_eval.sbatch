@@ -40,7 +40,8 @@ usage() {
 	echo " BOS: 'true' prepends the BOS token, 'false' leaves it to the tokenizer; default 'auto' = true for models whose tokenizer never adds the BOS token they need (Gemma 4, scripts/lm_eval_harness/bos_default.py)."
 	echo " TRUST_REMOTE_CODE: 'true' loads the tokenizer (hf/vllm: also the model) with trust_remote_code=True; hf, vllm and openai backends."
 	echo " LOGS_ROOT: Where are your evaluation wandb&harness logs going to."
-	echo " TASKS: Tasks to run with lm eval harness."
+	echo " TASKS: Required. Tasks to run with lm eval harness: a task list file (one name per line, # comments) or comma-separated names."
+	echo " TABLE_METRICS: task/metric pairs for the W&B summary table: a file (one pair per line, # group headers) or space-separated pairs (default: TASKS)."
 	echo " WANDB_ENTITY: WandB entity name for uploading results (default: apertus)."
 	echo " WANDB_PROJECT: WandB project name for uploading results (default: swissai-evals-test)."
 	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: vllm). - options are: hf, vllm, sglang, megatron_lm, openai"
@@ -104,8 +105,8 @@ SIZE=${SIZE:-1}
 BOS=${BOS:-auto}
 TRUST_REMOTE_CODE=${TRUST_REMOTE_CODE:-false}
 LOGS_ROOT=${LOGS_ROOT:-$SCRATCH/eval_logs_start/}
-TASKS=${TASKS:-./configs/archive/apertus/tasks_default.txt}
-TABLE_METRICS=${TABLE_METRICS:-./configs/archive/apertus/tasks_default_main_table.txt}
+TASKS=${TASKS:-}
+TABLE_METRICS=${TABLE_METRICS:-$TASKS}
 WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
 LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
@@ -137,6 +138,7 @@ if [[ -n "$EVAL_CHUNKS_FILE" ]]; then
     [[ -n "$TASKS" ]] || die "No task chunk at array index $SLURM_ARRAY_TASK_ID"
     echo "Array chunk $SLURM_ARRAY_TASK_ID: $TASKS"
 fi
+[[ -n "$TASKS" ]] || die "TASKS is not set: a task list file or comma-separated task names"
 
 [[ -n "$EVAL_ENV_MANIFEST" ]] || die "EVAL_ENV_MANIFEST is required; launch through scripts/lm_eval_harness/launch_evaluations.sh"
 [[ -f "$EVAL_RUN_CONFIG" ]] || die "EVAL_RUN_CONFIG is required and must be a readable file"
