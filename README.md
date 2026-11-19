@@ -59,7 +59,7 @@ bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --mod
 bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k --limit 5 --no-wandb \
   --backend openai --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --api-model-name SwissAI-Research/swiss-ai/chonk-lc-16k-v0.1-ep1-iter_0019374 \
-  --chat-format apertus2 --tokenizer <tokenizer dir> --max-length 16384
+  --chat-format apertus2 --tokenizer <tokenizer dir> --max-length 32768
 ```
 
 **Inspect AI**: tau2-bench retail, a served model as the simulated customer.
