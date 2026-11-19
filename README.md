@@ -46,11 +46,11 @@ Every runner except the in-job lm-eval backends can also run from the prebuilt i
 
 The CSCS serving key is read from `scripts/secrets.env` (see [Credentials](#credentials)).
 
-**lm-evaluation-harness**: serves the model in the job and runs the default task list, 10 samples per task.
+**lm-evaluation-harness**: a model behind an OpenAI-compatible endpoint (a server you started, here a vLLM server on node `nid001234`; or the CSCS serving API with its URL and the served name as `--api-model-name`), GSM8K with chain of thought, 5 samples. `--model` is also the tokenizer's name, so it must be a Hugging Face name or a path.
 
 ```bash
-bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/archive/apertus/tasks_default.txt --table-metrics configs/archive/apertus/tasks_default_main_table.txt --model meta-llama/Llama-3.1-8B-Instruct \
-  --name Llama-Baseline --limit 10 --no-wandb
+bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B --limit 5 --no-wandb \
+  --backend openai --api-base-url http://nid001234:8000
 ```
 
 **lm-evaluation-harness, Apertus 2 native format**: a served Apertus 2 checkpoint through the CSCS serving API, 5 samples. `--tokenizer` is a local directory with the verified Apertus 2 instruct tokenizer that `apertus-common` names: [`tokenizers/Apertus_2_instruct`](https://github.com/swiss-ai/apertus-omni-tokenizer/tree/b801ff1b00d933d10bba90b0c22307157299faa7/tokenizers/Apertus_2_instruct) in `swiss-ai/apertus-omni-tokenizer` (evals-svc's Chonk/Megachonk evaluation tokenizer lacks the control tokens and is rejected), `--max-length` is the server's `--max-model-len`. Installs the pinned `apertus-common` commit ([details](docs/lm-eval-harness.md#apertus-2-native-format)).
