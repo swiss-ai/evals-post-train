@@ -89,7 +89,7 @@
       }
     },
     "chonk-lc-16k-v0.2-sft": {
-      "description": "SwissAI-Research/swiss-ai/chonk-lc-16k-v0.2-sft. No Jinja template exists: apertus-common renders the format, in lm_eval (--chat-format apertus2, completions endpoint, needs --backend openai and the verified Apertus_2_instruct tokenizer, pinned in `tokenizer`) and on the server for the other frameworks (vLLM plugin of apertus-common PR #5, see docs/thinking.md). The window 16384 is the checkpoint's name (16k), not a decided maximum. It only reasons at effort high on non-math tasks.",
+      "description": "SwissAI-Research/swiss-ai/chonk-lc-16k-v0.2-sft. No Jinja template exists: apertus-common renders the format, in lm_eval (--chat-format apertus2, completions endpoint, needs --backend openai and the verified Apertus_2_instruct tokenizer, pinned in `tokenizer`) and on the server for the other frameworks (vLLM plugin of apertus-common, see docs/thinking.md). The window 16384 is the checkpoint's name (16k), not a decided maximum. It only reasons at effort high on non-math tasks.",
       "max_length": 16384,
       "sampling": "thinking",
       "reasoning_effort": "high",

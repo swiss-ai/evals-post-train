@@ -1,16 +1,13 @@
 #!/bin/bash
 #
 # prepare_apertus_common.sh [requirements file] - Build the apertus-common wheel that
-# requirements/apertus2.txt (or the file given, e.g. requirements/apertus2-vllm-plugin.txt) pins.
+# requirements/apertus2.txt (or the file given) pins.
 #
-# apertus-common is a private repository, and the prebuilt image has neither a credential nor an ssh
-# client. So the launcher (which runs where your git access is) clones the pinned commit and builds a
-# wheel once; the job only installs that wheel, offline (run_lm_eval.sbatch). The wheel is kept in
+# The launcher clones the pinned commit and builds a wheel once; the job only installs that wheel,
+# offline (run_lm_eval.sbatch), and so does the vLLM server (docs/thinking.md). The wheel is kept in
 # ${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}/apertus-common/<commit>/, which the job's container must
 # mount (like the rest of EVAL_ENV_CACHE_ROOT). Prints that directory; EVAL_DRY_RUN=true only prints it.
 #
-# Cloning uses the URL in that file through your own git configuration, e.g. an ssh rewrite:
-#   git config --global url."git@github.com:".insteadOf https://github.com/
 
 set -euo pipefail
 
@@ -36,7 +33,7 @@ if [[ "${EVAL_DRY_RUN:-false}" != "true" && ! -f "$wheel_dir/.complete" ]]; then
     echo "Building apertus-common@${commit:0:12} from $url" >&2
     git init -q "$work/src"
     GIT_TERMINAL_PROMPT=0 git -C "$work/src" fetch -q --depth 1 "$url" "$commit" >&2 \
-        || { echo "Could not fetch $url@$commit: this needs read access to the repository (see the header of this script)." >&2; exit 1; }
+        || { echo "Could not fetch $url@$commit: check the network and the pin." >&2; exit 1; }
     git -C "$work/src" checkout -q FETCH_HEAD
     [[ "$(git -C "$work/src" rev-parse HEAD)" == "$commit" ]] \
         || { echo "Fetched a different commit than the pinned $commit" >&2; exit 1; }
