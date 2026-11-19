@@ -1,0 +1,13 @@
+# Input to gaia2-runtime.lock (scripts/common/lock_requirements.sh), which run_gaia2_eval.sh
+# installs into its own venv (gaia2-runner needs Python >= 3.12). gaia2-cli is not on PyPI: its
+# three packages are git installs of facebookresearch/meta-agents-research-environments, pinned to
+# one commit (keep ARE_COMMIT in scripts/gaia2/run.py and the image tags in
+# .github/workflows/gaia2-images.yml at the same commit).
+gaia2-core @ git+https://github.com/facebookresearch/meta-agents-research-environments@a9fd2edccb4bc7e22fbf45c8482a5fef30a2a5a4#subdirectory=gaia2-cli/core
+gaia2-cli[judge] @ git+https://github.com/facebookresearch/meta-agents-research-environments@a9fd2edccb4bc7e22fbf45c8482a5fef30a2a5a4#subdirectory=gaia2-cli/cli
+gaia2-runner @ git+https://github.com/facebookresearch/meta-agents-research-environments@a9fd2edccb4bc7e22fbf45c8482a5fef30a2a5a4#subdirectory=gaia2-cli/runner
+# The scenario containers run as Kata microVMs: scripts/gaia2/opensandbox_launcher.py (the same
+# version as Harbor's).
+opensandbox==1.2.0
+# --wandb-entity/--wandb-project: scripts.results.update_wandb_gaia2 runs from this venv.
+wandb==0.31.0

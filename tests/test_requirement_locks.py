@@ -25,5 +25,24 @@ class HarborVersionTest(unittest.TestCase):
         self.assertEqual({pin[1], tag[1]}, {runner[1]})
 
 
+class Gaia2CommitTest(unittest.TestCase):
+    def test_runtime_runner_and_images_agree(self) -> None:
+        pins = set(
+            re.findall(
+                r"meta-agents-research-environments@([0-9a-f]{40})#",
+                (REPO_ROOT / "requirements/gaia2-runtime.txt").read_text(),
+            )
+        )
+        runner = re.search(
+            r'^ARE_COMMIT = "([0-9a-f]{40})"$', (REPO_ROOT / "scripts/gaia2/run.py").read_text(), re.MULTILINE
+        )
+        images = re.search(
+            r"^  ARE_COMMIT: ([0-9a-f]{40})$",
+            (REPO_ROOT / ".github/workflows/gaia2-images.yml").read_text(),
+            re.MULTILINE,
+        )
+        self.assertEqual(pins | {runner[1], images[1]}, {runner[1]})
+
+
 if __name__ == "__main__":
     unittest.main()
