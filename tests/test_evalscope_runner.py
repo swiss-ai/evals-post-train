@@ -687,3 +687,56 @@ class BfclV4Test(unittest.TestCase):
         self.assertNotIn("api_key", shown)
         self.assertEqual(shown["dataset_args"]["bfcl_v4"]["extra_params"], {"SERPAPI_API_KEY": "***", "is_fc_model": False})
         self.assertEqual(cfg["dataset_args"]["bfcl_v4"]["extra_params"]["SERPAPI_API_KEY"], "secret")
+
+
+class Tau3BenchTest(unittest.TestCase):
+    def _cfg(self, *extra, env=None):
+        args = run.parse_args(["--benchmark", "tau3_bench", "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", *extra])
+        with mock.patch.dict(os.environ, env or {}, clear=False):
+            return run.build_task_config(args, ["tau3_bench"], run.resolved_revisions(["tau3_bench"], []))
+
+    def test_runs_all_four_domains_without_a_sandbox(self):
+        cfg = self._cfg()
+        self.assertEqual(cfg["datasets"], ["tau3_bench"])
+        self.assertEqual(cfg["dataset_args"]["tau3_bench"]["subset_list"], ["airline", "retail", "telecom", "banking_knowledge"])
+        self.assertEqual(cfg["dataset_hub"], "modelscope")
+        self.assertNotIn("sandbox", cfg)
+        self.assertFalse(run.needs_sandbox(["tau3_bench"]))
+
+    def test_the_user_is_the_model_under_test_by_default(self):
+        params = self._cfg(env={"EVALSCOPE_API_KEY": "k", "USER_API_KEY": ""})["dataset_args"]["tau3_bench"]["extra_params"]
+        self.assertEqual((params["user_model"], params["api_base"], params["api_key"]), ("m", "http://x/v1", "k"))
+        self.assertNotIn("max_steps", params)
+
+    def test_user_model_endpoint_key_and_steps(self):
+        cfg = self._cfg("--user-model", "judge", "--user-api-base-url", "http://u/v1", "--max-steps", "200",
+                        "--extra-param", "retrieval_config=bm25_grep", env={"USER_API_KEY": "uk"})
+        params = cfg["dataset_args"]["tau3_bench"]["extra_params"]
+        self.assertEqual(params, {"user_model": "judge", "api_base": "http://u/v1", "api_key": "uk",
+                                  "max_steps": 200, "retrieval_config": "bm25_grep"})
+
+    def test_the_user_key_is_masked_in_the_log(self):
+        cfg = self._cfg(env={"USER_API_KEY": "secret"})
+        self.assertNotIn("secret", json.dumps(run.printable_config(cfg)))
+
+    def test_data_dir_and_repeats(self):
+        self.assertNotIn("dataset_id", self._cfg(env={"TAU2_DATA_DIR": ""})["dataset_args"]["tau3_bench"])
+        cfg = self._cfg("--repeats", "5", env={"TAU2_DATA_DIR": "/opt/tau2-bench/data"})
+        self.assertEqual(cfg["dataset_args"]["tau3_bench"]["dataset_id"], "/opt/tau2-bench/data")
+        self.assertEqual(cfg["repeats"], 5)
+
+    def test_gold_is_refused(self):
+        with self.assertRaises(SystemExit) as gold:
+            run.main(["--benchmark", "tau3_bench", "--work-dir", "/w", "--gold"])
+        self.assertIn("reference solutions", str(gold.exception))
+
+    def test_a_swallowed_tau2_error_is_an_evaluation_error(self):
+        with tempfile.TemporaryDirectory() as work:
+            reviews = Path(work, "reviews", "m")
+            reviews.mkdir(parents=True)
+            rows = [
+                {"sample_score": {"sample_id": 1, "sample_metadata": {"id": "t1"}, "score": {"metadata": {"task_result": {"reward": 0.0, "error": "boom"}}}}},
+                {"sample_score": {"sample_id": 2, "sample_metadata": {"id": "t2"}, "score": {"metadata": {"task_result": {"reward": 1.0}}}}},
+            ]
+            reviews.joinpath("tau3_bench_airline.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
+            self.assertEqual(run.evaluation_errors(work), {"m/tau3_bench_airline": {"count": 1, "instances": ["t1"]}})

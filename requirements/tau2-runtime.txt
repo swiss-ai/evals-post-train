@@ -8,3 +8,9 @@ tau2[knowledge] @ git+https://github.com/sierra-research/tau2-bench@fc0055dc4e0a
 # removed from the standard library; audioop-lts is its drop-in for 3.13+ (the lock's venv takes
 # the newest Python >= 3.12 the machine has).
 audioop-lts; python_version >= "3.13"
+# EvalScope's tau3_bench adapter (run_evalscope_eval.sh --benchmark tau3_bench) runs tau2-bench from this
+# venv too: tau2 needs Python >= 3.12, the EvalScope venv is 3.11. The same EvalScope version as
+# evalscope-runtime.txt; plain evalscope, no sandbox extras (tau3_bench runs no sandbox).
+evalscope==1.14.0
+# The W&B upload of run_evalscope_eval.sh, which runs from this venv for tau3_bench.
+wandb==0.31.0

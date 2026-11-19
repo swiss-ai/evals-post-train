@@ -15,6 +15,10 @@
 #   bfcl_v4        BFCL v4 (function calling) through the bfcl-eval package, native tool calls on
 #                  /v1/chat/completions (--extra-param is_fc_model=false: prompt mode); no sandbox, no
 #                  --gold. Default subsets leave out web_search_* and memory_vector, see docs/evalscope.md.
+#   tau3_bench     tau-bench v1.0 (airline, retail, telecom, banking_knowledge) through the tau2-bench
+#                  package: the model under test talks to a simulated user (--user-model). Runs from the
+#                  tau2 venv (Python >= 3.12), so not together with the other benchmarks; no sandbox, no
+#                  --gold. Not Artificial Analysis's protocol (scripts/aaii/run_tau2_bench.sh is).
 #
 # EvalScope lives in its own venv (requirements/evalscope-runtime.lock, every package pinned): its
 # math-verify pin conflicts with the lm-eval/Inspect environment's antlr4 pin.
@@ -35,7 +39,8 @@
 #     --model <served model> --api-base-url <url> [options]
 #
 # Required:
-#   --benchmark <b[,b]>        swe_bench, swe_bench_pro (comma-separated for both), live_code_bench or bfcl_v4.
+#   --benchmark <b[,b]>        swe_bench, swe_bench_pro (comma-separated for both), live_code_bench, bfcl_v4
+#                               or tau3_bench (alone).
 #   --model <name>             Served model name at --api-base-url. The model must serve tool
 #                               calls (vLLM --enable-auto-tool-choice + parser, sglang
 #                               --tool-call-parser) for the default toolcall strategy; else
@@ -90,6 +95,10 @@
 #   --extra-param <key=value>   An EvalScope extra_param for the selected benchmark(s) (repeatable),
 #                               e.g. swe_bench_pro's eval_timeout=7200 or swe_bench_pro_repo_path=/path.
 #   --api-timeout <s>           Per-request timeout towards the model endpoint.
+#   --user-model <name>         tau3_bench: the simulated user's model, which also judges the NL assertions
+#                               (default: --model). --user-api-base-url: its endpoint (default: --api-base-url);
+#                               its key is USER_API_KEY, else the model's.
+#   --repeats <n>               Trials per sample; tau3_bench reports pass^k over them (default 1).
 #   --gold                      Score each instance's reference patch instead of running a model (no
 #                               --model/--api-base-url): a check of the scoring pipeline, where every
 #                               instance should come out resolved.
@@ -103,6 +112,9 @@
 #
 # Environment (keys also from scripts/secrets.env, see scripts/common/secrets.sh):
 #   TARGET_API_KEY   key for --api-base-url (default: CSCS_SERVING_API, as in run_inspect_eval.sh).
+#   TAU2_VENV, TAU2_DATA_DIR  tau3_bench: the tau2 venv (default: the cached venv of
+#                    requirements/tau2-runtime.lock) and the data of its tau2-bench commit (the prebuilt image
+#                    has both; otherwise EvalScope downloads its own copy of the data from ModelScope).
 #   EVALSCOPE_VENV   venv to run from (default: the cached venv of the lock, see
 #                    scripts/common/locked_venv.sh). SKIP_INSTALL=1 runs with the current python3 as is.
 #                    With EVAL_PREBUILT_ENV=1 (the prebuilt image, containers/Dockerfile.eval) it
@@ -163,6 +175,7 @@ while (( $# > 0 )); do
         --shuffle|--completions|--enable-thinking|--no-enable-thinking) RUN_ARGS+=("$1"); shift ;;
         --sandbox-config|--limit|--max-concurrency|--max-steps|--strategy|--command-timeout|\
         --generation-config|--dataset-revision|--subset|--extra-param|--api-timeout|--agent-network|\
+        --user-model|--user-api-base-url|--repeats|\
         --temperature|--top-p|--top-k|--min-p|--repetition-penalty|--sampling-profile|--sampling-config|\
         --reasoning-effort)
             RUN_ARGS+=("$1" "$2"); shift 2 ;;
@@ -171,12 +184,18 @@ while (( $# > 0 )); do
     esac
 done
 
-[[ -n "$BENCHMARK" ]] || die "Missing --benchmark (swe_bench, swe_bench_pro, live_code_bench, bfcl_v4). See --help."
+[[ -n "$BENCHMARK" ]] || die "Missing --benchmark (swe_bench, swe_bench_pro, live_code_bench, bfcl_v4, tau3_bench). See --help."
 IFS=',' read -ra BENCHMARK_LIST <<< "$BENCHMARK"
 for b in "${BENCHMARK_LIST[@]}"; do
-    [[ "$b" == swe_bench || "$b" == swe_bench_pro || "$b" == live_code_bench || "$b" == bfcl_v4 ]] \
-        || die "Unknown --benchmark '$b' (swe_bench, swe_bench_pro, live_code_bench or bfcl_v4)."
+    [[ "$b" == swe_bench || "$b" == swe_bench_pro || "$b" == live_code_bench || "$b" == bfcl_v4 || "$b" == tau3_bench ]] \
+        || die "Unknown --benchmark '$b' (swe_bench, swe_bench_pro, live_code_bench, bfcl_v4 or tau3_bench)."
 done
+# tau3_bench needs tau2-bench (Python >= 3.12), which cannot share the EvalScope venv (3.11): it runs from the tau2 venv, alone.
+TAU3=0
+if [[ ",$BENCHMARK," == *,tau3_bench,* ]]; then
+    (( ${#BENCHMARK_LIST[@]} == 1 )) || die "tau3_bench runs from the tau2 venv: run it separately from the other benchmarks."
+    TAU3=1
+fi
 if [[ "$GOLD" == "1" ]]; then
     [[ -z "$MODEL" ]] || die "--gold scores the reference patches; drop --model."
     MODEL_ARGS=(--gold)
@@ -226,21 +245,30 @@ if [[ "${SKIP_INSTALL:-0}" == "1" ]]; then
     PY=python3
     echo "SKIP_INSTALL=1: running with $(command -v python3) as is (no venv, no install)"
 elif [[ "${EVAL_PREBUILT_ENV:-0}" == "1" ]]; then
-    PY="${EVALSCOPE_VENV:-}/bin/python"
-    [[ -n "${EVALSCOPE_VENV:-}" && -x "$PY" ]] ||
-        die "EVAL_PREBUILT_ENV=1 but EVALSCOPE_VENV (${EVALSCOPE_VENV:-unset}) has no bin/python:" \
-            "this image has no EvalScope environment, and a prebuilt image installs nothing at run time."
-    echo "EVAL_PREBUILT_ENV=1: using $EVALSCOPE_VENV (no install)"
+    if (( TAU3 )); then VENV_VAR=TAU2_VENV; else VENV_VAR=EVALSCOPE_VENV; fi
+    PY="${!VENV_VAR:-}/bin/python"
+    [[ -n "${!VENV_VAR:-}" && -x "$PY" ]] ||
+        die "EVAL_PREBUILT_ENV=1 but $VENV_VAR (${!VENV_VAR:-unset}) has no bin/python:" \
+            "this image has no such environment, and a prebuilt image installs nothing at run time."
+    echo "EVAL_PREBUILT_ENV=1: using ${!VENV_VAR} (no install)"
 else
-    if [[ -z "${EVALSCOPE_VENV:-}" ]]; then
+    if (( TAU3 )); then
         # shellcheck source=scripts/common/locked_venv.sh
-        source scripts/common/locked_venv.sh
-        locked_venv requirements/evalscope-runtime.lock 3.11 requirements/evalscope-bfcl.txt ||
-            die "Installing requirements/evalscope-runtime.lock failed."
-        EVALSCOPE_VENV=$LOCKED_VENV
+        [[ -n "${TAU2_VENV:-}" ]] || { source scripts/common/locked_venv.sh
+            locked_venv requirements/tau2-runtime.lock 3.12 || die "Installing requirements/tau2-runtime.lock failed."
+            TAU2_VENV=$LOCKED_VENV; }
+        PY="$TAU2_VENV/bin/python"
+    else
+        if [[ -z "${EVALSCOPE_VENV:-}" ]]; then
+            # shellcheck source=scripts/common/locked_venv.sh
+            source scripts/common/locked_venv.sh
+            locked_venv requirements/evalscope-runtime.lock 3.11 requirements/evalscope-bfcl.txt ||
+                die "Installing requirements/evalscope-runtime.lock failed."
+            EVALSCOPE_VENV=$LOCKED_VENV
+        fi
+        PY="$EVALSCOPE_VENV/bin/python"
     fi
-    PY="$EVALSCOPE_VENV/bin/python"
-    [[ -x "$PY" ]] || die "EVALSCOPE_VENV=$EVALSCOPE_VENV has no bin/python"
+    [[ -x "$PY" ]] || die "no bin/python at $PY"
 fi
 
 mkdir -p "$WORK_DIR"

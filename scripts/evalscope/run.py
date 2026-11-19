@@ -90,6 +90,23 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
         "gold": False,
         "sandbox": False,
     },
+    # tau-bench v1.0 ("tau3"): EvalScope's adapter around the tau2-bench package, all four domains. A simulated
+    # user (--user-model) talks to the model under test, which calls the domain's tools; banking_knowledge
+    # adds retrieval over a policy knowledge base (--extra-param retrieval_config=..., default bm25). The
+    # package is the tau2 venv's (requirements/tau2-runtime.txt: Python >= 3.12, the EvalScope venv is 3.11),
+    # at the commit Artificial Analysis scores with. Its data is that commit's (TAU2_DATA_DIR, set in the
+    # eval image), else EvalScope's ModelScope copy. Not Artificial Analysis's protocol (scripts/aaii/
+    # run_tau2_bench.sh is): EvalScope's loop and defaults, the user model also judges NL assertions,
+    # --repeats trials for pass^k. No sandbox, no reference solutions.
+    "tau3_bench": {
+        "evalscope": "tau3_bench",
+        "hub": "modelscope",
+        "revision": None,
+        "subsets": ["airline", "retail", "telecom", "banking_knowledge"],
+        "extra_params": {},
+        "gold": False,
+        "sandbox": False,
+    },
 }
 
 # Generation settings bfcl-eval's handler does not send (it passes only the temperature).
@@ -158,6 +175,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--dataset-revision", action="append", default=[], help="<benchmark>=<revision>.")
     p.add_argument("--extra-param", action="append", default=[], help="key=value (JSON value or string).")
     p.add_argument("--api-timeout", type=float, default=None)
+    p.add_argument("--user-model", default=None, help="tau3_bench: the simulated user's (and NL judge's) model "
+                   "(default: --model).")
+    p.add_argument("--user-api-base-url", default=None, help="tau3_bench: endpoint of --user-model "
+                   "(default: --api-base-url). Its key is USER_API_KEY, else the model's.")
+    p.add_argument("--repeats", type=int, default=None, help="Trials per sample (tau3_bench: pass^k over them).")
     args = p.parse_args(argv)
     if not args.gold and not (args.model and args.api_base_url):
         p.error("--model and --api-base-url are required (unless --gold)")
@@ -279,6 +301,26 @@ def environment_extra_params(name: str) -> Dict[str, Any]:
     return {}
 
 
+def tau3_extra_params(args: argparse.Namespace) -> Dict[str, Any]:
+    """tau3_bench's simulated user: --user-model on --user-api-base-url (default: the model under test, same
+    endpoint), and --max-steps as the adapter's own max_steps. EvalScope masks the api_key in its saved config."""
+    params: Dict[str, Any] = {
+        "user_model": args.user_model or args.model,
+        "api_base": args.user_api_base_url or args.api_base_url,
+        "api_key": os.environ.get("USER_API_KEY") or os.environ.get("EVALSCOPE_API_KEY") or "EMPTY",
+    }
+    if args.max_steps:
+        params["max_steps"] = args.max_steps
+    return params
+
+
+def tau3_dataset_args() -> Dict[str, Any]:
+    """The data of the tau2-bench commit the venv has (TAU2_DATA_DIR, the eval image's checkout); without it,
+    EvalScope's own copy from ModelScope."""
+    data = os.environ.get("TAU2_DATA_DIR")
+    return {"dataset_id": data} if data else {}
+
+
 def generation_config(args: argparse.Namespace) -> Dict[str, Any]:
     """The model's generation_config: sampling defaults, --generation-config over them, flags over both.
 
@@ -356,7 +398,13 @@ def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dic
         BENCHMARKS[n]["evalscope"]: {
             **({HUB_REVISION_KEY[hub]: revisions[n]} if n in revisions else {}),
             **({"subset_list": subset_list(n, args)} if subset_list(n, args) else {}),
-            "extra_params": {**BENCHMARKS[n]["extra_params"], **environment_extra_params(n), **extra_params},
+            **(tau3_dataset_args() if n == "tau3_bench" else {}),
+            "extra_params": {
+                **BENCHMARKS[n]["extra_params"],
+                **(tau3_extra_params(args) if n == "tau3_bench" else {}),
+                **environment_extra_params(n),
+                **extra_params,
+            },
             **({"shuffle": True} if args.shuffle or args.limit is not None else {}),
         }
         for n in names
@@ -411,6 +459,8 @@ def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dic
         cfg["agent_config"] = {"mode": "native", **agent}
     if args.limit is not None:
         cfg["limit"] = int(args.limit) if args.limit >= 1 else args.limit
+    if args.repeats:
+        cfg["repeats"] = args.repeats
     if args.api_timeout:
         cfg["timeout"] = args.api_timeout
     return cfg
@@ -451,6 +501,10 @@ def evaluation_errors(work_dir: str) -> Dict[str, Dict[str, Any]]:
             for line in f:
                 sample = json.loads(line)["sample_score"]
                 result = sample["score"].get("metadata") or {}
+                # tau3_bench turns an exception of tau2's run_task into reward 0 with an error, not a crash.
+                if (result.get("task_result") or {}).get("error"):
+                    instances.append((sample.get("sample_metadata") or {}).get("id") or sample.get("sample_id"))
+                    continue
                 if result.get("completed", True):
                     continue
                 error = str((result.get("report") or {}).get("error", ""))
@@ -593,6 +647,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     }
     if "swe_bench_pro" in names:
         summary["swe_bench_pro_os_commit"] = swe_bench_pro_os_commit()
+    if "tau3_bench" in names:
+        params = cfg["dataset_args"]["tau3_bench"]["extra_params"]
+        summary["tau3_bench"] = {
+            "user_model": params["user_model"],
+            "user_api_base_url": params["api_base"],
+            "retrieval_config": params.get("retrieval_config", "bm25"),
+            "max_steps": params.get("max_steps", 100),
+            "repeats": cfg.get("repeats", 1),
+            "data": cfg["dataset_args"]["tau3_bench"].get("dataset_id", "evalscope/tau3-bench-data (ModelScope)"),
+        }
     if "bfcl_v4" in names:
         from importlib.metadata import version
 
