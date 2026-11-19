@@ -50,7 +50,7 @@ Every launcher takes the same flags:
 | `--sampling-config F` | Another config file instead of `configs/sampling_defaults.json` |
 
 `none` leaves one out (`--top-p none`). Precedence, strongest first: the flags, `--sampling-profile`,
-the profile of the thinking mode, the framework's default profile. The resolved values are printed in the run's log. Temperature 0
+the profile of the thinking mode, the framework's default profile. The run's log prints the resolved values. Temperature 0
 on a thinking run prints a warning: reasoning models loop and truncate under greedy decoding.
 
 ## By framework
