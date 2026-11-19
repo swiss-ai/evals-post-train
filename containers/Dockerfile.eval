@@ -25,15 +25,9 @@ RUN apt-get update -qq \
 # PyTorch's index. The lock's hashes decide which file is accepted, whichever index has it.
 COPY --from=ghcr.io/astral-sh/uv:0.11.28 /uv /usr/local/bin/uv
 COPY requirements/lm-eval-runtime.lock requirements/inspect-runtime.lock requirements/inspect-ifeval.txt /tmp/requirements/
-# tree_sitter==0.21.3 (bfcl scoring) has no Python 3.13 wheel, so it is built from source:
-# the compiler is only there for this layer.
-RUN apt-get update -qq \
-    && apt-get install -y -qq --no-install-recommends build-essential \
-    && UV_PYTHON_INSTALL_DIR=/opt/python uv venv --seed --python 3.13.14 /opt/lm-eval-venv \
+RUN UV_PYTHON_INSTALL_DIR=/opt/python uv venv --seed --python 3.13.14 /opt/lm-eval-venv \
     && /opt/lm-eval-venv/bin/pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
-        -r /tmp/requirements/lm-eval-runtime.lock \
-    && apt-get purge -y -qq --auto-remove build-essential \
-    && rm -rf /var/lib/apt/lists/*
+        -r /tmp/requirements/lm-eval-runtime.lock
 
 # NLTK's data (ifeval, multi_if, ruler, ifbench) is baked in: /opt/lm-eval-venv/nltk_data is on
 # NLTK's search path, root-owned and read-only. Downloading at run time put it in the run's

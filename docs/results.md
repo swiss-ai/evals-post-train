@@ -301,7 +301,7 @@ task config so, for example, `exact_match,mean@{repeats}` selects
 
 Do not otherwise use fuzzy matching for benchmark variants. For example,
 `gsm8k_platinum` is not mapped to `gsm8k`. Until a mapping is reviewed, tasks
-such as `bfcl_v3` and `swiss_ai_charter_alignment` are exported under safe
+such as `swiss_ai_charter_alignment` are exported under safe
 internal names rather than being omitted or assigned to a possibly incorrect
 external benchmark.
 
