@@ -563,11 +563,9 @@ bash scripts/lm_eval_harness/launch_evaluations.sh custom \
 - **Refused:** `--thinking`, `--(no-)enable-thinking`, think tokens, `--track-thinking-metrics`,
   `--no-chat-template`, `--chat-template-by-type`, `--api-endpoint chat-completions`, `--bos`,
   `--convert-to-hf`.
-- **Environment:** `apertus-common` (`requirements/apertus2.txt`, a public repository) is installed
-  `--no-deps` into a separate harness overlay in built environments. On the prebuilt image
-  `prepare_apertus_common.sh` clones the pinned commit and builds a wheel into `$EVAL_ENV_CACHE_ROOT/apertus-common/<commit>/` (default
-  `$SCRATCH/eval-envs`, once per commit), and the job installs it offline, so the container must mount
-  that directory. Both pins (harness and `apertus-common`)
+- **Environment:** `apertus-common` (`requirements/apertus2.txt`) is installed `--no-deps` into a
+  separate harness overlay in built environments, and into the venv of the prebuilt image.
+  (The vLLM server installs the same commit, see [`thinking.md`](thinking.md).) Both pins (harness and `apertus-common`)
   are in the run config, so bumping one reruns earlier results of the same run name.
 - **Tables:** `make_html_table.py --thinking --length-unit words` (API models report no token
   lengths), with truncation and parse-failure rates.
@@ -680,7 +678,7 @@ The pipeline runs inside containers managed by enroot/pyxis on SLURM. The availa
 | `env_vllm.toml` | CSCS vLLM 0.22.1 runtime image | vLLM and Megatron-LM evals |
 | `env_sglang.toml` | CSCS SGLang CUDA 13 image | SGLang evals |
 
-Hugging Face caches are on scratch for every runner (lm-eval, Inspect, the aggregation job, EvalScope, Harbor), set in one place, `scripts/common/cache_dirs.sh`: datasets in `$SCRATCH/.cache/huggingface/datasets` (`HF_DATASETS_CACHE`), hub and models in `$SCRATCH/huggingface` (`HF_HOME`, which a caller may set). A dataset is therefore downloaded once for all of them, and a job in the prebuilt image needs only the scratch mount. The same file puts `XDG_CACHE_HOME` (`$SCRATCH/.cache`) and `XDG_DATA_HOME` (`$SCRATCH/.local/share`) on scratch: Inspect writes its trace log and dataset downloads there, and in the prebuilt image `$HOME` is on the container's `fuse-overlayfs` root, where Inspect jobs hung forever ([#158](https://github.com/swiss-ai/evals-post-train/issues/158)). The pinned artifacts (environments, the `apertus-common` wheel, tokenizers) are separate, under `$EVAL_ENV_CACHE_ROOT` below.
+Hugging Face caches are on scratch for every runner (lm-eval, Inspect, the aggregation job, EvalScope, Harbor), set in one place, `scripts/common/cache_dirs.sh`: datasets in `$SCRATCH/.cache/huggingface/datasets` (`HF_DATASETS_CACHE`), hub and models in `$SCRATCH/huggingface` (`HF_HOME`, which a caller may set). A dataset is therefore downloaded once for all of them, and a job in the prebuilt image needs only the scratch mount. The same file puts `XDG_CACHE_HOME` (`$SCRATCH/.cache`) and `XDG_DATA_HOME` (`$SCRATCH/.local/share`) on scratch: Inspect writes its trace log and dataset downloads there, and in the prebuilt image `$HOME` is on the container's `fuse-overlayfs` root, where Inspect jobs hung forever ([#158](https://github.com/swiss-ai/evals-post-train/issues/158)). The pinned artifacts (environments, tokenizers) are separate, under `$EVAL_ENV_CACHE_ROOT` below.
 
 Evaluation dependencies use a shared two-tier cache under `${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}`:
 
@@ -761,7 +759,10 @@ anything. `run_inspect_eval.sh` skips its install the same way. A mismatch
 a message naming both commits, so run the image with the scripts from the
 commit it was built from. This repo's own scripts don't start the image: its
 launcher has to already be running inside it. Runs started on Clariden use the
-environment-building path, with the same locks.
+environment-building path, with the same locks, unless you point
+`EVAL_PREBUILT_CONTAINER_CONFIG` at an EDF for the image (above) and set `EVAL_PREBUILT_ENV=1`:
+the launcher then runs on the login node from a checkout of the image's commit and the jobs run in
+the image (`--chat-format apertus2` on the API endpoint, highprio: tested with `ifbench`, 2026-11-18).
 
 To ship a newer harness, bump its commit in `requirements/lm-eval-harness.txt`:
 all runs use that commit. `--harness-branch`/`LM_EVAL_HARNESS_BRANCH` overrides it
