@@ -231,6 +231,52 @@ class InlineSlurmTests(unittest.TestCase):
 
 
 class MainTests(unittest.TestCase):
+    def _render_main(self, argv: list[str]) -> str:
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as stdout,
+            patch.object(job, "image_published", return_value=True),
+        ):
+            self.assertEqual(job.main(argv), 0)
+        return stdout.getvalue()
+
+    def _suite_argv(self, *extra: str) -> list[str]:
+        return [
+            "--suite", "apertus2/chonk_sft", "--setup", "chonk-lc-16k-v0.2-sft", "--account", "infra01",
+            "--eval-image-commit", "abc123", "--eval", "echo hi", *extra,
+        ]  # fmt: skip
+
+    def test_suite_setup_fills_in_what_the_command_line_leaves_out(self) -> None:
+        script = self._render_main(self._suite_argv("--framework-args", "--max-num-seqs 16"))
+
+        self.assertIn("--model /capstor/store/cscs/swissai/infra01/hf-checkpoints/swiss-ai/chonk-lc-16k-v0.2-sft ", script)
+        self.assertIn("--served-model-name chonk-lc-16k-v0.2-sft ", script)
+        self.assertIn("#SBATCH --nodes=2\n", script)
+        self.assertIn("#SBATCH --time=24:00:00\n", script)
+        self.assertIn("--tool-call-parser apertus2 --max-num-seqs 16", script)  # the setup's, then the command line's
+
+    def test_the_command_line_wins_over_the_suite(self) -> None:
+        script = self._render_main(self._suite_argv("--nodes", "3", "--time", "01:00:00", "--served-model-name", "m"))
+
+        self.assertIn("#SBATCH --nodes=3\n", script)
+        self.assertIn("#SBATCH --time=01:00:00\n", script)
+        self.assertIn("--served-model-name m ", script)
+
+    def test_pre_launch_cmds_reach_the_serving_nodes(self) -> None:
+        script = self._render_main(self._suite_argv("--pre-launch-cmds", "echo prepare-the-node"))
+
+        self.assertIn("echo prepare-the-node", script)
+
+    def test_suite_and_setup_go_together_and_a_model_is_needed_without_them(self) -> None:
+        for argv in (
+            ["--suite", "apertus2/chonk_sft", "--eval", "x"],
+            ["--setup", "chonk-lc-16k-v0.2-sft", "--eval", "x"],
+            ["--suite", "apertus2/chonk_sft", "--setup", "apertus-1.5-70b-thinking", "--eval", "x"],  # no launch block
+            ["--eval", "x"],
+        ):
+            with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    job.main(argv)
+
     def _argv(self, *extra: str) -> list[str]:
         return ["--model", "/store/m", "--environment", _env_file(self), "--account", "infra01", *extra]
 

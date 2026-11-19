@@ -23,7 +23,7 @@ Evaluation infrastructure for LLMs on CSCS Alps (Clariden), with results in W&B.
 
 ¹ The CSCS serving API (`https://api.swissai.svc.cscs.ch/v1`), which serves only models launched and registered there, or a server you start yourself, e.g. `vllm serve <checkpoint>` on a Clariden node, passed by its own URL (no registration).
 
-One Slurm job can also serve the model (on several nodes if it needs them) and run evals against it on the same nodes, with no gateway between: [docs/direct-serving.md](docs/direct-serving.md).
+A model of your own can also be served and evaluated by one Slurm job, on several nodes if it needs them, with no gateway between: [the direct route](#serving-the-model-in-the-eval-job-direct-route).
 
 Every runner except the in-job lm-eval backends can also run from the prebuilt image (`containers/Dockerfile.eval`, [details](docs/lm-eval-harness.md#prebuilt-evaluation-image-no-installs-at-run-time)), which installs nothing at run time.
 
@@ -97,6 +97,48 @@ The examples above are smoke tests, hence `--no-wandb`. Otherwise all four frame
 
 ---
 
+## Serving the model in the eval job (direct route)
+
+For a checkpoint that is not on the CSCS serving API, or too big for one node, one command starts **one Slurm job** that serves the model and runs the evals against it. The two parts run as steps of the job, each in its own container:
+
+```
+sbatch                       scripts/direct_serving/job.py
+|- srun   model server(s)    serving image (vLLM), one step per node, Ray across the nodes of a replica
+'- srun   eval command 1, 2  prebuilt eval image, one after another, against http://127.0.0.1:8080/v1
+```
+
+- **The server** is started by model-launch's own job script with OpenTela, metrics and telemetry off: nothing registers on the serving gateway, so its 503s, rate limits and header timeout never reach a run.
+- **The evals** are launcher commands of any of the four frameworks (`--eval`, repeatable). The job waits for the server's `/health`, then runs them in order from this checkout in the [prebuilt eval image](docs/lm-eval-harness.md#prebuilt-evaluation-image-no-installs-at-run-time): the image of the last commit that changed what it is built from, which the job checks on ghcr before it starts. The model loads once for all of them, and a command finds the server's URL in `$EVAL_API_BASE_URL`.
+- **The end:** the job ends with status 1 if the server died or any command failed; a failed command does not stop the next one.
+- **A suite** can say how its model is served: a setup's `launch` block (checkpoint, serving EDF, nodes, time, parallelism) is read by `--suite` and `--setup`, and the setup's `serving` arguments are added ([docs/suites.md](docs/suites.md)).
+
+Run it from the root of this checkout on a Clariden login node, in a Python that has `swiss_ai_model_launch` ([setup](docs/lm-eval-harness.md#judge-model-launching)); the checkout has to be on storage the compute nodes see. `--submit` submits the job and prints its id; without it the job script is printed. The job's logs are in `~/.sml/logs/<job id>/` (`--workdir` changes it): `log.out` for the commands, `replica_0.out`/`.err` for the server. Each runner writes its results where it always does.
+
+**A model by hand**: Qwen3-32B on one node, Inspect and lm-eval, 3 samples each. `--framework-args` follow `--model`, `--served-model-name` and `--host`, which the launcher sets; lm-eval needs `--failure-policy fail-fast` here, and a Hugging Face name or a path as `--tokenizer`, not the served name.
+
+```bash
+python -m scripts.direct_serving.job \
+  --model /capstor/store/cscs/swissai/infra01/hf_models/models/Qwen/Qwen3-32B --served-model-name qwen3-32b \
+  --nodes 1 --time 01:00:00 --environment containers/env_vllm.toml \
+  --framework-args "--tensor-parallel-size 4 --max-model-len 32768 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser hermes" \
+  --eval 'scripts/inspect_ai/run_inspect_eval.sh --task gsm8k --model qwen3-32b --api-base-url "$EVAL_API_BASE_URL" --limit 3 --no-wandb --no-enable-thinking' \
+  --eval 'bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k --model qwen3-32b --backend openai --api-base-url "$EVAL_API_BASE_URL" --api-model-name qwen3-32b --tokenizer Qwen/Qwen3-32B --limit 3 --no-wandb --failure-policy fail-fast' \
+  --submit
+```
+
+**A suite setup**: Chonk (`apertus2/chonk_sft`, setup `chonk-lc-16k-v0.2-sft`) on 2 nodes. The setup's `launch` block gives the checkpoint, the Apertus 2 serving EDF, 2 nodes, 24 h and the tensor-parallel 1 x data-parallel 8 layout over Ray; its `serving` arguments make the server render the Apertus 2 format. The server needs the `apertus-common` vLLM plugin, which its image does not contain: the install is `--pre-launch-cmds` (the commit is pinned in `requirements/apertus2.txt`, [details](docs/thinking.md#apertus-2-on-v1chatcompletions-temporary)). The model is served as `chonk-lc-16k-v0.2-sft`, the setup's name; `--time` overrides the suite's 24 h.
+
+```bash
+python -m scripts.direct_serving.job --suite apertus2/chonk_sft --setup chonk-lc-16k-v0.2-sft --time 01:00:00 \
+  --pre-launch-cmds "pip install -q --no-deps --force-reinstall --ignore-requires-python 'git+https://github.com/swiss-ai/apertus-common.git@<pin of requirements/apertus2.txt>'" \
+  --eval 'scripts/inspect_ai/run_inspect_eval.sh --task gsm8k --model chonk-lc-16k-v0.2-sft --api-base-url "$EVAL_API_BASE_URL" --limit 5 --no-wandb' \
+  --submit
+```
+
+`--partition`, `--qos`, `--account` and `--reservation` set the job's Slurm options (the partition is `normal` unless you name another). The Slurm options, the eval image (`--eval-image-commit`), extra mounts and everything else: [docs/direct-serving.md](docs/direct-serving.md).
+
+---
+
 ## Credentials
 
 All keys go in one file, `scripts/secrets.env` (in `.gitignore`), one `NAME=value` per line; fill in the ones you have:
@@ -110,7 +152,7 @@ Every runner reads it (`scripts/common/secrets.sh`). A variable already set in t
 | Variable | Read by | Required for |
 |---|---|---|
 | `HF_TOKEN` | lm-eval jobs, `run_inspect_eval.sbatch` | Gated/rate-limited Hugging Face datasets and models (most task suites). |
-| `CSCS_SERVING_API` | all four frameworks, the AA scripts | LLM-as-a-judge evals (e.g. AlpacaEval) and any `--api-base-url`/`openai` backend run against CSCS serving. Key can be obtained [here](https://serving.swissai.cscs.ch). |
+| `CSCS_SERVING_API` | all four frameworks, the AA scripts | LLM-as-a-judge evals (e.g. AlpacaEval) and any `--api-base-url`/`openai` backend run against CSCS serving. Key can be obtained [here](https://serving.swissai.cscs.ch). Not needed to serve and evaluate in the direct route, only for a judge on the CSCS serving API. |
 | `OPENAI_API_KEY` | lm-eval jobs, `run_inspect_eval.sbatch` | The optional `gpt` suite (falls back to `CSCS_SERVING_API` in lm-eval jobs), and Inspect `openai/...` model roles. |
 | `WANDB_API_KEY` | all four frameworks | Uploading results to Weights & Biases. |
 | `CRITPT_API_KEY` | `run_inspect_eval.sh` | Optional: grading for CritPt (`scripts/aaii/aa_critpt.py`); ask critpt@artificialanalysis.ai for access. Without it, the submissions are written to a local file. |
@@ -131,6 +173,7 @@ Adding a benchmark or a framework, fixing a bug, running the tests, changing a d
 evals-post-train/
 ├── scripts/
 │   ├── lm_eval_harness/   # launch_evaluations.sh: Slurm jobs that serve the model and run lm-eval, in resumable chunks; judges, Megatron conversion
+│   ├── direct_serving/    # job.py: one Slurm job that serves a model and runs evals against it; inline_slurm/: sbatch and srun that run in place
 │   ├── inspect_ai/        # run_inspect_eval.sh/.sbatch, sandbox_patches/, opensandbox_sandbox.py (the opensandbox sandbox provider)
 │   ├── harbor/            # run_harbor_eval.sh/.sbatch, run.py (benchmarks), k8s/docker/opensandbox environments, task_patches.py
 │   ├── evalscope/         # run_evalscope_eval.sh/.sbatch, run.py, SWE-bench scorer
@@ -138,8 +181,8 @@ evals-post-train/
 │   ├── common/            # suites.py (suite files: `plan`, `flags`, `run`), sampling.py and thinking.py (the shared sampling and thinking policy), k8s_sandbox.py (task containers as pods: Harbor, EvalScope), opensandbox_sandbox.py (as Kata microVMs: EvalScope; Harbor's cleanup), dockerfile_replay.py (Dockerfiles replayed where images can't be built: Harbor, Inspect), wandb.sh (the W&B upload rule), lock_requirements.sh and locked_venv.sh (dependency locks)
 │   └── results/           # W&B upload, tables, exports
 ├── configs/               # sampling_defaults.json, suites/ (comparison definitions), export mappings; archive/: lm-eval task lists, main-table metrics, model registry
-├── containers/            # Enroot/Pyxis configs and the prebuilt evaluation image (Dockerfile.eval)
+├── containers/            # Enroot/Pyxis configs (serving images, env_vllm_apertus2.toml for Apertus 2) and the prebuilt evaluation image (Dockerfile.eval)
 ├── requirements/          # Dependencies per framework environment: .txt (edited) and .lock (generated; see CONTRIBUTING.md for what installs which)
-├── docs/                  # One doc per framework, plus results.md, sampling.md, thinking.md, suites.md and repeated_sampling.md
+├── docs/                  # One doc per framework, plus direct-serving.md, results.md, sampling.md, thinking.md, suites.md and repeated_sampling.md
 └── tests/
 ```

@@ -9,7 +9,10 @@ configs/suites/<name>.json holds two things:
   setups      named kinds of model setup: max_length, sampling (a profile name), flags (the
               launcher flags of each framework the suite uses: thinking, chat format, ...) and
               optionally serving (the arguments the server itself needs, e.g. a reasoning parser;
-              nothing here runs them, whoever launches the model passes them to `vllm serve`) and
+              nothing here runs them; scripts/direct_serving/job.py --suite appends them to the launch
+              block's) and launch {model_path, environment, nodes, time, framework_args} (how the
+              model is served: the checkpoint, the serving EDF, the nodes of the one replica, the
+              wall time and the layout arguments; scripts/direct_serving/job.py --suite/--setup reads it) and
               tokenizer {repo, revision, path} (a tokenizer pinned in a git repository; lm_eval
               gets --tokenizer <local copy>, which `flags` fetches once into the cache) and
               task_flags {task: [flags]} (replaces the setup's flags of that one task, e.g. the
@@ -53,6 +56,11 @@ FRAMEWORKS = ("lm_eval", "inspect", "evalscope", "harbor", "tau2")
 VIA = ("flag", "task")
 
 
+LAUNCH_KEYS = ("model_path", "environment", "nodes", "time", "framework_args")
+# What scripts/direct_serving/job.py sets itself on the serving command.
+LAUNCH_OWN_FLAGS = ("--model", "--served-model-name", "--host", "--port")
+
+
 def _positive_int(where, value):
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise ValueError(f"{where}: must be an integer >= 1 (got {value!r})")
@@ -68,6 +76,23 @@ RESERVED = {"lm_eval": {"--max-length", "--repeats", "--reasoning-effort"},
 def _profile(where, name, profiles):
     if name not in profiles:
         raise ValueError(f"{where}: unknown sampling profile {name!r} ({', '.join(profiles)})")
+
+
+def _launch(where, launch):
+    if not isinstance(launch, dict) or set(launch) != set(LAUNCH_KEYS):
+        raise ValueError(f"{where}: launch must be an object with exactly {', '.join(LAUNCH_KEYS)}")
+    for key in ("model_path", "environment"):
+        if not isinstance(launch[key], str) or not launch[key]:
+            raise ValueError(f"{where}: launch.{key} must be a non-empty string")
+    _positive_int(f"{where} launch.nodes", launch["nodes"])
+    if not isinstance(launch["time"], str) or not re.fullmatch(r"\d+:[0-5]\d:[0-5]\d", launch["time"]):
+        raise ValueError(f"{where}: launch.time must be HH:MM:SS (got {launch['time']!r})")
+    args = launch["framework_args"]
+    if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+        raise ValueError(f"{where}: launch.framework_args must be a list of strings")
+    for flag in LAUNCH_OWN_FLAGS:
+        if flag in args:
+            raise ValueError(f"{where}: launch.framework_args must not hold {flag}: the launcher sets it")
 
 
 def _tokenizer(where, spec):
@@ -180,6 +205,8 @@ def validate(suite):
             raise ValueError(f"setup {name}: reasoning_effort must be one of {thinking.EFFORTS} (got {setup['reasoning_effort']!r})")
         if "tokenizer" in setup:
             _tokenizer(f"setup {name}", setup["tokenizer"])
+        if "launch" in setup:
+            _launch(f"setup {name}", setup["launch"])
         serving = setup.get("serving", [])
         if not isinstance(serving, list) or not all(isinstance(a, str) for a in serving):
             raise ValueError(f"setup {name}: serving must be a list of strings")
@@ -227,6 +254,21 @@ def setup(suite, name):
     if name not in suite["setups"]:
         raise ValueError(f"unknown setup {name!r} ({', '.join(suite['setups'])})")
     return suite["setups"][name]
+
+
+def launch_for(suite, setup_name):
+    """How a setup's model is served, for scripts/direct_serving/job.py: its launch block, the
+    EDF as an absolute path and the setup's `serving` arguments appended to the framework
+    arguments (a string). ValueError when the setup has no launch block."""
+    chosen = setup(suite, setup_name)
+    if "launch" not in chosen:
+        raise ValueError(f"setup {setup_name!r} has no launch block")
+    launch = chosen["launch"]
+    return {
+        **launch,
+        "environment": str(REPO_ROOT / launch["environment"]),
+        "framework_args": shlex.join([*launch["framework_args"], *chosen.get("serving", [])]),
+    }
 
 
 def flags_for(suite, setup_name, task, fetch=False):
@@ -364,6 +406,9 @@ def main(argv=None):
                     print(f"  tokenizer: {t['repo']}@{t['revision'][:12]} {t['path']}")
                 if s.get("serving"):
                     print(f"  server: {shlex.join(s['serving'])}")
+                if s.get("launch"):
+                    launch = s["launch"]
+                    print(f"  launch: {launch['nodes']} node(s), {launch['time']}, {launch['model_path']}")
         elif args.command == "plan":
             suite = load(args.suite)
             print(_table([[r["label"], r["task"], shlex.join(r["flags"]), r["sampling"], r["metric"],

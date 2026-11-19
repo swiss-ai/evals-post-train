@@ -89,6 +89,31 @@ class SuiteTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, message):
                 suites.validate(suite)
 
+    def test_a_setups_launch_block_becomes_the_serving_the_launcher_needs(self):
+        suite = suites.load(SUITE)
+        launch = suites.launch_for(suite, "chonk-lc-16k-v0.2-sft")
+        self.assertEqual((launch["nodes"], launch["time"]), (2, "24:00:00"))
+        self.assertTrue(Path(launch["environment"]).is_file())  # the EDF it names ships in this repo
+        self.assertIn("--data-parallel-backend ray", launch["framework_args"])
+        self.assertTrue(launch["framework_args"].endswith("--tool-call-parser apertus2"))  # the setup's serving
+        with self.assertRaisesRegex(ValueError, "no launch block"):
+            suites.launch_for(suite, THINK)
+
+    def test_malformed_launch_blocks_name_the_field(self):
+        base = suites.load(SUITE)
+        for mutate, message in (
+            (lambda launch: launch.pop("nodes"), "launch must be an object"),
+            (lambda launch: launch.update(nodes=0), "launch.nodes"),
+            (lambda launch: launch.update(time="1 day"), "launch.time"),
+            (lambda launch: launch.update(environment=""), "launch.environment"),
+            (lambda launch: launch.update(framework_args="--x"), "list of strings"),
+            (lambda launch: launch["framework_args"].extend(["--model", "x"]), "the launcher sets it"),
+        ):
+            suite = copy.deepcopy(base)
+            mutate(suite["setups"]["chonk-lc-16k-v0.2-sft"]["launch"])
+            with self.assertRaisesRegex(ValueError, message):
+                suites.validate(suite)
+
     def test_inspect_rows_get_their_own_flags_task_args_and_epochs(self):
         suite = suites.load("apertus2/chonk_sft")
         self.assertEqual(suites.flags_for(suite, "qwen3-32b-thinking", "mmlu_0_shot"),
