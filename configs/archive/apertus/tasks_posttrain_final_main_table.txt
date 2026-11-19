@@ -53,6 +53,5 @@ realguardrails_s_ifeval/prompt_level_strict_acc
 realguardrails_tensortrust/passed
 realguardrails_s_rules_br/passed
 # Tool Use
-bfcl_v3/acc
 # Charter Alignment
 swiss_ai_charter_alignment/swiss_ai_charter_length_controlled_winrate

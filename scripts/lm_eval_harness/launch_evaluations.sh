@@ -76,7 +76,7 @@
 #   --api-num-concurrent N - 'openai' backend: concurrent requests (default 8)
 #   --api-endpoint <e>   - 'completions' (default) or 'chat-completions' for the 'openai' backend.
 #                          chat-completions lets the server render the chat template (generative
-#                          tasks only; required by FC tasks such as bfcl_v3_fc).
+#                          tasks only; required by tasks that send `tools` in the request).
 #   --chat-format <f>    - 'template' (default) or 'apertus2' (Apertus 2 native format, a thinking
 #                          run; needs --backend openai, --tokenizer, --max-length; see the docs)
 #   --prefill-mode <m>   - apertus2 answer prefills: 'after_think' (default) or 'empty_think'

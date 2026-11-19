@@ -11,7 +11,6 @@ class BenchmarkConfigTests(unittest.TestCase):
             REPO_ROOT / "configs" / "archive" / "apertus" / "tasks_posttrain_final.txt"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("\nbfcl_v3\n", tasks)
         self.assertIn("\nswiss_ai_charter_alignment\n", tasks)
 
     def test_minerva_tables_promote_math_verify(self) -> None:
