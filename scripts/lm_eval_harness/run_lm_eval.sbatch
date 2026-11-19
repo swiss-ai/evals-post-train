@@ -144,8 +144,7 @@ fi
 load_prepared_eval_env() {
     EVAL_ENV_CHECK_ERROR=""
     unset EVAL_ENV_KIND EVAL_BASE_ENV EVAL_HARNESS_OVERLAY EVAL_HARNESS_ARCHIVE \
-        EVAL_RESOLVED_HARNESS_REPO EVAL_RESOLVED_HARNESS_COMMIT EVAL_RESOLVED_BASE_KEY \
-        EVAL_APERTUS_COMMON_WHEELS
+        EVAL_RESOLVED_HARNESS_REPO EVAL_RESOLVED_HARNESS_COMMIT EVAL_RESOLVED_BASE_KEY
     if [[ ! -f "$EVAL_ENV_MANIFEST" ]]; then
         EVAL_ENV_CHECK_ERROR="manifest is missing: $EVAL_ENV_MANIFEST"
         return 1
@@ -802,25 +801,7 @@ echo "Using lm-evaluation-harness: $EVAL_RESOLVED_HARNESS_REPO@$EVAL_RESOLVED_HA
 if [[ "${EVAL_ENV_KIND:-}" == "prebuilt" ]]; then
 # EVAL_PREBUILT_ENV=1: the container (containers/Dockerfile.eval) already has
 # every package and the pinned harness. Check it, never install: a mismatch means the job runs
-# in an image built from a different commit. The one exception is apertus-common (a private
-# repository, so not in the image): an apertus2 run installs the wheel the launcher built from the
-# commit requirements/apertus2.txt pins (prepare_apertus_common.sh), offline and --no-deps like
-# the harness, into a directory of its own ahead of the overlay.
-APERTUS_COMMON_INSTALL=""
-APERTUS_COMMON_IMPORT=""
-if [[ "$CHAT_FORMAT" == "apertus2" ]]; then
-[[ -n "${EVAL_APERTUS_COMMON_WHEELS:-}" ]] \
-    || die "CHAT_FORMAT=apertus2 on the prebuilt image needs EVAL_APERTUS_COMMON_WHEELS in the manifest (the launcher writes it)."
-APERTUS_COMMON_IMPORT=", apertus_common"
-APERTUS_COMMON_INSTALL="
-if [[ ! -f '$EVAL_APERTUS_COMMON_WHEELS/.complete' ]]; then
-    echo 'The apertus-common wheel is not visible in the container: $EVAL_APERTUS_COMMON_WHEELS (mount EVAL_ENV_CACHE_ROOT).' >&2
-    exit 1
-fi
-apertus_common_dir=\$(mktemp -d)
-python -m pip install --quiet --no-deps --no-index --target \"\$apertus_common_dir\" '$EVAL_APERTUS_COMMON_WHEELS'/*.whl || exit 1
-export PYTHONPATH=\"\$apertus_common_dir\"\${PYTHONPATH:+:\$PYTHONPATH}"
-fi
+# in an image built from a different commit.
 LOAD_ENV_CMD="
 echo Container entered: \$(date -Is)
 # lm-eval's packages are in the image's venv, first on PATH by the image's ENV. Not every runtime
@@ -836,8 +817,7 @@ if [[ \"\$container_harness_commit\" != '$EVAL_RESOLVED_HARNESS_COMMIT' ]]; then
     exit 1
 fi
 export PYTHONPATH='$EVAL_HARNESS_OVERLAY'\${PYTHONPATH:+:\$PYTHONPATH}
-$APERTUS_COMMON_INSTALL
-if ! python -c 'import accelerate, datasets, transformers, wandb, lm_eval${APERTUS_COMMON_IMPORT}'; then
+if ! python -c 'import accelerate, datasets, transformers, wandb, lm_eval, apertus_common'; then
     echo 'EVAL_PREBUILT_ENV=1, but this container is missing evaluation packages (import check above).' >&2
     exit 1
 fi
