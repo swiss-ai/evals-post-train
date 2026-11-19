@@ -18,6 +18,12 @@ subject/object popularity in its metadata for accuracy-by-popularity breakdowns.
 
 Runs 14,267 short generations in full (the generations are brief, so this is cheap);
 use `--limit 100` to test.
+
+Thinking models: raise `max_tokens` (the reasoning counts against it). Thinking left inline
+in the answer (`<|inner_prefix|>...<|inner_suffix|>`, Apertus 1.5 served without a
+reasoning parser) is removed before scoring, since the substring match would otherwise
+credit an alias that only appears in the reasoning; an answer whose thinking never closed
+scores as empty.
 """
 
 from __future__ import annotations
@@ -25,18 +31,48 @@ from __future__ import annotations
 import csv
 import json
 import random
+import re
 
 from huggingface_hub import hf_hub_download
 from inspect_ai import Task, task
 from inspect_ai.dataset import MemoryDataset, Sample
 from inspect_ai.model import GenerateConfig
 from inspect_ai.scorer import includes
-from inspect_ai.solver import generate
+from inspect_ai.solver import Generate, Solver, TaskState, generate, solver
 
 DATASET = "akariasai/PopQA"
 FILENAME = "test.tsv"
 # Pinned dataset revision.
 REVISION = "098765c79ea10a2cb19c828324e33281b8336ec0"
+THINK_START = "<|inner_prefix|>"
+THINK_END = "<|inner_suffix|>"
+_THINK_BLOCK = re.compile(
+    re.escape(THINK_START) + r".*?" + re.escape(THINK_END), re.DOTALL
+)
+
+
+def strip_reasoning(text: str) -> str:
+    """The answer without inline thinking; "" if the thinking never closed."""
+    text = _THINK_BLOCK.sub("", text)
+    if THINK_END in text:
+        text = text.rsplit(THINK_END, 1)[1]
+    if THINK_START in text:
+        text = text.split(THINK_START, 1)[0]
+    return text.strip()
+
+
+@solver
+def strip_inline_reasoning() -> Solver:
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        if state.output and state.output.choices:
+            completion = state.output.completion
+            stripped = strip_reasoning(completion)
+            if stripped != completion:
+                state.output.completion = stripped
+        return state
+
+    return solve
+
 
 PROMPT = "Answer the question with a short phrase only. Do not explain.\n\nQuestion: {question}\nAnswer:"
 
@@ -87,7 +123,7 @@ def popqa(
         dataset=MemoryDataset(
             load_samples(path, num_samples, shuffle_seed), name="popqa"
         ),
-        solver=generate(),
+        solver=[generate(), strip_inline_reasoning()],
         scorer=includes(ignore_case=True),
         config=GenerateConfig(temperature=0.0, max_tokens=max_tokens),
     )
