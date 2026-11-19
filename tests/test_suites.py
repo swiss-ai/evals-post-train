@@ -192,22 +192,11 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(qwen_lm_eval[qwen_lm_eval.index("--backend") + 1], "openai")
         self.assertEqual(qwen_lm_eval[qwen_lm_eval.index("--api-model-name") + 1], "qwen")
 
-    def test_swe_bench_row_tells_the_agent_the_window_of_each_setup(self):
-        suite = suites.load(SUITE)
-        self.assertEqual(suites.benchmark(suite, "swe_bench")["framework"], "harbor")
-        chonk = suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "swe_bench")
-        self.assertEqual(chonk, ["--agent-kwarg", 'model_info={"max_input_tokens": 32768}', "--reasoning-effort", "high",
-                                 "--sandbox", "opensandbox"])
-        think = suites.flags_for(suite, "apertus-1.5-70b-thinking", "swe_bench")
-        self.assertEqual(think, ["--enable-thinking", "--agent-kwarg", 'model_info={"max_input_tokens": 32768}',
-                                 "--sandbox", "opensandbox"])
-        self.assertNotIn("--reasoning-effort", think)
-
     def test_run_prints_by_default_and_checks_its_arguments(self):
         with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
             self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m", "--model", "qwen3-32b-thinking=q"]), 0)
-        self.assertIn("28 launches: 2 models x 14 benchmarks", err.getvalue())
+        self.assertIn("26 launches: 2 models x 13 benchmarks", err.getvalue())
         for bad in (["--model", "m"], ["--model", "nope=m"], ["--model", f"{THINK}=a", "--model", f"{THINK}=b"]):
             self.assertEqual(suites.main(["run", SUITE, *bad]), 1)
 
@@ -228,9 +217,15 @@ class SuiteTests(unittest.TestCase):
 
     def test_a_benchmarks_flags_follow_the_setups(self):
         suite = suites.load(SUITE)
-        flags = suites.flags_for(suite, THINK, "swe_bench")
-        self.assertEqual(flags[-2:], ["--sandbox", "opensandbox"])
-        self.assertEqual(flags[:len(suite["setups"][THINK]["flags"]["harbor"])], suite["setups"][THINK]["flags"]["harbor"])
+        # No shipped row carries flags of its own at the moment: the mechanism is exercised with a row set here.
+        next(b for b in suite["benchmarks"] if b["task"] == "ifeval")["flags"] = ["--sandbox", "opensandbox"]
+        suites.validate(suite)
+        flags = suites.flags_for(suite, THINK, "ifeval")
+        setup_flags = suite["setups"][THINK]["flags"]["inspect"]
+        self.assertEqual(flags[:len(setup_flags)], setup_flags)
+        own = flags.index("--sandbox")
+        self.assertEqual(flags[own:own + 2], ["--sandbox", "opensandbox"])
+        self.assertLess(own, flags.index("--"))  # before the epochs
         next(b for b in suite["benchmarks"] if b["task"] == "ifbench")["flags"] = ["--repeats", "2"]
         with self.assertRaisesRegex(ValueError, "--repeats"):
             suites.validate(suite)
