@@ -32,7 +32,9 @@ from inspect_ai.solver import Generate, Solver, TaskState, solver
 GATEWAY_BASE_URL = "https://api.swissai.svc.cscs.ch/v1"
 THINK_START = "<|inner_prefix|>"
 THINK_END = "<|inner_suffix|>"
-_THINK_BLOCK = re.compile(re.escape(THINK_START) + r".*?" + re.escape(THINK_END), re.S)
+_THINK_BLOCK = re.compile(
+    re.escape(THINK_START) + r".*?" + re.escape(THINK_END), re.DOTALL
+)
 
 
 def strip_reasoning(text: str) -> str:
