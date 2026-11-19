@@ -99,7 +99,7 @@ The examples above are smoke tests, hence `--no-wandb`. Otherwise all four frame
 
 ## Serving the model in the eval job (direct route)
 
-For a checkpoint that is not on the CSCS serving API, or too big for one node, one command starts **one Slurm job** that serves the model and runs the evals against it. The two parts run as steps of the job, each in its own container:
+For a checkpoint that is not on the CSCS serving API, or too big for one node, one command starts **one Slurm job** that serves the model and runs the evals against it, each part as a step in its own container:
 
 ```
 sbatch                       scripts/direct_serving/job.py
@@ -107,14 +107,14 @@ sbatch                       scripts/direct_serving/job.py
 '- srun   eval command 1, 2  prebuilt eval image, one after another, against http://127.0.0.1:8080/v1
 ```
 
-- **The server** is started by model-launch's own job script with OpenTela, metrics and telemetry off: nothing registers on the serving gateway, so its 503s, rate limits and header timeout never reach a run.
-- **The evals** are launcher commands of any of the four frameworks (`--eval`, repeatable). The job waits for the server's `/health`, then runs them in order from this checkout in the [prebuilt eval image](docs/lm-eval-harness.md#prebuilt-evaluation-image-no-installs-at-run-time): the image of the last commit that changed what it is built from, which the job checks on ghcr before it starts. The model loads once for all of them, and a command finds the server's URL in `$EVAL_API_BASE_URL`.
-- **The end:** the job ends with status 1 if the server died or any command failed; a failed command does not stop the next one.
-- **A suite** can say how its model is served: a setup's `launch` block (checkpoint, serving EDF, nodes, time, parallelism) is read by `--suite` and `--setup`, and the setup's `serving` arguments are added ([docs/suites.md](docs/suites.md)).
+- **Server**: started by model-launch's job script with OpenTela, metrics and telemetry off, so nothing registers on the serving gateway and its 503s and rate limits never reach a run.
+- **Evals**: launcher commands of any of the four frameworks (`--eval`, repeatable), run in order once `/health` answers, in the [prebuilt eval image](docs/lm-eval-harness.md#prebuilt-evaluation-image-no-installs-at-run-time). They find the server's URL in `$EVAL_API_BASE_URL`. The model loads once for all of them.
+- **End**: status 1 if the server died or any command failed; a failed command does not stop the next one.
+- **Suite**: a setup's `launch` block (checkpoint, serving EDF, nodes, time, parallelism) and `serving` arguments are read by `--suite` and `--setup` ([docs/suites.md](docs/suites.md)).
 
-Run it from the root of this checkout on a Clariden login node, in a Python that has `swiss_ai_model_launch` ([setup](docs/lm-eval-harness.md#judge-model-launching)); the checkout has to be on storage the compute nodes see. `--submit` submits the job and prints its id; without it the job script is printed. The job's logs are in `~/.sml/logs/<job id>/` (`--workdir` changes it): `log.out` for the commands, `replica_0.out`/`.err` for the server. Each runner writes its results where it always does.
+Run it from this checkout (on storage the compute nodes see) on a Clariden login node, in a Python with `swiss_ai_model_launch` ([setup](docs/lm-eval-harness.md#judge-model-launching)). `--submit` submits and prints the job id; without it the job script is printed. Logs are in `~/.sml/logs/<job id>/` (`--workdir` changes it): `log.out` for the commands, `replica_0.out`/`.err` for the server.
 
-**A model by hand**: Qwen3-32B on one node, Inspect and lm-eval, 3 samples each. `--framework-args` follow `--model`, `--served-model-name` and `--host`, which the launcher sets; lm-eval needs `--failure-policy fail-fast` here, and a Hugging Face name or a path as `--tokenizer`, not the served name.
+**A model by hand**: Qwen3-32B on one node, Inspect and lm-eval, 3 samples each. lm-eval needs `--failure-policy fail-fast` here and a Hugging Face name or path as `--tokenizer`, not the served name.
 
 ```bash
 python -m scripts.direct_serving.job \
@@ -126,7 +126,7 @@ python -m scripts.direct_serving.job \
   --submit
 ```
 
-**A suite setup**: Chonk (`apertus2/chonk_sft`, setup `chonk-lc-16k-v0.2-sft`) on 2 nodes. The setup's `launch` block gives the checkpoint, the Apertus 2 serving EDF, 2 nodes, 24 h and the tensor-parallel 1 x data-parallel 8 layout over Ray; its `serving` arguments make the server render the Apertus 2 format. The server needs the `apertus-common` vLLM plugin, which its image does not contain: the install is `--pre-launch-cmds` (the commit is pinned in `requirements/apertus2.txt`, [details](docs/thinking.md#apertus-2-on-v1chatcompletions-temporary)). The model is served as `chonk-lc-16k-v0.2-sft`, the setup's name; `--time` overrides the suite's 24 h.
+**A suite setup**: Chonk (`apertus2/chonk_sft`, setup `chonk-lc-16k-v0.2-sft`) on 2 nodes; the setup supplies checkpoint, EDF, nodes, 24 h (`--time` overrides) and the Apertus 2 serving arguments. The server's image lacks the `apertus-common` vLLM plugin, so it is installed via `--pre-launch-cmds` (commit pinned in `requirements/apertus2.txt`, [details](docs/thinking.md#apertus-2-on-v1chatcompletions-temporary)).
 
 ```bash
 python -m scripts.direct_serving.job --suite apertus2/chonk_sft --setup chonk-lc-16k-v0.2-sft --time 01:00:00 \
@@ -135,7 +135,7 @@ python -m scripts.direct_serving.job --suite apertus2/chonk_sft --setup chonk-lc
   --submit
 ```
 
-`--partition`, `--qos`, `--account` and `--reservation` set the job's Slurm options (the partition is `normal` unless you name another). The Slurm options, the eval image (`--eval-image-commit`), extra mounts and everything else: [docs/direct-serving.md](docs/direct-serving.md).
+Slurm options (`--partition`, `--qos`, `--account`, `--reservation`), the eval image and everything else: [docs/direct-serving.md](docs/direct-serving.md).
 
 ---
 

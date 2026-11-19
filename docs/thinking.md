@@ -45,18 +45,18 @@ the reply. That is the vLLM plugin of `apertus-common` (PRs #5 and #7, merged), 
        --enable-auto-tool-choice --tool-call-parser apertus2"
    ```
 
-   Without the install the server exits
-   at startup with `invalid tool call parser: apertus2`. `sml advanced` does not set a QoS: for
-   `highprio`, render the job with `--output-script`, add the `#SBATCH --qos` line, and `sbatch` it.
+   Without the install the server exits at startup with `invalid tool call parser: apertus2`.
+   `sml advanced` does not set a QoS: for `highprio`, render the job with `--output-script`, add
+   the `#SBATCH --qos` line, and `sbatch` it.
 2. **Point the framework at it** like any served model: `--model <served name> --api-base-url ...`.
 
 The server answers with the reasoning in a separate `reasoning` field. Notes:
 
-- Apertus 2 always reasons: `--no-enable-thinking` did not change the output length, so the thinking
-  flags only pick the sampling profile ([sampling](sampling.md)) for this model.
+- Apertus 2 always reasons: `--no-enable-thinking` did not change the output length, so for this
+  model the thinking flags only pick the sampling profile ([sampling](sampling.md)).
 - It thinks a lot even on trivial prompts, so give a large token budget. The Chonk launch has a
-  context of 16384; an empty `content` with `finish_reason: length` means the budget ran out while
-  it was still thinking.
+  context of 16384; an empty `content` with `finish_reason: length` means the budget ran out
+  mid-thought.
 - Harbor's terminus-2 agent assumes a very large context window. On a server with a smaller one it
   hits "Context length exceeded" and keeps falling back to summaries. Tell it the real limit:
   `--agent-kwarg 'model_info={"max_input_tokens": 16384}'` (the Chonk launch's context).

@@ -37,7 +37,7 @@ EvalScope covers SWE-bench Verified and Pro, LiveCodeBench and BFCL v4. Results 
 
 **Harbor:** add a pinned entry to `BENCHMARKS` in `scripts/harbor/run.py` (`name@1.0` or `@sha256:...`), list it in `run_harbor_eval.sh`'s header and [docs/harbor.md](docs/harbor.md), and check that `--gold --limit 2` scores 1 on each sandbox it supports. Tasks that need fixing after download get a patch in `scripts/harbor/task_patches.py`, with a test.
 
-**Before a new benchmark counts as done**, it runs end to end, not just with `--limit`/`--gold`:
+**A new benchmark is done** only when it runs end to end, not just with `--limit`/`--gold`:
 
 - against an OpenAI-compatible endpoint (`--api-base-url`; `--backend openai` for lm-eval),
 - with W&B logging, and
