@@ -172,7 +172,7 @@ Adding a benchmark or a framework, fixing a bug, running the tests, changing a d
 ```
 evals-post-train/
 ├── scripts/
-│   ├── lm_eval_harness/   # launch_evaluations.sh: Slurm jobs that serve the model and run lm-eval, in resumable chunks; judges
+│   ├── lm_eval_harness/   # launch_evaluations.sh: the lm-eval launcher, chunked resumable Slurm jobs (the model loaded in the job, or an endpoint); judges
 │   ├── direct_serving/    # job.py: one Slurm job that serves a model and runs evals against it; inline_slurm/: sbatch and srun that run in place
 │   ├── inspect_ai/        # run_inspect_eval.sh/.sbatch, sandbox_patches/, opensandbox_sandbox.py (the opensandbox sandbox provider)
 │   ├── harbor/            # run_harbor_eval.sh/.sbatch, run.py (benchmarks), k8s/docker/opensandbox environments, task_patches.py
