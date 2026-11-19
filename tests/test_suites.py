@@ -212,7 +212,7 @@ class SuiteTests(unittest.TestCase):
     def test_a_setups_reasoning_effort_reaches_all_its_lm_eval_and_inspect_rows(self):
         suite = suites.load(SUITE)
         chonk = "chonk-lc-16k-v0.2-sft"
-        for name in (chonk, "chonk-lc-16k-v0.1-ep1"):
+        for name in (chonk, "chonk-lc-16k-v0.2-sft-32k", "chonk-lc-16k-v0.1-ep1"):
             self.assertEqual(suite["setups"][name]["reasoning_effort"], "high")
             for bench in suite["benchmarks"]:
                 flags = suites.flags_for(suite, name, bench["task"])
@@ -223,7 +223,7 @@ class SuiteTests(unittest.TestCase):
                 self.assertEqual(flags[flags.index("--reasoning-effort") + 1], "high")
                 self.assertEqual(suites.sampling_for(suite, name, bench["task"]), "thinking")
         self.assertEqual(suites.flags_for(suite, chonk, "aime2024"), ["--reasoning-effort", "high", "--", "--epochs", "8"])
-        for other in set(suite["setups"]) - {chonk, "chonk-lc-16k-v0.1-ep1"}:
+        for other in set(suite["setups"]) - {chonk, "chonk-lc-16k-v0.2-sft-32k", "chonk-lc-16k-v0.1-ep1"}:
             for bench in suite["benchmarks"]:
                 self.assertNotIn("--reasoning-effort", suites.flags_for(suite, other, bench["task"]))
 

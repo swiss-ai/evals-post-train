@@ -112,6 +112,30 @@
         "bfcl_v3_fc": ["--backend", "openai", "--api-endpoint", "chat-completions", "--enable-thinking"]
       }
     },
+    "chonk-lc-16k-v0.2-sft-32k": {
+      "description": "chonk-lc-16k-v0.2-sft served with a 32768 window, for BFCL v4: its memory categories send prompts over 16k tokens and a 16384 server answers them with HTTP 400. The checkpoint's max_position_embeddings is 16384 (plain RoPE), so what it does past 16k is untrained: read those scores with that in mind. Everything else is the chonk-lc-16k-v0.2-sft setup.",
+      "max_length": 32768,
+      "sampling": "thinking",
+      "reasoning_effort": "high",
+      "tokenizer": {"repo": "https://github.com/swiss-ai/apertus-omni-tokenizer.git", "revision": "b801ff1b00d933d10bba90b0c22307157299faa7", "path": "tokenizers/Apertus_2_instruct"},
+      "serving": ["--tokenizer-mode", "apertus2", "--reasoning-parser", "apertus2", "--enable-auto-tool-choice", "--tool-call-parser", "apertus2"],
+      "launch": {
+        "model_path": "/capstor/store/cscs/swissai/infra01/hf-checkpoints/swiss-ai/chonk-lc-16k-v0.2-sft",
+        "environment": "containers/env_vllm_apertus2.toml",
+        "nodes": 2,
+        "time": "24:00:00",
+        "framework_args": ["--trust-remote-code", "--dtype", "bfloat16", "--max-model-len", "32768", "--tensor-parallel-size", "1", "--data-parallel-size", "8", "--data-parallel-size-local", "4", "--data-parallel-backend", "ray", "--enable-expert-parallel", "--all2all-backend", "allgather_reducescatter", "--moe-backend", "triton", "--numa-bind", "--load-format", "runai_streamer", "--gpu-memory-utilization", "0.95", "--max-num-seqs", "8", "--max-num-batched-tokens", "512", "--api-server-count", "4"]
+      },
+      "flags": {
+        "lm_eval": ["--backend", "openai", "--chat-format", "apertus2"],
+        "inspect": [],
+        "evalscope": [],
+        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
+      },
+      "task_flags": {
+        "bfcl_v3_fc": ["--backend", "openai", "--api-endpoint", "chat-completions", "--enable-thinking"]
+      }
+    },
     "chonk-lc-16k-v0.1-ep1": {
       "description": "Same settings as chonk-lc-16k-v0.2-sft (apertus-common format, 16k window, effort high, tokenizer and serving options), for the earlier chonk-lc-16k-v0.1-ep1 checkpoint.",
       "max_length": 16384,
