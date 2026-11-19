@@ -9,8 +9,8 @@ The harness owns generation repeats and scoring; the pipeline adds no repeat loo
 
 ```bash
 bash scripts/lm_eval_harness/launch_evaluations.sh custom \
-  --task-file configs/archive/apertus/tasks_posttrain_thinking.txt \
-  --repeat-config configs/archive/apertus/repeat_scoring.example.json \
+  --task-file tasks.txt \
+  --repeat-config repeat_scoring.json \
   --backend openai --api-model-name my-model \
   --api-base-url http://localhost:8000/v1 \
   --chat-format apertus2 --tokenizer /path/to/tokenizer
