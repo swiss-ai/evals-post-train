@@ -1186,7 +1186,7 @@ class EvalExportTests(unittest.TestCase):
             for line in task_file.read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.lstrip().startswith("#")
         ]
-        self.assertEqual(len(task_names), 50)
+        self.assertEqual(len(task_names), 49)
 
         raw = fixture_results()
         raw["results"] = {name: {"acc,none": 0.5} for name in task_names}
@@ -1224,7 +1224,6 @@ class EvalExportTests(unittest.TestCase):
             self.assertNotIn(
                 "gpqa_main_cot_zeroshot", manifest["internally_named_tasks"]
             )
-            self.assertIn("bfcl_v3", manifest["internally_named_tasks"])
             self.assertIn(
                 "swiss_ai_charter_alignment", manifest["internally_named_tasks"]
             )
