@@ -180,7 +180,7 @@ class SuiteTests(unittest.TestCase):
         with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
             self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m", "--model", "qwen3-32b-thinking=q"]), 0)
-        self.assertIn("58 launches: 2 models x 29 benchmarks", err.getvalue())
+        self.assertIn("74 launches: 2 models x 37 benchmarks", err.getvalue())
         for bad in (["--model", "m"], ["--model", "nope=m"], ["--model", f"{THINK}=a", "--model", f"{THINK}=b"]):
             self.assertEqual(suites.main(["run", SUITE, *bad]), 1)
 
