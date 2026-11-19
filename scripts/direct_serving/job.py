@@ -406,6 +406,8 @@ def _apply_suite(args: argparse.Namespace, parser: argparse.ArgumentParser) -> N
         args.time = args.time or launch["time"]
         args.served_model_name = args.served_model_name or args.setup
         args.framework_args = " ".join(filter(None, [launch["framework_args"], args.framework_args]))
+        exports = "; ".join(f"export {name}={shlex.quote(value)}" for name, value in launch.get("env", {}).items())
+        args.pre_launch_cmds = "; ".join(filter(None, [exports, args.pre_launch_cmds]))
     if not (args.model and args.environment):
         parser.error("--model and --environment are required without --suite and --setup")
     args.nodes = args.nodes or 1

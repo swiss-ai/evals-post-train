@@ -266,6 +266,15 @@ class MainTests(unittest.TestCase):
 
         self.assertIn("echo prepare-the-node", script)
 
+    def test_a_setups_env_is_exported_before_the_users_pre_launch_cmds(self) -> None:
+        argv = ["--suite", "apertus2/chonk_sft", "--setup", "chonk-lc-16k-v0.2-sft-32k", "--account", "infra01",
+                "--eval-image-commit", "abc123", "--eval", "echo hi", "--pre-launch-cmds", "echo prepare-the-node"]  # fmt: skip
+        script = self._render_main(argv)
+
+        self.assertIn("export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1; echo prepare-the-node", script)
+        self.assertIn("--max-model-len 32768", script)
+        self.assertNotIn("export VLLM_ALLOW", self._render_main(self._suite_argv()))  # the 16k setup has none
+
     def test_suite_and_setup_go_together_and_a_model_is_needed_without_them(self) -> None:
         for argv in (
             ["--suite", "apertus2/chonk_sft", "--eval", "x"],

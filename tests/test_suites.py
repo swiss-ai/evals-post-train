@@ -108,6 +108,9 @@ class SuiteTests(unittest.TestCase):
             (lambda launch: launch.update(environment=""), "launch.environment"),
             (lambda launch: launch.update(framework_args="--x"), "list of strings"),
             (lambda launch: launch["framework_args"].extend(["--model", "x"]), "the launcher sets it"),
+            (lambda launch: launch.update(env={"A B": "1"}), "launch.env"),
+            (lambda launch: launch.update(env={"A": 1}), "launch.env"),
+            (lambda launch: launch.update(extra=1), "launch must be an object"),
         ):
             suite = copy.deepcopy(base)
             mutate(suite["setups"]["chonk-lc-16k-v0.2-sft"]["launch"])
