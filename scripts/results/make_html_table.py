@@ -110,7 +110,7 @@ def thinking_specs(length_unit="tokens", format_detail=False):
 
 
 def thinking_tasks_from_file(path):
-    """Task names from a suite file (`tasks_*.txt` list or `*_main_table.txt`).
+    """Task names from a suite file (a task list or a `*_main_table.txt`).
 
     Not parse_metrics_file(): that returns nothing for a file with no `#` header. Inline
     comments are stripped, matching the graceful launcher.
@@ -969,8 +969,8 @@ def fetch_model(api, project_path, run_name, display_name, groups, scores, debug
 def main():
     parser = argparse.ArgumentParser(description="Generate an HTML eval table from W&B results")
     parser.add_argument("--metrics-file", required=True,
-                        help="Metrics file with # group headers (e.g. tasks_posttrain_final_main_table.txt). "
-                             "With --thinking this is read as a task source instead: any tasks_*.txt list or "
+                        help="Metrics file with # group headers (e.g. tasks_main_table.txt). "
+                             "With --thinking this is read as a task source instead: any task list or "
                              "*_main_table.txt works, only the task names are used.")
     parser.add_argument("--thinking", action="store_true",
                         help="Render a thinking-only table: one group per thinking metric family, one row per "

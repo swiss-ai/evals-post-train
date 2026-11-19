@@ -15,7 +15,7 @@ The launcher takes a required first positional argument, `<mode>`:
 | `single` | `--task` | One task, or a comma-separated list |
 | `custom` | `--task-file` | A task list, with an optional `--table-metrics` file (default: the task list) |
 
-The task lists the former modes used are still in `configs/archive/apertus/` and `configs/archive/olmo/`; pass one with `custom --task-file <list> --table-metrics <list>_main_table.txt` (the examples below call such a list `tasks.txt`) (for OLMo3: `olmo3_<suite>.txt` and `olmo3_<suite>_main_table.txt`). The launcher defaults `WANDB_PROJECT` to `apertus-1.5-post-training-v0.0` (not `run_lm_eval.sbatch`'s own `swissai-evals-test` default; see [SBATCH Scripts](#sbatch-scripts)); export `WANDB_PROJECT` yourself for test/smoke runs to avoid logging into the production project.
+Pass a task list with `custom --task-file <list> --table-metrics <list>_main_table.txt` (the examples below call such a list `tasks.txt`). The launcher defaults `WANDB_PROJECT` to `apertus-1.5-post-training-v0.0` (not `run_lm_eval.sbatch`'s own `swissai-evals-test` default; see [SBATCH Scripts](#sbatch-scripts)); export `WANDB_PROJECT` yourself for test/smoke runs to avoid logging into the production project.
 
 ### Model Selection Modes
 
@@ -140,24 +140,6 @@ python3 scripts/lm_eval_harness/launch_judge.py \
 
 By default the evaluation launcher submits a cleanup job that cancels automatically launched judges after all evaluation jobs finish. Pass `--keep-judge` to leave them running. Additional judge-specific options, such as `--health-timeout 1800`, can be supplied through `--judge-args`.
 
-#### Experimental OpenAI GPT judge path
-
-The `configs/archive/apertus/tasks_gpt.txt` list reserves a stable task/config path for the planned
-OpenAI GPT judge implementation in `swiss-ai/lm-evaluation-harness`:
-
-```bash
-export OPENAI_API_KEY="..."
-bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file tasks_gpt.txt \
-  --model /capstor/store/.../checkpoint
-```
-
-The key may instead be set in `scripts/secrets.env`.
-This is experimental scaffolding: the launcher deliberately does not pass a
-speculative `--judge-type` (or similar) flag yet. Until the corresponding
-Swiss-AI harness support lands, that list is not expected to provide the future
-GPT-judge behavior. Other runs continue to use the CSCS judge setup described above.
-
-
 ### Examples
 
 ```bash
@@ -257,7 +239,7 @@ Use `--failure-policy fail-fast` to recover the original single-job behavior. `-
 
 ## Task Configuration
 
-Task lists are plain text files under `configs/` (principally `configs/archive/apertus/` and `configs/archive/olmo/`) with one task name per line. Comments (`#`) and blank lines are supported:
+Task lists are plain text files you keep wherever you like (the examples call one `tasks.txt`), with one task name per line. Comments (`#`) and blank lines are supported:
 
 ```
 # Math
@@ -556,7 +538,7 @@ bash scripts/lm_eval_harness/launch_evaluations.sh custom \
   `empty_think` (no reasoning under a prefix, like other thinking models: cross-model tables).
 - **Generative tasks only:** `custom` or `single` runs; the job stops if a task (or a group or tag
   member) is scored by log-likelihood in its yaml (Python task classes such as `squadv2` are not
-  seen). `configs/archive/apertus/tasks_posttrain_thinking.txt` holds the suite's generative tasks.
+  seen).
 - **Refused:** `--thinking`, `--(no-)enable-thinking`, think tokens, `--track-thinking-metrics`,
   `--no-chat-template`, `--chat-template-by-type`, `--api-endpoint chat-completions`, `--bos`,
   `--convert-to-hf`.
@@ -581,8 +563,8 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TASKS` | `configs/archive/apertus/tasks_default.txt` | Task list file or comma-separated task names |
-| `TABLE_METRICS` | `configs/archive/apertus/tasks_default_main_table.txt` | Metrics for W&B summary table |
+| `TASKS` | (unset) | **Required.** Task list file or comma-separated task names |
+| `TABLE_METRICS` | same as `TASKS` | Metrics for W&B summary table |
 | `LM_EVAL_BACKEND` | `vllm` | Backend: `hf` (accelerate), `vllm`, `sglang`, `megatron_lm`, `openai` (OpenAI-compatible API) |
 | `API_BASE_URL` | (unset) | `openai` backend only, **required**: the OpenAI-compatible endpoint. Bare host / `/v1` root / full endpoint URL all accepted. |
 | `API_MODEL_NAME` | same as model | `openai` backend only: the `model` field sent in requests, when the server registers the model under a different id |
@@ -653,9 +635,9 @@ Base models take the launcher's `--no-chat-template` (Apertus base checkpoints a
 
 `hf_base_runner.sh` handles the model loop and delegates resumable chunk orchestration to `scripts/lm_eval_harness/evaluation_orchestrator.sh`. It respects `EVAL_CHUNK_SIZE`, `EVAL_MAX_PARALLEL`, `EVAL_MAX_RETRIES`, `SBATCH_SCRIPT`, and `WANDB_*`.
 
-### Model Registry
+### Model Families
 
-See `configs/archive/models.md` for a reference list of models with their HF paths, local checkpoint paths, and required special flags. Key model families:
+Models that have been run here include:
 
 - **Apertus** (1.0, 1.5, and aligned checkpoints)
 - **Meta Llama** (3.1, 3.3)

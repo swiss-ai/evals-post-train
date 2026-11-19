@@ -31,7 +31,7 @@ Run `bash -n` on edited shell scripts; they must work on macOS bash 3.2 (`${ARR[
 
 EvalScope covers SWE-bench Verified and Pro, LiveCodeBench and BFCL v4. Results are uploaded by the framework's existing W&B uploader.
 
-**lm-evaluation-harness:** add the task to a task list in `configs/` and its `task/metric` to the matching `*_main_table.txt`. A task missing from [swiss-ai/lm-evaluation-harness](https://github.com/swiss-ai/lm-evaluation-harness) goes there first; then bump the commit in `requirements/lm-eval-harness.txt`. Details: [Adding a New Task](docs/lm-eval-harness.md#adding-a-new-task).
+**lm-evaluation-harness:** add the task to your task list and its `task/metric` to the matching `*_main_table.txt`. A task missing from [swiss-ai/lm-evaluation-harness](https://github.com/swiss-ai/lm-evaluation-harness) goes there first; then bump the commit in `requirements/lm-eval-harness.txt`. Details: [Adding a New Task](docs/lm-eval-harness.md#adding-a-new-task).
 
 **Inspect AI:** a task in [inspect_evals](https://github.com/UKGovernmentBEIS/inspect_evals) needs no code (`--task <name>`); add an example to [docs/inspect-ai.md](docs/inspect-ai.md). Otherwise write a `@task` file, run it by path (`--task path/to/task.py`), and test it. `scripts/aaii/aa_lcr.py` and its `tests/test_aa_lcr.py` are an example with a judge.
 

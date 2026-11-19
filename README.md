@@ -180,7 +180,7 @@ evals-post-train/
 │   ├── aaii/              # Artificial Analysis protocol: Inspect tasks (*.py) and standalone runners (run_*.sh)
 │   ├── common/            # suites.py (suite files: `plan`, `flags`, `run`), sampling.py and thinking.py (the shared sampling and thinking policy), k8s_sandbox.py (task containers as pods: Harbor, EvalScope), opensandbox_sandbox.py (as Kata microVMs: EvalScope; Harbor's cleanup), dockerfile_replay.py (Dockerfiles replayed where images can't be built: Harbor, Inspect), wandb.sh (the W&B upload rule), lock_requirements.sh and locked_venv.sh (dependency locks)
 │   └── results/           # W&B upload, tables, exports
-├── configs/               # sampling_defaults.json, suites/ (comparison definitions), export mappings; archive/: lm-eval task lists, main-table metrics, model registry
+├── configs/               # sampling_defaults.json, suites/ (comparison definitions), export mappings
 ├── containers/            # Enroot/Pyxis configs (serving images, env_vllm_apertus2.toml for Apertus 2) and the prebuilt evaluation image (Dockerfile.eval)
 ├── requirements/          # Dependencies per framework environment: .txt (edited) and .lock (generated; see CONTRIBUTING.md for what installs which)
 ├── docs/                  # One doc per framework, plus direct-serving.md, results.md, sampling.md, thinking.md, suites.md and repeated_sampling.md
