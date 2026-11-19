@@ -912,11 +912,11 @@ if [[ -n "$MODEL_PATH" ]]; then
         HF_SAVE_DIR="${HF_OUTPUT_DIR_FLAG:-/capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/${MODEL_NAME}-iter${MEGATRON_ITER}}"
         echo "  Convert: $MEGATRON_LOAD_DIR -> $HF_SAVE_DIR"
         if [[ "$EVAL_DRY_RUN" == "true" ]]; then
-            echo "[DRY RUN] sbatch scripts/lm_eval_harness/convert_megatron_checkpoint.sbatch $MEGATRON_LOAD_DIR $HF_SAVE_DIR" >&2
+            echo "[DRY RUN] sbatch scripts/megatron_convert/convert_megatron_checkpoint.sbatch $MEGATRON_LOAD_DIR $HF_SAVE_DIR" >&2
             EVAL_CONVERT_JOB_ID="dry-convert"
         else
             EVAL_CONVERT_JOB_ID=$(HF_TOKENIZER="${CUSTOM_TOKENIZER:-alehc/swissai-tokenizer}" \
-                sbatch --parsable scripts/lm_eval_harness/convert_megatron_checkpoint.sbatch "$MEGATRON_LOAD_DIR" "$HF_SAVE_DIR")
+                sbatch --parsable scripts/megatron_convert/convert_megatron_checkpoint.sbatch "$MEGATRON_LOAD_DIR" "$HF_SAVE_DIR")
             echo "  Conversion job: $EVAL_CONVERT_JOB_ID"
         fi
         MODEL_PATH="$HF_SAVE_DIR"

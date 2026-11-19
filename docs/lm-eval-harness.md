@@ -204,7 +204,7 @@ To test the conversion alone, without an eval, e.g. on an iteration directory di
 
 ```bash
 SBATCH_RESERVATION=<reservation> CHECK_EQ_HF=/capstor/store/cscs/swissai/infra01/apertus_checkpoints/v1p5/hf/8B/pretraining/iter_0430000 \
-  sbatch scripts/lm_eval_harness/convert_megatron_checkpoint.sbatch \
+  sbatch scripts/megatron_convert/convert_megatron_checkpoint.sbatch \
   /capstor/store/cscs/swissai/infra01/apertus_checkpoints/v1p5/megatron/8B/pretraining/iter_0430000 \
   /iopsstor/scratch/cscs/$USER/Apertus-v1p5-8B-pretraining-iter430000
 ```
