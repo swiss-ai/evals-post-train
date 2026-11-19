@@ -19,10 +19,11 @@ any command failed, and the other commands still run.
 
 The commands are the launchers of any framework here (lm-eval's launch_evaluations.sh,
 run_inspect_eval.sh, run_harbor_eval.sh, run_evalscope_eval.sh). Each runs with `bash -c`
-from this checkout, with `sbatch` and `srun` that run in place (inline_slurm/), inside the prebuilt eval image (docs/lm-eval-harness.md): the image of the last
-commit that changed what it is built from, which CI published (.github/workflows/
-eval-image.yml). The job writes the EDF that starts it; the checkout and the usual scratch
-directories are mounted (more with `--mount`).
+from this checkout, with `sbatch` and `srun` that run in place (inline_slurm/), inside the
+prebuilt eval image (docs/lm-eval-harness.md): the image of the last commit that changed what
+it is built from, which CI published (.github/workflows/eval-image.yml). The job writes the
+EDF that starts it; the checkout and the usual scratch directories are mounted (more with
+`--mount`).
 
 Print the job script (to submit it another way):
 
