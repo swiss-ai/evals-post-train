@@ -705,19 +705,21 @@ class Tau3BenchTest(unittest.TestCase):
 
     def test_the_user_is_the_model_under_test_by_default(self):
         params = self._cfg(env={"EVALSCOPE_API_KEY": "k", "USER_API_KEY": ""})["dataset_args"]["tau3_bench"]["extra_params"]
-        self.assertEqual((params["user_model"], params["api_base"], params["api_key"]), ("m", "http://x/v1", "k"))
+        self.assertEqual((params["user_model"], params["api_base"]), ("m", "http://x/v1"))
         self.assertNotIn("max_steps", params)
 
     def test_user_model_endpoint_key_and_steps(self):
         cfg = self._cfg("--user-model", "judge", "--user-api-base-url", "http://u/v1", "--max-steps", "200",
                         "--extra-param", "retrieval_config=bm25_grep", env={"USER_API_KEY": "uk"})
         params = cfg["dataset_args"]["tau3_bench"]["extra_params"]
-        self.assertEqual(params, {"user_model": "judge", "api_base": "http://u/v1", "api_key": "uk",
+        self.assertEqual(params, {"user_model": "judge", "api_base": "http://u/v1",
                                   "max_steps": 200, "retrieval_config": "bm25_grep"})
 
-    def test_the_user_key_is_masked_in_the_log(self):
-        cfg = self._cfg(env={"USER_API_KEY": "secret"})
-        self.assertNotIn("secret", json.dumps(run.printable_config(cfg)))
+    def test_the_user_key_is_not_in_the_config_at_all(self):
+        # EvalScope saves extra_params to task_config.yaml unmasked (only the top-level model api_key is masked).
+        cfg = self._cfg(env={"USER_API_KEY": "secret", "EVALSCOPE_API_KEY": "other"})
+        self.assertNotIn("secret", json.dumps(cfg))
+        self.assertNotIn("other", json.dumps(cfg["dataset_args"]))
 
     def test_data_dir_and_repeats(self):
         self.assertNotIn("dataset_id", self._cfg(env={"TAU2_DATA_DIR": ""})["dataset_args"]["tau3_bench"])

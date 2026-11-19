@@ -303,15 +303,30 @@ def environment_extra_params(name: str) -> Dict[str, Any]:
 
 def tau3_extra_params(args: argparse.Namespace) -> Dict[str, Any]:
     """tau3_bench's simulated user: --user-model on --user-api-base-url (default: the model under test, same
-    endpoint), and --max-steps as the adapter's own max_steps. EvalScope masks the api_key in its saved config."""
+    endpoint), and --max-steps as the adapter's own max_steps. Its key is not here: EvalScope writes extra_params
+    to task_config.yaml unmasked, so install_tau3_user_key() sets it on the adapter instead."""
     params: Dict[str, Any] = {
         "user_model": args.user_model or args.model,
         "api_base": args.user_api_base_url or args.api_base_url,
-        "api_key": os.environ.get("USER_API_KEY") or os.environ.get("EVALSCOPE_API_KEY") or "EMPTY",
     }
     if args.max_steps:
         params["max_steps"] = args.max_steps
     return params
+
+
+def install_tau3_user_key() -> None:
+    """Give the tau3_bench adapter the simulated user's key (USER_API_KEY, else the model's) after it has
+    initialised, so the key stays out of extra_params and so out of EvalScope's saved config and logs."""
+    from evalscope.benchmarks.tau_bench.tau3_bench import tau3_bench_adapter
+
+    key = os.environ.get("USER_API_KEY") or os.environ.get("EVALSCOPE_API_KEY") or "EMPTY"
+    original = tau3_bench_adapter.Tau3BenchAdapter.__init__
+
+    def init(self: Any, *args: Any, **kwargs: Any) -> None:
+        original(self, *args, **kwargs)
+        self.api_key = key
+
+    tau3_bench_adapter.Tau3BenchAdapter.__init__ = init
 
 
 def tau3_dataset_args() -> Dict[str, Any]:
@@ -604,6 +619,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             signal.signal(signal.SIGTERM, exit_on_sigterm)
     if args.gold:
         install_gold()
+    if "tau3_bench" in names:
+        install_tau3_user_key()
     if args.completions:
         from scripts.evalscope import completions_model, lcb_base  # noqa: F401 (registers openai_completions)
 
