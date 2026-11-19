@@ -33,7 +33,9 @@
 #                               same endpoint, so no second credential). A bare name is reached by
 #                               litellm with its own credentials (e.g. OPENAI_API_KEY).
 #   --user-llm-args <json>     Extra litellm kwargs for the user, merged over its default key by key.
-#   --retrieval-config <name>  banking_knowledge: the retrieval pipeline (tau2's default if unset).
+#   --retrieval-config <name>  banking_knowledge: the retrieval pipeline (default: bm25, offline keyword search).
+#                               tau2's own default embeds the documents with OpenAI and needs an OPENAI_API_KEY;
+#                               those configs (openai_embeddings*, ...) are available by naming them.
 #   --num-trials <n>           Trials per task (default: 1). The summary prints pass^k for k = 1..n.
 #   --max-steps <n>            Max steps per trial (default: 100, tau2's).
 #   --num-tasks <n>            Only the first n tasks (a smoke test).
@@ -267,6 +269,8 @@ ARGS=(run --domain "$DOMAIN"
       --num-trials "$NUM_TRIALS" --max-steps "$MAX_STEPS" --seed "$SEED"
       --max-concurrency "$MAX_CONCURRENCY"
       --save-to "$SAVE_TO" --auto-resume --log-level INFO)
+# banking_knowledge retrieves from a knowledge base: bm25 runs offline, tau2's own default needs OpenAI embeddings.
+[[ -n "$RETRIEVAL_CONFIG" || "$DOMAIN" != banking_knowledge ]] || RETRIEVAL_CONFIG=bm25
 [[ -z "$RETRIEVAL_CONFIG" ]] || ARGS+=(--retrieval-config "$RETRIEVAL_CONFIG")
 [[ -z "$NUM_TASKS" ]] || ARGS+=(--num-tasks "$NUM_TASKS")
 (( ${#EXTRA_ARGS[@]} == 0 )) || ARGS+=("${EXTRA_ARGS[@]}")
