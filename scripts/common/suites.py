@@ -308,13 +308,15 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
     `models` maps a setup name to the name the model is served under. Every launch is its own Slurm job
     (lm_eval: one `single` launch; inspect, harbor and evalscope: one sbatch). api_model_name only applies to lm_eval, which
     takes the served name separately from the model; qos and partition go to the lm_eval launcher or to
-    sbatch. Every launch uploads to the W&B project named after the suite. Returns [{"setup", "label", "framework", "argv"}]."""
+    sbatch. Every launch uploads to the W&B project named after the suite, and the inspect, harbor and evalscope ones
+    write to logs/<framework>/<suite>/<served name>/<task> (lm_eval's logs already sit under the project). Returns [{"setup", "label", "framework", "argv"}]."""
     rows = []
     for setup_name, served in models.items():
         for bench in suite["benchmarks"]:
             framework = bench["framework"]
             flags = flags_for(suite, setup_name, bench["task"], fetch=fetch)
             common = ["--task", bench["task"], "--model", served]
+            out_dir = f"logs/{framework}/{suite['name']}/{served}/{bench['task']}"
             if api_base_url:
                 common += ["--api-base-url", api_base_url]
             if limit:
@@ -332,13 +334,15 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
                 argv = [*LM_EVAL[:3], *common[:2], *common[2:], *scheduling, *flags]
             elif framework == "inspect":
                 scheduling = ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])
-                argv = ["sbatch", *scheduling, INSPECT, *common, *flags]
+                argv = ["sbatch", *scheduling, INSPECT, *common, "--logs-dir", out_dir, *flags]
             elif framework == "harbor":
                 scheduling = ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])
-                argv = ["sbatch", *scheduling, HARBOR, "--benchmark", bench["task"], *common[2:], *flags]
+                argv = ["sbatch", *scheduling, HARBOR, "--benchmark", bench["task"], *common[2:],
+                        "--work-dir", out_dir, *flags]
             elif framework == "evalscope":
                 scheduling = ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])
-                argv = ["sbatch", *scheduling, EVALSCOPE, "--benchmark", bench["task"], *common[2:], *flags]
+                argv = ["sbatch", *scheduling, EVALSCOPE, "--benchmark", bench["task"], *common[2:],
+                        "--work-dir", out_dir, *flags]
             else:
                 raise ValueError(f"{bench['task']}: no launcher for the {framework} framework yet")
             rows.append({"setup": setup_name, "label": bench["label"], "framework": framework, "argv": argv})
