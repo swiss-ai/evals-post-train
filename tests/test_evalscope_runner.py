@@ -462,6 +462,23 @@ class TaskConfigTest(unittest.TestCase):
                 run.evaluation_errors(work_dir), {"gold/swe_bench_pro_default": {"count": 1, "instances": ["lost"]}}
             )
 
+    def test_review_progress(self):
+        def sample(value, status="success"):
+            return json.dumps({"sample_score": {"score": {"value": {"acc": value}, "status": status}}})
+
+        with tempfile.TemporaryDirectory() as work_dir:
+            reviews = Path(work_dir, "reviews", "m")
+            reviews.mkdir(parents=True)
+            Path(reviews, "bfcl_v3_java.jsonl.rerun-abc").write_text(
+                "\n".join([sample(1.0), sample(0.0), sample(0.0, "error"), '{"sample_sc'])
+            )
+            old = Path(reviews, "bfcl_v3_simple.jsonl")
+            old.write_text(sample(1.0) + "\n")
+            os.utime(old, (1, 1))
+            self.assertEqual(
+                run.review_progress(work_dir, since=100.0), {"m/bfcl_v3_java": {"done": 3, "passed": 1, "failed": 1}}
+            )
+
     def test_only_the_two_benchmarks(self):
         for bad in ("gsm8k", "swe_bench_verified_agentic", ""):
             with self.assertRaises(SystemExit):
