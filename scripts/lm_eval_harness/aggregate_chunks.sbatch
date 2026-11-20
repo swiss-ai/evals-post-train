@@ -24,7 +24,7 @@ MODEL=$1
 NAME=$2
 
 # These must be passed as env vars from the launcher
-LOGS_ROOT=${LOGS_ROOT:-/iopsstor/scratch/cscs/dmelikidze/eval_logs_start}
+LOGS_ROOT=${LOGS_ROOT:?LOGS_ROOT is required}
 WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 WANDB_PROJECT=${WANDB_PROJECT:-apertus-1.5-post-training-v0.0}
 TABLE_METRICS=${TABLE_METRICS:-""}

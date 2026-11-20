@@ -598,7 +598,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `EVAL_PREBUILT_ENV` | (unset) | `1` in the prebuilt image: no environment preparation or installs; the launcher writes the manifest (see [Prebuilt evaluation image](#prebuilt-evaluation-image-no-installs-at-run-time)) |
 | `EVAL_RUN_CONFIG` | required | Launcher-generated normalized provenance used to exclude incompatible results during resume |
 | `EVAL_CHUNKS_FILE` | (unset) | One comma-separated task chunk per line; indexed by `SLURM_ARRAY_TASK_ID` |
-| `LOGS_ROOT` | `$SCRATCH/eval_logs_start/` | Root directory for evaluation logs |
+| `LOGS_ROOT` | `<repo>/logs/lm_eval` | Root directory for evaluation logs |
 | `WANDB_ENTITY` | `apertus` | W&B entity |
 | `WANDB_PROJECT` | `swissai-evals-test` | W&B project. This is `run_lm_eval.sbatch`'s own default when invoked directly; `launch_evaluations.sh` sets its own default of `e-p-t-pool` before the sbatch script ever runs (see [The Launch Script](#the-launch-script)), so export `WANDB_PROJECT` explicitly to keep test/smoke runs out of the production project. |
 | `ENABLE_THINKING` | *(unset)* | Chat-template argument: whether the model reasons. Emitted for `hf`, `vllm` and `sglang` **only when set explicitly**; unset leaves the template's default. |
