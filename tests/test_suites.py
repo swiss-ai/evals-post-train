@@ -192,6 +192,15 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(qwen_lm_eval[qwen_lm_eval.index("--backend") + 1], "openai")
         self.assertEqual(qwen_lm_eval[qwen_lm_eval.index("--api-model-name") + 1], "qwen")
 
+    def test_every_launch_uploads_to_the_suites_wandb_project(self):
+        suite = suites.load(SUITE)
+        rows = suites.commands(suite, {"chonk-lc-16k-v0.2-sft": "chonk"}, api_base_url="http://x/v1")
+        for row in rows:
+            argv = row["argv"]
+            self.assertEqual(argv[argv.index("--wandb-project") + 1], suite["name"], row["label"])
+        for row in suites.commands(suite, {"chonk-lc-16k-v0.2-sft": "chonk"}, no_wandb=True):
+            self.assertNotIn("--wandb-project", row["argv"])
+
     def test_run_prints_by_default_and_checks_its_arguments(self):
         with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
