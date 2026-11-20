@@ -308,7 +308,7 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
     `models` maps a setup name to the name the model is served under. Every launch is its own Slurm job
     (lm_eval: one `single` launch; inspect, harbor and evalscope: one sbatch). api_model_name only applies to lm_eval, which
     takes the served name separately from the model; qos and partition go to the lm_eval launcher or to
-    sbatch. Returns [{"setup", "label", "framework", "argv"}]."""
+    sbatch. Every launch uploads to the W&B project named after the suite. Returns [{"setup", "label", "framework", "argv"}]."""
     rows = []
     for setup_name, served in models.items():
         for bench in suite["benchmarks"]:
@@ -321,6 +321,8 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
                 common += ["--limit", str(limit)]
             if no_wandb:
                 common += ["--no-wandb"]
+            else:
+                common += ["--wandb-project", suite["name"]]
             if framework == "lm_eval":
                 if api_base_url:
                     common += ["--api-model-name", api_model_name or served]
