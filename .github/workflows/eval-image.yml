@@ -7,6 +7,10 @@ name: Evaluation image
 # nearest ancestor whose image inputs are unchanged, which is the same image.
 # Keep the paths in step with what the Dockerfile COPYs. A commit that needs an
 # image anyway: run this workflow by hand (workflow_dispatch) on it.
+#
+# Each platform is built on a runner of its own architecture (an emulated arm64 build on an
+# x86 runner took 60-110 minutes, the arm64 steps 6-11 times slower than the same steps on
+# amd64) and pushed by digest; the last job joins the two into the tagged multi-platform image.
 on:
   push:
     paths:
@@ -25,17 +29,27 @@ concurrency:
   group: eval-image-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/evals-post-train-eval
+
 jobs:
   build:
-    name: Build and push
-    runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            slug: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            slug: arm64
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
-
-      - uses: docker/setup-qemu-action@v3
 
       - uses: docker/setup-buildx-action@v3
 
@@ -45,13 +59,58 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push the evaluation image
+      - name: Build and push the image of one platform, by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: containers/Dockerfile.eval
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ghcr.io/${{ github.repository_owner }}/evals-post-train-eval:${{ github.sha }}
-          cache-from: type=gha,scope=eval-image
-          cache-to: type=gha,mode=max,scope=eval-image
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=eval-image-${{ matrix.slug }}
+          cache-to: type=gha,mode=max,scope=eval-image-${{ matrix.slug }}
+
+      - name: Export the digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digests-${{ matrix.slug }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Named as the single job was: it is the check that says the commit's image exists.
+  merge:
+    name: Build and push
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag the multi-platform image
+        working-directory: /tmp/digests
+        run: |
+          # shellcheck disable=SC2046
+          docker buildx imagetools create -t "$IMAGE:${{ github.sha }}" \
+            $(printf "$IMAGE@sha256:%s " *)
+
+      - name: Inspect the image
+        run: docker buildx imagetools inspect "$IMAGE:${{ github.sha }}"
