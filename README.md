@@ -44,13 +44,17 @@ Every runner except the in-job lm-eval backends can also run from the prebuilt i
 
 ## Quick Start
 
-The CSCS serving key is read from `scripts/secrets.env` (see [Credentials](#credentials)).
+Every evaluation needs a served model. Either use one that is already deployed, or launch your own with the evals in the same Slurm job.
 
-**lm-evaluation-harness**: a model behind an OpenAI-compatible endpoint (a server you started, here a vLLM server on node `nid001234`; or the CSCS serving API with its URL and the served name as `--api-model-name`), GSM8K with chain of thought, 5 samples. `--model` is also the tokenizer's name, so it must be a Hugging Face name or a path.
+### Deployed serving model
+
+A model already behind an OpenAI-compatible endpoint, here the CSCS serving API (`https://api.swissai.svc.cscs.ch/v1`; a server you started yourself works the same, passed by its own URL). Nothing is launched: the commands only send requests. The CSCS serving key is read from `scripts/secrets.env` (see [Credentials](#credentials)).
+
+**lm-evaluation-harness**: GSM8K with chain of thought, 5 samples. `--model` is also the tokenizer's name, so it must be a Hugging Face name or a path; `--api-model-name` is the name the endpoint serves the model under.
 
 ```bash
-bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B --limit 5 --no-wandb \
-  --backend openai --api-base-url http://nid001234:8000
+bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3.6-35B-A3B --limit 5 --no-wandb \
+  --backend openai --api-base-url https://api.swissai.svc.cscs.ch/v1 --api-model-name RCP-AIaaS/Qwen/Qwen3.6-35B-A3B
 ```
 
 **lm-evaluation-harness, Apertus 2 native format**: a served Apertus 2 checkpoint through the CSCS serving API, 5 samples. `--tokenizer` is a local directory with the verified Apertus 2 instruct tokenizer that `apertus-common` names: [`tokenizers/Apertus_2_instruct`](https://github.com/swiss-ai/apertus-omni-tokenizer/tree/b801ff1b00d933d10bba90b0c22307157299faa7/tokenizers/Apertus_2_instruct) in `swiss-ai/apertus-omni-tokenizer` (evals-svc's Chonk/Megachonk evaluation tokenizer lacks the control tokens and is rejected), `--max-length` is the server's `--max-model-len`. Installs the pinned `apertus-common` commit ([details](docs/lm-eval-harness.md#apertus-2-native-format)).
@@ -90,6 +94,23 @@ scripts/evalscope/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --li
 python -m scripts.common.suites run apertus2/chonk_sft --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --model chonk-lc-16k-v0.2-sft=<served name> --limit 5 --no-wandb      # add --submit to launch
 ```
+
+### Launching the serving model
+
+A checkpoint that is not on the CSCS serving API: one command submits **one Slurm job** that serves it with vLLM and runs your eval commands against the server, which they find at `$EVAL_API_BASE_URL`. Run it on a Clariden login node, from this checkout. Qwen3-32B on one node, lm-eval GSM8K, 3 samples (lm-eval needs `--failure-policy fail-fast` here and a Hugging Face name or path as `--tokenizer`, not the served name):
+
+```bash
+scripts/direct_serving/job.sh \
+  --model /capstor/store/cscs/swissai/infra01/hf_models/models/Qwen/Qwen3-32B --served-model-name qwen3-32b \
+  --nodes 1 --time 01:00:00 --environment containers/env_vllm.toml \
+  --framework-args "--tensor-parallel-size 4 --max-model-len 32768 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser hermes" \
+  --eval 'bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model qwen3-32b --backend openai --api-base-url "$EVAL_API_BASE_URL" --api-model-name qwen3-32b --tokenizer Qwen/Qwen3-32B --limit 3 --no-wandb --failure-policy fail-fast' \
+  --submit
+```
+
+`--submit` prints the job id; without it the job script is printed. Logs: `~/.sml/logs/<job id>/`. More examples (several evals in one job, a suite setup, Chonk on 2 nodes) and all options: [the direct route](#serving-the-model-in-the-eval-job-direct-route).
+
+### Smoke-test options
 
 `--limit N` is a random subset of N samples per task (seed 42, so the same subset on every run) in all four frameworks, not the first N. lm-eval, EvalScope and Harbor also take a fraction below 1 (`--limit 0.5`: a random half); Inspect takes whole numbers only.
 
