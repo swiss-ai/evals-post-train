@@ -1,7 +1,7 @@
 {
   "name": "apertus2-chonk-sft",
   "title": "Compare Chonk to other post-trained thinking models",
-  "description": "Benchmarks for Apertus 2 Chonk SFT and the models it is compared with (Apertus 1.5 70B and 8B, Qwen3 32B), in table order. Mean@8 for AIME, mean@4 for the rest. MATH is not listed yet: its task (hendrycks_math or minerva_math) is undecided. HLE is judged by GLM-5.3 (plain-text judge prompt), SciCode and GDPval run their code in OpenSandbox (Kata); GDPval only generates, its grading is a separate submission. HarmBench, MultiJail and Aya red-teaming are lm-eval groups judged by a fixed model through the SwissAI API (HarmBench's classifier cais/HarmBench-Llama-2-13b-cls, Llama-3.3-70B-Instruct for the other two; lower is safer); only HarmBench repeats in the harness, the other two score once.",
+  "description": "Benchmarks for Apertus 2 Chonk SFT and the models it is compared with (Apertus 1.5 70B and 8B, Qwen3 32B), in table order. Mean@8 for AIME, mean@4 for the rest. MATH is not listed yet: its task (hendrycks_math or minerva_math) is undecided. HLE is judged by GLM-5.3 (plain-text judge prompt), SciCode and GDPval run their code in OpenSandbox (Kata); GDPval only generates, its grading is a separate submission. HarmBench, MultiJail and Aya red-teaming are lm-eval groups judged by a fixed model through the SwissAI API (HarmBench's classifier cais/HarmBench-Llama-2-13b-cls, Llama-3.3-70B-Instruct for the other two; lower is safer); only HarmBench repeats in the harness, the other two score once. PopQA and SimpleQA Verified are task files in scripts/inspect_ai/tasks that strip the inline reasoning before scoring; SimpleQA is judged by GLM-5.3 through the SwissAI gateway (rate-limited, so it is slow).",
   "benchmarks": [
     {"label": "MMLU", "task": "mmlu_0_shot", "framework": "inspect",
      "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null},
@@ -101,7 +101,18 @@
      "flags": ["--harness-branch", "02d5b21106efd91781dc8d50a8a40a72a474f3b5"]},
     {"label": "FLORES+ es-en", "task": "flores_plus_chrf_spa_Latn-eng_Latn", "framework": "lm_eval",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "chrF", "key": null},
-     "flags": ["--harness-branch", "02d5b21106efd91781dc8d50a8a40a72a474f3b5"]}
+     "flags": ["--harness-branch", "02d5b21106efd91781dc8d50a8a40a72a474f3b5"]},
+    {"label": "RealGuardrails (S-IFEval)", "task": "realguardrails_s_ifeval", "framework": "lm_eval",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "loose acc", "key": "prompt_level_loose_acc,none"}},
+    {"label": "GSM8K Platinum", "task": "gsm8k_platinum_cot", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": "exact_match_mean_repeats,flexible-extract"},
+     "flags": ["--harness-branch", "1232b0e4f362da7c82b74f9ccc8aa770cbc6326c"]},
+    {"label": "PopQA", "task": "scripts/inspect_ai/tasks/popqa.py", "framework": "inspect",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null},
+     "task_args": {"max_tokens": "16384"}},
+    {"label": "SimpleQA Verified", "task": "scripts/inspect_ai/tasks/simpleqa_verified_gateway.py", "framework": "inspect",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null},
+     "task_args": {"judge_model": "openai-api/gateway/CSCS-Inference/zai-org/GLM-5.3"}}
   ],
   "setups": {
     "apertus-1.5-70b-thinking": {
