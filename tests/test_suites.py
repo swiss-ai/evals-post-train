@@ -201,6 +201,22 @@ class SuiteTests(unittest.TestCase):
         for row in suites.commands(suite, {"chonk-lc-16k-v0.2-sft": "chonk"}, no_wandb=True):
             self.assertNotIn("--wandb-project", row["argv"])
 
+    def test_inspect_and_evalscope_rows_write_to_their_own_log_dir(self):
+        suite = suites.load(SUITE)
+        flag = {"inspect": "--logs-dir", "evalscope": "--work-dir", "harbor": "--work-dir"}
+        seen = set()
+        for row in suites.commands(suite, {"chonk-lc-16k-v0.2-sft": "chonk"}):
+            argv = row["argv"]
+            if row["framework"] not in flag:
+                self.assertNotIn("--logs-dir", argv)
+                self.assertNotIn("--work-dir", argv)
+                continue
+            task = argv[argv.index("--task") + 1] if "--task" in argv else argv[argv.index("--benchmark") + 1]
+            expected = f"logs/{row['framework']}/{suite['name']}/chonk/{task}"
+            self.assertEqual(argv[argv.index(flag[row["framework"]]) + 1], expected)
+            seen.add(expected)
+        self.assertIn(f"logs/evalscope/{suite['name']}/chonk/bfcl_v4", seen)
+
     def test_run_prints_by_default_and_checks_its_arguments(self):
         with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
