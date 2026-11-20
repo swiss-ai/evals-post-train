@@ -33,3 +33,5 @@ lock harbor-adapters 3.12 "$@"
 # No hashes either: tau2-bench is a git install (not on PyPI); the lock pins its commit.
 lock tau2-runtime 3.12 "$@"
 lock gdpval-runtime 3.12 --generate-hashes "$@"
+# No hashes either: model-launch is a git install (not on PyPI); the lock pins its commit.
+lock direct-serving 3.11 "$@"

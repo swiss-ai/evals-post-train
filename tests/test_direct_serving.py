@@ -50,6 +50,33 @@ def _render(test: unittest.TestCase, evals: list[str], nodes: int = 2, **kwargs)
     )
 
 
+class LauncherEnvironmentTest(unittest.TestCase):
+    """requirements/direct-serving.* is what job.sh runs job.py from; CI tests it against the [ci] pin."""
+
+    PIN = re.compile(r"swiss-ai-model-launch @ git\+https://github.com/swiss-ai/model-launch(?:\.git)?@([0-9a-f]{40})")
+
+    def _pin(self, path: str) -> str:
+        match = self.PIN.search((Path(__file__).resolve().parent.parent / path).read_text())
+        self.assertIsNotNone(match, f"{path} pins no model-launch commit")
+        return match.group(1)
+
+    def test_the_launcher_venv_runs_the_commit_ci_tests_against(self):
+        ci = self._pin("pyproject.toml")
+        self.assertEqual(self._pin("requirements/direct-serving.txt"), ci)
+        self.assertEqual(self._pin("requirements/direct-serving.lock"), ci)
+
+    def test_the_wrapper_refuses_a_venv_without_python(self):
+        with tempfile.TemporaryDirectory() as empty:
+            result = subprocess.run(
+                ["bash", "scripts/direct_serving/job.sh", "--help"],
+                cwd=Path(__file__).resolve().parent.parent,
+                env={"PATH": "/usr/bin:/bin", "DIRECT_SERVING_VENV": empty},
+                capture_output=True, text=True, timeout=60,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("has no bin/python", result.stderr)
+
+
 class LaunchArgsTests(unittest.TestCase):
     def test_server_is_reachable_only_from_the_job(self) -> None:
         args = _launch_args(self)

@@ -112,12 +112,12 @@ sbatch                       scripts/direct_serving/job.py
 - **End**: status 1 if the server died or any command failed; a failed command does not stop the next one.
 - **Suite**: a setup's `launch` block (checkpoint, serving EDF, nodes, time, parallelism) and `serving` arguments are read by `--suite` and `--setup` ([docs/suites.md](docs/suites.md)).
 
-Run it from this checkout (on storage the compute nodes see) on a Clariden login node, in a Python with `swiss_ai_model_launch` ([setup](docs/lm-eval-harness.md#judge-model-launching)). `--submit` submits and prints the job id; without it the job script is printed. Logs are in `~/.sml/logs/<job id>/` (`--workdir` changes it): `log.out` for the commands, `replica_0.out`/`.err` for the server.
+Run it from this checkout (on storage the compute nodes see) on a Clariden login node, with `scripts/direct_serving/job.sh` (it builds its own pinned venv: nothing to install by hand). `--submit` submits and prints the job id; without it the job script is printed. Logs are in `~/.sml/logs/<job id>/` (`--workdir` changes it): `log.out` for the commands, `replica_0.out`/`.err` for the server.
 
 **A model by hand**: Qwen3-32B on one node, Inspect and lm-eval, 3 samples each. lm-eval needs `--failure-policy fail-fast` here and a Hugging Face name or path as `--tokenizer`, not the served name.
 
 ```bash
-python -m scripts.direct_serving.job \
+scripts/direct_serving/job.sh \
   --model /capstor/store/cscs/swissai/infra01/hf_models/models/Qwen/Qwen3-32B --served-model-name qwen3-32b \
   --nodes 1 --time 01:00:00 --environment containers/env_vllm.toml \
   --framework-args "--tensor-parallel-size 4 --max-model-len 32768 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser hermes" \
@@ -129,7 +129,7 @@ python -m scripts.direct_serving.job \
 **A suite setup**: Chonk (`apertus2/chonk_sft`, setup `chonk-lc-16k-v0.2-sft`) on 2 nodes; the setup supplies checkpoint, EDF, nodes, 24 h (`--time` overrides) and the Apertus 2 serving arguments. The server's image lacks the `apertus-common` vLLM plugin, so it is installed via `--pre-launch-cmds` (commit pinned in `requirements/apertus2.txt`, [details](docs/thinking.md#apertus-2-on-v1chatcompletions-temporary)).
 
 ```bash
-python -m scripts.direct_serving.job --suite apertus2/chonk_sft --setup chonk-lc-16k-v0.2-sft --time 01:00:00 \
+scripts/direct_serving/job.sh --suite apertus2/chonk_sft --setup chonk-lc-16k-v0.2-sft --time 01:00:00 \
   --pre-launch-cmds "pip install -q --no-deps --force-reinstall --ignore-requires-python 'git+https://github.com/swiss-ai/apertus-common.git@<pin of requirements/apertus2.txt>'" \
   --eval 'scripts/inspect_ai/run_inspect_eval.sh --task gsm8k --model chonk-lc-16k-v0.2-sft --api-base-url "$EVAL_API_BASE_URL" --limit 5 --no-wandb' \
   --submit

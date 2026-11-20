@@ -25,9 +25,10 @@ it is built from, which CI published (.github/workflows/eval-image.yml). The job
 EDF that starts it; the checkout and the usual scratch directories are mounted (more with
 `--mount`).
 
-Print the job script (to submit it another way):
+Print the job script (to submit it another way). scripts/direct_serving/job.sh runs this module from
+its own pinned venv (the model-launch it needs; nothing to install by hand):
 
-    python -m scripts.direct_serving.job --model <checkpoint dir> --nodes 2 \
+    scripts/direct_serving/job.sh --model <checkpoint dir> --nodes 2 \
         --environment containers/env_vllm_apertus2.toml --framework-args "..." \
         --eval 'scripts/inspect_ai/run_inspect_eval.sh --task gsm8k --model m --api-base-url "$EVAL_API_BASE_URL"'
 

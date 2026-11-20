@@ -1,0 +1,7 @@
+# Input to direct-serving.lock (scripts/common/lock_requirements.sh): the login-node venv that
+# scripts/direct_serving/job.sh runs scripts/direct_serving/job.py from. job.py renders its serving
+# job from model-launch's own job script (public, not on PyPI) and replaces the end of it, so it
+# needs this exact version: the same commit as the [ci] extra of pyproject.toml, which test_direct_serving
+# runs against (a test keeps the two equal); job.py refuses a model-launch whose script ends differently.
+# Python >= 3.10 at this commit.
+swiss-ai-model-launch @ git+https://github.com/swiss-ai/model-launch@fa000afd670f3ae95b2748b58113297279e86dc9
