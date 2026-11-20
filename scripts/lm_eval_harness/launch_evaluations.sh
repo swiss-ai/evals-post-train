@@ -713,7 +713,7 @@ fi
 [[ -n "$PARTITION_FLAG" ]] && export SBATCH_PARTITION="$PARTITION_FLAG"
 export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 export WANDB_PROJECT=${WANDB_PROJECT:-e-p-t-pool}
-export LOGS_ROOT=${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}
+export LOGS_ROOT=${LOGS_ROOT:-$PWD/logs/lm_eval}
 [[ -n "$WANDB_ENTITY_FLAG" ]] && export WANDB_ENTITY="$WANDB_ENTITY_FLAG"
 [[ -n "$WANDB_PROJECT_FLAG" ]] && export WANDB_PROJECT="$WANDB_PROJECT_FLAG"
 [[ -n "$LOGS_ROOT_FLAG" ]] && export LOGS_ROOT="$LOGS_ROOT_FLAG"

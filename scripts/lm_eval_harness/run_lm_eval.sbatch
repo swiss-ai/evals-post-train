@@ -39,7 +39,7 @@ usage() {
 	echo " MEGATRON_MICRO_BATCH_SIZE: Megatron micro-batch override; otherwise uses numeric BS or 1 when BS=auto."
 	echo " BOS: 'true' prepends the BOS token, 'false' leaves it to the tokenizer; default 'auto' = true for models whose tokenizer never adds the BOS token they need (Gemma 4, scripts/lm_eval_harness/bos_default.py)."
 	echo " TRUST_REMOTE_CODE: 'true' loads the tokenizer (hf/vllm: also the model) with trust_remote_code=True; hf, vllm and openai backends."
-	echo " LOGS_ROOT: Where are your evaluation wandb&harness logs going to."
+	echo " LOGS_ROOT: Where the evaluation wandb&harness logs go (default: <repo>/logs/lm_eval)."
 	echo " TASKS: Required. Tasks to run with lm eval harness: a task list file (one name per line, # comments) or comma-separated names."
 	echo " TABLE_METRICS: task/metric pairs for the W&B summary table: a file (one pair per line, # group headers) or space-separated pairs (default: TASKS)."
 	echo " WANDB_ENTITY: WandB entity name for uploading results (default: apertus)."
@@ -105,7 +105,7 @@ BS=${BS:-"auto:20"}
 SIZE=${SIZE:-1}
 BOS=${BOS:-auto}
 TRUST_REMOTE_CODE=${TRUST_REMOTE_CODE:-false}
-LOGS_ROOT=${LOGS_ROOT:-$SCRATCH/eval_logs_start/}
+LOGS_ROOT=${LOGS_ROOT:-$PWD/logs/lm_eval}
 TASKS=${TASKS:-}
 TABLE_METRICS=${TABLE_METRICS:-$TASKS}
 WANDB_ENTITY=${WANDB_ENTITY:-apertus}

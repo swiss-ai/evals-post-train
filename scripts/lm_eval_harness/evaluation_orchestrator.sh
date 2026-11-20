@@ -458,7 +458,7 @@ submit_evaluation() {
     repo_root=$(_eval_repo_root)
     cd "$repo_root"
 
-    logs_root=${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}
+    logs_root=${LOGS_ROOT:-$PWD/logs/lm_eval}
     run_root="$logs_root/${WANDB_ENTITY:-apertus}/${WANDB_PROJECT:-swissai-evals-test}/$name"
     EVAL_HARNESS_DIR="$run_root/harness"
     legacy_project="${WANDB_PROJECT:-swissai-evals-test}"
@@ -540,10 +540,10 @@ evaluation_controller() {
     local model="$1" name="$2" state_dir="$3" attempt="$4" chunk_size="$5"
     local missing_count completed_count next_attempt next_chunk aggregate_job legacy_project
     cd "$(_eval_repo_root)"
-    EVAL_HARNESS_DIR="${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}/${WANDB_ENTITY:-apertus}/${WANDB_PROJECT:-swissai-evals-test}/$name/harness"
+    EVAL_HARNESS_DIR="${LOGS_ROOT:-$PWD/logs/lm_eval}/${WANDB_ENTITY:-apertus}/${WANDB_PROJECT:-swissai-evals-test}/$name/harness"
     legacy_project="${WANDB_PROJECT:-swissai-evals-test}"
     [[ "$legacy_project" == *-single ]] || legacy_project="${legacy_project}-single"
-    EVAL_LEGACY_HARNESS_DIR="${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}/${WANDB_ENTITY:-apertus}/$legacy_project/$name/harness"
+    EVAL_LEGACY_HARNESS_DIR="${LOGS_ROOT:-$PWD/logs/lm_eval}/${WANDB_ENTITY:-apertus}/$legacy_project/$name/harness"
     export EVAL_HARNESS_DIR EVAL_LEGACY_HARNESS_DIR EVAL_ENV_MANIFEST="$state_dir/environment.sh"
     export EVAL_RUN_CONFIG="$state_dir/run_config.json"
 
