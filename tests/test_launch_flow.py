@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Launcher inputs a caller's shell may export; the dry runs start without them.
 _LAUNCH_INPUTS = {
-    "TOKENIZER", "MAX_LENGTH", "BOS", "CHAT_FORMAT", "PREFILL_MODE", "EVAL_PREBUILT_ENV",
+    "TOKENIZER", "MAX_LENGTH", "BOS", "CHAT_FORMAT", "PREFILL_MODE", "ANSWER_FRAME", "EVAL_PREBUILT_ENV",
     "LM_EVAL_BACKEND", "LM_EVAL_HARNESS_BRANCH", "LM_EVAL_HARNESS_REPO", "EVAL_ENV_CACHE_ROOT", "API_CHAT_ENDPOINT", "ENABLE_THINKING",
 }
 ENV = {key: value for key, value in os.environ.items() if key not in _LAUNCH_INPUTS}
@@ -790,9 +790,20 @@ class LaunchFlowTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, output)
             self.assertIn("Chat format: apertus2 (prefill=after_think)", output)
             self.assertIn("Name:   test-model-apertus2-after_think-effort-medium", output)
+            self.assertNotIn("Answer frame", output)
             # Built environments get the pinned harness, which has apertus2-completions.
             self.assertIn(f"(swiss-ai/lm-evaluation-harness@{_harness_pin()})", output)
             config = _run_config(tmp)["configuration"]
+        # The default run records no answer frame; --answer-frame claim is named, recorded and announced.
+        self.assertNotIn("answer_frame", config)
+        with tempfile.TemporaryDirectory() as tmp:
+            claimed = _launch("single", "--task", "gsm8k", *apertus2, "--answer-frame", "claim",
+                              "--logs-root", tmp)
+            claimed_output = claimed.stdout + claimed.stderr
+            self.assertEqual(claimed.returncode, 0, claimed_output)
+            self.assertIn("Answer frame: claim", claimed_output)
+            self.assertIn("Name:   test-model-apertus2-after_think-claim-effort-medium", claimed_output)
+            self.assertEqual(_run_config(tmp)["configuration"]["answer_frame"], "claim")
         library = (REPO_ROOT / "requirements/apertus2.txt").read_text().rsplit("@", 1)[1].strip()
         self.assertEqual(
             {key: config[key] for key in ("chat_format", "prefill_mode", "reasoning_effort",
@@ -836,6 +847,9 @@ class LaunchFlowTests(unittest.TestCase):
             "prefill mode": ([*apertus2, "--prefill-mode", "reject"], "--prefill-mode must be"),
             "prefill without apertus2": ([*api, "--prefill-mode", "empty_think"],
                                          "--prefill-mode only applies with --chat-format apertus2"),
+            "answer frame": ([*apertus2, "--answer-frame", "think"], "--answer-frame must be"),
+            "answer frame without apertus2": ([*api, "--answer-frame", "claim"],
+                                              "--answer-frame only applies with --chat-format apertus2"),
             "unknown format": ([*api, "--chat-format", "harmony"], "--chat-format must be"),
             "bos": ([*apertus2, "--bos"], "drop --bos"),
             "ambient bos": (apertus2, "drop --bos", {"BOS": "true"}),
@@ -868,6 +882,7 @@ class LaunchFlowTests(unittest.TestCase):
             "no tokenizer": ({"TOKENIZER": ""}, "needs TOKENIZER"),
             "bos": ({"BOS": "true"}, "unset BOS"),
             "prefill mode": ({"PREFILL_MODE": "reject"}, "PREFILL_MODE must be"),
+            "answer frame": ({"ANSWER_FRAME": "think"}, "ANSWER_FRAME must be"),
             "thinking switch": ({"ENABLE_THINKING_EXPLICIT": "1"}, "always reasons"),
             "think token": ({"THINK_END_TOKEN": "</think>"}, "always reasons"),
             "autodetect": ({"AUTODETECT_THINK_TOKENS": "True"}, "always reasons"),
@@ -891,6 +906,10 @@ class LaunchFlowTests(unittest.TestCase):
             "max_retries=3,timeout=3600,tokenizer=/ckpt,prefill=after_think,reasoning_effort=medium,"
             "max_gen_toks=32768,max_model_len=65536",
         )
+        # --answer-frame claim reaches the model; the default leaves the arguments as they were.
+        self.assertIn(",max_gen_toks=32768,answer_frame=claim,max_model_len=65536",
+                      model(CHAT_FORMAT="apertus2", ANSWER_FRAME="claim"))
+        self.assertNotIn("answer_frame", model(CHAT_FORMAT="apertus2"))
         # ruler's detected length bounds the template path's context, not the server's.
         self.assertTrue(model(CHAT_FORMAT="apertus2", BACKEND_MAX_LENGTH="8792").endswith(",max_model_len=65536"))
         # The template path keeps its own model, context argument and chat_template_args token.

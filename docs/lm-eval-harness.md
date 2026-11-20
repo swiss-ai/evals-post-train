@@ -52,6 +52,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--api-num-concurrent N` | `openai` backend: concurrent requests (default 8) |
 | `--chat-format <template\|apertus2>` | `apertus2`: the Apertus 2 native format (see [Apertus 2 native format](#apertus-2-native-format)); default `template` |
 | `--prefill-mode <after_think\|empty_think>` | `apertus2` answer prefills (default `after_think`) |
+| `--answer-frame <reply\|claim>` | `apertus2`: score the reply (default) or the last claim, the frame the Apertus 2 RL math reward grades |
 | `--chunk-size N` | Maximum tasks per resumable Slurm-array element (default: 8) |
 | `--max-parallel N` | Cap concurrently running chunks; omitted means all generated chunks may run |
 | `--max-retries N` | Retry waves for missing tasks (default: 1); retry chunk size is halved |
@@ -529,6 +530,10 @@ bash scripts/lm_eval_harness/launch_evaluations.sh custom \
 - **Answer prefills** (bbh cot, `arc_challenge_chat`, `drop`, `humaneval_instruct`,
   `mbpp_instruct`): `--prefill-mode after_think` (default; thinks, then continues the prefix) or
   `empty_think` (no reasoning under a prefix, like other thinking models: cross-model tables).
+- **Answer frame:** tasks score the reply by default. `--answer-frame claim` scores the payload of
+  the last claim instead, as the Apertus 2 RL math reward does: no claim, or an answer cut at the
+  token limit, scores as an empty answer. The run's name gets `-claim`. Needs a harness whose
+  `apertus2-completions` takes `answer_frame`.
 - **Generative tasks only:** `custom` or `single` runs; the job stops if a task (or a group or tag
   member) is scored by log-likelihood in its yaml (Python task classes such as `squadv2` are not
   seen).
@@ -585,6 +590,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `THINK_REPETITION_PENALTY` | (unset) | Optional knob against degenerate looping in thinking runs (e.g. `1.05`) |
 | `THINK_TOP_K` / `THINK_MIN_P` | (unset) | Optional sampling of thinking runs, sent only when set |
 | `CHAT_FORMAT` / `PREFILL_MODE` | `template` / `after_think` | Set by `--chat-format` / `--prefill-mode` |
+| `ANSWER_FRAME` | `reply` | Set by `--answer-frame` |
 | `NOTHINK_TEMPERATURE` / `NOTHINK_TOP_P` | (unset) / `0.95` | Optional sampling for NO-think runs (greedy-vs-sampling ablations); inert unless `NOTHINK_TEMPERATURE` is set |
 | `HARNESS_LIMIT` | (unset) | Random subset of this many samples per task (set by launcher flag `--limit`) |
 | `NUM_FEWSHOT` | (unset) | Global few-shot override |

@@ -69,6 +69,8 @@
 #   --chat-format <f>    - 'template' (default) or 'apertus2' (Apertus 2 native format, a thinking
 #                          run; needs --backend openai, --tokenizer, --max-length; see the docs)
 #   --prefill-mode <m>   - apertus2 answer prefills: 'after_think' (default) or 'empty_think'
+#   --answer-frame <f>   - apertus2: score the 'reply' (default) or the 'claim', the frame the
+#                          Apertus 2 RL math reward grades (needs a harness with answer_frame)
 #   --temperature V, --top-p V, --top-k V, --min-p V, --repetition-penalty V
 #                        - Sampling of thinking/apertus2 runs (defaults: configs/sampling_defaults.json,
 #                          0.6 / 0.95); 'none' leaves one out. On other runs, --temperature turns sampling on.
@@ -180,6 +182,7 @@ API_NUM_CONCURRENT_FLAG=""
 API_ENDPOINT_FLAG=""
 CHAT_FORMAT_FLAG="${CHAT_FORMAT:-}"
 PREFILL_MODE_FLAG=""
+ANSWER_FRAME_FLAG=""
 FEWSHOT_FLAG=""
 # Keep an ambient HARNESS_LIMIT (the graceful launcher has no --limit flag, so callers export
 # it); blanking it here would ship the cleared value into the job. --limit still overrides.
@@ -248,6 +251,7 @@ while [[ $# -gt 0 ]]; do
         --api-endpoint) API_ENDPOINT_FLAG="$2";       shift 2 ;;
         --chat-format)  CHAT_FORMAT_FLAG="$2";        shift 2 ;;
         --prefill-mode) PREFILL_MODE_FLAG="$2";       shift 2 ;;
+        --answer-frame) ANSWER_FRAME_FLAG="$2";       shift 2 ;;
         --megatron-iter) MEGATRON_ITER="$2";            shift 2 ;;
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --max-length) MAX_LENGTH="$2";          shift 2 ;;
@@ -429,7 +433,11 @@ case "${CHAT_FORMAT_FLAG:-template}" in
             echo "Error: --prefill-mode only applies with --chat-format apertus2"
             exit 1
         fi
-        unset CHAT_FORMAT PREFILL_MODE
+        if [[ -n "$ANSWER_FRAME_FLAG" ]]; then
+            echo "Error: --answer-frame only applies with --chat-format apertus2"
+            exit 1
+        fi
+        unset CHAT_FORMAT PREFILL_MODE ANSWER_FRAME
         ;;
     apertus2)
         if [[ "$EFFECTIVE_BACKEND" != "openai" || -z "${CUSTOM_TOKENIZER:-${TOKENIZER:-}}" || -z "$MAX_LENGTH" ]]; then
@@ -457,13 +465,18 @@ case "${CHAT_FORMAT_FLAG:-template}" in
             echo "Error: --prefill-mode must be 'after_think' or 'empty_think' (got '$PREFILL_MODE_FLAG')"
             exit 1
         fi
+        ANSWER_FRAME_FLAG="${ANSWER_FRAME_FLAG:-${ANSWER_FRAME:-reply}}"
+        if [[ "$ANSWER_FRAME_FLAG" != "reply" && "$ANSWER_FRAME_FLAG" != "claim" ]]; then
+            echo "Error: --answer-frame must be 'reply' or 'claim' (got '$ANSWER_FRAME_FLAG')"
+            exit 1
+        fi
         REASONING_EFFORT="${REASONING_EFFORT:-medium}"
         if [[ ! "$REASONING_EFFORT" =~ ^(low|medium|high)$ ]]; then
             echo "Error: --chat-format apertus2 takes --reasoning-effort low, medium or high (got '$REASONING_EFFORT')"
             exit 1
         fi
         LOG_LENGTH_METRICS="true"
-        export CHAT_FORMAT=apertus2 PREFILL_MODE="$PREFILL_MODE_FLAG"
+        export CHAT_FORMAT=apertus2 PREFILL_MODE="$PREFILL_MODE_FLAG" ANSWER_FRAME="$ANSWER_FRAME_FLAG"
         ;;
     *)
         echo "Error: --chat-format must be 'template' or 'apertus2' (got '$CHAT_FORMAT_FLAG')"
@@ -800,6 +813,7 @@ if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
         echo "  API endpoint: completions"
     fi
     [[ "${CHAT_FORMAT:-}" == "apertus2" ]] && echo "  Chat format: apertus2 (prefill=$PREFILL_MODE)"
+    [[ "${ANSWER_FRAME:-reply}" == "claim" ]] && echo "  Answer frame: claim (scored as by the Apertus 2 RL math reward)"
 fi
 echo "  Slurm:  partition=${SBATCH_PARTITION:-normal} qos=${SBATCH_QOS:-<default>}${SBATCH_RESERVATION:+ reservation=$SBATCH_RESERVATION}"
 echo "  Judge RPM: ${JUDGE_REQUESTS_PER_MINUTE:-unlimited}"
@@ -849,6 +863,7 @@ if [[ -n "$MODEL_PATH" ]]; then
             MODEL_NAME="${MODEL_NAME}-think"
         fi
         [[ "${CHAT_FORMAT:-}" == "apertus2" ]] && MODEL_NAME="${MODEL_NAME}-apertus2-${PREFILL_MODE}"
+        [[ "${ANSWER_FRAME:-reply}" == "claim" ]] && MODEL_NAME="${MODEL_NAME}-claim"
         [[ -n "$REASONING_EFFORT" ]] && MODEL_NAME="${MODEL_NAME}-effort-${REASONING_EFFORT}"
     fi
 

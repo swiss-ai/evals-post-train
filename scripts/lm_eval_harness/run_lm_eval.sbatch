@@ -77,6 +77,7 @@ usage() {
     echo " THINK_TEMPERATURE, THINK_TOP_P, THINK_TOP_K, THINK_MIN_P, THINK_REPETITION_PENALTY: sampling of thinking runs (defaults in configs/sampling_defaults.json: 0.6 / 0.95, the others unset; 'none' leaves one out)."
     echo " CHAT_FORMAT: 'apertus2' for the Apertus 2 native format (openai backend, harness model apertus2-completions; needs TOKENIZER and MAX_LENGTH). Default: template."
     echo " PREFILL_MODE: apertus2 answer prefills, 'after_think' (default) or 'empty_think'."
+    echo " ANSWER_FRAME: apertus2: score the 'reply' (default) or the 'claim', the frame the Apertus 2 RL math reward grades."
 	echo "For more information see the README: https://github.com/swiss-ai/evals?tab=readme-ov-file."
 }
 die() {
@@ -301,6 +302,7 @@ case "$CHAT_FORMAT" in
     template) ;;
     apertus2)
         PREFILL_MODE=${PREFILL_MODE:-after_think}
+        ANSWER_FRAME=${ANSWER_FRAME:-reply}
         [[ -n "${TOKENIZER:-}" ]] || die "CHAT_FORMAT=apertus2 needs TOKENIZER, the checkpoint's tokenizer."
         [[ "$BOS" != "true" ]] || die "CHAT_FORMAT=apertus2 renders the BOS token itself: unset BOS."
         [[ "$LM_EVAL_BACKEND" == "openai" && "${API_CHAT_ENDPOINT:-false}" != "true" && $APPLY_CHAT_TEMPLATE = true ]] \
@@ -308,6 +310,8 @@ case "$CHAT_FORMAT" in
         [[ -n "$MAX_LENGTH" ]] || die "CHAT_FORMAT=apertus2 needs MAX_LENGTH, the server's --max-model-len."
         [[ "$PREFILL_MODE" == "after_think" || "$PREFILL_MODE" == "empty_think" ]] \
             || die "PREFILL_MODE must be after_think or empty_think (got '$PREFILL_MODE')."
+        [[ "$ANSWER_FRAME" == "reply" || "$ANSWER_FRAME" == "claim" ]] \
+            || die "ANSWER_FRAME must be reply or claim (got '$ANSWER_FRAME')."
         [[ $ENABLE_THINKING_EXPLICIT == 0 && -z "$THINK_END_TOKEN$THINK_START_TOKEN$TRACK_THINKING_METRICS" \
            && "$AUTODETECT_THINK_TOKENS" == "False" ]] \
             || die "CHAT_FORMAT=apertus2 always reasons and separates the reasoning itself: unset ENABLE_THINKING, THINK_END_TOKEN, THINK_START_TOKEN, AUTODETECT_THINK_TOKENS and TRACK_THINKING_METRICS."
@@ -611,6 +615,8 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
         # The model reads the effort itself (no chat template); the context goes in as
         # max_model_len (below).
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer=$TOKENIZER,prefill=$PREFILL_MODE,reasoning_effort=$REASONING_EFFORT${THINKING_DEFAULT_MODEL_ARG}"
+        # Only when asked: default runs keep their model arguments.
+        [[ "${ANSWER_FRAME:-reply}" == "claim" ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,answer_frame=claim"
         CHAT_TEMPLATE_ARGS=""
     elif [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then
         # tokenizer_backend/tokenizer is local bookkeeping only (max context length, decoding,

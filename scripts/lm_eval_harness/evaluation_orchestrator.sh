@@ -162,6 +162,7 @@ _eval_create_run_config() {
     if [[ "${CHAT_FORMAT:-template}" == "apertus2" ]]; then
         fields+=(--field "chat_format=apertus2" --field "prefill_mode=${PREFILL_MODE:-after_think}"
                  --field "apertus_common=$(grep -oE '[0-9a-f]{40}' requirements/apertus2.txt)")
+        [[ "${ANSWER_FRAME:-reply}" == "claim" ]] && fields+=(--field "answer_frame=claim")
     fi
     [[ -n "${THINK_TOP_K:-}" ]] && fields+=(--field "think_top_k=$THINK_TOP_K")
     [[ -n "${THINK_MIN_P:-}" ]] && fields+=(--field "think_min_p=$THINK_MIN_P")
