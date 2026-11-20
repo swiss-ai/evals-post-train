@@ -27,6 +27,8 @@ import os
 import re
 import signal
 import sys
+import threading
+import time
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -446,6 +448,44 @@ def collect_reports(work_dir: str) -> List[Dict[str, Any]]:
     return reports
 
 
+PROGRESS_INTERVAL = 120  # seconds between progress lines
+
+
+def review_progress(work_dir: str, since: float) -> Dict[str, Dict[str, int]]:
+    """Per review file written since `since` (a run's own, not an earlier run's in the same
+    work dir): {"<model>/<dataset>_<subset>": {"done", "passed", "failed"}}. A sample passed when
+    its first metric is 1, failed when its score status is not "success" (a request or scoring
+    error); a wrong answer is neither."""
+    progress: Dict[str, Dict[str, int]] = {}
+    for path in sorted(glob.glob(os.path.join(work_dir, "reviews", "*", "*.jsonl*"))):
+        if os.path.getmtime(path) < since:
+            continue
+        done = passed = failed = 0
+        with open(path) as f:
+            for line in f:
+                try:
+                    score = json.loads(line)["sample_score"]["score"]
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    continue  # the line being written
+                done += 1
+                values = list((score.get("value") or {}).values())
+                passed += bool(values) and values[0] == 1
+                failed += score.get("status", "success") != "success"
+        key = re.sub(r"\.jsonl.*$", "", os.path.relpath(path, os.path.join(work_dir, "reviews")))
+        entry = progress.setdefault(key, {"done": 0, "passed": 0, "failed": 0})
+        entry["done"] += done
+        entry["passed"] += passed
+        entry["failed"] += failed
+    return progress
+
+
+def log_progress(work_dir: str, since: float, stop: threading.Event) -> None:
+    """Print review_progress every PROGRESS_INTERVAL seconds until `stop` is set."""
+    while not stop.wait(PROGRESS_INTERVAL):
+        for key, p in review_progress(work_dir, since).items():
+            print(f"[progress] {key}: {p['done']} scored, {p['passed']} passed, {p['failed']} failed", flush=True)
+
+
 # Reasons SWE-bench's eval_instance gives up that are the model's doing, not the
 # infrastructure's: an unresolved sample, not an evaluation error.
 _MODEL_FAILURES = ("Patch Apply Failed", "Test timed out")
@@ -586,9 +626,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     printable = printable_config(cfg)
     print("EvalScope task config:", json.dumps(printable, indent=2), flush=True)
 
+    stop_progress = threading.Event()
+    threading.Thread(target=log_progress, args=(args.work_dir, time.time(), stop_progress), daemon=True).start()
     try:
         run_task(cfg)
     finally:
+        stop_progress.set()
         if args.sandbox == "opensandbox" and needs_sandbox(names):
             delete_leftover_sandboxes()
 
