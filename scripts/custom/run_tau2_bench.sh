@@ -37,8 +37,15 @@
 #   --user-llm-args <json>     Extra litellm kwargs for the user, merged over its default key by key. The default
 #                               user (the model under test) runs at reasoning_effort low with max_tokens 4096: at its
 #                               default effort a turn could run 15k tokens and end with no reply, and tau2 redoes the task.
-#   --judge-llm-args <json>    Extra litellm kwargs for the retail NL-assertion judge, merged over its default key by
-#                               key (with --api-base-url: the model under test at reasoning_effort low, max_tokens 4096).
+#   --judge-llm <model>        The retail NL-assertion judge (default with --api-base-url: --model, which then judges
+#                               its own agent runs). Named like --user-llm: openai/<served name> is reached on the same
+#                               endpoint and key at the pin below; a bare name by litellm with its own credentials.
+#                               A judge started with scripts/lm_eval_harness/launch_judge.py is hosted as
+#                               <user>/<served name>: give the served name, the launcher finds the hosted id in
+#                               the endpoint's /models and stops when the model is not served.
+#                               Only used with --api-base-url, else the judge is upstream's own.
+#   --judge-llm-args <json>    Extra litellm kwargs for the judge, merged over its default key by key (the default
+#                               judge runs at reasoning_effort low with max_tokens 4096, like the default user).
 #   --retrieval-config <name>  banking_knowledge: the retrieval pipeline (default: bm25, offline keyword search).
 #                               tau2's own default embeds the documents with OpenAI and needs an OPENAI_API_KEY;
 #                               those configs (openai_embeddings*, ...) are available by naming them.
@@ -94,6 +101,7 @@ API_BASE_URL=${API_BASE_URL:-""}
 AGENT_LLM_ARGS_OVERRIDE=""
 USER_LLM=""
 USER_LLM_ARGS_OVERRIDE=""
+JUDGE_LLM=""
 JUDGE_LLM_ARGS_OVERRIDE=""
 RETRIEVAL_CONFIG=""
 NUM_TRIALS=1
@@ -118,6 +126,7 @@ while (( $# > 0 )); do
         --agent-llm-args) AGENT_LLM_ARGS_OVERRIDE=$2; shift 2 ;;
         --user-llm) USER_LLM=$2; shift 2 ;;
         --user-llm-args) USER_LLM_ARGS_OVERRIDE=$2; shift 2 ;;
+        --judge-llm) JUDGE_LLM=$2; shift 2 ;;
         --judge-llm-args) JUDGE_LLM_ARGS_OVERRIDE=$2; shift 2 ;;
         --retrieval-config) RETRIEVAL_CONFIG=$2; shift 2 ;;
         --num-trials) NUM_TRIALS=$2; shift 2 ;;
@@ -306,9 +315,30 @@ echo "+ tau2 run --domain $DOMAIN --agent-llm $AGENT_LLM --user-llm $USER_LLM" \
      "--num-trials $NUM_TRIALS --max-steps $MAX_STEPS --seed $SEED" \
      "--max-concurrency $MAX_CONCURRENCY (llm args name the key by its environment variable, never the key)"
 # The NL-assertion judge (retail) is hardcoded upstream to an OpenAI model, which we have no key for: with an
-# endpoint, it is the model under test (tau2_judge/sitecustomize.py repoints it; it judges its own agent runs).
+# endpoint, it is --judge-llm, else the model under test (tau2_judge/sitecustomize.py repoints it).
 if [[ -n "$API_BASE_URL" ]]; then
-    JUDGE_LLM_ARGS=$PINNED_LLM_ARGS
+    JUDGE_LLM=${JUDGE_LLM:-$AGENT_LLM}
+    if [[ "$JUDGE_LLM" == openai/* && "$JUDGE_LLM" != "$AGENT_LLM" ]]; then
+        # A launched judge is hosted under its launcher's scope (<user>/<served name>); a shared one as named.
+        JUDGE_HOSTED=$(python3 -c '
+import getpass, json, os, sys, urllib.request
+base, name = sys.argv[1:]
+request = urllib.request.Request(base.rstrip("/") + "/models", headers={"Authorization": "Bearer " + os.environ.get("TARGET_API_KEY", "")})
+try:
+    with urllib.request.urlopen(request, timeout=30) as response:
+        served = [m["id"] for m in json.load(response)["data"]]
+except Exception as error:
+    sys.exit(f"cannot list the models of {base}: {error}")
+for candidate in (f"{getpass.getuser()}/{name}", name):
+    if candidate in served:
+        print(candidate)
+        break
+else:
+    sys.exit(f"judge {name!r} is not served on {base} (looked for {getpass.getuser()}/{name} and {name}); start it with scripts/lm_eval_harness/launch_judge.py")
+' "$API_BASE_URL" "${JUDGE_LLM#openai/}") || exit 1
+        JUDGE_LLM="openai/$JUDGE_HOSTED"
+    fi
+    if [[ "$JUDGE_LLM" == openai/* ]]; then JUDGE_LLM_ARGS=$PINNED_LLM_ARGS; else JUDGE_LLM_ARGS='{}'; fi
     if [[ -n "$JUDGE_LLM_ARGS_OVERRIDE" ]]; then
         JUDGE_LLM_ARGS=$(python3 -c '
 import json, sys
@@ -316,8 +346,9 @@ merged = json.loads(sys.argv[1])
 merged.update(json.loads(sys.argv[2]))
 print(json.dumps(merged))' "$JUDGE_LLM_ARGS" "$JUDGE_LLM_ARGS_OVERRIDE")
     fi
-    export TAU2_JUDGE_LLM=$AGENT_LLM TAU2_JUDGE_LLM_ARGS=$JUDGE_LLM_ARGS
-    echo "NL-assertion judge: $TAU2_JUDGE_LLM (the model under test, through $API_BASE_URL)"
+    export TAU2_JUDGE_LLM=$JUDGE_LLM TAU2_JUDGE_LLM_ARGS=$JUDGE_LLM_ARGS
+    if [[ "$JUDGE_LLM" == "$AGENT_LLM" ]]; then echo "NL-assertion judge: $TAU2_JUDGE_LLM (the model under test, through $API_BASE_URL)"
+    else echo "NL-assertion judge: $TAU2_JUDGE_LLM"; fi
 else
     echo "NL-assertion judge: upstream's own (OpenAI; needs OPENAI_API_KEY for retail)"
 fi

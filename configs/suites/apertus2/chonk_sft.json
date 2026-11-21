@@ -27,6 +27,7 @@
     {"label": "tau2-bench retail", "task": "retail", "framework": "tau2",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "pass@1", "key": null},
      "flags": ["--user-llm-args", "{\"reasoning_effort\": \"low\", \"max_tokens\": 4096}",
+               "--judge-llm", "openai/RCP-AIaaS/openai/gpt-oss-120b",
                "--judge-llm-args", "{\"reasoning_effort\": \"low\", \"max_tokens\": 4096}"]},
     {"label": "tau2-bench telecom", "task": "telecom", "framework": "tau2",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "pass@1", "key": null},

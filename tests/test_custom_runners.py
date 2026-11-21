@@ -1,8 +1,10 @@
 """Offline checks of scripts/custom/run_tau2_bench.sh's argument handling (no network, model or venv)."""
 
+import http.server
 import json
 import os
 import subprocess
+import threading
 import sys
 import tempfile
 import unittest
@@ -157,8 +159,8 @@ class JudgeTest(unittest.TestCase):
                 env={"PATH": "/usr/bin:/bin", "HOME": d, "EVAL_PREBUILT_ENV": "1", "TARGET_API_KEY": "sk-test-secret-1234",
                      "TAU2_UPSTREAM_DIR": str(root), "TAU2_UPSTREAM_REF_FILE": str(ref), **(env_extra or {})},
             )
-            text = Path(d, "env").read_text()
-            return dict(line.split("=", 1) for line in text.splitlines()), result.stdout
+            text = Path(d, "env").read_text() if Path(d, "env").exists() else ""
+            return dict(line.split("=", 1) for line in text.splitlines()), result.stdout + result.stderr
 
     def test_with_an_endpoint_the_judge_is_the_model_under_test_at_low_effort_without_the_key(self):
         env, out = self._tau2_env("--reasoning-effort", "high")
@@ -173,6 +175,43 @@ class JudgeTest(unittest.TestCase):
         env, _ = self._tau2_env("--judge-llm-args", '{"reasoning_effort": "medium", "max_tokens": 100}')
         args = json.loads(env["TAU2_JUDGE_LLM_ARGS"])
         self.assertEqual((args["reasoning_effort"], args["max_tokens"], args["api_key"]), ("medium", 100, "os.environ/TARGET_API_KEY"))
+
+    def _endpoint_serving(self, *model_ids):
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = json.dumps({"data": [{"id": i} for i in model_ids]}).encode()
+                self.send_response(200 if self.path == "/v1/models" else 404)
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return ("--api-base-url", f"http://127.0.0.1:{server.server_port}/v1")
+
+    def test_judge_llm_names_the_served_model_and_the_launcher_finds_its_hosted_id(self):
+        base = self._endpoint_serving("alice/openai/gpt-oss-120b", "RCP/openai/gpt-oss-120b", "m")
+        env, out = self._tau2_env("--judge-llm", "openai/openai/gpt-oss-120b", base=base, env_extra={"LOGNAME": "alice"})
+        self.assertEqual(env["TAU2_JUDGE_LLM"], "openai/alice/openai/gpt-oss-120b")
+        args = json.loads(env["TAU2_JUDGE_LLM_ARGS"])
+        self.assertEqual((args["reasoning_effort"], args["max_tokens"], args["api_key"]), ("low", 4096, "os.environ/TARGET_API_KEY"))
+        self.assertIn("NL-assertion judge: openai/alice/openai/gpt-oss-120b\n", out)
+
+    def test_judge_llm_falls_back_to_a_shared_hosted_model_as_named(self):
+        base = self._endpoint_serving("RCP/openai/gpt-oss-120b")
+        env, _ = self._tau2_env("--judge-llm", "openai/RCP/openai/gpt-oss-120b", base=base, env_extra={"LOGNAME": "alice"})
+        self.assertEqual(env["TAU2_JUDGE_LLM"], "openai/RCP/openai/gpt-oss-120b")
+
+    def test_judge_llm_that_is_not_served_stops_the_run_before_tau2_starts(self):
+        base = self._endpoint_serving("m")
+        env, out = self._tau2_env("--judge-llm", "openai/openai/gpt-oss-120b", base=base, env_extra={"LOGNAME": "alice"})
+        self.assertEqual(env, {})  # the stub tau2 never ran
+        self.assertIn("is not served on", out)
+        self.assertIn("launch_judge.py", out)
 
     def test_without_an_endpoint_the_judge_stays_upstreams(self):
         env, out = self._tau2_env("--user-llm", "gpt-4.1", base=())
