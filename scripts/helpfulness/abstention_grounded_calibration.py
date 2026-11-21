@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import sys
 
 from scripts.helpfulness import abstention_annotation as legacy, abstention_calibration as evidence
 from scripts.helpfulness.benchmark_pilot import record_sdk_calls, verified_bytes
@@ -108,30 +109,33 @@ SCHEMA_SHA256 = digest({
 })
 
 
-def messages(stage, sample, audit=None):
+def messages(stage, sample, audit=None, *, protocol=None):
+    p = protocol or sys.modules[__name__]
     payload = evidence.evidence(sample)
     if stage == "assessment" and audit is not None:
         payload["scope_audit"] = audit
-    return [{"role": "system", "content": RUBRICS[stage]},
+    return [{"role": "system", "content": p.RUBRICS[stage]},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
 
 
-def request(stage, sample, model, audit=None):
+def request(stage, sample, model, audit=None, *, protocol=None):
+    p = protocol or sys.modules[__name__]
     return {
-        "model": model, "messages": messages(stage, sample, audit),
-        "temperature": 0, "seed": 1234, "max_tokens": LIMITS[stage],
+        "model": model, "messages": p.messages(stage, sample, audit),
+        "temperature": 0, "seed": 1234, "max_tokens": p.LIMITS[stage],
         "response_format": {"type": "json_schema", "json_schema": {
-            "name": "grounded_" + stage, "strict": True, "schema": schema(stage, sample),
+            "name": "grounded_" + stage, "strict": True, "schema": p.schema(stage, sample),
         }},
     }
 
 
-def parse(stage, sample, response):
+def parse(stage, sample, response, *, protocol=None):
+    p = protocol or sys.modules[__name__]
     choices = response["choices"]
     if len(choices) != 1 or choices[0]["finish_reason"] != "stop":
         raise ValueError("Stage output missing or truncated")
     value = legacy.open_benchmarks.strict_json(choices[0]["message"]["content"])
-    spec = schema(stage, sample)
+    spec = p.schema(stage, sample)
     legacy.fields(value, " ".join(spec["properties"]))
     for key, constraint in spec["properties"].items():
         if constraint["type"] == "string":
@@ -147,7 +151,7 @@ def parse(stage, sample, response):
             for key, constraint in spec["properties"]["readings"]["items"]["properties"].items():
                 _string_field(reading[key], constraint)
     else:
-        if type(value["assumptions"]) is not bool:
+        if spec["properties"]["assumptions"]["type"] == "boolean" and type(value["assumptions"]) is not bool:
             raise ValueError("Assumptions flag must be a boolean")
         errors = value["errors"]
         if not isinstance(errors, list) or len(errors) > 2:
@@ -189,17 +193,18 @@ def annotation(audit, assessment):
     }
 
 
-def row_from_responses(sample, responses):
+def row_from_responses(sample, responses, *, protocol=None):
+    p = protocol or sys.modules[__name__]
     stages, errors = {}, {}
-    for stage in LIMITS:
+    for stage in p.LIMITS:
         try:
-            stages[stage] = parse(stage, sample, responses[stage])
+            stages[stage] = p.parse(stage, sample, responses[stage])
         except (ValueError, KeyError, TypeError) as error:
             errors[stage] = type(error).__name__ + ": " + str(error)
     return {
         "case": sample["case"], "answer": sample["answer"], "stages": stages,
         "status": "annotation_failure" if errors else "annotated",
-        "annotation": None if errors else annotation(stages["audit"], stages["assessment"]),
+        "annotation": None if errors else p.annotation(stages["audit"], stages["assessment"]),
         "stage_errors": errors,
     }
 
@@ -240,16 +245,7 @@ def preflight(args):
         or not all(row["answer"].strip() and row["status"] == "generated" for row in samples)
     ):
         raise ValueError("Frozen case coverage, source replies or oracle IDs differ")
-    legacy.reject_closed(identity["public_model"])
-    legacy.reject_closed(args.model)
-    if (
-        identity["served_model"] != args.model or identity["base_url"] != args.base_url
-        or identity["protocol"] != PROTOCOL or identity["rubric_sha256"] != RUBRIC_SHA256
-        or identity["schema_sha256"] != SCHEMA_SHA256
-        or identity["cases_sha256"] != args.cases_sha256 or identity["oracle_sha256"] != args.oracle_sha256
-        or not identity["license"] or not identity["public_repository_revision"]
-    ):
-        raise ValueError("Frozen judge identity or protocol differs")
+    check_identity(args, identity, sys.modules[__name__])
     return samples, oracle, {
         "protocol": PROTOCOL, "judge_identity": identity, "limits": LIMITS,
         "judge_messages": [{"case_id": row["case"]["id"], "stage": stage,
@@ -259,16 +255,30 @@ def preflight(args):
     }
 
 
-def replay(samples, rows, calls, model, oracle):
+def check_identity(args, identity, protocol):
+    legacy.reject_closed(identity["public_model"])
+    legacy.reject_closed(args.model)
+    if (
+        identity["served_model"] != args.model or identity["base_url"] != args.base_url
+        or identity["protocol"] != protocol.PROTOCOL or identity["rubric_sha256"] != protocol.RUBRIC_SHA256
+        or identity["schema_sha256"] != protocol.SCHEMA_SHA256
+        or identity["cases_sha256"] != args.cases_sha256 or identity["oracle_sha256"] != args.oracle_sha256
+        or not identity["license"] or not identity["public_repository_revision"]
+    ):
+        raise ValueError("Frozen judge identity or protocol differs")
+
+
+def replay(samples, rows, calls, model, oracle, *, protocol=None):
+    p = protocol or sys.modules[__name__]
     if len(rows) != len(samples) or len(calls) != len(samples) * 4:
         raise ValueError("Incomplete two-stage evidence")
     offset = 0
     for sample, row in zip(samples, rows, strict=True):
         responses, audit = {}, None
-        for stage in LIMITS:
+        for stage in p.LIMITS:
             sent, returned = calls[offset:offset + 2]
             offset += 2
-            if sent != {"phase": "requested", "request": request(stage, sample, model, audit)}:
+            if sent != {"phase": "requested", "request": p.request(stage, sample, model, audit)}:
                 raise ValueError("Actual stage request differs from frozen protocol")
             response = returned["response"]
             if returned["phase"] != "returned" or response["model"] != model:
@@ -276,19 +286,20 @@ def replay(samples, rows, calls, model, oracle):
             responses[stage] = response
             if stage == "audit":
                 try:
-                    audit = parse(stage, sample, response)
+                    audit = p.parse(stage, sample, response)
                 except (ValueError, KeyError, TypeError):
                     audit = {"invalid_audit": True}
-        if row != row_from_responses(sample, responses):
+        if row != p.row_from_responses(sample, responses):
             raise ValueError("Saved outcome differs from actual stage response replay")
-    return summarize(rows, oracle)
+    return p.summarize(rows, oracle)
 
 
-def run(args):
+def run(args, *, protocol=None):
     from openai import OpenAI
-    samples, oracle, checked = preflight(args)
+    p = protocol or sys.modules[__name__]
+    samples, oracle, checked = p.preflight(args)
     args.output.mkdir(parents=True, exist_ok=False)
-    report = {"protocol": PROTOCOL, "status": "running", "target_regenerated": False}
+    report = {"protocol": p.PROTOCOL, "status": "running", "target_regenerated": False}
     write_json(args.output / "report.json", report)
     try:
         legacy.teacher_smoke.wait_for_server(args.base_url, args.model, args.ready_timeout)
@@ -298,20 +309,20 @@ def run(args):
             rows = []
             for sample in samples:
                 responses, audit = {}, None
-                for stage in LIMITS:
-                    response = client.chat.completions.create(**request(stage, sample, args.model, audit)).model_dump(mode="json")
+                for stage in p.LIMITS:
+                    response = client.chat.completions.create(**p.request(stage, sample, args.model, audit)).model_dump(mode="json")
                     responses[stage] = response
                     if stage == "audit":
                         try:
-                            audit = parse(stage, sample, response)
+                            audit = p.parse(stage, sample, response)
                         except (ValueError, KeyError, TypeError):
                             audit = {"invalid_audit": True}
-                row = row_from_responses(sample, responses)
+                row = p.row_from_responses(sample, responses)
                 append_jsonl(args.output / "annotations.jsonl", row)
                 rows.append(row)
                 report["completed_outcomes"] = len(rows)
                 write_json(args.output / "report.json", report)
-        report["summary"] = replay(samples, rows, read_jsonl(args.output / "judge-calls.jsonl"), args.model, oracle)
+        report["summary"] = p.replay(samples, rows, read_jsonl(args.output / "judge-calls.jsonl"), args.model, oracle)
         report["status"] = "completed" if report["summary"]["gate_passed"] else "failed_calibration_gate"
         if not report["summary"]["gate_passed"]:
             raise ValueError("Frozen calibration gate failed; preserve failures and disagreements")
@@ -323,7 +334,8 @@ def run(args):
     return report
 
 
-def main(argv=None):
+def main(argv=None, *, protocol=None):
+    p = protocol or sys.modules[__name__]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("preflight", "annotate"))
     for key in ("cases", "oracle", "identity", "output"):
@@ -336,10 +348,10 @@ def main(argv=None):
     if args.action == "preflight":
         if args.output.exists():
             raise FileExistsError("Frozen preflight already exists")
-        _, _, checked = preflight(args)
+        _, _, checked = p.preflight(args)
         write_json(args.output, checked)
     else:
-        run(args)
+        p.run(args)
 
 
 if __name__ == "__main__":

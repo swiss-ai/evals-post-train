@@ -824,6 +824,19 @@ independently reviewed contrastive labels before further calibration; these
 inspected controls are now development evidence, not a reusable held-out gate.
 Do not compare v3/v4 whole-case percentages as matched-input general accuracy.
 
+`scripts.helpfulness.abstention_contrastive_calibration` is the separate v5
+iteration requested to reach at least 17/20 full-case matches. It uses an
+explicit `absent`/`present` assumption category with negative as well as positive
+examples, distinguishes reply abstention from question answerability, and
+requires checking hypothetical arithmetic and missing-evidence judgments.
+The unchanged earlier twenty cases are development regressions; twenty new
+constructed transfer checks are frozen before revising prompts. Require at
+least 17/20 matches in **each** split and every stage valid. This user-requested
+target does not retroactively change v4's failed all-case gate or establish
+general judge accuracy or production readiness. The two-stage request/replay
+engine is shared through protocol hooks; v4's default schema, rubric and gate
+remain unchanged.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID
