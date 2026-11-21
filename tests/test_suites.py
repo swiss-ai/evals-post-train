@@ -52,7 +52,7 @@ class SuiteTests(unittest.TestCase):
         suite = suites.load(SUITE)
         self.assertEqual(suites.sampling_for(suite, THINK, "aime24_think"), "thinking")
         suite["benchmarks"][5]["sampling"] = "thinking"
-        self.assertEqual(suites.plan(suite, THINK)[6]["sampling"], "thinking")
+        self.assertEqual(suites.plan(suite, THINK)[5]["sampling"], "thinking")
 
     def test_unknown_task_or_setup_is_refused(self):
         suite = suites.load(SUITE)
