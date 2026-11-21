@@ -774,7 +774,10 @@ cannot pass, even if a second request returns.
 
 Disable arbitrary JSON whitespace in the existing vLLM structured-output
 configuration to address the observed whitespace loops; do not increase token
-budgets to hide them. Short categorical outputs eliminate redundant overall
+budgets to hide them. Select the backend explicitly:
+`--structured-outputs-config '{"backend":"xgrammar","disable_any_whitespace":true}'`.
+The pinned vLLM build rejects `disable_any_whitespace` with its default `auto`
+backend, even before weight loading. Short categorical outputs eliminate redundant overall
 evidence-basis/applicability fields. Evidence IDs are resolved verbatim, not
 corrected by a language model. Parse failures and inconsistent findings remain
 visible failures.
@@ -797,6 +800,10 @@ without requiring that dependency. Keep the GPU-job CPU test gate intact;
 test dependency absence explicitly rather than trusting a requirement listed
 outside the actual isolated runtime. A replacement requires separate approval,
 a new immutable run directory, and unchanged frozen cases and expected labels.
+Replacement `3997910` passed all 37 CPU tests but stopped in the serving-config
+constructor because no supported whitespace backend was explicitly selected.
+It also made zero judge calls. Neither preparation failure supplies evidence
+of judge agreement or scientific readiness.
 
 ```bash
 squeue --me
