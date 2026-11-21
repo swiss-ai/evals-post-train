@@ -29,7 +29,7 @@ Run `bash -n` on edited shell scripts; they must work on macOS bash 3.2 (`${ARR[
 | needs its own scorer, an LLM judge or a simulated user | Inspect AI |
 | is agentic coding or terminal work, one container per task | Harbor |
 
-EvalScope covers SWE-bench Verified and Pro, LiveCodeBench and BFCL v4. Results are uploaded by the framework's existing W&B uploader.
+EvalScope covers SWE-bench Verified and Pro and LiveCodeBench. Results are uploaded by the framework's existing W&B uploader.
 
 **lm-evaluation-harness:** add the task to your task list and its `task/metric` to the matching `*_main_table.txt`. A task missing from [swiss-ai/lm-evaluation-harness](https://github.com/swiss-ai/lm-evaluation-harness) goes there first; then bump the commit in `requirements/lm-eval-harness.txt`. Details: [Adding a New Task](docs/lm-eval-harness.md#adding-a-new-task).
 

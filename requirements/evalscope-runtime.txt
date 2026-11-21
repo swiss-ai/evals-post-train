@@ -14,35 +14,3 @@ opensandbox==1.2.0
 swebench==4.1.0
 # The W&B upload (scripts/results/update_wandb_evalscope.py, --wandb-entity/--wandb-project).
 wandb==0.31.0
-# BFCL v4's dependencies (requirements/evalscope-bfcl.txt installs bfcl-eval itself without them).
-# Its scorer imports the SDK of every provider it supports (eval_runner -> model_config), so they are
-# all needed (import time only: the OpenAI one is what runs; bfcl-eval's exact pins for some conflict
-# with opensandbox's httpx-sse, so those float; mistralai keeps its pin, which resolves).
-tree_sitter==0.21.3
-tree-sitter-java==0.21.0
-tree-sitter-javascript==0.21.4
-rank_bm25==0.2.2
-networkx==3.3
-html2text
-beautifulsoup4
-google-search-results
-python-dotenv
-tabulate
-typer
-tenacity
-overrides
-anthropic>=0.61.0
-mistralai==1.7.0  # 2.x moved Mistral out of the package root, where bfcl-eval imports it from
-cohere
-google-genai
-qwen-agent
-soundfile
-writer-sdk>=2.1.0
-boto3
-mpmath
-datamodel-code-generator
-# memory_vector's embeddings (faiss-cpu is newer than bfcl-eval's 1.11.0 pin, which has no Python 3.14 wheel). They pull in torch, which the
-# lock takes as the CPU build (scripts/common/lock_requirements.sh): no model runs in this venv. The embedding
-# model, all-MiniLM-L6-v2, is downloaded from Hugging Face when the scorer is imported.
-sentence-transformers>=2.7.0
-faiss-cpu==1.13.2

@@ -1,6 +1,6 @@
 """Run BFCL (the Berkeley Function Call Leaderboard) with the official bfcl-eval package: its own generation
 (the model's requests, the multi-turn loop with its simulated tool environments), its own checkers and its own
-score aggregation. Nothing of EvalScope in between. Run by scripts/custom/run_bfcl.sh in a venv of
+score aggregation. No other framework in between. Run by scripts/custom/run_bfcl.sh in a venv of
 requirements/bfcl-runtime.lock; see docs/custom-bfcl.md.
 
 The model is served by any OpenAI-compatible endpoint. It is registered at run time under "<name>-FC" (bfcl-eval
@@ -26,7 +26,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-# What EvalScope's BFCL v3 ran: the non-live, live and multi-turn categories. BFCL v4 adds the memory
+# BFCL v3: the non-live, live and multi-turn categories. BFCL v4 adds the memory
 # categories; its web search ones need a SerpAPI key and are not run (--test-category adds them).
 V3_CATEGORIES = [
     "simple_python", "simple_java", "simple_javascript", "multiple", "parallel", "parallel_multiple", "irrelevance",
@@ -211,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
     from bfcl_eval.eval_checker.eval_runner import main as evaluate
 
     temperature, request_kwargs = split_llm_args(json.loads(args.llm_args))
-    # A thinking model's long answers outlast the SDK's 600 s; EvalScope lost 3 samples per run to it.
+    # A thinking model's long answers outlast the SDK's 600 s; about 3 samples per run were lost to it.
     install_patches({"timeout": args.request_timeout, **request_kwargs})
     registry = register(args.model)
     categories = args.test_category or CATEGORIES[args.version]
