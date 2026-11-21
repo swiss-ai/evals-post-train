@@ -31,6 +31,8 @@ STRUCTURED_SCHEMA = {
 
 
 def structured_preference(raw, candidate_position):
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("Structured Arena comparison must contain JSON text")
     value = open_benchmarks.strict_json(raw)
     if set(value) != set(STRUCTURED_SCHEMA["properties"]):
         raise ValueError("Structured Arena comparison fields are missing or unexpected")

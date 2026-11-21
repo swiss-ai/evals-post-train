@@ -46,6 +46,30 @@ invented by the batch script.
 
 ### Arena-Hard v2 twenty-case open-reference pilot
 
+Structured v3 job `3998552` completed 78/78 valid comparison orders in 11m04s.
+Agreement was **14/20 unchanged pilot cases and 19/20 newly frozen controls**;
+the joint 17/20-per-split gate remains failed. All twenty checkpoint attempts
+are preserved, including the empty native failure. Source samples SHA-256:
+`5b2f1333a1fb8b2f4eaa52e2aab081ef717dd5ac269a136f5e9aa261bd18e0ea`.
+
+The resulting observed weighted rate is `0.035` (battle weight 100):
+`hard_prompt` 0.04838709677419355 (weight 62), `creative_writing`
+0.013157894736842105 (weight 38). These are unaccepted judge diagnostics, not
+reliable quality estimates or a headline ranking. The annuity comparison still
+reverses a wrong arithmetic verdict by answer position; other unresolved errors
+certify an incorrect SciPy fix, misread a corrected Rolle proof, or inconsistently
+assume canon/privacy facts. Syntactically valid structured output is not factual
+verification. Automatic scoring remains disabled.
+
+Three sequential judge candidates are preserved. Further acceptance requires
+independent factual verification and stronger validation, rather than relabeling
+the frozen cases or weakening the gate to obtain a passing count.
+The self-contained session evidence report is
+`arena-hard-v2-pilot20-alignment.html`, SHA-256
+`bbcd1f493d16a90a4d702590aff93cd0d443fed8dfb4f5527deb02afe60b8109`.
+It includes all exact source pairs, frozen reviews, original SDK responses,
+license evidence, and the rejected historical candidates.
+
 The structured comparison profile adds `--structured-comparison` to the
 hash-bound compact rubric arguments. Its
 `adapted-arena-hard-v2-factorized-strength-alignment-v3` protocol produces two

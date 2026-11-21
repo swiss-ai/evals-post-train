@@ -29,6 +29,8 @@ class ArenaAlignmentTests(unittest.TestCase):
         value["extra"] = True
         with self.assertRaises(ValueError):
             alignment.structured_preference(json.dumps(value), "B")
+        with self.assertRaises(ValueError):
+            alignment.structured_preference(None, "B")
 
     def test_compact_rubric_is_hash_bound_without_changing_native_messages(self):
         cases, _, _ = self.fixture()
