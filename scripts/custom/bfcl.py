@@ -35,6 +35,14 @@ V3_CATEGORIES = [
 ]
 CATEGORIES = {"v3": V3_CATEGORIES, "v4": V3_CATEGORIES + ["memory_kv", "memory_vector", "memory_rec_sum"]}
 
+# The categories of each of bfcl-eval's groups; a group is only reported when all were run.
+NEEDED = {
+    "non_live": ["simple_python", "simple_java", "simple_javascript", "multiple", "parallel", "parallel_multiple", "irrelevance"],
+    "live": ["live_simple", "live_multiple", "live_parallel", "live_parallel_multiple", "live_irrelevance", "live_relevance"],
+    "multi_turn": ["multi_turn_base", "multi_turn_miss_func", "multi_turn_miss_param", "multi_turn_long_context"],
+    "agentic": ["memory_kv", "memory_vector", "memory_rec_sum", "web_search_base", "web_search_no_snippet"],
+}
+
 # bfcl-eval's own default for API models.
 DEFAULT_TEMPERATURE = 0.001
 
@@ -168,10 +176,45 @@ def group_scores(score_dir: Path) -> dict[str, float | None]:
     return groups
 
 
+def mean(values: list[float]) -> float:
+    return sum(values) / len(values)
+
+
+def v4_without_web_search(categories: dict[str, dict[str, Any]]) -> dict[str, float] | None:
+    """BFCL v4's overall with the web search categories left out, from the per-category accuracies; None unless
+    every category it needs was run. bfcl-eval's own formula (eval_runner_helper.py, 2026.3.23) with one change:
+    its agentic group is the mean of the web search and the memory scores, here the memory score alone. The rest
+    is the package's: non-live is the mean of simple (the mean of Python, Java, JavaScript), multiple, parallel and
+    parallel multiple; live weights its four categories by their size; irrelevance is the mean of the non-live and
+    the live irrelevance scores; multi-turn and memory are plain means; the weights are 10/10/10/30/40 over
+    non-live, live, irrelevance, multi-turn and agentic. Not the leaderboard's number: bfcl-eval counts a missing
+    web search score as 0, which would put its overall far below this one."""
+    names = [c for group in NEEDED.values() for c in group if c not in ("web_search_base", "web_search_no_snippet")]
+    if not all(name in categories for name in names):
+        return None
+    accuracy = {name: categories[name]["accuracy"] for name in names}
+    live = [categories[c] for c in NEEDED["live"] if c not in ("live_irrelevance", "live_relevance")]
+    scores = {
+        "non_live": mean([
+            mean([accuracy["simple_python"], accuracy["simple_java"], accuracy["simple_javascript"]]),
+            accuracy["multiple"], accuracy["parallel"], accuracy["parallel_multiple"],
+        ]),
+        "live": sum(c["accuracy"] * c["total"] for c in live) / sum(c["total"] for c in live),
+        "irrelevance": mean([accuracy["irrelevance"], accuracy["live_irrelevance"]]),
+        "multi_turn": mean([accuracy[c] for c in NEEDED["multi_turn"]]),
+        "memory": mean([accuracy[c] for c in ("memory_kv", "memory_vector", "memory_rec_sum")]),
+    }
+    scores["overall_no_web_search"] = (
+        10 * scores["non_live"] + 10 * scores["live"] + 10 * scores["irrelevance"]
+        + 30 * scores["multi_turn"] + 40 * scores["memory"]
+    ) / 100
+    return scores
+
+
 def summarize(version: str, registry: str, score_dir: Path) -> dict[str, Any]:
     """Per-category scores and the official groups; the overall BFCL v3 computed (bfcl-eval 3.0.0's
-    total: the unweighted mean of the live, non-live and multi-turn groups), and for v4 only when
-    bfcl-eval itself has all its groups (the agentic one needs web search).
+    total: the unweighted mean of the live, non-live and multi-turn groups). For v4 there is no official overall
+    here (the agentic group needs web search); `v4_without_web_search` holds the scores of v4_without_web_search().
 
     bfcl-eval counts a category it was not asked to run as 0 in its group tables, so a group is only
     reported when all its categories were run: the agentic group needs both web search categories (memory alone
@@ -183,17 +226,14 @@ def summarize(version: str, registry: str, score_dir: Path) -> dict[str, Any]:
         categories[re.sub(r"^BFCL_v\d+_", "", name)] = {
             "accuracy": score["accuracy"], "correct": score["correct_count"], "total": score["total_count"],
         }
-    needed = {
-        "non_live": ["simple_python", "simple_java", "simple_javascript", "multiple", "parallel", "parallel_multiple", "irrelevance"],
-        "live": ["live_simple", "live_multiple", "live_parallel", "live_parallel_multiple", "live_irrelevance", "live_relevance"],
-        "multi_turn": ["multi_turn_base", "multi_turn_miss_func", "multi_turn_miss_param", "multi_turn_long_context"],
-        "agentic": ["memory_kv", "memory_vector", "memory_rec_sum", "web_search_base", "web_search_no_snippet"],
-    }
-    groups = {g: v for g, v in group_scores(score_dir).items() if all(c in categories for c in needed[g])}
+    groups = {g: v for g, v in group_scores(score_dir).items() if all(c in categories for c in NEEDED[g])}
     overall = None
     if version == "v3" and all(groups.get(g) is not None for g in ("non_live", "live", "multi_turn")):
         overall = sum(groups[g] for g in ("non_live", "live", "multi_turn")) / 3
-    return {"version": version, "categories": categories, "groups": groups, "overall": overall}
+    summary = {"version": version, "categories": categories, "groups": groups, "overall": overall}
+    if version == "v4" and (no_web := v4_without_web_search(categories)):
+        summary["v4_without_web_search"] = no_web
+    return summary
 
 
 def main(argv: list[str] | None = None) -> int:

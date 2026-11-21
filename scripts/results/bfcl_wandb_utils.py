@@ -29,6 +29,9 @@ def create_model_evaluation_from_bfcl_run(model_name: str, work_dir: Path) -> Tu
     if summary.get("overall") is not None:
         metrics.append(Metric(name="overall", score=summary["overall"]))
     metrics += [Metric(name=group, score=score) for group, score in summary["groups"].items() if score is not None]
+    # v4 without the web search categories: overall_no_web_search, its groups and memory (not bfcl-eval's overall).
+    metrics += [Metric(name=name, score=score) for name, score in (summary.get("v4_without_web_search") or {}).items()
+                if name not in ("non_live", "live")]
     for name, category in summary["categories"].items():
         metrics.append(Metric(name=name, score=category["accuracy"]))
     metrics.append(Metric(name="n_samples", score=sum(c["total"] for c in summary["categories"].values())))
