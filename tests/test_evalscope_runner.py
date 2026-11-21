@@ -469,14 +469,14 @@ class TaskConfigTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as work_dir:
             reviews = Path(work_dir, "reviews", "m")
             reviews.mkdir(parents=True)
-            Path(reviews, "bfcl_v3_java.jsonl.rerun-abc").write_text(
+            Path(reviews, "live_code_bench_v6.jsonl.rerun-abc").write_text(
                 "\n".join([sample(1.0), sample(0.0), sample(0.0, "error"), '{"sample_sc'])
             )
-            old = Path(reviews, "bfcl_v3_simple.jsonl")
+            old = Path(reviews, "live_code_bench_v5.jsonl")
             old.write_text(sample(1.0) + "\n")
             os.utime(old, (1, 1))
             self.assertEqual(
-                run.review_progress(work_dir, since=100.0), {"m/bfcl_v3_java": {"done": 3, "passed": 1, "failed": 1}}
+                run.review_progress(work_dir, since=100.0), {"m/live_code_bench_v6": {"done": 3, "passed": 1, "failed": 1}}
             )
 
     def test_only_the_two_benchmarks(self):
