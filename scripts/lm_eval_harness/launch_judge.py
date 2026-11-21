@@ -99,6 +99,20 @@ JUDGE_PRESETS = {
             "--tensor-parallel-size 4 --max-model-len 2048"
         ),
     },
+    "gpt-oss-120b": {
+        "served_model_name": "openai/gpt-oss-120b",
+        "framework": "vllm",
+        "nodes": 1,
+        "time": "04:00:00",
+        "account": "infra01",
+        "partition": "normal",
+        "framework_args": (
+            f"--model {MODEL_REGISTRY / 'openai/gpt-oss-120b'} "
+            "--host 0.0.0.0 "
+            "--served-model-name openai/gpt-oss-120b "
+            "--tensor-parallel-size 4 --max-model-len 32768"
+        ),
+    },
     "llama-guard": {
         "served_model_name": "meta-llama/Llama-Guard-4-12B",
         "framework": "vllm",
