@@ -151,7 +151,10 @@ def parse(stage, sample, response, *, protocol=None):
             for key, constraint in spec["properties"]["readings"]["items"]["properties"].items():
                 _string_field(reading[key], constraint)
     else:
-        if spec["properties"]["assumptions"]["type"] == "boolean" and type(value["assumptions"]) is not bool:
+        if (
+            "assumptions" in spec["properties"] and spec["properties"]["assumptions"]["type"] == "boolean"
+            and type(value["assumptions"]) is not bool
+        ):
             raise ValueError("Assumptions flag must be a boolean")
         errors = value["errors"]
         if not isinstance(errors, list) or len(errors) > 2:
@@ -193,6 +196,11 @@ def annotation(audit, assessment):
     }
 
 
+def combine(stages, *, protocol=None):
+    p = protocol or sys.modules[__name__]
+    return p.annotation(stages["audit"], stages["assessment"])
+
+
 def row_from_responses(sample, responses, *, protocol=None):
     p = protocol or sys.modules[__name__]
     stages, errors = {}, {}
@@ -204,7 +212,7 @@ def row_from_responses(sample, responses, *, protocol=None):
     return {
         "case": sample["case"], "answer": sample["answer"], "stages": stages,
         "status": "annotation_failure" if errors else "annotated",
-        "annotation": None if errors else p.annotation(stages["audit"], stages["assessment"]),
+        "annotation": None if errors else p.combine(stages),
         "stage_errors": errors,
     }
 
@@ -270,7 +278,7 @@ def check_identity(args, identity, protocol):
 
 def replay(samples, rows, calls, model, oracle, *, protocol=None):
     p = protocol or sys.modules[__name__]
-    if len(rows) != len(samples) or len(calls) != len(samples) * 4:
+    if len(rows) != len(samples) or len(calls) != len(samples) * len(p.LIMITS) * 2:
         raise ValueError("Incomplete two-stage evidence")
     offset = 0
     for sample, row in zip(samples, rows, strict=True):

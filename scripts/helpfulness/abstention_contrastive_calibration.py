@@ -72,6 +72,7 @@ messages = partial(base.messages, protocol=_SELF)
 request = partial(base.request, protocol=_SELF)
 parse = partial(base.parse, protocol=_SELF)
 row_from_responses = partial(base.row_from_responses, protocol=_SELF)
+combine = partial(base.combine, protocol=_SELF)
 replay = partial(base.replay, protocol=_SELF)
 run = partial(base.run, protocol=_SELF)
 
@@ -95,7 +96,8 @@ def comparisons(rows, expected):
     return result
 
 
-def summarize(rows, oracle):
+def summarize(rows, oracle, *, protocol=None):
+    p = protocol or _SELF
     if oracle["minimum_passes"] != MINIMUM_PASSES:
         raise ValueError("Acceptance target differs from frozen protocol")
     regression_count = len(oracle["regression_cases"])
@@ -105,7 +107,7 @@ def summarize(rows, oracle):
     passed = sum(row["passed"] for row in fresh)
     regressions_passed = sum(row["passed"] for row in regression)
     return {
-        "protocol": PROTOCOL, "outcomes": len(rows), "valid_annotations": len(rows) - len(failures),
+        "protocol": p.PROTOCOL, "outcomes": len(rows), "valid_annotations": len(rows) - len(failures),
         "failure_case_ids": failures, "fresh_cases": len(fresh),
         "fresh_valid_annotations": sum(row["status"] == "annotated" for row in rows[regression_count:]),
         "whole_case_passed": passed, "regression_cases": len(regression),
@@ -118,7 +120,8 @@ def summarize(rows, oracle):
     }
 
 
-def preflight(args):
+def preflight(args, *, protocol=None):
+    p = protocol or _SELF
     base.verified_bytes(args.cases, args.cases_sha256)
     base.verified_bytes(args.oracle, args.oracle_sha256)
     samples, oracle, identity = base.read_jsonl(args.cases), base.read_json(args.oracle), base.read_json(args.identity)
@@ -130,12 +133,12 @@ def preflight(args):
         or not all(row["answer"].strip() and row["status"] == "generated" for row in samples)
     ):
         raise ValueError("Frozen case coverage, source replies, target or oracle IDs differ")
-    base.check_identity(args, identity, _SELF)
+    base.check_identity(args, identity, p)
     return samples, oracle, {
-        "protocol": PROTOCOL, "judge_identity": identity, "limits": LIMITS,
+        "protocol": p.PROTOCOL, "judge_identity": identity, "limits": p.LIMITS,
         "judge_messages": [{"case_id": row["case"]["id"], "stage": stage,
-                            "messages": messages(stage, row)} for row in samples for stage in LIMITS],
-        "dynamic_audit_token_reserve": LIMITS["audit"] + 32, "target_regenerated": False,
+                            "messages": p.messages(stage, row)} for row in samples for stage in p.LIMITS],
+        "dynamic_audit_token_reserve": p.LIMITS["audit"] + 32, "target_regenerated": False,
     }
 
 

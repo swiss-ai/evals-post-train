@@ -837,6 +837,23 @@ general judge accuracy or production readiness. The two-stage request/replay
 engine is shared through protocol hooks; v4's default schema, rubric and gate
 remain unchanged.
 
+The first v5 scoring run, `3998034`, completed 80 calls with valid outputs but
+reached only 13/20 in each split. Its corrected decoder probe admitted both
+boolean/category values with default JSON separators; compact strings were
+rejected by the fixed-format grammar. Do not misidentify that formatting
+behavior as a boolean-value restriction. Its fresh controls are now observed
+development evidence.
+
+`scripts.helpfulness.abstention_factorized_calibration` is a separate v6
+candidate. Keep the successful scope/reference stage, put a bounded source
+justification before factuality, and judge introduced missing premises in a
+dedicated third stage rather than mixing that flag with factual errors.
+Its limits are 320/384/160 tokens; forty cases require 120 calls, with exact
+three-stage replay and no credit for a missing premise-stage output. Freeze
+another twenty new transfer cases before changing this rubric and retain the
+original twenty regression labels. The same 17/20 target applies separately
+to both splits; previous protocols and failures remain unchanged.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID
