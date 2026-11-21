@@ -214,10 +214,11 @@ class SuiteTests(unittest.TestCase):
                                     "--domain", domain, "--model", "chonk", "--api-base-url", "http://x/v1",
                                     "--num-tasks", "2", "--workdir", f"logs/tau2/{suite['name']}/chonk/{domain}",
                                     "--reasoning-effort", "high", "--user-llm-args", USER_LLM_ARGS]
-                             + (["--retrieval-config", "bm25"] if domain == "banking_knowledge" else []))
+                             + (["--retrieval-config", "bm25"] if domain == "banking_knowledge" else [])
+                             + (["--judge-llm-args", USER_LLM_ARGS] if domain == "retail" else []))
         qwen = rows["qwen3-32b-thinking", "tau2-bench retail"]
         self.assertIn("--enable-thinking", qwen)
-        self.assertEqual(qwen[-2:], ["--user-llm-args", USER_LLM_ARGS])
+        self.assertEqual(qwen[-4:], ["--user-llm-args", USER_LLM_ARGS, "--judge-llm-args", USER_LLM_ARGS])
 
     def test_every_launch_uploads_to_the_suites_wandb_project(self):
         suite = suites.load(SUITE)

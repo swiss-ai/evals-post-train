@@ -169,6 +169,11 @@ class JudgeTest(unittest.TestCase):
         self.assertNotIn("sk-test-secret-1234", env["TAU2_JUDGE_LLM_ARGS"] + out)
         self.assertIn("NL-assertion judge: openai/m", out)
 
+    def test_judge_llm_args_override_the_judges_effort_and_cap(self):
+        env, _ = self._tau2_env("--judge-llm-args", '{"reasoning_effort": "medium", "max_tokens": 100}')
+        args = json.loads(env["TAU2_JUDGE_LLM_ARGS"])
+        self.assertEqual((args["reasoning_effort"], args["max_tokens"], args["api_key"]), ("medium", 100, "os.environ/TARGET_API_KEY"))
+
     def test_without_an_endpoint_the_judge_stays_upstreams(self):
         env, out = self._tau2_env("--user-llm", "gpt-4.1", base=())
         self.assertNotIn("TAU2_JUDGE_LLM", env)
