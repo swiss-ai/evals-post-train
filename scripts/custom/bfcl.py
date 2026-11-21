@@ -134,11 +134,21 @@ def register(model: str) -> str:
     return name
 
 
+def select_ids(entry_ids: list[str], n: int) -> list[str]:
+    """The first n questions of a category, and for memory categories the prerequisite conversations of their
+    scenarios: those are the turns that write the memory the questions then ask about, and without them the
+    model is asked about facts it was never told (every memory question scores 0)."""
+    questions = [i for i in entry_ids if "_prereq_" not in i][:n]
+    scenario = lambda i: i.split("-")[1]  # "memory_kv_0-customer-0" -> "customer"
+    scenarios = {scenario(i) for i in questions if i.startswith("memory_")}
+    return [i for i in entry_ids if "_prereq_" in i and scenario(i) in scenarios] + questions
+
+
 def first_entries(categories: list[str], n: int, workdir: Path) -> None:
     """Write bfcl-eval's test_case_ids_to_generate.json: the first n entries of each category."""
     from bfcl_eval.utils import load_dataset_entry
 
-    ids = {c: [e["id"] for e in load_dataset_entry(c, include_prereq=False)][:n] for c in categories}
+    ids = {c: select_ids([e["id"] for e in load_dataset_entry(c)], n) for c in categories}
     (workdir / "test_case_ids_to_generate.json").write_text(json.dumps(ids))
 
 

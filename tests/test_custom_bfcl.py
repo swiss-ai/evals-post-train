@@ -111,6 +111,18 @@ class SummaryTest(unittest.TestCase):
                 writer.writerow(["Rank", "Model", column])
                 writer.writerow(["N/A", "m (FC)", value])
 
+    def test_num_tasks_keeps_the_prerequisite_conversations_of_the_selected_memory_scenarios(self):
+        ids = ["memory_kv_prereq_0-customer-0", "memory_kv_prereq_1-customer-1", "memory_kv_prereq_22-student-0",
+               "memory_kv_0-customer-0", "memory_kv_1-customer-1", "memory_kv_30-student-0"]
+        self.assertEqual(bfcl.select_ids(ids, 2), ["memory_kv_prereq_0-customer-0", "memory_kv_prereq_1-customer-1",
+                                                   "memory_kv_0-customer-0", "memory_kv_1-customer-1"])
+        self.assertEqual(bfcl.select_ids(ids, 3)[-3:], ["memory_kv_0-customer-0", "memory_kv_1-customer-1", "memory_kv_30-student-0"])
+        self.assertIn("memory_kv_prereq_22-student-0", bfcl.select_ids(ids, 3))
+
+    def test_num_tasks_on_other_categories_is_the_first_n(self):
+        self.assertEqual(bfcl.select_ids(["simple_python_0", "simple_python_1", "simple_python_2"], 2),
+                         ["simple_python_0", "simple_python_1"])
+
     def test_v3_overall_is_the_mean_of_the_three_groups(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.write(Path(tmp), "m-FC", groups=("non_live", "live", "multi_turn"))
