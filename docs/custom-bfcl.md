@@ -26,9 +26,15 @@ bfcl-eval sends a temperature of 0.001 and nothing else. The sampling flags (`--
 
 Rerunning with the same `--workdir` resumes: bfcl-eval skips the entries it already has. `--num-tasks n` runs the first n entries of each category (a smoke test); its scores cover that subset and are not the leaderboard's.
 
-## What the EvalScope runs showed
+## Samples that fail in inference
 
-EvalScope's BFCL code has been removed from the repository; this is what its two Chonk runs showed. Checked against the logs of the two Chonk runs (v3 and v4, 2026-11-20): of ~4400 samples each, about 47 failed in inference and are scored wrong, as bfcl-eval does too (it keeps them in the denominator as `inference_error`). 43-44 of them are `multi_turn_long_context` prompts over the 32768 window (HTTP 400, not fixable by the runner), 3 are request timeouts (hence `--request-timeout`) and 2 are vLLM's tool-call parser rejecting a replayed assistant turn whose arguments the model wrote as invalid JSON (the server's parser, not the client's history). EvalScope's own v3 client also logged unparseable tool-call arguments, which bfcl-eval's handler does not hit.
+A sample whose generation fails is scored wrong and stays in the denominator (bfcl-eval records it as `inference_error`), so these lower the score and are worth counting after a run. In the two full Chonk runs of the earlier EvalScope setup (v3 and v4, 2026-11-20; ~4400 samples each) about 47 per run failed this way:
+
+- **Prompt over the context window** (43-44): `multi_turn_long_context` prompts longer than the 32768-token window get HTTP 400. The runner cannot fix this; a longer window would.
+- **Request timeouts** (3): long thinking answers outlasted the OpenAI SDK's 600 s. `--request-timeout` (default 3600 s) is the answer.
+- **vLLM's tool-call parser** (2): it rejected a replayed assistant turn whose arguments the model had written as invalid JSON. That is the server's parser, not the client's history.
+
+Those runs were not made with this runner, so the counts are what to expect, not measured here.
 
 ## In suites
 
