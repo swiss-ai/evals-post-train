@@ -805,6 +805,25 @@ constructor because no supported whitespace backend was explicitly selected.
 It also made zero judge calls. Neither preparation failure supplies evidence
 of judge agreement or scientific readiness.
 
+The separately approved explicit-xgrammar run `3997933` made all 52 calls and
+replayed all 26 valid two-stage annotations. Every output ended normally; the
+largest audit/assessment outputs used 132/118 tokens, below the 320/384 caps.
+The job nevertheless ended `FAILED` because the unchanged calibration gate
+rejected the candidate: **1/20** fresh cases matched every verdict and flag,
+and **0/6** development cases passed.
+
+Fresh per-dimension agreement was 16/20 for abstention, 19/20 for reference
+agreement, 18/20 for source-grounded factuality, 20/20 for each ambiguity flag,
+and 3/20 for unsupported assumptions. The assumptions flag was `true` in all
+26 replies, versus four expected positives. It also accepted an incorrect
+hypothetical sum and treated an unrecorded age as a disproved age. The raw
+schema allows either boolean value; these outputs do not isolate whether the
+constant-positive behavior comes from prompting, the model, or decoding.
+Keep automatic scoring unaccepted. Verify the constrained decoder and use
+independently reviewed contrastive labels before further calibration; these
+inspected controls are now development evidence, not a reusable held-out gate.
+Do not compare v3/v4 whole-case percentages as matched-input general accuracy.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID
