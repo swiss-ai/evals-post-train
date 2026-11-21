@@ -1,0 +1,45 @@
+# Container engine EDF for serving with vLLM on Beverin (AMD MI300A, gfx942).
+# rocm/vllm "rocm10.1.0_ubuntu24.04_py3.14-pytorch_2.13.0_vllm-0.29.0" (vLLM
+# 0.29.1.dev0, transformers 5.18.0), pinned by digest.
+#
+# Replaces model-launch's vllm_rocm.toml (rocm/vllm:v0.14.0_amd_dev) as the
+# Beverin default: that image predates the apertus1p5 and gemma4 architectures
+# and, on gpt-oss-120b ifeval, reasoned longer than the CUDA builds (28%
+# truncated answers vs ~20% on Clariden and the RCP deployment, 2026-10-26).
+# Checked on Beverin 2026-10-26: 4 GPUs visible, gemma4 config loads, vLLM
+# registers Gemma4ForConditionalGeneration.
+#
+# Mounts are vllm_rocm.toml's: model-launch runs /opentelabin/prod/otela-<arch>
+# on every node of a replica, so the OpenTela share has to be mounted there.
+image = "rocm/vllm@sha256:e0ea9a10b729573ea8598bdc073bda0ea382fe1037eec7c0761b6fa7f46baaf4"
+
+mounts = [
+  "/capstor/store/cscs/swissai/infra01/opentela-share:/opentelabin",
+  "/capstor",
+  "/iopsstor",
+]
+
+workdir = "/opt"
+
+[env]
+# NCCL_DEBUG = "INFO"  # uncomment for debugging
+# NCCL_DEBUG_SUBSYS = "INIT,NET"  # uncomment for debugging
+# Node-local: nodes of a multi-node replica compiling into one network-FS
+# directory crash a worker with "Stale file handle".
+VLLM_CACHE_ROOT = "/tmp/vllm-cache"
+TRITON_CACHE_DIR = "/tmp/triton-cache"
+TORCHINDUCTOR_CACHE_DIR = "/tmp/inductor-cache"
+# vLLM's default 600 s is too short for the large checkpoints' first load
+# (Kimi-K2-Base on 4 nodes: 40 min).
+VLLM_ENGINE_READY_TIMEOUT_S = "3600"
+# Settings from swiss-ai/uncheatable-eval's validated Beverin vLLM runs
+# (env/vllm-rocm-beverin*.toml).
+HSA_NO_SCRATCH_RECLAIM = "1"
+
+[annotations]
+# No CXI / aws-ofi-nccl hooks: with them RCCL hangs in the plugin's init on every
+# rank under model-launch (one SLURM task per node, Ray spawns the GPU
+# processes). Without them RCCL goes over TCP sockets, across nodes too: this
+# image served Kimi-K2-Base on 4 nodes (Ray, TP4 x PP4; echo with
+# log-probabilities, which v0.14 hangs on), Beverin 2026-10-26.
+com.hooks.cxi.enabled = "false"

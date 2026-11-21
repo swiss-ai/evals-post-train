@@ -60,7 +60,7 @@ The Chonk setups' `serving` arguments need the `apertus-common` plugin, which th
 | Option | |
 |---|---|
 | `--account`, `--partition`, `--qos`, `--reservation` | The job's Slurm options. The partition is `normal` unless you name another; the account defaults to your primary group. |
-| `--environment` | EDF of the serving image. `containers/env_vllm_apertus2.toml` has the Apertus 2 vLLM image; `containers/env_vllm.toml` is the default one. |
+| `--environment` | EDF of the serving image. `containers/env_vllm_apertus2.toml` has the Apertus 2 vLLM image; `containers/env_vllm.toml` is the default one. For Beverin (AMD MI300A, gfx942) use the ROCm EDFs: `env_vllm_apertus2_rocm.toml` (Chonk), `env_vllm_apertus1p5_rocm.toml` (Apertus 1.5), `env_vllm_rocm_0.29.toml` and `env_vllm_rocm_0.30.0.toml` (stock vLLM). They carry no RCCL/CXI hooks (with them RCCL hangs under model-launch). |
 | `--framework-args` | After `--model`, `--served-model-name` and `--host`, which the launcher sets. The layout above is the validated 2-node one for Chonk: it needs `--api-server-count 4` (more front ends race at startup), and the engine takes about 8.5 minutes to be ready. |
 | `--suite`, `--setup` | A suite setup's `launch` block ([above](#from-a-suite)); then `--model`, `--environment` and `--served-model-name` are optional, and so are `--nodes` and `--time`. |
 | `--pre-launch-cmds` | A shell command every serving node runs before the server starts. |
