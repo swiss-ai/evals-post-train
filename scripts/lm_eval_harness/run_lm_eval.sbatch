@@ -1169,7 +1169,10 @@ else
     WANDB_CMD="cd $PWD && python -m scripts.results.update_wandb_alignment --entity $WANDB_ENTITY --project $WANDB_PROJECT --logs_root $HARNESS_EVAL_DIR --name $NAME --main_metrics $TABLE_METRICS --eval_duration $DURATION"
     echo "Running command to upload results to wandb:"
     echo "$WANDB_CMD"
+    # Run in the evaluation environment, like the evaluation itself: the container's own python has no wandb.
     srun -ul --mpi=pmix --environment=$BASE_CONTAINER_ENV bash -c " \
+        set -euo pipefail
+        $LOAD_ENV_CMD
         $WANDB_CMD
     "
 fi
