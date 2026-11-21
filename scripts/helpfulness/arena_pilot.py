@@ -100,7 +100,8 @@ def battle_scores(margins):
     }
 
 
-def judgment(sample, responses):
+def judgment(sample, responses, preference_parser=None):
+    preference_parser = preference_parser or parse_preference
     if sample["status"] == "model_no_final_reply":
         if responses:
             raise ValueError("A failed checkpoint reply must not be judged")
@@ -115,7 +116,7 @@ def judgment(sample, responses):
             choices = response["choices"]
             if len(choices) != 1 or choices[0]["finish_reason"] != "stop":
                 raise ValueError("Arena judge response is missing or truncated")
-            item["margin"] = parse_preference(choices[0]["message"]["content"], position)
+            item["margin"] = preference_parser(choices[0]["message"]["content"], position)
             item["status"] = "succeeded"
         except (ValueError, KeyError, TypeError) as error:
             item.update(status="failed", error=str(error))

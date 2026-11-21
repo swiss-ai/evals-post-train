@@ -46,6 +46,24 @@ invented by the batch script.
 
 ### Arena-Hard v2 twenty-case open-reference pilot
 
+The structured comparison profile adds `--structured-comparison` to the
+hash-bound compact rubric arguments. Its
+`adapted-arena-hard-v2-factorized-strength-alignment-v3` protocol produces two
+bounded assessments, per-answer final/core-error classifications, and a blinded
+winner. Strong margins are derived only when the winner has no demonstrated
+major error and the loser has one; shared errors, uncertainty, and minor
+presentation differences cannot produce strong margins. Xgrammar and the schema
+are explicitly pinned; raw JSON is retained and independently replayed. This
+strength policy is an adaptation, not the native five-way judge protocol.
+
+Compact v2 job `3998493` completed all 78 calls in 8m47s but was rejected:
+13/20 unchanged pilot matches, 17/20 fresh transfer matches, and 77/78 valid
+orders. One annuity comparison repeated a numerical correction until truncation.
+Other failures overstated corrected algebra, minor omissions, and optional
+numerical output; equivalent short answers also exposed a verbosity preference.
+The structured profile addresses these observed defects without changing labels
+or replacing invalid answers.
+
 The optional `arena_alignment --compact-rubric FILE --compact-rubric-sha256 SHA`
 profile replaces the native system rubric with a hash-bound concise comparison
 rubric and a 512-token response budget. This is explicitly

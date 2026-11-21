@@ -1,5 +1,6 @@
 from copy import deepcopy
 import hashlib
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -11,6 +12,24 @@ from scripts.helpfulness.teacher_smoke import FAILURE_FLAGS
 
 
 class ArenaAlignmentTests(unittest.TestCase):
+    def test_structured_strength_requires_a_demonstrated_major_gap(self):
+        value = {
+            "a_assessment": "Correct computation with a minor omission.",
+            "b_assessment": "Same correct computation.",
+            "a_status": "no_major_error", "b_status": "no_major_error", "preference": "A",
+        }
+        self.assertEqual(alignment.structured_preference(json.dumps(value), "B"), -1)
+        value["b_status"] = "major_error"
+        self.assertEqual(alignment.structured_preference(json.dumps(value), "B"), -2)
+        self.assertEqual(alignment.structured_preference(json.dumps(value), "A"), 2)
+        value["a_status"] = "uncertain"
+        self.assertEqual(alignment.structured_preference(json.dumps(value), "B"), -1)
+        value["preference"] = "tie"
+        self.assertEqual(alignment.structured_preference(json.dumps(value), "B"), 0)
+        value["extra"] = True
+        with self.assertRaises(ValueError):
+            alignment.structured_preference(json.dumps(value), "B")
+
     def test_compact_rubric_is_hash_bound_without_changing_native_messages(self):
         cases, _, _ = self.fixture()
         original = [{"candidate_position": "B", "messages": [

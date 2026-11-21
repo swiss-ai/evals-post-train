@@ -13,9 +13,42 @@ from scripts.helpfulness.open_models import reject_closed
 
 PROTOCOL = "adapted-arena-hard-v2-both-order-alignment-v1"
 COMPACT_PROTOCOL = "adapted-arena-hard-v2-compact-both-order-alignment-v2"
+STRUCTURED_PROTOCOL = "adapted-arena-hard-v2-factorized-strength-alignment-v3"
 LIMIT = 2048
 COMPACT_LIMIT = 512
 SPLITS = {"pilot_review": 20, "fresh_constructed_controls": 20}
+STRUCTURED_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "properties": {
+        "a_assessment": {"type": "string", "minLength": 1, "maxLength": 420},
+        "b_assessment": {"type": "string", "minLength": 1, "maxLength": 420},
+        "a_status": {"type": "string", "enum": ["no_major_error", "major_error", "uncertain"]},
+        "b_status": {"type": "string", "enum": ["no_major_error", "major_error", "uncertain"]},
+        "preference": {"type": "string", "enum": ["A", "B", "tie"]},
+    },
+    "required": ["a_assessment", "b_assessment", "a_status", "b_status", "preference"],
+}
+
+
+def structured_preference(raw, candidate_position):
+    value = open_benchmarks.strict_json(raw)
+    if set(value) != set(STRUCTURED_SCHEMA["properties"]):
+        raise ValueError("Structured Arena comparison fields are missing or unexpected")
+    for key, rule in STRUCTURED_SCHEMA["properties"].items():
+        item = value[key]
+        if not isinstance(item, str) or (
+            "enum" in rule and item not in rule["enum"]
+        ) or ("maxLength" in rule and (not item.strip() or len(item) > rule["maxLength"])):
+            raise ValueError("Invalid structured Arena field: " + key)
+    winner = value["preference"]
+    if winner == "tie":
+        return 0
+    loser = "B" if winner == "A" else "A"
+    strength = 2 if (
+        value[winner.lower() + "_status"] == "no_major_error"
+        and value[loser.lower() + "_status"] == "major_error"
+    ) else 1
+    return strength if winner == candidate_position else -strength
 
 
 def load_inputs(args):
@@ -61,12 +94,15 @@ def comparison_profile(args):
     if (rubric is None) != (expected is None):
         raise ValueError("Compact comparisons require both a rubric file and its frozen checksum")
     if rubric is None:
+        if getattr(args, "structured_comparison", False):
+            raise ValueError("Structured comparisons require a frozen rubric")
         return None, PROTOCOL, LIMIT
     verified_bytes(rubric, expected)
     text = Path(rubric).read_text(encoding="utf-8")
     if not text.strip():
         raise ValueError("Compact comparison rubric must not be empty")
-    return text, COMPACT_PROTOCOL, COMPACT_LIMIT
+    protocol = STRUCTURED_PROTOCOL if getattr(args, "structured_comparison", False) else COMPACT_PROTOCOL
+    return text, protocol, COMPACT_LIMIT
 
 
 def plans(cases, assets, rubric=None):
@@ -82,9 +118,14 @@ def plans(cases, assets, rubric=None):
     return entries
 
 
-def request(entry, model, limit=LIMIT):
-    return {"model": model, "messages": entry["messages"], "temperature": 0,
-            "max_tokens": limit, "seed": 1234}
+def request(entry, model, limit=LIMIT, structured=False):
+    value = {"model": model, "messages": entry["messages"], "temperature": 0,
+             "max_tokens": limit, "seed": 1234}
+    if structured:
+        value["response_format"] = {"type": "json_schema", "json_schema": {
+            "name": "arena_factorized_strength", "strict": True, "schema": STRUCTURED_SCHEMA,
+        }}
+    return value
 
 
 def results(cases, oracle, responses, protocol=PROTOCOL):
@@ -97,7 +138,10 @@ def results(cases, oracle, responses, protocol=PROTOCOL):
         failed_model = case.get("status") == "model_no_final_reply"
         sample = {**case, "status": "model_no_final_reply" if failed_model else "generated"}
         count = 0 if failed_model else 2
-        row = arena_pilot.judgment(sample, responses[offset:offset + count])
+        row = arena_pilot.judgment(
+            sample, responses[offset:offset + count],
+            structured_preference if protocol == STRUCTURED_PROTOCOL else arena_pilot.parse_preference,
+        )
         offset += count
         row["split"] = case["split"]
         row["review"] = expected
@@ -144,7 +188,7 @@ def replay(args, cases, oracle, calls, assets):
     for entry, requested, returned in zip(expected, calls[::2], calls[1::2]):
         if (
             requested.get("phase") != "requested" or returned.get("phase") != "returned"
-            or requested.get("request") != request(entry, args.model, limit)
+            or requested.get("request") != request(entry, args.model, limit, protocol == STRUCTURED_PROTOCOL)
             or returned.get("response", {}).get("model") != args.model
         ):
             raise ValueError("Alignment raw messages/decoding/model binding changed")
@@ -165,6 +209,11 @@ def preflight(args):
         or identity.get("license") != "Apache-2.0" or not identity.get("public_repository_revision")
         or identity.get("protocol") != protocol
         or identity.get("compact_rubric_sha256") != getattr(args, "compact_rubric_sha256", None)
+        or identity.get("structured_comparison", False) != getattr(args, "structured_comparison", False)
+        or (protocol == STRUCTURED_PROTOCOL and (
+            identity.get("structured_outputs_backend") != "xgrammar"
+            or identity.get("structured_schema_sha256") != digest(STRUCTURED_SCHEMA)
+        ))
     ):
         raise ValueError("Alignment judge identity is not bound to frozen inputs and protocol")
     return cases, oracle, assets, {
@@ -192,7 +241,9 @@ def run(args):
                    max_retries=0, timeout=180) as sdk,
         ):
             for entry in checked["judge_messages"]:
-                sdk.chat.completions.create(**request(entry, args.model, checked["max_tokens"]))
+                sdk.chat.completions.create(**request(
+                    entry, args.model, checked["max_tokens"], checked["protocol"] == STRUCTURED_PROTOCOL,
+                ))
                 report["completed_calls"] += 1
                 write_json(args.output / "report.json", report)
         rows, summary = replay(args, cases, oracle, read_jsonl(args.output / "judge-calls.jsonl"), assets)
@@ -216,6 +267,7 @@ def main(argv=None):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--compact-rubric", type=Path)
     parser.add_argument("--compact-rubric-sha256")
+    parser.add_argument("--structured-comparison", action="store_true")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
     args = parser.parse_args(argv)
     if args.action == "preflight":
