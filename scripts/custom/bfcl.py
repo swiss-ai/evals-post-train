@@ -59,8 +59,11 @@ def split_llm_args(llm_args: dict[str, Any]) -> tuple[float, dict[str, Any]]:
 
 
 def registry_name(model: str) -> str:
-    """The registry key: bfcl-eval builds file paths from it, so no slash."""
-    return re.sub(r"[^A-Za-z0-9._-]", "_", model) + "-FC"
+    """The registry key. bfcl-eval names the result directory after it with "/" as "_", and its evaluator maps
+    that name back with every "_" as "/": a key with either would come back as another one (the official
+    Qwen/Qwen3-8B-FC, with its own handler, for a served Qwen/Qwen3-8B). So letters, digits, "." and "-" only,
+    and a prefix that no official key has."""
+    return "custom-" + re.sub(r"[^A-Za-z0-9.-]", "-", model) + "-FC"
 
 
 def clean_message(message: Any) -> dict[str, Any]:
@@ -167,15 +170,25 @@ def group_scores(score_dir: Path) -> dict[str, float | None]:
 def summarize(version: str, registry: str, score_dir: Path) -> dict[str, Any]:
     """Per-category scores and the official groups; the overall BFCL v3 computed (bfcl-eval 3.0.0's
     total: the unweighted mean of the live, non-live and multi-turn groups), and for v4 only when
-    bfcl-eval itself has all its groups (the agentic one needs web search)."""
+    bfcl-eval itself has all its groups (the agentic one needs web search).
+
+    bfcl-eval counts a category it was not asked to run as 0 in its group tables, so a group is only
+    reported when all its categories were run: the agentic group needs both web search categories (memory alone
+    is in the per-category scores)."""
     categories = {}
-    for path in sorted(score_dir.glob(f"{registry}/*/*_score.json")):
+    for path in sorted(score_dir.glob(f"{registry}/**/*_score.json")):  # the memory ones sit one level deeper
         score = read_score(path)
         name = path.name.removesuffix("_score.json")
         categories[re.sub(r"^BFCL_v\d+_", "", name)] = {
             "accuracy": score["accuracy"], "correct": score["correct_count"], "total": score["total_count"],
         }
-    groups = group_scores(score_dir)
+    needed = {
+        "non_live": ["simple_python", "simple_java", "simple_javascript", "multiple", "parallel", "parallel_multiple", "irrelevance"],
+        "live": ["live_simple", "live_multiple", "live_parallel", "live_parallel_multiple", "live_irrelevance", "live_relevance"],
+        "multi_turn": ["multi_turn_base", "multi_turn_miss_func", "multi_turn_miss_param", "multi_turn_long_context"],
+        "agentic": ["memory_kv", "memory_vector", "memory_rec_sum", "web_search_base", "web_search_no_snippet"],
+    }
+    groups = {g: v for g, v in group_scores(score_dir).items() if all(c in categories for c in needed[g])}
     overall = None
     if version == "v3" and all(groups.get(g) is not None for g in ("non_live", "live", "multi_turn")):
         overall = sum(groups[g] for g in ("non_live", "live", "multi_turn")) / 3

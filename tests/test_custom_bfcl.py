@@ -61,8 +61,15 @@ class RequestTest(unittest.TestCase):
             (0.6, {"top_p": 0.95, "reasoning_effort": "high", "extra_body": {"top_k": 20}}),
         )
 
-    def test_registry_names_have_no_slash(self):
-        self.assertEqual(bfcl.registry_name("CSCS-Inference/swiss-ai/Apertus-v1.5-8B"), "CSCS-Inference_swiss-ai_Apertus-v1.5-8B-FC")
+    def test_registry_names_survive_bfcl_evals_directory_round_trip(self):
+        # The evaluator turns the result directory's "_" back into "/": no key may hold either character.
+        name = bfcl.registry_name("CSCS-Inference/swiss-ai/Apertus-v1.5-8B")
+        self.assertEqual(name, "custom-CSCS-Inference-swiss-ai-Apertus-v1.5-8B-FC")
+        self.assertEqual(name.replace("/", "_").replace("_", "/"), name)
+        weird = bfcl.registry_name("Qwen/Qwen3_8B (x)")
+        self.assertNotIn("/", weird)
+        self.assertNotIn("_", weird)
+        self.assertTrue(weird.startswith("custom-"))
 
     def test_clean_message_drops_nulls_and_keeps_content_for_text_turns(self):
         self.assertEqual(
@@ -77,20 +84,27 @@ class RequestTest(unittest.TestCase):
 
 
 class SummaryTest(unittest.TestCase):
-    def write(self, root: Path, registry: str):
-        for group, category, correct, total in (
-            ("non_live", "simple_python", 9, 10), ("live", "live_simple", 6, 10), ("multi_turn", "multi_turn_base", 2, 10),
-        ):
-            directory = root / registry / group
-            directory.mkdir(parents=True)
-            (directory / f"BFCL_v4_{category}_score.json").write_text(
-                json.dumps({"accuracy": correct / total, "correct_count": correct, "total_count": total}) + "\n{}\n"
-            )
+    CATEGORIES = {
+        "non_live": ["simple_python", "simple_java", "simple_javascript", "multiple", "parallel", "parallel_multiple", "irrelevance"],
+        "live": ["live_simple", "live_multiple", "live_parallel", "live_parallel_multiple", "live_irrelevance", "live_relevance"],
+        "multi_turn": ["multi_turn_base", "multi_turn_miss_func", "multi_turn_miss_param", "multi_turn_long_context"],
+        "agentic": ["memory_kv", "memory_vector", "memory_rec_sum"],
+    }
+
+    def write(self, root: Path, registry: str, groups=("non_live", "live", "multi_turn", "agentic")):
+        for group in groups:
+            for category in self.CATEGORIES[group]:
+                # bfcl-eval puts the memory categories one level deeper: agentic/memory/<kv|vector|rec_sum>/
+                directory = root / registry / group / ("memory/" + category.split("_", 1)[1] if category.startswith("memory") else "")
+                directory.mkdir(parents=True, exist_ok=True)
+                (directory / f"BFCL_v4_{category}_score.json").write_text(
+                    json.dumps({"accuracy": 0.5, "correct_count": 5, "total_count": 10}) + "\n{}\n"
+                )
         for name, column, value in (
             ("data_non_live.csv", "Non-Live Overall Acc", "90.00%"),
             ("data_live.csv", "Live Overall Acc", "60.00%"),
             ("data_multi_turn.csv", "Multi Turn Overall Acc", "20.00%"),
-            ("data_agentic.csv", "Agentic Overall Acc", "N/A"),
+            ("data_agentic.csv", "Agentic Overall Acc", "0.00%"),  # bfcl-eval counts a missing category as 0
         ):
             with open(root / name, "w", newline="") as f:
                 writer = csv.writer(f)
@@ -99,16 +113,19 @@ class SummaryTest(unittest.TestCase):
 
     def test_v3_overall_is_the_mean_of_the_three_groups(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.write(Path(tmp), "m-FC")
+            self.write(Path(tmp), "m-FC", groups=("non_live", "live", "multi_turn"))
             summary = bfcl.summarize("v3", "m-FC", Path(tmp))
         self.assertAlmostEqual(summary["overall"], (0.9 + 0.6 + 0.2) / 3)
-        self.assertEqual(summary["groups"], {"non_live": 0.9, "live": 0.6, "multi_turn": 0.2, "agentic": None})
-        self.assertEqual(summary["categories"]["simple_python"], {"accuracy": 0.9, "correct": 9, "total": 10})
+        self.assertEqual(summary["groups"], {"non_live": 0.9, "live": 0.6, "multi_turn": 0.2})  # no agentic: not run
+        self.assertEqual(summary["categories"]["simple_python"], {"accuracy": 0.5, "correct": 5, "total": 10})
 
-    def test_v4_has_no_overall_without_all_its_groups(self):
+    def test_the_agentic_group_needs_web_search_and_so_v4_has_no_overall(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.write(Path(tmp), "m-FC")
-            self.assertIsNone(bfcl.summarize("v4", "m-FC", Path(tmp))["overall"])
+            self.write(Path(tmp), "m-FC")  # memory categories only
+            summary = bfcl.summarize("v4", "m-FC", Path(tmp))
+        self.assertNotIn("agentic", summary["groups"])
+        self.assertIsNone(summary["overall"])
+        self.assertIn("memory_kv", summary["categories"])
 
 
 if __name__ == "__main__":
