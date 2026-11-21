@@ -25,7 +25,7 @@ class SuiteTests(unittest.TestCase):
         suite = suites.load(SUITE)
         self.assertEqual(suites.flags_for(suite, THINK, "ifbench"),
                          ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>",
-                          "--api-num-concurrent", "256", "--max-length", "32768", "--repeats", "4"])
+                          "--api-num-concurrent", "256", "--max-length", "262144", "--repeats", "4"])
         self.assertNotIn("--repeats", suites.flags_for(suite, THINK, "minerva_math500_think"))
 
     def test_apertus_15_70b_runs_with_high_client_concurrency_on_every_lm_eval_row(self):
@@ -96,7 +96,10 @@ class SuiteTests(unittest.TestCase):
         self.assertIn("--data-parallel-backend ray", launch["framework_args"])
         self.assertTrue(launch["framework_args"].endswith("--tool-call-parser apertus2"))  # the setup's serving
         with self.assertRaisesRegex(ValueError, "no launch block"):
-            suites.launch_for(suite, THINK)
+            suites.launch_for(suite, "apertus-1.5-8b-thinking")
+        launch = suites.launch_for(suite, THINK)
+        self.assertTrue(Path(launch["environment"]).is_file())
+        self.assertIn("--max-model-len 262144", launch["framework_args"])  # served with the setup's window
 
     def test_malformed_launch_blocks_name_the_field(self):
         base = suites.load(SUITE)
@@ -195,18 +198,35 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(qwen_lm_eval[qwen_lm_eval.index("--backend") + 1], "openai")
         self.assertEqual(qwen_lm_eval[qwen_lm_eval.index("--api-model-name") + 1], "qwen")
 
+    def test_tau2_rows_are_one_sbatch_per_domain_with_the_agents_thinking_flags(self):
+        suite = suites.load(SUITE)
+        rows = {(r["setup"], r["label"]): r["argv"] for r in suites.commands(
+            suite, {"chonk-lc-16k-v0.2-sft": "chonk", "qwen3-32b-thinking": "qwen"}, api_base_url="http://x/v1",
+            limit=2, qos="highprio", partition="highprio")}
+        domains = ["airline", "retail", "telecom", "banking_knowledge"]
+        for domain in domains:
+            argv = rows["chonk-lc-16k-v0.2-sft", f"tau2-bench {domain}"]
+            self.assertEqual(argv, ["sbatch", "--qos=highprio", "--partition=highprio", "scripts/custom/run_tau2_bench.sbatch",
+                                    "--domain", domain, "--model", "chonk", "--api-base-url", "http://x/v1",
+                                    "--num-tasks", "2", "--workdir", f"logs/tau2/{suite['name']}/chonk/{domain}",
+                                    "--reasoning-effort", "high"])
+        self.assertEqual(rows["qwen3-32b-thinking", "tau2-bench retail"][-1], "--enable-thinking")
+
     def test_every_launch_uploads_to_the_suites_wandb_project(self):
         suite = suites.load(SUITE)
         rows = suites.commands(suite, {"chonk-lc-16k-v0.2-sft": "chonk"}, api_base_url="http://x/v1")
         for row in rows:
             argv = row["argv"]
+            if row["framework"] == "tau2":
+                self.assertNotIn("--wandb-project", argv)  # its runner has no W&B upload
+                continue
             self.assertEqual(argv[argv.index("--wandb-project") + 1], suite["name"], row["label"])
         for row in suites.commands(suite, {"chonk-lc-16k-v0.2-sft": "chonk"}, no_wandb=True):
             self.assertNotIn("--wandb-project", row["argv"])
 
     def test_sbatch_rows_write_to_their_own_log_dir(self):
         suite = suites.load(SUITE)
-        flag = {"inspect": "--logs-dir", "evalscope": "--work-dir", "harbor": "--work-dir", "bfcl": "--workdir"}
+        flag = {"inspect": "--logs-dir", "evalscope": "--work-dir", "harbor": "--work-dir", "bfcl": "--workdir", "tau2": "--workdir"}
         seen = set()
         for row in suites.commands(suite, {"chonk-lc-16k-v0.2-sft": "chonk"}):
             argv = row["argv"]
@@ -216,6 +236,8 @@ class SuiteTests(unittest.TestCase):
                 continue
             if row["framework"] == "bfcl":
                 task = "bfcl_" + argv[argv.index("--version") + 1]
+            elif row["framework"] == "tau2":
+                task = argv[argv.index("--domain") + 1]
             else:
                 task = argv[argv.index("--task") + 1] if "--task" in argv else argv[argv.index("--benchmark") + 1]
             expected = f"logs/{row['framework']}/{suite['name']}/chonk/{task}"
@@ -243,7 +265,7 @@ class SuiteTests(unittest.TestCase):
         with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
             self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m", "--model", "qwen3-32b-thinking=q"]), 0)
-        self.assertIn("24 launches: 2 models x 12 benchmarks", err.getvalue())
+        self.assertIn("32 launches: 2 models x 16 benchmarks", err.getvalue())
         for bad in (["--model", "m"], ["--model", "nope=m"], ["--model", f"{THINK}=a", "--model", f"{THINK}=b"]):
             self.assertEqual(suites.main(["run", SUITE, *bad]), 1)
 

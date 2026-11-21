@@ -126,6 +126,48 @@ class SummaryTest(unittest.TestCase):
         self.assertNotIn("agentic", summary["groups"])
         self.assertIsNone(summary["overall"])
         self.assertIn("memory_kv", summary["categories"])
+        self.assertIn("v4_without_web_search", summary)  # every category it needs was run
+
+    @staticmethod
+    def accuracies(value, **given):
+        categories = {name: {"accuracy": value, "correct": 0, "total": 10}
+                      for name in bfcl.CATEGORIES["v4"]}
+        for name, accuracy in given.items():
+            categories[name] = {**categories[name], "accuracy": accuracy}
+        return categories
+
+    def test_v4_without_web_search_follows_the_packages_weights(self):
+        # Every category equally right: any weighted mean is that accuracy.
+        self.assertAlmostEqual(bfcl.v4_without_web_search(self.accuracies(0.5))["overall_no_web_search"], 0.5)
+        zero = {name: 0.0 for name in bfcl.CATEGORIES["v4"]}
+        for given, weight in (
+            ({"memory_kv": 1, "memory_vector": 1, "memory_rec_sum": 1}, 0.40),  # agentic: memory alone
+            ({n: 1 for n in bfcl.V3_CATEGORIES if n.startswith("multi_turn")}, 0.30),
+            ({"irrelevance": 1, "live_irrelevance": 1}, 0.10),
+            ({"live_simple": 1, "live_multiple": 1, "live_parallel": 1, "live_parallel_multiple": 1}, 0.10),
+            ({"simple_python": 1, "simple_java": 1, "simple_javascript": 1, "multiple": 1, "parallel": 1,
+              "parallel_multiple": 1}, 0.10),
+        ):
+            scores = bfcl.v4_without_web_search(self.accuracies(0.0, **given))
+            self.assertAlmostEqual(scores["overall_no_web_search"], weight, msg=str(given))
+        self.assertEqual(set(zero), set(bfcl.CATEGORIES["v4"]))
+
+    def test_v4_without_web_search_averages_irrelevance_and_the_simple_languages(self):
+        scores = bfcl.v4_without_web_search(self.accuracies(0.0, irrelevance=1.0))
+        self.assertAlmostEqual(scores["irrelevance"], 0.5)
+        scores = bfcl.v4_without_web_search(self.accuracies(0.0, simple_python=1.0))
+        self.assertAlmostEqual(scores["non_live"], (1 / 3) / 4)  # simple is a third of its quarter
+
+    def test_the_live_group_weights_its_categories_by_size(self):
+        categories = self.accuracies(0.0, live_simple=1.0)
+        categories["live_simple"]["total"] = 30
+        scores = bfcl.v4_without_web_search(categories)
+        self.assertAlmostEqual(scores["live"], 30 / (30 + 10 * 3))
+
+    def test_v4_without_web_search_needs_every_category_it_uses(self):
+        categories = self.accuracies(0.5)
+        del categories["memory_vector"]
+        self.assertIsNone(bfcl.v4_without_web_search(categories))
 
 
 if __name__ == "__main__":
