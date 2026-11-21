@@ -37,6 +37,8 @@
 #   --user-llm-args <json>     Extra litellm kwargs for the user, merged over its default key by key. The default
 #                               user (the model under test) runs at reasoning_effort low with max_tokens 4096: at its
 #                               default effort a turn could run 15k tokens and end with no reply, and tau2 redoes the task.
+#   --judge-llm-args <json>    Extra litellm kwargs for the retail NL-assertion judge, merged over its default key by
+#                               key (with --api-base-url: the model under test at reasoning_effort low, max_tokens 4096).
 #   --retrieval-config <name>  banking_knowledge: the retrieval pipeline (default: bm25, offline keyword search).
 #                               tau2's own default embeds the documents with OpenAI and needs an OPENAI_API_KEY;
 #                               those configs (openai_embeddings*, ...) are available by naming them.
@@ -92,6 +94,7 @@ API_BASE_URL=${API_BASE_URL:-""}
 AGENT_LLM_ARGS_OVERRIDE=""
 USER_LLM=""
 USER_LLM_ARGS_OVERRIDE=""
+JUDGE_LLM_ARGS_OVERRIDE=""
 RETRIEVAL_CONFIG=""
 NUM_TRIALS=1
 MAX_STEPS=100
@@ -115,6 +118,7 @@ while (( $# > 0 )); do
         --agent-llm-args) AGENT_LLM_ARGS_OVERRIDE=$2; shift 2 ;;
         --user-llm) USER_LLM=$2; shift 2 ;;
         --user-llm-args) USER_LLM_ARGS_OVERRIDE=$2; shift 2 ;;
+        --judge-llm-args) JUDGE_LLM_ARGS_OVERRIDE=$2; shift 2 ;;
         --retrieval-config) RETRIEVAL_CONFIG=$2; shift 2 ;;
         --num-trials) NUM_TRIALS=$2; shift 2 ;;
         --max-steps) MAX_STEPS=$2; shift 2 ;;
@@ -304,7 +308,15 @@ echo "+ tau2 run --domain $DOMAIN --agent-llm $AGENT_LLM --user-llm $USER_LLM" \
 # The NL-assertion judge (retail) is hardcoded upstream to an OpenAI model, which we have no key for: with an
 # endpoint, it is the model under test (tau2_judge/sitecustomize.py repoints it; it judges its own agent runs).
 if [[ -n "$API_BASE_URL" ]]; then
-    export TAU2_JUDGE_LLM=$AGENT_LLM TAU2_JUDGE_LLM_ARGS=$PINNED_LLM_ARGS
+    JUDGE_LLM_ARGS=$PINNED_LLM_ARGS
+    if [[ -n "$JUDGE_LLM_ARGS_OVERRIDE" ]]; then
+        JUDGE_LLM_ARGS=$(python3 -c '
+import json, sys
+merged = json.loads(sys.argv[1])
+merged.update(json.loads(sys.argv[2]))
+print(json.dumps(merged))' "$JUDGE_LLM_ARGS" "$JUDGE_LLM_ARGS_OVERRIDE")
+    fi
+    export TAU2_JUDGE_LLM=$AGENT_LLM TAU2_JUDGE_LLM_ARGS=$JUDGE_LLM_ARGS
     echo "NL-assertion judge: $TAU2_JUDGE_LLM (the model under test, through $API_BASE_URL)"
 else
     echo "NL-assertion judge: upstream's own (OpenAI; needs OPENAI_API_KEY for retail)"
