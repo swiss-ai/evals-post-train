@@ -27,12 +27,16 @@
 #   --api-base-url <url>       OpenAI-compatible endpoint serving --model (bare host or /v1 root).
 #                               Its key: TARGET_API_KEY (default: CSCS_SERVING_API; both also from
 #                               scripts/secrets.env, as in run_inspect_eval.sh).
-#   --agent-llm-args <json>    Replace the agent's litellm kwargs (default: api_base/api_key built
-#                               from --api-base-url/TARGET_API_KEY).
-#   --user-llm <model>         The simulated user (and NL-assertion judge) (default: --model on the
+#   --agent-llm-args <json>    Replace the agent's litellm kwargs (default: api_base, and api_key as
+#                               "os.environ/TARGET_API_KEY": the key stays out of results.json and the logs).
+#   --user-llm <model>         The simulated user (default: --model on the
 #                               same endpoint, so no second credential). A bare name is reached by
 #                               litellm with its own credentials (e.g. OPENAI_API_KEY).
-#   --user-llm-args <json>     Extra litellm kwargs for the user, merged over its default key by key.
+#                               With --api-base-url the NL-assertion judge (retail) is the model under test too, at
+#                               the same low effort and cap: upstream hardcodes an OpenAI model (tau2_judge/).
+#   --user-llm-args <json>     Extra litellm kwargs for the user, merged over its default key by key. The default
+#                               user (the model under test) runs at reasoning_effort low with max_tokens 4096: at its
+#                               default effort a turn could run 15k tokens and end with no reply, and tau2 redoes the task.
 #   --retrieval-config <name>  banking_knowledge: the retrieval pipeline (default: bm25, offline keyword search).
 #                               tau2's own default embeds the documents with OpenAI and needs an OPENAI_API_KEY;
 #                               those configs (openai_embeddings*, ...) are available by naming them.
@@ -74,6 +78,7 @@
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
+JUDGE_SHIM_DIR="$PWD/scripts/custom/tau2_judge"
 
 die() { echo "$*" >&2; exit 1; }
 
@@ -148,9 +153,11 @@ if [[ -n "$API_BASE_URL" ]]; then
     [[ "$API_BASE_URL" == */v1 || "$API_BASE_URL" == */v1/ ]] || API_BASE_URL="${API_BASE_URL%/}/v1"
     # shellcheck source=scripts/common/secrets.sh
     source scripts/common/secrets.sh
-    TARGET_API_KEY="${TARGET_API_KEY:-${CSCS_SERVING_API:-}}"
-    AGENT_LLM_ARGS=$(python3 -c "import json,sys; print(json.dumps({'api_base': sys.argv[1], 'api_key': sys.argv[2]}))" \
-        "$API_BASE_URL" "$TARGET_API_KEY")
+    export TARGET_API_KEY="${TARGET_API_KEY:-${CSCS_SERVING_API:-}}"
+    # The key never goes into the llm args: tau2 writes them to results.json and to its LLM call logs, and
+    # prints them in a resume diff. litellm resolves "os.environ/<NAME>" from the environment at call time.
+    AGENT_LLM_ARGS=$(python3 -c "import json,sys; print(json.dumps({'api_base': sys.argv[1], 'api_key': 'os.environ/TARGET_API_KEY'}))" \
+        "$API_BASE_URL")
     AGENT_LLM="openai/$MODEL"
 else
     AGENT_LLM="$MODEL"
@@ -175,8 +182,29 @@ if [[ -z "$USER_LLM" ]]; then
     [[ -n "$API_BASE_URL" ]] || die "Without --api-base-url the user simulator needs its own --user-llm."
     USER_LLM=$AGENT_LLM
 fi
+# The litellm kwargs of a thinking setting (scripts/common/thinking.py): $1 the args so far, $2 its values (json).
+with_thinking() {
+    python3 -c '
+import json, sys
+from scripts.common import thinking
+args, values = json.loads(sys.argv[1]), json.loads(sys.argv[2])
+args.update({k: v for k, v in thinking.litellm_kwargs(values).items() if k != "extra_body"})
+body = thinking.merge_extra_body(args.get("extra_body"), values)
+if body:
+    args["extra_body"] = body
+print(json.dumps(args))' "$1" "$2"
+}
+# The model under test as its own user and judge: low reasoning effort and a capped reply. At the model's default
+# effort a user turn sometimes ran 15k tokens (7 min) and ended with no reply: tau2 rejects an empty message and
+# redoes the whole task, up to 4 times. --user-llm-args overrides both for the user.
+if [[ -n "$API_BASE_URL" ]]; then
+    PINNED_LLM_ARGS=$(with_thinking "$AGENT_LLM_ARGS" "$(python3 -m scripts.common.thinking --format json --reasoning-effort low)") || exit 1
+    PINNED_LLM_ARGS=$(python3 -c '
+import json, sys
+args = json.loads(sys.argv[1]); args["max_tokens"] = 4096; print(json.dumps(args))' "$PINNED_LLM_ARGS")
+fi
 if [[ "$USER_LLM" == openai/* && -n "$API_BASE_URL" ]]; then
-    USER_LLM_ARGS=$AGENT_LLM_ARGS
+    USER_LLM_ARGS=$PINNED_LLM_ARGS
 else
     USER_LLM_ARGS='{}'
 fi
@@ -190,15 +218,7 @@ fi
 
 # Thinking and reasoning effort of the agent (scripts/common/thinking.py), after the user copied its args.
 THINKING_VALUES=$(python3 -m scripts.common.thinking "${THINKING_ARGS[@]}") || exit 1
-AGENT_LLM_ARGS=$(python3 -c '
-import json, sys
-from scripts.common import thinking
-args, values = json.loads(sys.argv[1]), json.loads(sys.argv[2])
-args.update({k: v for k, v in thinking.litellm_kwargs(values).items() if k != "extra_body"})
-body = thinking.merge_extra_body(args.get("extra_body"), values)
-if body:
-    args["extra_body"] = body
-print(json.dumps(args))' "$AGENT_LLM_ARGS" "$THINKING_VALUES")
+AGENT_LLM_ARGS=$(with_thinking "$AGENT_LLM_ARGS" "$THINKING_VALUES")
 
 # The commit a ref names in $TAU_REPO (a full commit is taken as is).
 resolve_ref() {
@@ -260,6 +280,7 @@ fi
 WORKDIR=${WORKDIR:-"$(mktemp -d /tmp/tau2-custom.XXXXXX)"}
 VIEW="$WORKDIR/tau2-data"
 mkdir -p "$VIEW"
+VIEW=$(cd "$VIEW" && pwd)  # absolute: tau2 runs from the checkout, so a relative --workdir would point elsewhere
 for entry in "$CHECKOUT"/data/* "$CHECKOUT"/data/.[!.]*; do
     [[ -e "$entry" && "$(basename "$entry")" != simulations ]] && ln -sfn "$entry" "$VIEW/"
 done
@@ -279,8 +300,16 @@ ARGS=(run --domain "$DOMAIN"
 
 echo "+ tau2 run --domain $DOMAIN --agent-llm $AGENT_LLM --user-llm $USER_LLM" \
      "--num-trials $NUM_TRIALS --max-steps $MAX_STEPS --seed $SEED" \
-     "--max-concurrency $MAX_CONCURRENCY (llm args carry the keys; not shown)"
-(cd "$CHECKOUT" && .venv/bin/tau2 "${ARGS[@]}")
+     "--max-concurrency $MAX_CONCURRENCY (llm args name the key by its environment variable, never the key)"
+# The NL-assertion judge (retail) is hardcoded upstream to an OpenAI model, which we have no key for: with an
+# endpoint, it is the model under test (tau2_judge/sitecustomize.py repoints it; it judges its own agent runs).
+if [[ -n "$API_BASE_URL" ]]; then
+    export TAU2_JUDGE_LLM=$AGENT_LLM TAU2_JUDGE_LLM_ARGS=$PINNED_LLM_ARGS
+    echo "NL-assertion judge: $TAU2_JUDGE_LLM (the model under test, through $API_BASE_URL)"
+else
+    echo "NL-assertion judge: upstream's own (OpenAI; needs OPENAI_API_KEY for retail)"
+fi
+(cd "$CHECKOUT" && PYTHONPATH="$JUDGE_SHIM_DIR${PYTHONPATH:+:$PYTHONPATH}" .venv/bin/tau2 "${ARGS[@]}")
 
 RESULTS_FILE="$VIEW/simulations/$SAVE_TO/results.json"
 [[ -f "$RESULTS_FILE" ]] || RESULTS_FILE=$(find "$VIEW/" -path "*/$SAVE_TO/results.json" 2>/dev/null | head -1)

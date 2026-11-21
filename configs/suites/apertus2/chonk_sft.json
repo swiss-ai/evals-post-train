@@ -21,6 +21,14 @@
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": "overall"}},
     {"label": "BFCL v4", "task": "bfcl_v4", "framework": "bfcl",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null}},
+    {"label": "tau2-bench airline", "task": "airline", "framework": "tau2",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "pass@1", "key": null}},
+    {"label": "tau2-bench retail", "task": "retail", "framework": "tau2",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "pass@1", "key": null}},
+    {"label": "tau2-bench telecom", "task": "telecom", "framework": "tau2",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "pass@1", "key": null}},
+    {"label": "tau2-bench banking_knowledge", "task": "banking_knowledge", "framework": "tau2",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "pass@1", "key": null}},
     {"label": "HarmBench", "task": "harmbench", "framework": "lm_eval",
      "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null}},
     {"label": "MultiJail", "task": "multijail", "framework": "lm_eval",
@@ -37,6 +45,7 @@
         "lm_eval": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>", "--api-num-concurrent", "256"],
         "inspect": ["--enable-thinking"],
         "bfcl": [],
+        "tau2": ["--enable-thinking"],
         "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       }
     },
@@ -48,6 +57,7 @@
         "lm_eval": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>"],
         "inspect": ["--enable-thinking"],
         "bfcl": [],
+        "tau2": ["--enable-thinking"],
         "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       }
     },
@@ -59,6 +69,7 @@
         "lm_eval": ["--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>"],
         "inspect": ["--enable-thinking"],
         "bfcl": [],
+        "tau2": ["--enable-thinking"],
         "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       }
     },
@@ -81,6 +92,7 @@
         "lm_eval": ["--backend", "openai", "--chat-format", "apertus2"],
         "inspect": [],
         "bfcl": [],
+        "tau2": [],
         "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       }
     },
@@ -103,6 +115,7 @@
         "lm_eval": ["--backend", "openai", "--chat-format", "apertus2"],
         "inspect": [],
         "bfcl": [],
+        "tau2": [],
         "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       }
     }
