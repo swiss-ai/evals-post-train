@@ -213,7 +213,8 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(argv, ["sbatch", "--qos=highprio", "--partition=highprio", "scripts/custom/run_tau2_bench.sbatch",
                                     "--domain", domain, "--model", "chonk", "--api-base-url", "http://x/v1",
                                     "--num-tasks", "2", "--workdir", f"logs/tau2/{suite['name']}/chonk/{domain}",
-                                    "--reasoning-effort", "high", "--user-llm-args", USER_LLM_ARGS])
+                                    "--reasoning-effort", "high", "--user-llm-args", USER_LLM_ARGS]
+                             + (["--retrieval-config", "bm25"] if domain == "banking_knowledge" else []))
         qwen = rows["qwen3-32b-thinking", "tau2-bench retail"]
         self.assertIn("--enable-thinking", qwen)
         self.assertEqual(qwen[-2:], ["--user-llm-args", USER_LLM_ARGS])

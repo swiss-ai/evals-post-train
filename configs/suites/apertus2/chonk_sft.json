@@ -32,7 +32,7 @@
      "flags": ["--user-llm-args", "{\"reasoning_effort\": \"low\", \"max_tokens\": 4096}"]},
     {"label": "tau2-bench banking_knowledge", "task": "banking_knowledge", "framework": "tau2",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "pass@1", "key": null},
-     "flags": ["--user-llm-args", "{\"reasoning_effort\": \"low\", \"max_tokens\": 4096}"]},
+     "flags": ["--user-llm-args", "{\"reasoning_effort\": \"low\", \"max_tokens\": 4096}", "--retrieval-config", "bm25"]},
     {"label": "HarmBench", "task": "harmbench", "framework": "lm_eval",
      "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null}},
     {"label": "MultiJail", "task": "multijail", "framework": "lm_eval",
