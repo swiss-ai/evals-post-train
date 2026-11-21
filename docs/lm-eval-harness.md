@@ -654,6 +654,7 @@ The pipeline runs inside containers managed by enroot/pyxis on SLURM:
 | `env.toml` | CSCS NGC PyTorch 25.12 image | Standard HF evals |
 | `env_vllm.toml` | CSCS vLLM 0.22.1 runtime image | vLLM and Megatron-LM evals |
 | `env_sglang.toml` | CSCS SGLang CUDA 13 image | SGLang evals |
+| `env_vllm_0.30.0.toml` | model-launch's vLLM 0.30.0 image (arm64) | the direct-serving launcher's default serving image |
 
 Hugging Face caches are on scratch for every runner (lm-eval, Inspect, the aggregation job, EvalScope, Harbor), set in one place, `scripts/common/cache_dirs.sh`: datasets in `$SCRATCH/.cache/huggingface/datasets` (`HF_DATASETS_CACHE`), hub and models in `$SCRATCH/huggingface` (`HF_HOME`, which a caller may set). A dataset is therefore downloaded once for all of them, and a job in the prebuilt image needs only the scratch mount. The same file puts `XDG_CACHE_HOME` (`$SCRATCH/.cache`) and `XDG_DATA_HOME` (`$SCRATCH/.local/share`) on scratch: Inspect writes its trace log and dataset downloads there, and in the prebuilt image `$HOME` is on the container's `fuse-overlayfs` root, where Inspect jobs hung forever ([#158](https://github.com/swiss-ai/evals-post-train/issues/158)). The pinned artifacts (environments, tokenizers) are separate, under `$EVAL_ENV_CACHE_ROOT` below.
 

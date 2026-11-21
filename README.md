@@ -102,7 +102,7 @@ A checkpoint that is not on the CSCS serving API: one command submits **one Slur
 ```bash
 scripts/direct_serving/job.sh \
   --model /capstor/store/cscs/swissai/infra01/hf_models/models/Qwen/Qwen3-32B --served-model-name qwen3-32b \
-  --nodes 1 --time 01:00:00 --environment containers/env_vllm.toml \
+  --nodes 1 --time 01:00:00 --environment containers/env_vllm_0.30.0.toml \
   --framework-args "--tensor-parallel-size 4 --max-model-len 32768 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser hermes" \
   --eval 'bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model qwen3-32b --backend openai --api-base-url "$EVAL_API_BASE_URL" --api-model-name qwen3-32b --tokenizer Qwen/Qwen3-32B --limit 3 --no-wandb --failure-policy fail-fast' \
   --submit
@@ -140,7 +140,7 @@ Run it from this checkout (on storage the compute nodes see) on a Clariden login
 ```bash
 scripts/direct_serving/job.sh \
   --model /capstor/store/cscs/swissai/infra01/hf_models/models/Qwen/Qwen3-32B --served-model-name qwen3-32b \
-  --nodes 1 --time 01:00:00 --environment containers/env_vllm.toml \
+  --nodes 1 --time 01:00:00 --environment containers/env_vllm_0.30.0.toml \
   --framework-args "--tensor-parallel-size 4 --max-model-len 32768 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser hermes" \
   --eval 'scripts/inspect_ai/run_inspect_eval.sh --task gsm8k --model qwen3-32b --api-base-url "$EVAL_API_BASE_URL" --limit 3 --no-wandb --no-enable-thinking' \
   --eval 'bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k --model qwen3-32b --backend openai --api-base-url "$EVAL_API_BASE_URL" --api-model-name qwen3-32b --tokenizer Qwen/Qwen3-32B --limit 3 --no-wandb --failure-policy fail-fast' \
