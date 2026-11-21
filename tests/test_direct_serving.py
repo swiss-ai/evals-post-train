@@ -159,6 +159,14 @@ class EvalImageTests(unittest.TestCase):
         self.assertIn('"/scratch/${USER}"', edf)
         tomllib.loads(edf)
 
+    def test_the_models_directory_is_mounted_unless_a_default_mount_holds_it(self) -> None:
+        store = "/capstor/store/x/hf_models/m"
+        self.assertEqual(job.model_mounts(store + "/", "me"), [store])
+        for held in ("/users/me/ckpt", "/capstor/scratch/cscs/me/m/", "/iopsstor/scratch/cscs/me/m", str(job.REPO_ROOT / "m")):
+            self.assertEqual(job.model_mounts(held, "me"), [], held)
+        self.assertEqual(job.model_mounts("/users/other/ckpt", "me"), ["/users/other/ckpt"])  # only the user's own home is mounted
+        self.assertEqual(job.model_mounts("Qwen/Qwen3-8B", "me"), [])  # a Hugging Face name is not a path
+
     def test_job_writes_the_edf_before_the_first_eval(self) -> None:
         script = _render(self, ["echo hi"])
 
@@ -327,6 +335,7 @@ class MainTests(unittest.TestCase):
         run.assert_not_called()
         self.assertIn("$PATH && echo hi'", stdout.getvalue())
         self.assertIn('    "/extra"\n', stdout.getvalue())
+        self.assertIn('    "/store/m",\n', stdout.getvalue())  # the model's directory, which no default mount holds
 
     def test_missing_image_stops_before_a_script_is_made(self) -> None:
         with (
