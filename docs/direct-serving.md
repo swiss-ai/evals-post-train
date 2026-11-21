@@ -65,7 +65,7 @@ The Chonk setups' `serving` arguments need the `apertus-common` plugin, which th
 | `--suite`, `--setup` | A suite setup's `launch` block ([above](#from-a-suite)); then `--model`, `--environment` and `--served-model-name` are optional, and so are `--nodes` and `--time`. |
 | `--pre-launch-cmds` | A shell command every serving node runs before the server starts. |
 | `--eval-image-commit` | The [prebuilt eval image](lm-eval-harness.md#prebuilt-evaluation-image-no-installs-at-run-time) the commands run in. Default: the last commit of this checkout that changed what the image is built from (`containers/Dockerfile.eval`, `requirements/`, the workflow), since CI builds an image only for those. The job refuses to start when ghcr does not have it yet (its build is still running, or the commit was never pushed), and writes the EDF that starts it. |
-| `--mount` | A directory to mount in the eval image besides this checkout, `/users/$USER` and the scratch directories. Repeatable. |
+| `--mount` | A directory to mount in the eval image besides this checkout, `/users/$USER`, the scratch directories and the model's directory (`--model`, or the setup's `launch.model_path`; skipped when one of those already holds it, so the evals can read its tokenizer). Repeatable. |
 | `--time` | The model's load plus every command: the job has no other limit. |
 | `--ready-timeout` | Seconds to wait for the server (default 3600). |
 
