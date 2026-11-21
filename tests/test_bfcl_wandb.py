@@ -31,6 +31,24 @@ class BfclWandbTests(unittest.TestCase):
         self.assertNotIn("bfcl_v4/overall", evaluation.get_flattened_metrics())
         self.assertEqual(duration, 0)
 
+    def test_v4_without_web_search_adds_its_scores_once(self):
+        summary = {
+            "version": "v4", "overall": None,
+            "groups": {"non_live": 0.9, "live": 0.8, "multi_turn": 0.1},
+            "v4_without_web_search": {"non_live": 0.91, "live": 0.81, "irrelevance": 0.7, "multi_turn": 0.12,
+                                      "memory": 0.3, "overall_no_web_search": 0.4},
+            "categories": {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "summary.json").write_text(json.dumps(summary))
+            evaluation, _ = create_model_evaluation_from_bfcl_run("m", Path(tmp))
+        names = [m.name for m in evaluation.tasks[0].metrics]
+        self.assertEqual(len(names), len(set(names)), names)  # one metric per name
+        flat = evaluation.get_flattened_metrics()
+        self.assertEqual(flat["bfcl_v4/multi_turn"], 0.1)  # bfcl-eval's own group, not the recomputed one
+        self.assertEqual(flat["bfcl_v4/overall_no_web_search"], 0.4)
+        self.assertEqual(flat["bfcl_v4/memory"], 0.3)
+
 
 if __name__ == "__main__":
     unittest.main()

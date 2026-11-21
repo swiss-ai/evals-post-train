@@ -20,7 +20,7 @@
     {"label": "BFCL v3", "task": "bfcl_v3", "framework": "bfcl",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": "overall"}},
     {"label": "BFCL v4", "task": "bfcl_v4", "framework": "bfcl",
-     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null}},
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc, no web search", "key": "overall_no_web_search"}},
     {"label": "tau2-bench airline", "task": "airline", "framework": "tau2",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "pass@1", "key": null}},
     {"label": "tau2-bench retail", "task": "retail", "framework": "tau2",

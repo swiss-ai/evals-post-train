@@ -13,9 +13,9 @@ def main(entity: str, project: str, name: str, work_dir: Path):
     for task in model_eval.tasks:
         print(",".join([f"{task.task_name}/{metric.name}" for metric in task.metrics]))
 
-    # The main table: the overall where there is one (v3), else the groups bfcl-eval computed.
+    # The main table: bfcl-eval's overall where there is one (v3), else v4's without web search.
     names = [m.name for t in model_eval.tasks for m in t.metrics]
-    shown = ["overall"] if "overall" in names else ["non_live", "live", "multi_turn", "agentic"]
+    shown = [n for n in ("overall", "overall_no_web_search") if n in names]
     main_metrics = [f"{t.task_name}/{m.name}" for t in model_eval.tasks for m in t.metrics if m.name in shown]
     upload_multi_model_results(entity, project, [model_eval], main_metrics, duration)
 
