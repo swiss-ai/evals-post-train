@@ -28,6 +28,8 @@ lock inspect-runtime 3.11 --generate-hashes "$@"
 # CPU torch for BFCL v4's memory_vector embeddings (sentence-transformers); no model runs in this venv.
 lock evalscope-runtime 3.11 --generate-hashes --torch-backend cpu "$@"
 lock harbor-runtime 3.12 --generate-hashes "$@"
+# bfcl-eval (scripts/custom/run_bfcl.sh): CPU torch for memory_vector's embeddings, as evalscope-runtime.
+lock bfcl-runtime 3.11 --generate-hashes --torch-backend cpu "$@"
 # No hashes: the adapter is a git install, which cannot be hashed. The lock pins its commit instead.
 lock harbor-adapters 3.12 "$@"
 # No hashes either: tau2-bench is a git install (not on PyPI); the lock pins its commit.

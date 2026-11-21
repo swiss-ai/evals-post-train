@@ -103,6 +103,17 @@ RUN python -m venv /opt/evalscope-venv \
     && git -C /opt/swe-bench-pro-os rev-parse HEAD > /opt/swe-bench-pro-os.commit \
     && rm -rf /opt/swe-bench-pro-os/.git
 
+# BFCL (run_bfcl.sh) in its own: bfcl-eval's official package with the lock of its dependencies, installed
+# the way scripts/common/locked_venv.sh would (requirements/bfcl-runtime.lock, then bfcl-eval without dependencies).
+FROM base AS bfcl-env
+COPY requirements/bfcl-runtime.lock requirements/bfcl-eval.txt /tmp/requirements/
+RUN python -m venv /opt/bfcl-venv \
+    && /opt/bfcl-venv/bin/pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
+        -r /tmp/requirements/bfcl-runtime.lock \
+    && /opt/bfcl-venv/bin/pip install --no-cache-dir --no-deps -r /tmp/requirements/bfcl-eval.txt \
+    && BFCL_PROJECT_ROOT=/tmp/bfcl-check /opt/bfcl-venv/bin/python -c \
+        "import bfcl_eval._llm_response_generation, bfcl_eval.eval_checker.eval_runner"
+
 # Harbor (agentic benchmarks, run_harbor_eval.sh) in a fourth: it pins its own
 # dependency set. Multi-SWE-bench has no published Harbor dataset, only an
 # adapter that generates the tasks; run.py would fetch it with uvx at run time,
@@ -168,6 +179,7 @@ COPY --from=inspect-env /opt/inspect-venv /opt/inspect-venv
 COPY --from=evalscope-env /opt/evalscope-venv /opt/evalscope-venv
 COPY --from=evalscope-env /opt/swe-bench-pro-os /opt/swe-bench-pro-os
 COPY --from=evalscope-env /opt/swe-bench-pro-os.commit /opt/swe-bench-pro-os.commit
+COPY --from=bfcl-env /opt/bfcl-venv /opt/bfcl-venv
 COPY --from=harbor-env /opt/harbor-venv /opt/harbor-venv
 COPY --from=harbor-env /opt/harbor-adapters /opt/harbor-adapters
 COPY --from=tau2-env /opt/tau2-venv /opt/tau2-venv
@@ -184,6 +196,7 @@ ENV PATH=/opt/lm-eval-venv/bin:$PATH \
     EVAL_INSPECT_VENV=/opt/inspect-venv \
     EVALSCOPE_VENV=/opt/evalscope-venv \
     EVALSCOPE_SWE_BENCH_PRO_REPO=/opt/swe-bench-pro-os \
+    BFCL_VENV=/opt/bfcl-venv \
     HARBOR_VENV=/opt/harbor-venv \
     HARBOR_ADAPTERS_ROOT=/opt/harbor-adapters \
     TAU2_VENV=/opt/tau2-venv \

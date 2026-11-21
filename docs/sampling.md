@@ -9,7 +9,7 @@ One policy sets how the model under test is sampled, in every framework launcher
                "greedy": {"temperature": 0.0}},
   "modes": {"thinking": "thinking", "non_thinking": "non_thinking"},
   "frameworks": {"lm_eval": "thinking", "inspect": "thinking", "evalscope": "thinking",
-                 "harbor": "thinking", "tau2": null}
+                 "harbor": "thinking", "tau2": null, "bfcl": null}
 }
 ```
 
@@ -61,6 +61,7 @@ on a thinking run prints a warning: reasoning models loop and truncate under gre
 | Inspect | `thinking` | `--temperature`, `--top-p`, `--top-k`; min-p and repetition penalty in `--extra-body` (a literal `-- --temperature ...` still wins) |
 | EvalScope | `thinking` (EvalScope's own default is greedy) | `generation_config`: `--generation-config` over the defaults, the flags over both; min-p in `extra_body` |
 | Harbor | `thinking`, terminus-2 only | `--ak temperature=...` and `--ak llm_kwargs=...` (`extra_body`); your own `--agent-kwarg` wins over the defaults, the flags win over both. Other agents get no defaults and refuse the flags |
+| BFCL | none: bfcl-eval's own temperature of 0.001 and no other setting unless you pass one | `temperature` goes to the handler; `top_p` and the thinking settings are request arguments, the rest in `extra_body` (`scripts/custom/run_bfcl.sh`) |
 | tau2 | none: no setting is sent unless you pass one (tau2-bench's own default is temperature 0, but the script's `--agent-llm-args` replaces it) | merged over `--agent-llm-args`: `temperature`, `top_p`, the rest in `extra_body` |
 
 Not covered: the GDPval runner (`scripts/aaii/run_gdpval.sh`) fixes its own `max_tokens`.

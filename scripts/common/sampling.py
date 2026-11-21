@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 SAMPLERS = ("temperature", "top_p", "top_k", "min_p", "repetition_penalty")
-FRAMEWORKS = ("lm_eval", "inspect", "evalscope", "harbor", "tau2")
+FRAMEWORKS = ("lm_eval", "inspect", "evalscope", "harbor", "tau2", "bfcl")
 MODES = ("thinking", "non_thinking")
 DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "configs" / "sampling_defaults.json"
 
