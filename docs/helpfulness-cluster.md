@@ -788,6 +788,16 @@ flags and all fifty-two stage outputs to be valid. Report observed agreement
 and failures without describing constructed checks as human gold or general
 judge accuracy. Previous teacher replies and annotations remain unchanged.
 
+The first compact calibration allocation, `3997862`, failed in CPU preflight
+because the historical isolated scorer did not contain `jsonschema`. No model
+was loaded and no judge call ran; this is not a calibration result. The compact
+parser now uses the existing strict JSON/object helpers and explicit checks for
+every stage field, type, bound, enum, evidence ID, and cross-field invariant,
+without requiring that dependency. Keep the GPU-job CPU test gate intact;
+test dependency absence explicitly rather than trusting a requirement listed
+outside the actual isolated runtime. A replacement requires separate approval,
+a new immutable run directory, and unchanged frozen cases and expected labels.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID

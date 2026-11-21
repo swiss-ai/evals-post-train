@@ -1,7 +1,6 @@
 """Compact two-stage, source-only judge calibration; never native scoring."""
 
 import argparse
-from collections import Counter
 import hashlib
 import json
 from pathlib import Path
@@ -133,21 +132,45 @@ def parse(stage, sample, response):
         raise ValueError("Stage output missing or truncated")
     value = legacy.open_benchmarks.strict_json(choices[0]["message"]["content"])
     spec = schema(stage, sample)
-    # The decoder enforces the schema; replay validates it independently as well.
-    from jsonschema import Draft202012Validator
-    Draft202012Validator(spec).validate(value)
-    for key in ("reason",):
-        if not value[key].strip():
-            raise ValueError("Stage reason must not be whitespace")
+    legacy.fields(value, " ".join(spec["properties"]))
+    for key, constraint in spec["properties"].items():
+        if constraint["type"] == "string":
+            _string_field(value[key], constraint)
     if stage == "audit":
+        readings = value["readings"]
+        if not isinstance(readings, list):
+            raise ValueError("Readings must be a list")
         if len(value["readings"]) != (2 if value["scope"] == "multiple_readings" else 0):
             raise ValueError("Scope must have zero or two explicit readings")
+        for reading in readings:
+            legacy.fields(reading, "interpretation source_id")
+            for key, constraint in spec["properties"]["readings"]["items"]["properties"].items():
+                _string_field(reading[key], constraint)
     else:
+        if type(value["assumptions"]) is not bool:
+            raise ValueError("Assumptions flag must be a boolean")
+        errors = value["errors"]
+        if not isinstance(errors, list) or len(errors) > 2:
+            raise ValueError("Error findings must be a list of at most two")
+        for error in errors:
+            legacy.fields(error, "reply_id source_id reason")
+            for key, constraint in spec["properties"]["errors"]["items"]["properties"].items():
+                _string_field(error[key], constraint)
         if (value["abstention_reply_id"] == "none") != (value["abstention"] == "no"):
             raise ValueError("Abstention must cite reply evidence exactly when detected")
         if bool(value["errors"]) != (value["factuality"] == "contradicted"):
             raise ValueError("Contradiction requires explicit error evidence; other verdicts must not claim it")
     return value
+
+
+def _string_field(value, constraint):
+    if not isinstance(value, str):
+        raise ValueError("Stage field must be text")
+    if "enum" in constraint:
+        if value not in constraint["enum"]:
+            raise ValueError("Stage enum or evidence ID is invalid")
+    elif not value.strip() or len(value) > constraint["maxLength"]:
+        raise ValueError("Stage explanation must be nonempty bounded text")
 
 
 def annotation(audit, assessment):
@@ -167,12 +190,11 @@ def annotation(audit, assessment):
 
 
 def row_from_responses(sample, responses):
-    from jsonschema.exceptions import ValidationError
     stages, errors = {}, {}
     for stage in LIMITS:
         try:
             stages[stage] = parse(stage, sample, responses[stage])
-        except (ValueError, KeyError, TypeError, ValidationError) as error:
+        except (ValueError, KeyError, TypeError) as error:
             errors[stage] = type(error).__name__ + ": " + str(error)
     return {
         "case": sample["case"], "answer": sample["answer"], "stages": stages,
@@ -253,10 +275,9 @@ def replay(samples, rows, calls, model, oracle):
                 raise ValueError("Actual stage model differs")
             responses[stage] = response
             if stage == "audit":
-                from jsonschema.exceptions import ValidationError
                 try:
                     audit = parse(stage, sample, response)
-                except (ValueError, KeyError, TypeError, ValidationError):
+                except (ValueError, KeyError, TypeError):
                     audit = {"invalid_audit": True}
         if row != row_from_responses(sample, responses):
             raise ValueError("Saved outcome differs from actual stage response replay")
@@ -264,7 +285,6 @@ def replay(samples, rows, calls, model, oracle):
 
 
 def run(args):
-    from jsonschema.exceptions import ValidationError
     from openai import OpenAI
     samples, oracle, checked = preflight(args)
     args.output.mkdir(parents=True, exist_ok=False)
@@ -284,7 +304,7 @@ def run(args):
                     if stage == "audit":
                         try:
                             audit = parse(stage, sample, response)
-                        except (ValueError, KeyError, TypeError, ValidationError):
+                        except (ValueError, KeyError, TypeError):
                             audit = {"invalid_audit": True}
                 row = row_from_responses(sample, responses)
                 append_jsonl(args.output / "annotations.jsonl", row)

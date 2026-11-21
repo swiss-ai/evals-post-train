@@ -1,6 +1,8 @@
 from copy import deepcopy
 import json
+import sys
 import unittest
+from unittest.mock import patch
 
 from scripts.helpfulness import abstention_grounded_calibration as judge
 
@@ -51,8 +53,7 @@ class GroundedCalibrationTests(unittest.TestCase):
                 judge.parse("assessment", self.sample, self.response(value))
         bad = deepcopy(self.assessment)
         bad["errors"][0]["source_id"] = "a1"
-        from jsonschema.exceptions import ValidationError
-        with self.assertRaises(ValidationError):
+        with self.assertRaises(ValueError):
             judge.parse("assessment", self.sample, self.response(bad))
 
     def test_failed_audit_preserved_and_never_credited_as_calibration_pass(self):
@@ -63,6 +64,35 @@ class GroundedCalibrationTests(unittest.TestCase):
         self.assertIn("audit", row["stage_errors"])
         self.assertIsNone(row["annotation"])
         self.assertFalse(judge.summarize([row], self.oracle())["gate_passed"])
+
+    def test_strict_stage_checks_work_without_jsonschema_installed(self):
+        invalid = [
+            ("audit", {**self.audit, "unexpected": "value"}),
+            ("audit", {key: value for key, value in self.audit.items() if key != "scope"}),
+            ("audit", {**self.audit, "scope": "unknown"}),
+            ("audit", {**self.audit, "readings": {}}),
+            ("audit", {**self.audit, "scope": "multiple_readings", "readings": [
+                {"interpretation": "First", "source_id": "s1"},
+                {"interpretation": "Second", "source_id": "unknown"},
+            ]}),
+            ("assessment", {**self.assessment, "assumptions": 0}),
+            ("assessment", {**self.assessment, "reason": 5}),
+            ("assessment", {**self.assessment, "reason": "x" * 241}),
+            ("assessment", {**self.assessment, "errors": {}}),
+            ("assessment", {**self.assessment, "errors": self.assessment["errors"] * 3}),
+            ("assessment", {**self.assessment, "errors": [
+                {**self.assessment["errors"][0], "reason": "x" * 161},
+            ]}),
+            ("assessment", {**self.assessment, "errors": [
+                {**self.assessment["errors"][0], "extra": True},
+            ]}),
+        ]
+        with patch.dict(sys.modules, {"jsonschema": None, "jsonschema.exceptions": None}):
+            self.assertEqual(judge.parse("audit", self.sample, self.response(self.audit)), self.audit)
+            self.assertEqual(judge.parse("assessment", self.sample, self.response(self.assessment)), self.assessment)
+            for stage, value in invalid:
+                with self.subTest(stage=stage, value=value), self.assertRaises(ValueError):
+                    judge.parse(stage, self.sample, self.response(value))
 
     def test_two_stage_replay_binds_actual_audit_into_second_request(self):
         responses = {"audit": self.response(self.audit), "assessment": self.response(self.assessment)}
