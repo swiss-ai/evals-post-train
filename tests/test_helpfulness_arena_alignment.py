@@ -2,6 +2,7 @@ from copy import deepcopy
 import unittest
 
 from scripts.helpfulness import arena_alignment as alignment
+from scripts.helpfulness.teacher_smoke import FAILURE_FLAGS
 
 
 class ArenaAlignmentTests(unittest.TestCase):
@@ -38,3 +39,16 @@ class ArenaAlignmentTests(unittest.TestCase):
         self.assertFalse(summary["alignment_gate_passed"])
         with self.assertRaises(ValueError):
             alignment.results(cases, oracle, responses[:-1])
+
+    def test_model_failure_has_no_judge_orders_and_remains_in_twenty_case_denominator(self):
+        cases, oracle, responses = self.fixture()
+        cases[0].update(status="model_no_final_reply", answer="")
+        oracle["cases"][0]["allowed_margins"] = []
+        rows, summary = alignment.results(cases, oracle, responses[2:])
+        self.assertEqual(rows[0]["orders"], [])
+        self.assertEqual(rows[0]["scores"], {})
+        self.assertEqual(summary["expected_judge_orders"], 78)
+        self.assertEqual(summary["split_results"]["pilot_review"]["selected_cases"], 20)
+        self.assertEqual(summary["split_results"]["pilot_review"]["complete_case_matches"], 19)
+        self.assertFalse(summary["checkpoint_reply_coverage_complete"])
+        self.assertTrue(summary["alignment_gate_passed"])

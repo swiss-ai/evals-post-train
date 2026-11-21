@@ -72,7 +72,10 @@ intervals frozen before judge outputs: twenty actual pilot replies and twenty
 separate constructed controls. Reviews may allow both slight and strong
 preferences when only the direction is independently supported. At least
 seventeen complete-case matches are required in each split, and every one of
-eighty orders must be valid. These are AI review/constructive-control checks,
+the actual judge orders must be valid. A verified native empty-reply failure
+omits its two requests, receives no score, and remains a failed case in the
+twenty-case agreement denominator; checkpoint coverage is reported separately.
+These are AI review/constructive-control checks,
 not independent human gold or a production acceptance lock. No oracle labels,
 model identities or prior verdicts are included in judge prompts. Preserve
 every failed candidate and freeze fresh transfer controls before retuning.

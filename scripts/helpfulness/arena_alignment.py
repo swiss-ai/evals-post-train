@@ -33,12 +33,19 @@ def load_inputs(args):
         case = row["case"]
         if case.get("category") not in ("hard_prompt", "creative_writing", "coding", "math"):
             raise ValueError("Unknown Arena category")
-        for value in (case.get("question"), case.get("reference_answer"), row.get("answer")):
+        for value in (case.get("question"), case.get("reference_answer")):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError("Alignment requires complete nonempty question and both answers")
+        failed_model = row.get("status") == "model_no_final_reply"
+        if not isinstance(row.get("answer"), str) or (not row["answer"].strip() and not failed_model):
+            raise ValueError("Empty replies require an explicit native model-failure outcome")
+        if failed_model:
+            if row["split"] != "pilot_review" or arena_pilot.outcome_status(row, True) != "model_no_final_reply":
+                raise ValueError("Only verified native checkpoint failures may skip judging")
         allowed = label.get("allowed_margins")
         if (
-            not isinstance(allowed, list) or not allowed or len(allowed) != len(set(allowed))
+            not isinstance(allowed, list) or (not allowed and not failed_model) or len(allowed) != len(set(allowed))
+            or (failed_model and allowed)
             or any(type(value) is not int or value not in range(-2, 3) for value in allowed)
             or not isinstance(label.get("basis"), str) or not label["basis"].strip()
         ):
@@ -49,7 +56,7 @@ def load_inputs(args):
 def plans(cases, assets):
     return [
         {"case_id": row["case"]["id"], **entry}
-        for row in cases
+        for row in cases if row.get("status") != "model_no_final_reply"
         for entry in open_benchmarks.arena_messages(row["case"], row["answer"], assets)
     ]
 
@@ -60,12 +67,17 @@ def request(entry, model):
 
 
 def results(cases, oracle, responses):
-    if len(responses) != 80:
-        raise ValueError("Alignment requires all eighty actual judge responses")
+    expected_orders = 2 * sum(row.get("status") != "model_no_final_reply" for row in cases)
+    if len(responses) != expected_orders:
+        raise ValueError("Alignment requires every actual judge response; native model failures must not be judged")
     rows = []
+    offset = 0
     for index, (case, expected) in enumerate(zip(cases, oracle["cases"])):
-        sample = {**case, "status": "generated"}
-        row = arena_pilot.judgment(sample, responses[2 * index:2 * index + 2])
+        failed_model = case.get("status") == "model_no_final_reply"
+        sample = {**case, "status": "model_no_final_reply" if failed_model else "generated"}
+        count = 0 if failed_model else 2
+        row = arena_pilot.judgment(sample, responses[offset:offset + count])
+        offset += count
         row["split"] = case["split"]
         row["review"] = expected
         row["alignment_match"] = (
@@ -85,11 +97,13 @@ def results(cases, oracle, responses):
             "failed_case_ids": [row["case"]["id"] for row in group if not row["alignment_match"]],
         }
     valid_orders = sum(order["status"] == "succeeded" for row in rows for order in row["orders"])
-    gate = valid_orders == 80 and all(value["complete_case_matches"] >= 17 for value in split_results.values())
+    gate = valid_orders == expected_orders and all(value["complete_case_matches"] >= 17 for value in split_results.values())
     pilot = [row for row in rows if row["split"] == "pilot_review"]
     summary = {
         "protocol": PROTOCOL, "split_results": split_results,
-        "valid_orders": valid_orders, "selected_orders": 80, "alignment_gate_passed": gate,
+        "valid_orders": valid_orders, "selected_orders": 80, "expected_judge_orders": expected_orders,
+        "omitted_model_failure_orders": 80 - expected_orders, "alignment_gate_passed": gate,
+        "checkpoint_reply_coverage_complete": expected_orders == 80,
         "automatic_scoring_ready": False, "independent_human_gold": False,
         "interpretation": "Agreement with frozen AI review intervals and constructive controls, not general judge accuracy",
         "pilot_metrics": arena_pilot.summarize(pilot),
@@ -99,7 +113,7 @@ def results(cases, oracle, responses):
 
 def replay(args, cases, oracle, calls, assets):
     expected = plans(cases, assets)
-    if len(calls) != 160:
+    if len(calls) != 2 * len(expected):
         raise ValueError("Incomplete alignment request/response evidence")
     responses = []
     for entry, requested, returned in zip(expected, calls[::2], calls[1::2]):
