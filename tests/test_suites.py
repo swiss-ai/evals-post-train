@@ -23,7 +23,7 @@ class SuiteTests(unittest.TestCase):
 
     def test_repeats_flag_only_where_the_task_has_no_repeats_of_its_own(self):
         suite = suites.load(SUITE)
-        self.assertEqual(suites.flags_for(suite, THINK, "ifbench"),
+        self.assertEqual(suites.flags_for(suite, THINK, "aime24_think"),
                          ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>",
                           "--api-num-concurrent", "256", "--max-length", "262144", "--repeats", "4"])
         self.assertNotIn("--repeats", suites.flags_for(suite, THINK, "minerva_math500_think"))
@@ -31,13 +31,13 @@ class SuiteTests(unittest.TestCase):
     def test_apertus_15_70b_runs_with_high_client_concurrency_on_every_lm_eval_row(self):
         # Its two replicas sit idle at the launcher's default of 8.
         suite = suites.load(SUITE)
-        flags = suites.flags_for(suite, THINK, "ifbench")
+        flags = suites.flags_for(suite, THINK, "ifbench_think")
         self.assertEqual(flags[flags.index("--api-num-concurrent") + 1], "256")
-        self.assertNotIn("--api-num-concurrent", suites.flags_for(suite, "apertus-1.5-8b-thinking", "ifbench"))
+        self.assertNotIn("--api-num-concurrent", suites.flags_for(suite, "apertus-1.5-8b-thinking", "ifbench_think"))
 
     def test_setup_sets_window_and_format(self):
         suite = suites.load("apertus2/chonk_sft")
-        flags = suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "ifbench")
+        flags = suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "ifbench_think")
         self.assertEqual(flags[:4], ["--backend", "openai", "--chat-format", "apertus2"])
         self.assertIn("apertus2", suite["setups"]["chonk-lc-16k-v0.2-sft"]["serving"])
         self.assertEqual(flags[flags.index("--max-length") + 1], "32768")
@@ -59,7 +59,7 @@ class SuiteTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not in suite"):
             suites.flags_for(suite, THINK, "nope")
         with self.assertRaisesRegex(ValueError, "unknown setup"):
-            suites.flags_for(suite, "nope", "ifbench")
+            suites.flags_for(suite, "nope", "ifbench_think")
 
     def test_malformed_suites_name_the_field(self):
         base = suites.load(SUITE)
@@ -121,14 +121,16 @@ class SuiteTests(unittest.TestCase):
 
     def test_inspect_rows_get_their_own_flags_task_args_and_epochs(self):
         suite = suites.load("apertus2/chonk_sft")
-        self.assertEqual(suites.flags_for(suite, "qwen3-32b-thinking", "ifeval"),
+        # No shipped inspect row repeats via the flag at the moment: the epochs path is exercised with a row set here.
+        next(b for b in suite["benchmarks"] if b["task"] == "gpqa_diamond")["repeats"]["via"] = "flag"
+        self.assertEqual(suites.flags_for(suite, "qwen3-32b-thinking", "gpqa_diamond"),
                          ["--enable-thinking", "--", "--epochs", "4"])
         with_args = copy.deepcopy(suite)
-        next(b for b in with_args["benchmarks"] if b["task"] == "ifeval")["task_args"] = {"cot": "true"}
-        self.assertEqual(suites.flags_for(with_args, "qwen3-32b-thinking", "ifeval"),
+        next(b for b in with_args["benchmarks"] if b["task"] == "gpqa_diamond")["task_args"] = {"cot": "true"}
+        self.assertEqual(suites.flags_for(with_args, "qwen3-32b-thinking", "gpqa_diamond"),
                          ["--enable-thinking", "--task-arg", "cot=true", "--", "--epochs", "4"])
-        self.assertEqual(suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "ifeval"), ["--reasoning-effort", "high", "--", "--epochs", "4"])
-        lm_eval = suites.flags_for(suite, "qwen3-32b-thinking", "ifbench")
+        self.assertEqual(suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "gpqa_diamond"), ["--reasoning-effort", "high", "--", "--epochs", "4"])
+        lm_eval = suites.flags_for(suite, "qwen3-32b-thinking", "ifbench_think")
         self.assertIn("--max-length", lm_eval)
         self.assertNotIn("--epochs", lm_eval)
 
@@ -142,9 +144,9 @@ class SuiteTests(unittest.TestCase):
         suite = suites.load(SUITE)
         spec = suite["setups"]["chonk-lc-16k-v0.2-sft"]["tokenizer"]
         with mock.patch.dict(os.environ, {"EVAL_ENV_CACHE_ROOT": "/cache"}):
-            flags = suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "ifbench")
+            flags = suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "ifbench_think")
             self.assertEqual(flags[flags.index("--tokenizer") + 1], f"/cache/tokenizers/{spec['revision']}/{spec['path']}")
-            self.assertNotIn("--tokenizer", suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "ifeval"))
+            self.assertNotIn("--tokenizer", suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "gpqa_diamond"))
         suite["setups"]["chonk-lc-16k-v0.2-sft"]["flags"]["lm_eval"] += ["--tokenizer", "x"]
         with self.assertRaisesRegex(ValueError, "--tokenizer"):
             suites.validate(suite)
@@ -188,11 +190,10 @@ class SuiteTests(unittest.TestCase):
                                qos="highprio", partition="highprio")
         self.assertEqual(len(rows), len(models) * len(suite["benchmarks"]))
         self.assertEqual([(r["setup"], r["label"]) for r in rows[:2]], [("chonk-lc-16k-v0.2-sft", "GPQA Diamond"), ("chonk-lc-16k-v0.2-sft", "IFBench")])
-        inspect_row, lm_eval_row = rows[2]["argv"], rows[1]["argv"]
+        inspect_row, lm_eval_row = rows[0]["argv"], rows[1]["argv"]
         self.assertEqual(inspect_row[:3], ["sbatch", "--qos=highprio", "--partition=highprio"])
-        self.assertEqual(inspect_row[-3:], ["--", "--epochs", "4"])
         self.assertEqual(lm_eval_row[:3], ["bash", "scripts/lm_eval_harness/launch_evaluations.sh", "single"])
-        self.assertEqual(lm_eval_row[lm_eval_row.index("--task") + 1], "ifbench")
+        self.assertEqual(lm_eval_row[lm_eval_row.index("--task") + 1], "ifbench_think")
         self.assertEqual(lm_eval_row.count("--backend"), 1)  # the Chonk setup already names it
         qwen_lm_eval = next(r["argv"] for r in rows if r["setup"] == "qwen3-32b-thinking" and r["framework"] == "lm_eval")
         self.assertEqual(qwen_lm_eval[qwen_lm_eval.index("--backend") + 1], "openai")
@@ -279,7 +280,7 @@ class SuiteTests(unittest.TestCase):
                 self.assertEqual(flags.count("--reasoning-effort"), 1, (name, bench["label"]))
                 self.assertEqual(flags[flags.index("--reasoning-effort") + 1], "high")
                 self.assertEqual(suites.sampling_for(suite, name, bench["task"]), "thinking")
-        self.assertEqual(suites.flags_for(suite, chonk, "ifeval"), ["--reasoning-effort", "high", "--", "--epochs", "4"])
+        self.assertEqual(suites.flags_for(suite, chonk, "gpqa_diamond"), ["--reasoning-effort", "high"])
         for other in set(suite["setups"]) - {chonk, "chonk-lc-16k-v0.1-ep1"}:
             for bench in suite["benchmarks"]:
                 self.assertNotIn("--reasoning-effort", suites.flags_for(suite, other, bench["task"]))
@@ -287,15 +288,14 @@ class SuiteTests(unittest.TestCase):
     def test_a_benchmarks_flags_follow_the_setups(self):
         suite = suites.load(SUITE)
         # No shipped row carries flags of its own at the moment: the mechanism is exercised with a row set here.
-        next(b for b in suite["benchmarks"] if b["task"] == "ifeval")["flags"] = ["--sandbox", "opensandbox"]
+        next(b for b in suite["benchmarks"] if b["task"] == "gpqa_diamond")["flags"] = ["--sandbox", "opensandbox"]
         suites.validate(suite)
-        flags = suites.flags_for(suite, THINK, "ifeval")
+        flags = suites.flags_for(suite, THINK, "gpqa_diamond")
         setup_flags = suite["setups"][THINK]["flags"]["inspect"]
         self.assertEqual(flags[:len(setup_flags)], setup_flags)
         own = flags.index("--sandbox")
         self.assertEqual(flags[own:own + 2], ["--sandbox", "opensandbox"])
-        self.assertLess(own, flags.index("--"))  # before the epochs
-        next(b for b in suite["benchmarks"] if b["task"] == "ifbench")["flags"] = ["--repeats", "2"]
+        next(b for b in suite["benchmarks"] if b["task"] == "ifbench_think")["flags"] = ["--repeats", "2"]
         with self.assertRaisesRegex(ValueError, "--repeats"):
             suites.validate(suite)
 
