@@ -26,7 +26,7 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(suites.flags_for(suite, THINK, "ifbench"),
                          ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>",
                           "--api-num-concurrent", "256", "--max-length", "32768", "--repeats", "4"])
-        self.assertNotIn("--repeats", suites.flags_for(suite, THINK, "minerva_math500_self_consistency"))
+        self.assertNotIn("--repeats", suites.flags_for(suite, THINK, "minerva_math500_think"))
 
     def test_apertus_15_70b_runs_with_high_client_concurrency_on_every_lm_eval_row(self):
         # Its two replicas sit idle at the launcher's default of 8.
@@ -51,8 +51,8 @@ class SuiteTests(unittest.TestCase):
     def test_a_benchmark_samples_with_its_setups_profile_unless_it_names_one(self):
         suite = suites.load(SUITE)
         self.assertEqual(suites.sampling_for(suite, THINK, "aime24_think"), "thinking")
-        suite["benchmarks"][6]["sampling"] = "thinking"
-        self.assertEqual(suites.plan(suite, THINK)[6]["sampling"], "thinking")
+        suite["benchmarks"][5]["sampling"] = "thinking"
+        self.assertEqual(suites.plan(suite, THINK)[5]["sampling"], "thinking")
 
     def test_unknown_task_or_setup_is_refused(self):
         suite = suites.load(SUITE)
@@ -64,24 +64,24 @@ class SuiteTests(unittest.TestCase):
     def test_malformed_suites_name_the_field(self):
         base = suites.load(SUITE)
         for mutate, message in (
-            (lambda s: s["benchmarks"][6].update(framework="x"), "framework"),
-            (lambda s: s["benchmarks"][6]["repeats"].update(n=0), "repeats.n"),
-            (lambda s: s["benchmarks"][6]["repeats"].update(via="both"), "repeats.via"),
-            (lambda s: s["benchmarks"][6]["metric"].update(label="mean@8"), "does not match"),
+            (lambda s: s["benchmarks"][5].update(framework="x"), "framework"),
+            (lambda s: s["benchmarks"][5]["repeats"].update(n=0), "repeats.n"),
+            (lambda s: s["benchmarks"][5]["repeats"].update(via="both"), "repeats.via"),
+            (lambda s: s["benchmarks"][5]["metric"].update(label="mean@8"), "does not match"),
             (lambda s: s["benchmarks"][1].update(task=s["benchmarks"][0]["task"]), "unique"),
             (lambda s: s["benchmarks"][0].pop("metric"), "missing 'metric'"),
             (lambda s: s["benchmarks"][0].update(repeats=4), "repeats must be an object"),
             (lambda s: s.pop("description"), "description"),
             (lambda s: s["setups"][THINK].update(max_length="32k"), "max_length"),
-            (lambda s: s["benchmarks"][6].update(sampling="warm"), "unknown sampling profile"),
+            (lambda s: s["benchmarks"][5].update(sampling="warm"), "unknown sampling profile"),
             (lambda s: s["setups"][THINK].update(sampling="greedy"), "not deterministic"),
-            (lambda s: s["benchmarks"][6].update(sampling="non_thinking"), "not deterministic"),
+            (lambda s: s["benchmarks"][5].update(sampling="non_thinking"), "not deterministic"),
             (lambda s: s["setups"][THINK].pop("sampling"), "sampling"),
             (lambda s: s["setups"][THINK]["flags"]["lm_eval"].extend(["--repeats", "2"]), "--repeats"),
             (lambda s: s["setups"][THINK].update(flags=["--thinking"]), "keyed by framework"),
             (lambda s: s["setups"][THINK].update(serving="--reasoning-parser x"), "serving must be a list"),
             (lambda s: s["setups"][THINK]["flags"].pop("lm_eval"), "no entry for 'lm_eval'"),
-            (lambda s: s["benchmarks"][2].update(task_args={"cot": "true"}), "inspect framework only"),
+            (lambda s: s["benchmarks"][1].update(task_args={"cot": "true"}), "inspect framework only"),
         ):
             suite = copy.deepcopy(base)
             mutate(suite)
@@ -118,7 +118,11 @@ class SuiteTests(unittest.TestCase):
 
     def test_inspect_rows_get_their_own_flags_task_args_and_epochs(self):
         suite = suites.load("apertus2/chonk_sft")
-        self.assertEqual(suites.flags_for(suite, "qwen3-32b-thinking", "mmlu_0_shot"),
+        self.assertEqual(suites.flags_for(suite, "qwen3-32b-thinking", "ifeval"),
+                         ["--enable-thinking", "--", "--epochs", "4"])
+        with_args = copy.deepcopy(suite)
+        next(b for b in with_args["benchmarks"] if b["task"] == "ifeval")["task_args"] = {"cot": "true"}
+        self.assertEqual(suites.flags_for(with_args, "qwen3-32b-thinking", "ifeval"),
                          ["--enable-thinking", "--task-arg", "cot=true", "--", "--epochs", "4"])
         self.assertEqual(suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "ifeval"), ["--reasoning-effort", "high", "--", "--epochs", "4"])
         lm_eval = suites.flags_for(suite, "qwen3-32b-thinking", "ifbench")
@@ -180,11 +184,10 @@ class SuiteTests(unittest.TestCase):
         rows = suites.commands(suite, models, api_base_url="http://x/v1", limit=5, no_wandb=True,
                                qos="highprio", partition="highprio")
         self.assertEqual(len(rows), len(models) * len(suite["benchmarks"]))
-        self.assertEqual([(r["setup"], r["label"]) for r in rows[:2]], [("chonk-lc-16k-v0.2-sft", "MMLU"), ("chonk-lc-16k-v0.2-sft", "GPQA Diamond")])
-        inspect_row, lm_eval_row = rows[0]["argv"], rows[2]["argv"]
+        self.assertEqual([(r["setup"], r["label"]) for r in rows[:2]], [("chonk-lc-16k-v0.2-sft", "GPQA Diamond"), ("chonk-lc-16k-v0.2-sft", "IFBench")])
+        inspect_row, lm_eval_row = rows[2]["argv"], rows[1]["argv"]
         self.assertEqual(inspect_row[:3], ["sbatch", "--qos=highprio", "--partition=highprio"])
         self.assertEqual(inspect_row[-3:], ["--", "--epochs", "4"])
-        self.assertIn("--task-arg", inspect_row)
         self.assertEqual(lm_eval_row[:3], ["bash", "scripts/lm_eval_harness/launch_evaluations.sh", "single"])
         self.assertEqual(lm_eval_row[lm_eval_row.index("--task") + 1], "ifbench")
         self.assertEqual(lm_eval_row.count("--backend"), 1)  # the Chonk setup already names it
@@ -221,7 +224,7 @@ class SuiteTests(unittest.TestCase):
         with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
             self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m", "--model", "qwen3-32b-thinking=q"]), 0)
-        self.assertIn("26 launches: 2 models x 13 benchmarks", err.getvalue())
+        self.assertIn("24 launches: 2 models x 12 benchmarks", err.getvalue())
         for bad in (["--model", "m"], ["--model", "nope=m"], ["--model", f"{THINK}=a", "--model", f"{THINK}=b"]):
             self.assertEqual(suites.main(["run", SUITE, *bad]), 1)
 
