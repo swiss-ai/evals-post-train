@@ -6,7 +6,7 @@ A suite writes down a comparison once: its benchmarks, how each is repeated and 
 python -m scripts.common.suites show apertus2/chonk_sft   # title and setups
 python -m scripts.common.suites plan apertus2/chonk_sft --setup apertus-1.5-70b-thinking
 python -m scripts.common.suites flags apertus2/chonk_sft --setup apertus-1.5-70b-thinking --task ifbench
-# --thinking --think-start-token '<|inner_prefix|>' --think-end-token '<|inner_suffix|>' --max-length 32768 --repeats 4
+# --thinking --think-start-token '<|inner_prefix|>' --think-end-token '<|inner_suffix|>' --max-length 262144 --repeats 4
 ```
 
 `show` prints the title and the setups. `plan` prints one row per benchmark (label, task, launcher flags, what it reports, the results key). Give `flags` output to the launcher next to `--task`. `run` starts a suite: see [Running a suite](#running-a-suite).
