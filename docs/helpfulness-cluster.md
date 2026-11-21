@@ -67,6 +67,16 @@ overall and per released category, with position diagnostics. It is not the
 official Bradley-Terry/style-controlled headline ranking or an automatically
 accepted judge. Judge alignment requires separate pre-judge evidence.
 
+`scripts.helpfulness.arena_alignment` compares both answer orders with review
+intervals frozen before judge outputs: twenty actual pilot replies and twenty
+separate constructed controls. Reviews may allow both slight and strong
+preferences when only the direction is independently supported. At least
+seventeen complete-case matches are required in each split, and every one of
+eighty orders must be valid. These are AI review/constructive-control checks,
+not independent human gold or a production acceptance lock. No oracle labels,
+model identities or prior verdicts are included in judge prompts. Preserve
+every failed candidate and freeze fresh transfer controls before retuning.
+
 ### Standalone IFEval regression tooling (not in the teacher suite)
 
 The active teacher suite selects AlpacaEval 2 LC, non-code MT-Bench,
