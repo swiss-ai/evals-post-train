@@ -24,8 +24,8 @@
 #                               (default: logs/bfcl/<model>-<version>). Rerunning with the same workdir resumes:
 #                               bfcl-eval skips the entries it already has.
 #   --num-threads <n>          Parallel requests (default: 32).
-#   --request-timeout <s>      Seconds per request (default: 3600; the OpenAI SDK's own 600 cut off a few long
-#                               thinking answers per run in the EvalScope runs).
+#   --request-timeout <s>      Seconds per request (default: 3600; the OpenAI SDK's own 600 cuts off a few long
+#                               thinking answers per run).
 #   --num-tasks <n>            Only the first n entries of each category (a smoke test); scores then cover
 #                               that subset and are not the leaderboard's.
 #   --test-category <name>     Replace the version's categories (repeatable; bfcl-eval's names or groups).

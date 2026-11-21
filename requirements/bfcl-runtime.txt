@@ -2,8 +2,7 @@
 # itself is requirements/bfcl-eval.txt, installed without dependencies after this lock: its own pins (numpy==1.26.4,
 # faiss-cpu==1.11.0) have no wheels for the newest Python the venv may be built with (3.14), and they float here.
 # The package imports the SDK of every provider it supports when its registry loads (eval_runner -> model_config), so
-# they are all needed, import time only: the OpenAI one is what runs. The list is bfcl-eval's own dependencies,
-# as in requirements/evalscope-runtime.txt.
+# they are all needed, import time only: the OpenAI one is what runs. The list is bfcl-eval's own dependencies.
 openai>=1.86.0
 pydantic>=2.8.2
 pandas

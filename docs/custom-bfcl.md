@@ -1,6 +1,6 @@
 # Custom BFCL runner
 
-`scripts/custom/run_bfcl.sh` runs BFCL (the Berkeley Function Call Leaderboard) with its official package, [`bfcl-eval`](https://pypi.org/project/bfcl-eval/): the package's generation (the model's requests and the multi-turn loop with its simulated tool environments), its checkers and its score aggregation. No framework of this repository sits in between (EvalScope's BFCL adapter averages the per-sample verdicts itself, which is why its score is a different number from the leaderboard's). The driver is `scripts/custom/bfcl.py`; the script runs it in the venv of `requirements/bfcl-runtime.lock` and `requirements/bfcl-eval.txt`: baked into the prebuilt image (`BFCL_VENV`, nothing is installed at run time), elsewhere built into a cache ([locked_venv](../scripts/common/locked_venv.sh)).
+`scripts/custom/run_bfcl.sh` runs BFCL (the Berkeley Function Call Leaderboard) with its official package, [`bfcl-eval`](https://pypi.org/project/bfcl-eval/): the package's generation (the model's requests and the multi-turn loop with its simulated tool environments), its checkers and its score aggregation. No framework of this repository sits in between, so the score is the one bfcl-eval computes. The driver is `scripts/custom/bfcl.py`; the script runs it in the venv of `requirements/bfcl-runtime.lock` and `requirements/bfcl-eval.txt`: baked into the prebuilt image (`BFCL_VENV`, nothing is installed at run time), elsewhere built into a cache ([locked_venv](../scripts/common/locked_venv.sh)).
 
 ```bash
 scripts/custom/run_bfcl.sh --version v3 --model <served name> --api-base-url https://api.swissai.svc.cscs.ch/v1 \
@@ -18,7 +18,7 @@ BFCL v4's web search categories need a SerpAPI key and are not run (`--test-cate
 
 ## Settings
 
-bfcl-eval sends a temperature of 0.001 and nothing else. The sampling flags (`--temperature`, `--top-p`, `--top-k`, `--min-p`, `--repetition-penalty`, `--sampling-profile`) and the thinking flags (`--enable-thinking`, `--reasoning-effort`) are added to every request ([sampling](sampling.md)); without them the run is bfcl-eval's own default. `--num-threads` (default 32) is the number of parallel requests, `--request-timeout` (default 3600 s) the time one request may take: the OpenAI SDK's own 600 s cut off a few long thinking answers per run in the EvalScope runs. The driver patches two things in the package's handler and nothing else: it passes those settings through, and it keeps the null fields of a vLLM reply out of the assistant turns it replays (they make vLLM answer HTTP 400 and end the multi-turn conversation).
+bfcl-eval sends a temperature of 0.001 and nothing else. The sampling flags (`--temperature`, `--top-p`, `--top-k`, `--min-p`, `--repetition-penalty`, `--sampling-profile`) and the thinking flags (`--enable-thinking`, `--reasoning-effort`) are added to every request ([sampling](sampling.md)); without them the run is bfcl-eval's own default. `--num-threads` (default 32) is the number of parallel requests, `--request-timeout` (default 3600 s) the time one request may take: the OpenAI SDK's own 600 s cuts off a few long thinking answers per run. The driver patches two things in the package's handler and nothing else: it passes those settings through, and it keeps the null fields of a vLLM reply out of the assistant turns it replays (they make vLLM answer HTTP 400 and end the multi-turn conversation).
 
 ## Results
 
@@ -28,7 +28,7 @@ Rerunning with the same `--workdir` resumes: bfcl-eval skips the entries it alre
 
 ## Samples that fail in inference
 
-A sample whose generation fails is scored wrong and stays in the denominator (bfcl-eval records it as `inference_error`), so these lower the score and are worth counting after a run. In the two full Chonk runs of the earlier EvalScope setup (v3 and v4, 2026-11-20; ~4400 samples each) about 47 per run failed this way:
+A sample whose generation fails is scored wrong and stays in the denominator (bfcl-eval records it as `inference_error`), so these lower the score and are worth counting after a run. In two full Chonk runs (v3 and v4, 2026-11-20; ~4400 samples each, made with an earlier setup) about 47 per run failed this way:
 
 - **Prompt over the context window** (43-44): `multi_turn_long_context` prompts longer than the 32768-token window get HTTP 400. The runner cannot fix this; a longer window would.
 - **Request timeouts** (3): long thinking answers outlasted the OpenAI SDK's 600 s. `--request-timeout` (default 3600 s) is the answer.
@@ -38,4 +38,4 @@ Those runs were not made with this runner, so the counts are what to expect, not
 
 ## In suites
 
-`bfcl_v3` and `bfcl_v4` rows of a suite (`"framework": "bfcl"`) launch `scripts/custom/run_bfcl.sbatch`, a CPU job that calls the served model: see [suites](suites.md). `run_bfcl.sh` uploads `summary.json` to W&B (`--wandb-entity`, `--wandb-project`, `--no-wandb`, as the EvalScope wrapper): one task, `bfcl_v3` or `bfcl_v4`, with `overall` (v3), the groups, every category's accuracy and `n_samples`; `scripts/results/update_wandb_bfcl.py` does it from the venv, which has `wandb` for that.
+`bfcl_v3` and `bfcl_v4` rows of a suite (`"framework": "bfcl"`) launch `scripts/custom/run_bfcl.sbatch`, a CPU job that calls the served model: see [suites](suites.md). `run_bfcl.sh` uploads `summary.json` to W&B (`--wandb-entity`, `--wandb-project`, `--no-wandb`): one task, `bfcl_v3` or `bfcl_v4`, with `overall` (v3), the groups, every category's accuracy and `n_samples`; `scripts/results/update_wandb_bfcl.py` does it from the venv, which has `wandb` for that.
