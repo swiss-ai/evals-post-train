@@ -69,7 +69,7 @@ THINKING_FLAGS = ("--thinking", "--enable-thinking")
 # Flags the suite itself produces, so a setup may not list them.
 RESERVED = {"lm_eval": {"--max-length", "--repeats", "--reasoning-effort"},
             "inspect": {"--task-arg", "--epochs", "--", "--reasoning-effort"},
-            "evalscope": set(), "harbor": {"--reasoning-effort"}, "tau2": set(),
+            "evalscope": set(), "harbor": {"--reasoning-effort"}, "tau2": {"--reasoning-effort"},
             "bfcl": {"--reasoning-effort", "--version", "--sampling-profile"}}
 
 
@@ -275,7 +275,7 @@ def flags_for(suite, setup_name, task, fetch=False):
     copy first (once), otherwise the flag names where it will be."""
     bench, chosen = benchmark(suite, task), setup(suite, setup_name)
     flags = list(chosen["flags"][bench["framework"]])
-    if "reasoning_effort" in chosen and bench["framework"] in ("lm_eval", "inspect", "evalscope", "harbor", "bfcl"):
+    if "reasoning_effort" in chosen and bench["framework"] in ("lm_eval", "inspect", "evalscope", "harbor", "bfcl", "tau2"):
         flags += ["--reasoning-effort", chosen["reasoning_effort"]]
     flags += bench.get("flags", [])
     repeat = bench["repeats"]["via"] == "flag"
@@ -301,6 +301,7 @@ INSPECT = "scripts/inspect_ai/run_inspect_eval.sbatch"
 HARBOR = "scripts/harbor/run_harbor_eval.sbatch"
 EVALSCOPE = "scripts/evalscope/run_evalscope_eval.sbatch"
 BFCL = "scripts/custom/run_bfcl.sbatch"
+TAU2 = "scripts/custom/run_tau2_bench.sbatch"
 
 
 def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, no_wandb=False,
@@ -308,10 +309,11 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
     """One launch per (model, benchmark), models in the order given, benchmarks in table order.
 
     `models` maps a setup name to the name the model is served under. Every launch is its own Slurm job
-    (lm_eval: one `single` launch; inspect, harbor, evalscope and bfcl: one sbatch). api_model_name only applies to lm_eval, which
+    (lm_eval: one `single` launch; inspect, harbor, evalscope, bfcl and tau2: one sbatch). api_model_name only applies to lm_eval, which
     takes the served name separately from the model; qos and partition go to the lm_eval launcher or to
-    sbatch. Every launch uploads to the W&B project named after the suite, and the inspect, harbor, evalscope and bfcl ones
-    write to logs/<framework>/<suite>/<served name>/<task> (lm_eval's logs already sit under the project). Returns [{"setup", "label", "framework", "argv"}]."""
+    sbatch. Every launch but tau2's uploads to the W&B project named after the suite (the tau2 runner has no upload), and the
+    inspect, harbor, evalscope, bfcl and tau2 ones write to logs/<framework>/<suite>/<served name>/<task> (lm_eval's logs already sit
+    under the project). Returns [{"setup", "label", "framework", "argv"}]."""
     rows = []
     for setup_name, served in models.items():
         for bench in suite["benchmarks"]:
@@ -354,6 +356,12 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
                         *(["--no-wandb"] if no_wandb else ["--wandb-project", suite["name"]]),
                         "--sampling-profile", sampling_for(suite, setup_name, bench["task"]),
                         "--workdir", out_dir, *flags]
+            elif framework == "tau2":
+                # The domain is the task; --limit is --num-tasks; no W&B (the runner prints its summary and keeps results.json).
+                scheduling = ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])
+                argv = ["sbatch", *scheduling, TAU2, "--domain", bench["task"], "--model", served,
+                        *(["--api-base-url", api_base_url] if api_base_url else []),
+                        *(["--num-tasks", str(limit)] if limit else []), "--workdir", out_dir, *flags]
             else:
                 raise ValueError(f"{bench['task']}: no launcher for the {framework} framework yet")
             rows.append({"setup": setup_name, "label": bench["label"], "framework": framework, "argv": argv})
