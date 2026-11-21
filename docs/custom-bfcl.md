@@ -28,12 +28,8 @@ Rerunning with the same `--workdir` resumes: bfcl-eval skips the entries it alre
 
 ## What the EvalScope runs showed
 
-Checked against the logs of the two Chonk runs (v3 and v4, 2026-11-20): of ~4400 samples each, about 47 failed in inference and are scored wrong, as bfcl-eval does too (it keeps them in the denominator as `inference_error`). 43-44 of them are `multi_turn_long_context` prompts over the 32768 window (HTTP 400, not fixable by the runner), 3 are request timeouts (hence `--request-timeout`) and 2 are vLLM's tool-call parser rejecting a replayed assistant turn whose arguments the model wrote as invalid JSON (the server's parser, not the client's history). EvalScope's own v3 client also logged unparseable tool-call arguments, which bfcl-eval's handler does not hit.
+EvalScope's BFCL code has been removed from the repository; this is what its two Chonk runs showed. Checked against the logs of the two Chonk runs (v3 and v4, 2026-11-20): of ~4400 samples each, about 47 failed in inference and are scored wrong, as bfcl-eval does too (it keeps them in the denominator as `inference_error`). 43-44 of them are `multi_turn_long_context` prompts over the 32768 window (HTTP 400, not fixable by the runner), 3 are request timeouts (hence `--request-timeout`) and 2 are vLLM's tool-call parser rejecting a replayed assistant turn whose arguments the model wrote as invalid JSON (the server's parser, not the client's history). EvalScope's own v3 client also logged unparseable tool-call arguments, which bfcl-eval's handler does not hit.
 
 ## In suites
 
 `bfcl_v3` and `bfcl_v4` rows of a suite (`"framework": "bfcl"`) launch `scripts/custom/run_bfcl.sbatch`, a CPU job that calls the served model: see [suites](suites.md). `run_bfcl.sh` uploads `summary.json` to W&B (`--wandb-entity`, `--wandb-project`, `--no-wandb`, as the EvalScope wrapper): one task, `bfcl_v3` or `bfcl_v4`, with `overall` (v3), the groups, every category's accuracy and `n_samples`; `scripts/results/update_wandb_bfcl.py` does it from the venv, which has `wandb` for that.
-
-## Not yet
-
-EvalScope's BFCL code (`scripts/evalscope/bfcl_request.py`, `bfcl_history.py`, the `bfcl_*` rows of `run.py`) is still in the repository, no suite uses it.

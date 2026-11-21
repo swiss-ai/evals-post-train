@@ -34,7 +34,7 @@ Use each framework's own launcher with `--api-base-url "$EVAL_API_BASE_URL"` and
 |---|---|
 | lm-eval-harness | `bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k --model <name> --backend openai --api-base-url "$EVAL_API_BASE_URL" --api-model-name <name> --tokenizer <HF name or path> --failure-policy fail-fast` |
 | Inspect AI | `scripts/inspect_ai/run_inspect_eval.sh --task gsm8k --model <name> --api-base-url "$EVAL_API_BASE_URL"` |
-| EvalScope | `scripts/evalscope/run_evalscope_eval.sh --benchmark bfcl_v4 --model <name> --api-base-url "$EVAL_API_BASE_URL"` |
+| EvalScope | `scripts/evalscope/run_evalscope_eval.sh --benchmark swe_bench --sandbox <k8s or opensandbox> --model <name> --api-base-url "$EVAL_API_BASE_URL"` |
 | Harbor | `scripts/harbor/run_harbor_eval.sh --benchmark swe_bench --sandbox <k8s or opensandbox> --model <name> --api-base-url "$EVAL_API_BASE_URL"` |
 
 - **lm-eval submits Slurm jobs of its own**, and a job on another node could not reach the server on `127.0.0.1`. So every command finds `sbatch` and `srun` stand-ins first on `PATH` (`scripts/direct_serving/inline_slurm/`), which run the batch script or command in place, in the job's allocation. They can't emulate job arrays, so give lm-eval `--failure-policy fail-fast`. They are a bridge for every command; an inline executor in lm-eval's launcher would replace them. With `--backend openai` the tokenizer must be a Hugging Face name or a path, not the served name.
