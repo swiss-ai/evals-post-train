@@ -96,7 +96,10 @@ class SuiteTests(unittest.TestCase):
         self.assertIn("--data-parallel-backend ray", launch["framework_args"])
         self.assertTrue(launch["framework_args"].endswith("--tool-call-parser apertus2"))  # the setup's serving
         with self.assertRaisesRegex(ValueError, "no launch block"):
-            suites.launch_for(suite, THINK)
+            suites.launch_for(suite, "apertus-1.5-8b-thinking")
+        launch = suites.launch_for(suite, THINK)
+        self.assertTrue(Path(launch["environment"]).is_file())
+        self.assertIn("--max-model-len 32768", launch["framework_args"])  # the setup's window, not evals-svc's 262144
 
     def test_malformed_launch_blocks_name_the_field(self):
         base = suites.load(SUITE)

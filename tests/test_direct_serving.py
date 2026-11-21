@@ -305,7 +305,7 @@ class MainTests(unittest.TestCase):
         for argv in (
             ["--suite", "apertus2/chonk_sft", "--eval", "x"],
             ["--setup", "chonk-lc-16k-v0.2-sft", "--eval", "x"],
-            ["--suite", "apertus2/chonk_sft", "--setup", "apertus-1.5-70b-thinking", "--eval", "x"],  # no launch block
+            ["--suite", "apertus2/chonk_sft", "--setup", "apertus-1.5-8b-thinking", "--eval", "x"],  # no launch block
             ["--eval", "x"],
         ):
             with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()):
