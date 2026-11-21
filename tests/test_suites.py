@@ -204,21 +204,40 @@ class SuiteTests(unittest.TestCase):
         for row in suites.commands(suite, {"chonk-lc-16k-v0.2-sft": "chonk"}, no_wandb=True):
             self.assertNotIn("--wandb-project", row["argv"])
 
-    def test_inspect_and_evalscope_rows_write_to_their_own_log_dir(self):
+    def test_sbatch_rows_write_to_their_own_log_dir(self):
         suite = suites.load(SUITE)
-        flag = {"inspect": "--logs-dir", "evalscope": "--work-dir", "harbor": "--work-dir"}
+        flag = {"inspect": "--logs-dir", "evalscope": "--work-dir", "harbor": "--work-dir", "bfcl": "--workdir"}
         seen = set()
         for row in suites.commands(suite, {"chonk-lc-16k-v0.2-sft": "chonk"}):
             argv = row["argv"]
             if row["framework"] not in flag:
-                self.assertNotIn("--logs-dir", argv)
-                self.assertNotIn("--work-dir", argv)
+                for name in flag.values():
+                    self.assertNotIn(name, argv)
                 continue
-            task = argv[argv.index("--task") + 1] if "--task" in argv else argv[argv.index("--benchmark") + 1]
+            if row["framework"] == "bfcl":
+                task = "bfcl_" + argv[argv.index("--version") + 1]
+            else:
+                task = argv[argv.index("--task") + 1] if "--task" in argv else argv[argv.index("--benchmark") + 1]
             expected = f"logs/{row['framework']}/{suite['name']}/chonk/{task}"
             self.assertEqual(argv[argv.index(flag[row["framework"]]) + 1], expected)
             seen.add(expected)
-        self.assertIn(f"logs/evalscope/{suite['name']}/chonk/bfcl_v4", seen)
+        self.assertIn(f"logs/bfcl/{suite['name']}/chonk/bfcl_v4", seen)
+
+    def test_bfcl_rows_run_the_custom_runner(self):
+        suite = suites.load(SUITE)
+        rows = {r["label"]: r["argv"] for r in suites.commands(
+            suite, {"chonk-lc-16k-v0.2-sft": "chonk"}, api_base_url="http://x/v1", limit=2, qos="highprio")}
+        for label, version in (("BFCL v3", "v3"), ("BFCL v4", "v4")):
+            argv = rows[label]
+            self.assertEqual(argv[:3], ["sbatch", "--qos=highprio", "scripts/custom/run_bfcl.sbatch"])
+            self.assertEqual(argv[argv.index("--version") + 1], version)
+            self.assertEqual(argv[argv.index("--model") + 1], "chonk")
+            self.assertEqual(argv[argv.index("--api-base-url") + 1], "http://x/v1")
+            self.assertEqual(argv[argv.index("--num-tasks") + 1], "2")
+            self.assertEqual(argv[argv.index("--sampling-profile") + 1], "thinking")
+            self.assertEqual(argv[argv.index("--reasoning-effort") + 1], "high")
+            self.assertEqual(argv[argv.index("--wandb-project") + 1], suite["name"])
+            self.assertNotIn("--limit", argv)
 
     def test_run_prints_by_default_and_checks_its_arguments(self):
         with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \

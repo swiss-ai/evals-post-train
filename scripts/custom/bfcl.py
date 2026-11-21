@@ -21,6 +21,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -197,6 +198,7 @@ def summarize(version: str, registry: str, score_dir: Path) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    started = time.time()
     workdir = args.workdir.resolve()
     workdir.mkdir(parents=True, exist_ok=True)
     # Read when bfcl_eval is imported: where results, scores and the ids file live.
@@ -225,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     evaluate([registry], categories, None, None, partial_eval=bool(args.num_tasks))
 
     summary = summarize(args.version, registry, workdir / "score")
-    summary.update(model=args.model, api_base_url=args.api_base_url, num_tasks=args.num_tasks)
+    summary.update(model=args.model, api_base_url=args.api_base_url, num_tasks=args.num_tasks, duration_s=int(time.time() - started))
     (workdir / "summary.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
     return 0
