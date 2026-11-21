@@ -25,7 +25,7 @@ class SuiteTests(unittest.TestCase):
         suite = suites.load(SUITE)
         self.assertEqual(suites.flags_for(suite, THINK, "ifbench"),
                          ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>",
-                          "--api-num-concurrent", "256", "--max-length", "32768", "--repeats", "4"])
+                          "--api-num-concurrent", "256", "--max-length", "262144", "--repeats", "4"])
         self.assertNotIn("--repeats", suites.flags_for(suite, THINK, "minerva_math500_think"))
 
     def test_apertus_15_70b_runs_with_high_client_concurrency_on_every_lm_eval_row(self):
@@ -96,7 +96,10 @@ class SuiteTests(unittest.TestCase):
         self.assertIn("--data-parallel-backend ray", launch["framework_args"])
         self.assertTrue(launch["framework_args"].endswith("--tool-call-parser apertus2"))  # the setup's serving
         with self.assertRaisesRegex(ValueError, "no launch block"):
-            suites.launch_for(suite, THINK)
+            suites.launch_for(suite, "apertus-1.5-8b-thinking")
+        launch = suites.launch_for(suite, THINK)
+        self.assertTrue(Path(launch["environment"]).is_file())
+        self.assertIn("--max-model-len 262144", launch["framework_args"])  # served with the setup's window
 
     def test_malformed_launch_blocks_name_the_field(self):
         base = suites.load(SUITE)

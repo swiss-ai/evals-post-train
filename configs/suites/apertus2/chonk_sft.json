@@ -38,19 +38,26 @@
   ],
   "setups": {
     "apertus-1.5-70b-thinking": {
-      "description": "swiss-ai/Apertus-v1.5-70B reasoning (--thinking with its <|inner_prefix|> / <|inner_suffix|> tokens). Window 32768. Client concurrency 256 (lm_eval): the default 8 leaves its two replicas idle (evals-svc runs it on 2 nodes, TP4 x DP2): 18 min instead of 28 for full gsm8k x4 at 64, 34 on one node; 512 gave nothing more (the longest generation bounds the run).",
-      "max_length": 32768,
+      "description": "swiss-ai/Apertus-v1.5-70B reasoning (--thinking with its <|inner_prefix|> / <|inner_suffix|> tokens). Window 262144, as evals-svc serves it. Client concurrency 256 (lm_eval): the default 8 leaves its two replicas idle (evals-svc runs it on 2 nodes, TP4 x DP2): 18 min instead of 28 for full gsm8k x4 at 64, 34 on one node; 512 gave nothing more (the longest generation bounds the run).",
+      "max_length": 262144,
       "sampling": "thinking",
+      "launch": {
+        "model_path": "/capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/Apertus-v1.5-70B",
+        "environment": "containers/env_vllm_apertus1p5.toml",
+        "nodes": 2,
+        "time": "24:00:00",
+        "framework_args": ["--chat-template-content-format", "string", "--tensor-parallel-size", "4", "--data-parallel-size", "2", "--data-parallel-size-local", "1", "--data-parallel-backend", "ray", "--gpu-memory-utilization", "0.8", "--max-model-len", "262144", "--reasoning-parser", "apertus", "--default-chat-template-kwargs.enable_thinking", "true", "--compilation-config.pass_config.fuse_allreduce_rms", "false", "--enable-auto-tool-choice", "--tool-call-parser", "apertus"]
+      },
       "flags": {
         "lm_eval": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>", "--api-num-concurrent", "256"],
         "inspect": ["--enable-thinking"],
         "bfcl": [],
         "tau2": ["--enable-thinking"],
-        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
+        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 262144}"]
       }
     },
     "apertus-1.5-8b-thinking": {
-      "description": "swiss-ai/Apertus-v1.5-8B reasoning (--thinking with its <|inner_prefix|> / <|inner_suffix|> tokens). Window 32768, as for the 70B.",
+      "description": "swiss-ai/Apertus-v1.5-8B reasoning (--thinking with its <|inner_prefix|> / <|inner_suffix|> tokens). Window 32768.",
       "max_length": 32768,
       "sampling": "thinking",
       "flags": {
