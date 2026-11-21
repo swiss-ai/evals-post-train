@@ -44,6 +44,29 @@ invented by the batch script.
 
 ## Submit one benchmark/scope per job
 
+### Arena-Hard v2 twenty-case open-reference pilot
+
+`scripts.helpfulness.arena_pilot` freezes thirteen `hard_prompt` and seven
+`creative_writing` cases by UID hash from the imported 750-case release. The
+source join uses the exact released Qwen3-32B final answers. The pinned toolkit
+at `196f6b826783b3da7310e361a805fa36f0be83f3`, released data at
+`15f3746e21432264ce9b453999bde4f3c946d2e6`, and Qwen model license at
+`9216db5781bf21249d130ec9da846c4624c16137` declare Apache-2.0. Preserve original
+license notices and data/model attribution. Released generation-weight identity
+is publisher-attributed, not independently attested.
+
+Generation uses the verified final Chonk SFT `iter_0019374` native-format
+runner, a 2,048-token pilot budget, and explicit continuation for recognized
+thinking-budget failures. Empty failed replies receive no preference credit.
+Judging uses the pinned category rubrics with a separately identified open
+judge, both answer orders, seed 1234 and temperature zero. Raw replay rejects
+changed prompts/models/decoding, truncated verdicts, and ambiguous terminal
+preferences. Invalid orders remain visible and cannot produce a complete-case
+score. The result is an observed strong-win-weighted rate from zero to one,
+overall and per released category, with position diagnostics. It is not the
+official Bradley-Terry/style-controlled headline ranking or an automatically
+accepted judge. Judge alignment requires separate pre-judge evidence.
+
 ### Standalone IFEval regression tooling (not in the teacher suite)
 
 The active teacher suite selects AlpacaEval 2 LC, non-code MT-Bench,

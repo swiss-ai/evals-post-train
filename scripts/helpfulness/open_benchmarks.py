@@ -249,6 +249,22 @@ def binary(raw: str, yes: str, no: str) -> bool:
     return value == yes
 
 
+def arena_messages(case: dict, answer: str, assets: dict) -> list[dict]:
+    settings = literals(assets["files"]["utils/judge_utils.py"])["JUDGE_SETTINGS"][case["category"]]
+    template = '<|User Prompt|>\n{QUESTION}\n\n<|The Start of Assistant A\'s Answer|>\n{ANSWER_A}\n<|The End of Assistant A\'s Answer|>\n\n<|The Start of Assistant B\'s Answer|>\n{ANSWER_B}\n<|The End of Assistant B\'s Answer|>'
+    result = []
+    for candidate_is_b in (True, False):
+        a, b = (case["reference_answer"], answer) if candidate_is_b else (answer, case["reference_answer"])
+        result.append({
+            "candidate_position": "B" if candidate_is_b else "A",
+            "messages": [{"role": "system", "content": settings["system_prompt"]}, {
+                "role": "user",
+                "content": template.format(QUESTION=case["question"], ANSWER_A=a, ANSWER_B=b),
+            }],
+        })
+    return result
+
+
 def score(name: str, case: dict, answer: str, judge, assets: dict, options: dict, context: dict,
           trace: list | None = None) -> tuple[dict, list[dict]]:
     files = assets["files"]
@@ -284,20 +300,16 @@ def score(name: str, case: dict, answer: str, judge, assets: dict, options: dict
             prefixes += ["As an AI language model, I", "I'm sorry, but"]
         return {"refused": answer.strip().startswith(tuple(prefixes))}, trace
     if name == "arena_hard_v2":
-        settings = literals(files["utils/judge_utils.py"])["JUDGE_SETTINGS"][case["category"]]
-        # Preserve the upstream v2 template and reverse both positions.
-        template = '<|User Prompt|>\n{QUESTION}\n\n<|The Start of Assistant A\'s Answer|>\n{ANSWER_A}\n<|The End of Assistant A\'s Answer|>\n\n<|The Start of Assistant B\'s Answer|>\n{ANSWER_B}\n<|The End of Assistant B\'s Answer|>'
         credit, weight = 0, 0
-        for candidate_is_b in (True, False):
-            a, b = (case["reference_answer"], answer) if candidate_is_b else (answer, case["reference_answer"])
-            raw = call(template.format(QUESTION=case["question"], ANSWER_A=a, ANSWER_B=b), settings["system_prompt"])
+        for entry in arena_messages(case, answer, assets):
+            raw = call(entry["messages"][1]["content"], entry["messages"][0]["content"])
             matches = re.findall(r"\[\[([AB<>=]+)\]\]", raw.upper()) or re.findall(r"\[([AB<>=]+)\]", raw.upper())
             verdict = matches[-1] if matches else ""
             values = {"A>>B": -2, "A>B": -1, "A=B": 0, "B=A": 0,
                       "B>A": 1, "B>>A": 2, "A<<B": 2, "A<B": 1, "B<<A": -2, "B<A": -1}
             if verdict not in values:
                 raise ValueError("Arena judge did not return a valid bracketed preference")
-            margin = values[verdict] * (1 if candidate_is_b else -1)
+            margin = values[verdict] * (1 if entry["candidate_position"] == "B" else -1)
             battle_weight = 3 if abs(margin) == 2 else 1
             weight += battle_weight
             credit += battle_weight * (1 if margin > 0 else 0 if margin < 0 else 0.5)
