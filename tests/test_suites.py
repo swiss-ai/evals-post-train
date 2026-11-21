@@ -223,7 +223,7 @@ class SuiteTests(unittest.TestCase):
 
     def test_sbatch_rows_write_to_their_own_log_dir(self):
         suite = suites.load(SUITE)
-        flag = {"inspect": "--logs-dir", "evalscope": "--work-dir", "harbor": "--work-dir", "bfcl": "--workdir"}
+        flag = {"inspect": "--logs-dir", "evalscope": "--work-dir", "harbor": "--work-dir", "bfcl": "--workdir", "tau2": "--workdir"}
         seen = set()
         for row in suites.commands(suite, {"chonk-lc-16k-v0.2-sft": "chonk"}):
             argv = row["argv"]
@@ -233,6 +233,8 @@ class SuiteTests(unittest.TestCase):
                 continue
             if row["framework"] == "bfcl":
                 task = "bfcl_" + argv[argv.index("--version") + 1]
+            elif row["framework"] == "tau2":
+                task = argv[argv.index("--domain") + 1]
             else:
                 task = argv[argv.index("--task") + 1] if "--task" in argv else argv[argv.index("--benchmark") + 1]
             expected = f"logs/{row['framework']}/{suite['name']}/chonk/{task}"
