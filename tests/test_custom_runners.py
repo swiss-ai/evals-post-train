@@ -114,6 +114,13 @@ class LlmArgsTest(unittest.TestCase):
             lines = Path(d, "args").read_text().splitlines()
             return lines, json.loads(lines[lines.index("--agent-llm-args") + 1]), json.loads(lines[lines.index("--user-llm-args") + 1])
 
+    def test_the_sampling_profile_is_in_the_agents_args_and_without_it_nothing_is_sent(self):
+        _, agent, _ = self._llm_args("--sampling-profile", "thinking")
+        self.assertEqual((agent["temperature"], agent["top_p"]), (0.6, 0.95))
+        _, agent, user = self._llm_args()
+        self.assertNotIn("temperature", agent)
+        self.assertNotIn("temperature", user)
+
     def test_the_key_is_named_by_its_environment_variable_never_passed(self):
         lines, agent, user = self._llm_args()
         self.assertNotIn(self.SECRET, "\n".join(lines))

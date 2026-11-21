@@ -69,7 +69,7 @@ THINKING_FLAGS = ("--thinking", "--enable-thinking")
 # Flags the suite itself produces, so a setup may not list them.
 RESERVED = {"lm_eval": {"--max-length", "--repeats", "--reasoning-effort"},
             "inspect": {"--task-arg", "--epochs", "--", "--reasoning-effort"},
-            "evalscope": set(), "harbor": {"--reasoning-effort"}, "tau2": {"--reasoning-effort"},
+            "evalscope": set(), "harbor": {"--reasoning-effort"}, "tau2": {"--reasoning-effort", "--sampling-profile"},
             "bfcl": {"--reasoning-effort", "--version", "--sampling-profile"}}
 
 
@@ -358,10 +358,13 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
                         "--workdir", out_dir, *flags]
             elif framework == "tau2":
                 # The domain is the task; --limit is --num-tasks; no W&B (the runner prints its summary and keeps results.json).
+                # The agent samples with the setup's profile, as the other rows do.
                 scheduling = ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])
                 argv = ["sbatch", *scheduling, TAU2, "--domain", bench["task"], "--model", served,
                         *(["--api-base-url", api_base_url] if api_base_url else []),
-                        *(["--num-tasks", str(limit)] if limit else []), "--workdir", out_dir, *flags]
+                        *(["--num-tasks", str(limit)] if limit else []),
+                        "--sampling-profile", sampling_for(suite, setup_name, bench["task"]),
+                        "--workdir", out_dir, *flags]
             else:
                 raise ValueError(f"{bench['task']}: no launcher for the {framework} framework yet")
             rows.append({"setup": setup_name, "label": bench["label"], "framework": framework, "argv": argv})
