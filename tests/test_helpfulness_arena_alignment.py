@@ -1,11 +1,39 @@
 from copy import deepcopy
+import hashlib
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from scripts.helpfulness import arena_alignment as alignment
 from scripts.helpfulness.teacher_smoke import FAILURE_FLAGS
 
 
 class ArenaAlignmentTests(unittest.TestCase):
+    def test_compact_rubric_is_hash_bound_without_changing_native_messages(self):
+        cases, _, _ = self.fixture()
+        original = [{"candidate_position": "B", "messages": [
+            {"role": "system", "content": "native rubric"},
+            {"role": "user", "content": "exact question and answers"},
+        ]}]
+        with TemporaryDirectory() as directory:
+            rubric = Path(directory) / "rubric.txt"
+            rubric.write_text("Compact blinded criteria", encoding="utf-8")
+            args = SimpleNamespace(compact_rubric=rubric, compact_rubric_sha256=hashlib.sha256(rubric.read_bytes()).hexdigest())
+            text, protocol, limit = alignment.comparison_profile(args)
+            with patch.object(alignment.open_benchmarks, "arena_messages", side_effect=lambda *a: deepcopy(original)):
+                native = alignment.plans(cases[:1], {})
+                compact = alignment.plans(cases[:1], {}, text)
+            self.assertEqual(native[0]["messages"], original[0]["messages"])
+            self.assertEqual(compact[0]["messages"][1], original[0]["messages"][1])
+            self.assertNotEqual(compact[0]["messages"][0], original[0]["messages"][0])
+            self.assertEqual(protocol, alignment.COMPACT_PROTOCOL)
+            self.assertEqual(alignment.request(compact[0], "open-judge", limit)["max_tokens"], 512)
+            rubric.write_text("Changed rubric", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                alignment.comparison_profile(args)
+
     def fixture(self):
         cases = [{"case": {"id": str(i), "category": "hard_prompt", "question": "q", "reference_answer": "r"},
                   "answer": "a", "split": split}

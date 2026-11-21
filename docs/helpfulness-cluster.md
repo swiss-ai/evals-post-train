@@ -46,6 +46,23 @@ invented by the batch script.
 
 ### Arena-Hard v2 twenty-case open-reference pilot
 
+The optional `arena_alignment --compact-rubric FILE --compact-rubric-sha256 SHA`
+profile replaces the native system rubric with a hash-bound concise comparison
+rubric and a 512-token response budget. This is explicitly
+`adapted-arena-hard-v2-compact-both-order-alignment-v2`, not the upstream
+independent-answer protocol. It preserves complete prompts, answers, both orders,
+five-way preferences, and battle weighting. It checks errors in both answers,
+reserves strong preferences for substantial demonstrated gaps, and treats
+corrected algebra, optional printed results, and minor omissions proportionately.
+Native replay is unchanged. Use fresh frozen transfer controls after observing
+development judgments; do not revise the unchanged pilot review intervals.
+
+The native first judge attempt, job `3998387`, reached its serving/client
+18-minute command timeout after 34 of 78 calls. Seventeen pairs were completed;
+12 matched their frozen intervals in both positions, with no transfer controls
+reached. This incomplete run is not an accepted calibration. All raw responses
+and the pending request remain preserved; no target replies were regenerated.
+
 `scripts.helpfulness.arena_pilot` freezes thirteen `hard_prompt` and seven
 `creative_writing` cases by UID hash from the imported 750-case release. The
 source join uses the exact released Qwen3-32B final answers. The pinned toolkit
