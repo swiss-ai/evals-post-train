@@ -854,6 +854,23 @@ another twenty new transfer cases before changing this rubric and retain the
 original twenty regression labels. The same 17/20 target applies separately
 to both splits; previous protocols and failures remain unchanged.
 
+The v6 run `3998126` completed and replayed all 120 calls. It reached the
+requested **17/20 complete-case count in both splits** without changing labels
+or repairing outputs. Its source execution commit was
+`c7d5fbfd77fbbf83854c8e8d3fa0989b96a98a41`. All outputs ended normally, with
+maximum audit/assessment/premise lengths of 115/137/66 tokens.
+
+The stricter scientific gate still failed: 38/40 complete annotations were
+valid; both hypothetical-arithmetic error cases emitted `contradicted` with
+empty required error findings. They remain failures in the twenty-case
+denominators. Remaining valid disagreements include inferring reply abstention
+from question ambiguity and missing a source/reference conflict. The dedicated
+premise stage produced six positives across forty replies, matching the six
+expected positives, rather than the old constant-positive behavior.
+Stop additional allocations at the requested count target, but keep automatic
+scoring unaccepted. This is constructed-control agreement, not independently
+human-calibrated or representative 85% judge accuracy.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID
