@@ -741,6 +741,25 @@ accepted verdicts and flags, with no invalid annotation. Report each disagreemen
 Even perfect agreement on these controlled checks is not independent human
 calibration or real-distribution judge accuracy. No new target generation is needed.
 
+The first evidence-ID calibration allocation `3962238` failed in 18m11s.
+All thirty-nine actual calls were retrieved and replayed after SSH access recovered.
+Only **7/20 frozen controls** matched all expected verdicts and flags end-to-end:
+thirteen control annotations were valid, seven invalid, and six valid ones still
+disagreed with at least one frozen check. Overall, seventeen of thirty-nine
+annotations passed validation. Twelve outputs hit the token ceiling, often
+repeating whitespace; seven others had applicability/basis conflicts, two lacked
+required error findings, and one used invalid evidence IDs. No failed rows were
+silently accepted or rerun.
+
+The candidate **failed the controlled-check gate and is not accepted as a
+reliable automatic judge**. Valid-output disagreements include source-method
+ambiguity, conflicting reference scopes, unsupported precision versus proven
+falsehood, and weak hedges. The 7/20 result is controlled end-to-end agreement,
+not general accuracy. The checks are assistant-authored, not human gold, and are
+now development evidence; further calibration needs fresh checks rather than
+retuning until this same set passes. Original teacher replies, native metrics
+and prior reports remain unchanged. No replacement allocation was started.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID
