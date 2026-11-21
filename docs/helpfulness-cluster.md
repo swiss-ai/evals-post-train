@@ -760,6 +760,34 @@ now development evidence; further calibration needs fresh checks rather than
 retuning until this same set passes. Original teacher replies, native metrics
 and prior reports remain unchanged. No replacement allocation was started.
 
+#### Compact, source-only calibration
+
+`scripts.helpfulness.abstention_grounded_calibration` tests a narrower judge:
+only contradictions and support grounded in supplied context and elementary
+arithmetic, **not open-world whole-answer factual verification**. Unverified
+claims must remain `insufficient_evidence`. It uses two compact stages: first
+question scope/reference agreement, then abstention and source-grounded
+factuality using the actual first-stage audit. Exact SDK replay verifies that
+audit binding, per-input evidence-ID schemas, caps of 320/384 tokens, and
+strict output validation. Invalid audits are explicitly marked and the case
+cannot pass, even if a second request returns.
+
+Disable arbitrary JSON whitespace in the existing vLLM structured-output
+configuration to address the observed whitespace loops; do not increase token
+budgets to hide them. Short categorical outputs eliminate redundant overall
+evidence-basis/applicability fields. Evidence IDs are resolved verbatim, not
+corrected by a language model. Parse failures and inconsistent findings remain
+visible failures.
+
+Use six earlier difficult controls as development regressions and freeze twenty
+new source-grounded transfer checks before revising the candidate prompts.
+The earlier examples may appear in prompts; fresh expected labels may not.
+These checks intentionally exercise known failure families, not a random
+real-world sample. Require every fresh case to pass all frozen dimensions and
+flags and all fifty-two stage outputs to be valid. Report observed agreement
+and failures without describing constructed checks as human gold or general
+judge accuracy. Previous teacher replies and annotations remain unchanged.
+
 ```bash
 squeue --me
 scontrol show job JOB_ID
