@@ -22,8 +22,8 @@ run_inspect_eval.sh, run_harbor_eval.sh, run_evalscope_eval.sh). Each runs with 
 from this checkout, with `sbatch` and `srun` that run in place (inline_slurm/), inside the
 prebuilt eval image (docs/lm-eval-harness.md): the image of the last commit that changed what
 it is built from, which CI published (.github/workflows/eval-image.yml). The job writes the
-EDF that starts it; the checkout and the usual scratch directories are mounted (more with
-`--mount`).
+EDF that starts it; the checkout, the usual scratch directories and the model's directory
+(unless one of those holds it: the evals read its tokenizer) are mounted, more with `--mount`.
 
 Print the job script (to submit it another way). scripts/direct_serving/job.sh runs this module from
 its own pinned venv (the model-launch it needs; nothing to install by hand):
@@ -73,6 +73,19 @@ DEFAULT_MOUNTS = (
     "/capstor/scratch/cscs/${USER}",
     "/iopsstor/scratch/cscs/${USER}",
 )
+
+
+def model_mounts(model: str, user: str) -> list[str]:
+    """The model's directory, for the eval image, unless a default mount already holds it.
+
+    The evals read the checkpoint's tokenizer; the server's image mounts the whole store, the eval image does not.
+    A model that is not an absolute path (a Hugging Face name) needs no mount.
+    """
+    path = model.rstrip("/")
+    if not os.path.isabs(path):
+        return []
+    held = (mount.replace("${USER}", user).rstrip("/") for mount in DEFAULT_MOUNTS)
+    return [] if any(path == mount or path.startswith(mount + "/") for mount in held) else [path]
 
 
 def build_launch_args(
@@ -441,7 +454,7 @@ def main(argv: list[str] | None = None) -> int:
     script = render(
         launch_args,
         image_commit=image_commit,
-        mounts=[*DEFAULT_MOUNTS, *args.mount],
+        mounts=[*DEFAULT_MOUNTS, *model_mounts(args.model, user), *args.mount],
         evals=args.evals,
         ready_timeout=args.ready_timeout,
         reservation=args.reservation,

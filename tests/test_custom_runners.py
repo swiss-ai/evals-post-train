@@ -1,7 +1,9 @@
 """Offline checks of scripts/custom/run_tau2_bench.sh's argument handling (no network, model or venv)."""
 
 import json
+import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -82,6 +84,156 @@ class RetrievalDefaultTest(unittest.TestCase):
         args = self._tau2_args("banking_knowledge", "--retrieval-config", "bm25_grep")
         self.assertEqual(args[args.index("--retrieval-config") + 1], "bm25_grep")
         self.assertNotIn("--retrieval-config", self._tau2_args("retail"))
+
+
+class LlmArgsTest(unittest.TestCase):
+    """The litellm args the runner hands tau2 for the agent and the simulated user (stub `tau2` records them)."""
+
+    SECRET = "sk-test-secret-1234"
+
+    def _llm_args(self, *extra, secret=SECRET):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d, "upstream")
+            (root / ".venv/bin").mkdir(parents=True)
+            (root / "data").mkdir()
+            (root / "data/x").write_text("")
+            stub = root / ".venv/bin/tau2"
+            stub.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > {d}/args\nexit 0\n')
+            stub.chmod(0o755)
+            ref = Path(d, "ref")
+            ref.write_text("v2.0.0 " + "a" * 40 + "\n")
+            subprocess.run(
+                ["bash", "scripts/custom/run_tau2_bench.sh", "--domain", "retail", "--model", "m", "--api-base-url", "http://x/v1",
+                 "--workdir", f"{d}/work", *extra],
+                cwd=REPO, capture_output=True, text=True, timeout=60,
+                env={"PATH": "/usr/bin:/bin", "HOME": d, "EVAL_PREBUILT_ENV": "1", "TARGET_API_KEY": secret,
+                     "TAU2_UPSTREAM_DIR": str(root), "TAU2_UPSTREAM_REF_FILE": str(ref)},
+            )
+            lines = Path(d, "args").read_text().splitlines()
+            return lines, json.loads(lines[lines.index("--agent-llm-args") + 1]), json.loads(lines[lines.index("--user-llm-args") + 1])
+
+    def test_the_key_is_named_by_its_environment_variable_never_passed(self):
+        lines, agent, user = self._llm_args()
+        self.assertNotIn(self.SECRET, "\n".join(lines))
+        self.assertEqual(agent["api_key"], "os.environ/TARGET_API_KEY")
+        self.assertEqual(user["api_key"], "os.environ/TARGET_API_KEY")
+
+    def test_the_default_user_reasons_at_low_effort_with_a_capped_reply_and_the_agent_is_untouched(self):
+        _, agent, user = self._llm_args("--reasoning-effort", "high")
+        self.assertEqual(agent["reasoning_effort"], "high")
+        self.assertNotIn("max_tokens", agent)
+        self.assertEqual(user["reasoning_effort"], "low")
+        self.assertEqual(user["max_tokens"], 4096)
+
+    def test_user_llm_args_override_the_users_effort_and_cap(self):
+        _, _, user = self._llm_args("--user-llm-args", '{"reasoning_effort": "medium", "max_tokens": 100}')
+        self.assertEqual((user["reasoning_effort"], user["max_tokens"]), ("medium", 100))
+
+    def test_another_user_model_gets_none_of_it(self):
+        _, _, user = self._llm_args("--user-llm", "gpt-4.1")
+        self.assertEqual(user, {})
+
+
+class JudgeTest(unittest.TestCase):
+    """The NL-assertion judge is the model under test: the runner's environment for tau2 and the sitecustomize shim."""
+
+    SHIM = REPO / "scripts/custom/tau2_judge"
+
+    def _tau2_env(self, *extra, env_extra=None, base=("--api-base-url", "http://x/v1")):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d, "upstream")
+            (root / ".venv/bin").mkdir(parents=True)
+            (root / "data").mkdir()
+            (root / "data/x").write_text("")
+            stub = root / ".venv/bin/tau2"
+            stub.write_text(f'#!/bin/sh\nenv | grep -E "^(TAU2_JUDGE|PYTHONPATH)" > {d}/env\nexit 0\n')
+            stub.chmod(0o755)
+            ref = Path(d, "ref")
+            ref.write_text("v2.0.0 " + "a" * 40 + "\n")
+            result = subprocess.run(
+                ["bash", "scripts/custom/run_tau2_bench.sh", "--domain", "retail", "--model", "m", *base,
+                 "--workdir", f"{d}/work", *extra],
+                cwd=REPO, capture_output=True, text=True, timeout=60,
+                env={"PATH": "/usr/bin:/bin", "HOME": d, "EVAL_PREBUILT_ENV": "1", "TARGET_API_KEY": "sk-test-secret-1234",
+                     "TAU2_UPSTREAM_DIR": str(root), "TAU2_UPSTREAM_REF_FILE": str(ref), **(env_extra or {})},
+            )
+            text = Path(d, "env").read_text()
+            return dict(line.split("=", 1) for line in text.splitlines()), result.stdout
+
+    def test_with_an_endpoint_the_judge_is_the_model_under_test_at_low_effort_without_the_key(self):
+        env, out = self._tau2_env("--reasoning-effort", "high")
+        self.assertEqual(env["TAU2_JUDGE_LLM"], "openai/m")
+        args = json.loads(env["TAU2_JUDGE_LLM_ARGS"])
+        self.assertEqual((args["reasoning_effort"], args["max_tokens"], args["api_key"]), ("low", 4096, "os.environ/TARGET_API_KEY"))
+        self.assertTrue(env["PYTHONPATH"].startswith(str(self.SHIM)))
+        self.assertNotIn("sk-test-secret-1234", env["TAU2_JUDGE_LLM_ARGS"] + out)
+        self.assertIn("NL-assertion judge: openai/m", out)
+
+    def test_without_an_endpoint_the_judge_stays_upstreams(self):
+        env, out = self._tau2_env("--user-llm", "gpt-4.1", base=())
+        self.assertNotIn("TAU2_JUDGE_LLM", env)
+        self.assertIn("upstream's own", out)
+
+    def test_the_shim_repoints_the_judge_and_never_scores_on_a_missing_judgement(self):
+        with tempfile.TemporaryDirectory() as d:
+            pkg = Path(d, "tau2/evaluator")
+            pkg.mkdir(parents=True)
+            Path(d, "tau2/__init__.py").write_text("")
+            (pkg / "__init__.py").write_text("")
+            (pkg / "evaluator_nl_assertions.py").write_text(
+                'import json, types\n'
+                'DEFAULT_LLM_NL_ASSERTIONS = "gpt"\nDEFAULT_LLM_NL_ASSERTIONS_ARGS = {"x": 1}\n'
+                'TWO = \'{"results": [{"met": true}, {"met": false}]}\'\n'
+                'REPLIES = ["```json\\n" + TWO + "\\n```", TWO,'                      # fenced, then clean
+                ' "{bad", \'{"results": []}\', None, TWO,'                             # bad json, empty list, None: retried
+                '] + ["x"] * 8\n'  # never usable: eight unparsable replies, so it raises
+                'def generate(**kwargs):\n    return types.SimpleNamespace(content=REPLIES.pop(0))\n'
+                'class NLAssertionsEvaluator:\n'
+                '    @classmethod\n'
+                '    def evaluate_nl_assertions(cls, trajectory, nl_assertions):\n'
+                '        return json.loads(generate().content)["results"]\n')
+            code = ("import sys\n"
+                    "m = sys.modules.get('tau2.evaluator.evaluator_nl_assertions')\n"
+                    "if not m: print('untouched'); raise SystemExit\n"
+                    "print(m.DEFAULT_LLM_NL_ASSERTIONS, m.DEFAULT_LLM_NL_ASSERTIONS_ARGS)\n"
+                    "ev = m.NLAssertionsEvaluator\n"
+                    "for _ in range(4):\n"
+                    "    try: print(len(ev.evaluate_nl_assertions([], ['a', 'b'])))\n"
+                    "    except ValueError as e: print('raised', e)\n")
+            run = lambda env: subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60,
+                                             env={"PATH": "/usr/bin:/bin", "PYTHONPATH": f"{self.SHIM}:{d}", **env}).stdout
+            out = run({"TAU2_JUDGE_LLM": "openai/m", "TAU2_JUDGE_LLM_ARGS": '{"max_tokens": 5}'})
+            lines = [line for line in out.splitlines() if not line.startswith("NL-assertion judge reply unusable")]
+            self.assertEqual(lines[0], "openai/m {'max_tokens': 5}")
+            self.assertEqual(lines[1:4], ["2", "2", "2"])  # a fenced reply parses; a clean one passes; {bad, an empty list and None are retried
+            self.assertTrue(lines[4].startswith("raised NL-assertion judge gave no usable reply in 8 attempts"), lines[4])  # never usable
+            self.assertEqual(out.count("reply unusable"), 3 + 8)
+            self.assertIn("0 verdicts for 2 assertions", out)
+            self.assertEqual(run({}).strip(), "untouched")
+
+
+class RelativeWorkdirTest(unittest.TestCase):
+    def test_a_relative_workdir_is_resolved_before_tau2_runs_from_its_checkout(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d, "upstream")
+            (root / ".venv/bin").mkdir(parents=True)
+            (root / "data").mkdir()
+            (root / "data/x").write_text("")
+            stub = root / ".venv/bin/tau2"
+            stub.write_text(f'#!/bin/sh\nprintf "%s" "$TAU2_DATA_DIR" > {d}/data_dir\nexit 0\n')
+            stub.chmod(0o755)
+            ref = Path(d, "ref")
+            ref.write_text("v2.0.0 " + "a" * 40 + "\n")
+            subprocess.run(
+                ["bash", "scripts/custom/run_tau2_bench.sh", "--domain", "retail", "--model", "m", "--api-base-url", "http://x/v1",
+                 "--workdir", os.path.relpath(f"{d}/work", REPO)],
+                cwd=REPO, capture_output=True, text=True, timeout=60,
+                env={"PATH": "/usr/bin:/bin", "HOME": d, "EVAL_PREBUILT_ENV": "1",
+                     "TAU2_UPSTREAM_DIR": str(root), "TAU2_UPSTREAM_REF_FILE": str(ref)},
+            )
+            data_dir = Path(d, "data_dir").read_text()
+            self.assertTrue(os.path.isabs(data_dir), data_dir)
+            self.assertEqual(os.path.realpath(data_dir), os.path.realpath(f"{d}/work/tau2-data"))
 
 
 class SummaryTest(unittest.TestCase):
