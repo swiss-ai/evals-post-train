@@ -50,7 +50,7 @@ from pathlib import Path
 from scripts.common import sampling, thinking
 
 SUITES_DIR = Path(__file__).resolve().parents[2] / "configs" / "suites"
-FRAMEWORKS = ("lm_eval", "inspect", "evalscope", "harbor", "tau2")
+FRAMEWORKS = ("lm_eval", "inspect", "evalscope", "harbor", "tau2", "bfcl")
 VIA = ("flag", "task")
 
 
@@ -69,7 +69,8 @@ THINKING_FLAGS = ("--thinking", "--enable-thinking")
 # Flags the suite itself produces, so a setup may not list them.
 RESERVED = {"lm_eval": {"--max-length", "--repeats", "--reasoning-effort"},
             "inspect": {"--task-arg", "--epochs", "--", "--reasoning-effort"},
-            "evalscope": set(), "harbor": {"--reasoning-effort"}, "tau2": set()}
+            "evalscope": set(), "harbor": {"--reasoning-effort"}, "tau2": set(),
+            "bfcl": {"--reasoning-effort", "--version", "--sampling-profile"}}
 
 
 def _profile(where, name, profiles):
@@ -274,7 +275,7 @@ def flags_for(suite, setup_name, task, fetch=False):
     copy first (once), otherwise the flag names where it will be."""
     bench, chosen = benchmark(suite, task), setup(suite, setup_name)
     flags = list(chosen["flags"][bench["framework"]])
-    if "reasoning_effort" in chosen and bench["framework"] in ("lm_eval", "inspect", "evalscope", "harbor"):
+    if "reasoning_effort" in chosen and bench["framework"] in ("lm_eval", "inspect", "evalscope", "harbor", "bfcl"):
         flags += ["--reasoning-effort", chosen["reasoning_effort"]]
     flags += bench.get("flags", [])
     repeat = bench["repeats"]["via"] == "flag"
@@ -299,6 +300,7 @@ LM_EVAL = ["bash", "scripts/lm_eval_harness/launch_evaluations.sh", "single"]
 INSPECT = "scripts/inspect_ai/run_inspect_eval.sbatch"
 HARBOR = "scripts/harbor/run_harbor_eval.sbatch"
 EVALSCOPE = "scripts/evalscope/run_evalscope_eval.sbatch"
+BFCL = "scripts/custom/run_bfcl.sbatch"
 
 
 def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, no_wandb=False,
@@ -306,9 +308,9 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
     """One launch per (model, benchmark), models in the order given, benchmarks in table order.
 
     `models` maps a setup name to the name the model is served under. Every launch is its own Slurm job
-    (lm_eval: one `single` launch; inspect, harbor and evalscope: one sbatch). api_model_name only applies to lm_eval, which
+    (lm_eval: one `single` launch; inspect, harbor, evalscope and bfcl: one sbatch). api_model_name only applies to lm_eval, which
     takes the served name separately from the model; qos and partition go to the lm_eval launcher or to
-    sbatch. Every launch uploads to the W&B project named after the suite, and the inspect, harbor and evalscope ones
+    sbatch. Every launch uploads to the W&B project named after the suite, and the inspect, harbor, evalscope and bfcl ones
     write to logs/<framework>/<suite>/<served name>/<task> (lm_eval's logs already sit under the project). Returns [{"setup", "label", "framework", "argv"}]."""
     rows = []
     for setup_name, served in models.items():
@@ -343,6 +345,15 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
                 scheduling = ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])
                 argv = ["sbatch", *scheduling, EVALSCOPE, "--benchmark", bench["task"], *common[2:],
                         "--work-dir", out_dir, *flags]
+            elif framework == "bfcl":
+                # bfcl_v3 / bfcl_v4 -> --version v3 / v4; --limit is the number of entries per category.
+                scheduling = ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])
+                argv = ["sbatch", *scheduling, BFCL, "--version", bench["task"].removeprefix("bfcl_"), "--model", served,
+                        *(["--api-base-url", api_base_url] if api_base_url else []),
+                        *(["--num-tasks", str(limit)] if limit else []),
+                        *(["--no-wandb"] if no_wandb else ["--wandb-project", suite["name"]]),
+                        "--sampling-profile", sampling_for(suite, setup_name, bench["task"]),
+                        "--workdir", out_dir, *flags]
             else:
                 raise ValueError(f"{bench['task']}: no launcher for the {framework} framework yet")
             rows.append({"setup": setup_name, "label": bench["label"], "framework": framework, "argv": argv})

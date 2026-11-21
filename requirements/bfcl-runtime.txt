@@ -39,3 +39,5 @@ datamodel-code-generator
 # all-MiniLM-L6-v2, is downloaded from Hugging Face when the scorer is imported.
 sentence-transformers>=2.7.0
 faiss-cpu==1.13.2
+# The W&B upload (scripts/results/update_wandb_bfcl.py, --wandb-entity/--wandb-project).
+wandb==0.31.0

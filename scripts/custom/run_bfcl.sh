@@ -36,6 +36,10 @@
 #   --sampling-config <file>   another file instead of configs/sampling_defaults.json.
 #   --enable-thinking, --no-enable-thinking, --reasoning-effort <level>
 #                              Thinking and reasoning effort (scripts/common/thinking.py).
+#   --name <name>              The run's name in W&B (default: the model name, "/" and ":" as "-").
+#   --wandb-entity <entity>    W&B entity and project to upload summary.json to (also WANDB_ENTITY, WANDB_PROJECT;
+#   --wandb-project <project>   default apertus/e-p-t-pool), when WANDB_API_KEY is set (scripts/common/wandb.sh).
+#   --no-wandb                 Don't upload (also WANDB_MODE=disabled).
 #   --cache-dir <path>         Outside the image: where the venv is cached (default:
 #                               ${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}).
 #
@@ -66,6 +70,8 @@ NUM_TASKS=""
 CATEGORY_ARGS=()
 SAMPLING_ARGS=(--framework bfcl --format litellm)
 THINKING_ARGS=(--format json)
+NAME=""
+NO_WANDB=0
 
 while (( $# > 0 )); do
     case "$1" in
@@ -85,6 +91,10 @@ while (( $# > 0 )); do
             SAMPLING_ARGS+=("$1"); THINKING_ARGS+=("$1"); shift ;;
         --reasoning-effort)
             SAMPLING_ARGS+=("$1" "$2"); THINKING_ARGS+=("$1" "$2"); shift 2 ;;
+        --name) NAME=$2; shift 2 ;;
+        --wandb-entity) WANDB_ENTITY=$2; shift 2 ;;
+        --wandb-project) WANDB_PROJECT=$2; shift 2 ;;
+        --no-wandb) NO_WANDB=1; shift ;;
         --cache-dir) export EVAL_ENV_CACHE_ROOT=$2; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "Unknown argument: $1 (see --help)" ;;
@@ -99,6 +109,10 @@ WORKDIR=${WORKDIR:-"logs/bfcl/$(tr '/' '_' <<<"$MODEL")-$VERSION"}
 
 # shellcheck source=scripts/common/secrets.sh
 source scripts/common/secrets.sh
+# shellcheck source=scripts/common/wandb.sh
+source scripts/common/wandb.sh
+if (( NO_WANDB )); then wandb_setup "--no-wandb"; else wandb_setup || exit 1; fi
+NAME=${NAME:-$(echo "$MODEL" | tr '/: ' '---')}
 export TARGET_API_KEY="${TARGET_API_KEY:-${CSCS_SERVING_API:-}}"
 
 # Sampling (scripts/common/sampling.py), then thinking and reasoning effort (scripts/common/thinking.py), as the
@@ -135,4 +149,13 @@ ARGS=(--version "$VERSION" --model "$MODEL" --api-base-url "$API_BASE_URL" --wor
 
 echo "+ python -m scripts.custom.bfcl --version $VERSION --model $MODEL --api-base-url $API_BASE_URL" \
      "--workdir $WORKDIR --num-threads $NUM_THREADS ${NUM_TASKS:+--num-tasks $NUM_TASKS} (llm args not shown)"
+# Written at the end of the run: one left by an earlier run here must not be taken (and uploaded) for this one's.
+rm -f "$WORKDIR/summary.json"
 PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" "$LOCKED_VENV/bin/python" -m scripts.custom.bfcl "${ARGS[@]}"
+
+if (( WANDB_UPLOAD )); then
+    echo ""
+    echo "Uploading results to wandb"
+    PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" "$LOCKED_VENV/bin/python" -m scripts.results.update_wandb_bfcl \
+        --entity "$WANDB_ENTITY" --project "$WANDB_PROJECT" --name "$NAME" --work-dir "$WORKDIR"
+fi
