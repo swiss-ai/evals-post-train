@@ -247,7 +247,17 @@ def parse_scores(n, sample, response):
     choice = response["choices"]
     if len(choice) != 1 or choice[0]["finish_reason"] != "stop":
         raise ValueError("Native EQ-Bench judge output missing or truncated")
-    scores = n.Task._parse_rubric_scores(choice[0]["message"]["content"])
+    content = choice[0]["message"]["content"]
+    if sample.get("calibration_prompt"):
+        raw = json.loads(content)
+        reason = raw.get("chain_of_thought_reasoning") if isinstance(raw, dict) else None
+        if (
+            not isinstance(raw, dict) or set(raw) != set(sample["criteria"]) | {"chain_of_thought_reasoning"}
+            or not isinstance(reason, str) or not reason.strip() or len(reason.split()) > 60
+            or any(type(raw.get(key)) not in (int, float) for key in sample["criteria"])
+        ):
+            raise ValueError("Compact EQ-Bench profile requires exact numeric JSON and a 1–60-word assessment")
+    scores = n.Task._parse_rubric_scores(content)
     if not scores or set(scores) != set(sample["criteria"]) or any(
         type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 20
         for value in scores.values()

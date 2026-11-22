@@ -1,5 +1,6 @@
 import math
 import copy
+import json
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -149,6 +150,19 @@ class EQBenchPilotTests(unittest.TestCase):
         calls[-1]["request"]["messages"] = []
         with self.assertRaises(ValueError):
             pilot.replay_partial(n, [first, second], calls, "open")
+
+    def test_compact_profile_enforces_real_json_numeric_types_and_assessment_budget(self):
+        n = SimpleNamespace(Task=SimpleNamespace(_parse_rubric_scores=lambda _: {"correctness": 12}))
+        sample = {"criteria": ["correctness"], "calibration_prompt": "compact profile"}
+        raw = {"correctness": 12, "chain_of_thought_reasoning": "grounded " * 60}
+        response = {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(raw)}}]}
+        self.assertEqual(pilot.parse_scores(n, sample, response), {"correctness": 12})
+        for changed in ({**raw, "chain_of_thought_reasoning": "grounded " * 61},
+                        {**raw, "correctness": True}, {**raw, "correctness": "12"},
+                        {**raw, "unexpected": 12}, {**raw, "chain_of_thought_reasoning": ""}):
+            response["choices"][0]["message"]["content"] = json.dumps(changed)
+            with self.assertRaises(ValueError):
+                pilot.parse_scores(n, sample, response)
 
 
 if __name__ == "__main__":
