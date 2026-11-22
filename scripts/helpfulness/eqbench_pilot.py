@@ -311,6 +311,40 @@ def replay(n, samples, calls, model):
     return rows, summarize(n, samples, rows)
 
 
+def replay_partial(n, samples, calls, model):
+    valid = [s for s in samples if s["status"] == "generated"]
+    pairs, pending = divmod(len(calls), 2)
+    if pairs + pending > len(valid):
+        raise ValueError("Too many raw EQ-Bench calls")
+    for sample, sent, returned in zip(valid, calls[::2], calls[1::2]):
+        if (
+            sent.get("phase") != "requested" or returned.get("phase") != "returned"
+            or sent.get("request") != request(sample, model)
+            or returned.get("response", {}).get("model") != model
+        ):
+            raise ValueError("Partial raw EQ-Bench evidence differs from frozen protocol")
+    if pending and (
+        calls[-1].get("phase") != "requested"
+        or calls[-1].get("request") != request(valid[pairs], model)
+    ):
+        raise ValueError("Unreturned request differs from the next declared native prompt")
+    rows, offset = [], 0
+    for sample in samples:
+        if sample["status"] == "generated":
+            if offset == pairs:
+                break
+            response = calls[2 * offset + 1]["response"]
+            offset += 1
+        else:
+            response = None
+        rows.append(judgment(n, sample, response))
+    summary = summarize(n, samples, rows)
+    summary.update(raw_returned_calls=pairs, unreturned_request=bool(pending),
+                   unattempted_calls=len(valid) - pairs - pending,
+                   complete_raw_evidence=len(rows) == len(samples) and not pending)
+    return rows, summary
+
+
 def judge(args):
     n, cases = preflight(args)
     samples, identity, plans = judge_preflight(args, n, cases)

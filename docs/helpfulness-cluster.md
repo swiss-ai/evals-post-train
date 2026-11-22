@@ -80,6 +80,11 @@ aggregation, even when they reuse the same native scenario IDs. Constructed
 controls and assistant-reviewed score intervals are diagnostic evidence, not
 independent human correctness; low-quality-only controls cannot establish
 discrimination among competent answers. Automatic scoring remains disabled.
+`scripts/helpfulness/eqbench_scalar_v2.txt` is an explicitly adapted compact
+assessment profile; pass it as a hash-bound `--calibration-prompt`, never as the
+upstream native prompt. Native verbose judging can exceed a bounded allocation.
+`replay_partial` verifies each completed raw call and any next unreturned
+request without assigning credit to unattempted items or declaring completeness.
 
 ### Arena-Hard v2 twenty-case open-reference pilot
 

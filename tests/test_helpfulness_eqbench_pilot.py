@@ -130,6 +130,26 @@ class EQBenchPilotTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     pilot.judge_preflight(args, None, [sample["case"]])
 
+    def test_partial_replay_preserves_pending_request_without_credit(self):
+        n = SimpleNamespace(Task=SimpleNamespace(_parse_rubric_scores=lambda _: {"correctness": 12}),
+                            calculate_final_rubric_score=lambda _: (12, None))
+        first = {"case": {"id": "401"}, "status": "generated", "criteria": ["correctness"],
+                 "judge_prompt": "first", "task": {}}
+        second = {**first, "case": {"id": "402"}, "judge_prompt": "second"}
+        response = {"model": "open", "choices": [
+            {"finish_reason": "stop", "message": {"content": '{"correctness":12}'}}]}
+        calls = [{"phase": "requested", "request": pilot.request(first, "open")},
+                 {"phase": "returned", "response": response},
+                 {"phase": "requested", "request": pilot.request(second, "open")}]
+        rows, result = pilot.replay_partial(n, [first, second], calls, "open")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(result["status"], "incomplete")
+        self.assertTrue(result["unreturned_request"])
+        self.assertFalse(result["complete_raw_evidence"])
+        calls[-1]["request"]["messages"] = []
+        with self.assertRaises(ValueError):
+            pilot.replay_partial(n, [first, second], calls, "open")
+
 
 if __name__ == "__main__":
     unittest.main()
