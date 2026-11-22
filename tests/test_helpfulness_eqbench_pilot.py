@@ -125,13 +125,29 @@ class EQBenchPilotTests(unittest.TestCase):
     def test_assessment_schema_enforces_word_bound_without_rewriting_returned_text(self):
         import re
         sample = {"judge_prompt": "native", "criteria": ["correctness"],
-                  "structured_output": True, "constrain_assessment": True}
+                  "structured_output": True, "constrain_assessment": True,
+                  "assessment_schema_version": 1}
         schema = pilot.request(sample, "open")["response_format"]["json_schema"]["schema"]
         pattern = schema["properties"]["chain_of_thought_reasoning"]["pattern"]
         for text in ("Grounded insight.", " ".join(["grounded"] * 60), "Grounded\npartial\tinsight."):
             self.assertIsNotNone(re.fullmatch(pattern, text))
         for text in ("", " ".join(["grounded"] * 61)):
             self.assertIsNone(re.fullmatch(pattern, text))
+        sample["assessment_schema_version"] = 2
+        bounded = pilot.request(sample, "open")["response_format"]["json_schema"]["schema"]
+        finite_pattern = bounded["properties"]["chain_of_thought_reasoning"]["pattern"]
+        self.assertIsNotNone(re.fullmatch(finite_pattern, " ".join(["x" * 32] * 60)))
+        for text in ("x" * 33, " ".join(["x"] * 61), "x  x", "x\nx"):
+            self.assertIsNone(re.fullmatch(finite_pattern, text))
+        sample["calibration_prompt"] = "compact"
+        n = SimpleNamespace(Task=SimpleNamespace(_parse_rubric_scores=lambda _: {"correctness": 12}))
+        response = {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps({
+            "correctness": 12, "chain_of_thought_reasoning": "x" * 33})}}]}
+        with self.assertRaises(ValueError):
+            pilot.parse_scores(n, sample, response)
+        response["choices"][0]["message"]["content"] = json.dumps({
+            "correctness": 12, "chain_of_thought_reasoning": "Grounded partial insight."})
+        self.assertEqual(pilot.parse_scores(n, sample, response), {"correctness": 12})
         sample["constrain_assessment"] = False
         unconstrained = pilot.request(sample, "open")["response_format"]["json_schema"]["schema"]
         self.assertNotIn("pattern", unconstrained["properties"]["chain_of_thought_reasoning"])

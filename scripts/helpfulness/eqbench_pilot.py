@@ -179,6 +179,13 @@ def generate(args):
         write_json(args.output / "report.json", report)
 
 
+def assessment_pattern(version):
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError("Unknown EQ-Bench assessment schema version")
+    return (r"^\S+(?:\s+\S+){0,59}$" if version == 1
+            else r"^[^\s]{1,32}(?: [^\s]{1,32}){0,59}$")
+
+
 def request(sample, model, max_tokens=2048):
     messages = []
     if sample.get("calibration_prompt"):
@@ -189,7 +196,8 @@ def request(sample, model, max_tokens=2048):
     if sample.get("structured_output"):
         properties = {"chain_of_thought_reasoning": {"type": "string", "minLength": 1}}
         if sample.get("constrain_assessment"):
-            properties["chain_of_thought_reasoning"]["pattern"] = r"^\S+(?:\s+\S+){0,59}$"
+            properties["chain_of_thought_reasoning"]["pattern"] = assessment_pattern(
+                sample.get("assessment_schema_version", 2))
         properties.update({key: {"type": "number", "minimum": 0, "maximum": 20}
                            for key in sample["criteria"]})
         value["response_format"] = {"type": "json_schema", "json_schema": {
@@ -245,6 +253,8 @@ def judge_preflight(args, n, cases):
         or identity.get("calibration_prompt_sha256") != getattr(args, "calibration_prompt_sha256", None)
         or identity.get("structured_output", False) != getattr(args, "structured_output", False)
         or identity.get("constrain_assessment", False) != getattr(args, "constrain_assessment", False)
+        or (getattr(args, "constrain_assessment", False)
+            and identity.get("assessment_schema_version", 1) != getattr(args, "assessment_schema_version", 2))
     ):
         raise ValueError("Judge requires bound open-model, source, selection and licensing evidence")
     if getattr(args, "structured_output", False):
@@ -257,6 +267,7 @@ def judge_preflight(args, n, cases):
             raise ValueError("Assessment decoding constraints require structured output")
         for sample in samples:
             sample["constrain_assessment"] = True
+            sample["assessment_schema_version"] = getattr(args, "assessment_schema_version", 2)
     if calibration:
         for sample in samples:
             sample["calibration_prompt"] = calibration
@@ -281,6 +292,9 @@ def parse_scores(n, sample, response):
             or any(type(raw.get(key)) not in (int, float) for key in sample["criteria"])
         ):
             raise ValueError("Compact EQ-Bench profile requires exact numeric JSON and a 1–60-word assessment")
+        if sample.get("constrain_assessment") and sample.get("assessment_schema_version", 2) == 2:
+            if not re.fullmatch(assessment_pattern(2), reason):
+                raise ValueError("Bounded EQ-Bench assessment violates the finite word/character contract")
     scores = n.Task._parse_rubric_scores(content)
     if not scores or set(scores) != set(sample["criteria"]) or any(
         type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 20
@@ -423,6 +437,7 @@ def main():
     parser.add_argument("--calibration-prompt-sha256")
     parser.add_argument("--structured-output", action="store_true")
     parser.add_argument("--constrain-assessment", action="store_true")
+    parser.add_argument("--assessment-schema-version", type=int, choices=(1, 2), default=2)
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--model", required=True)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")

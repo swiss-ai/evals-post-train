@@ -95,6 +95,12 @@ failures rather than being repaired and credited.
 the scenario-specific decoding schema. It requires structured output and matching
 identity evidence. This leaves earlier unconstrained requests replayable and does
 not truncate, rewrite, or retroactively validate their returned assessments.
+Assessment schema version 2 is the default for new constrained requests: a single
+line, at most 60 words, at most 32 characters per word, and one space between
+words. Its finite length prevents the word-only mask from allowing unbounded
+in-word repetition. Version 1 remains explicitly selectable only for historical
+replay; judge identity binds the version. The v5 prompt targets a shorter public
+assessment while keeping the same source-grounded grading principles.
 
 ### Arena-Hard v2 twenty-case open-reference pilot
 
