@@ -91,6 +91,10 @@ native criteria; preflight requires matching identity and xgrammar evidence.
 The native user rubric is unchanged. Numeric bounds and the 60-word assessment
 limit are still validated on actual responses; historical fenced outputs remain
 failures rather than being repaired and credited.
+`--constrain-assessment` additionally enforces the compact word bound through
+the scenario-specific decoding schema. It requires structured output and matching
+identity evidence. This leaves earlier unconstrained requests replayable and does
+not truncate, rewrite, or retroactively validate their returned assessments.
 
 ### Arena-Hard v2 twenty-case open-reference pilot
 

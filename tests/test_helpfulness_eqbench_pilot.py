@@ -122,6 +122,20 @@ class EQBenchPilotTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             pilot.replay(n, [sample], calls, "open")
 
+    def test_assessment_schema_enforces_word_bound_without_rewriting_returned_text(self):
+        import re
+        sample = {"judge_prompt": "native", "criteria": ["correctness"],
+                  "structured_output": True, "constrain_assessment": True}
+        schema = pilot.request(sample, "open")["response_format"]["json_schema"]["schema"]
+        pattern = schema["properties"]["chain_of_thought_reasoning"]["pattern"]
+        for text in ("Grounded insight.", " ".join(["grounded"] * 60), "Grounded\npartial\tinsight."):
+            self.assertIsNotNone(re.fullmatch(pattern, text))
+        for text in ("", " ".join(["grounded"] * 61)):
+            self.assertIsNone(re.fullmatch(pattern, text))
+        sample["constrain_assessment"] = False
+        unconstrained = pilot.request(sample, "open")["response_format"]["json_schema"]["schema"]
+        self.assertNotIn("pattern", unconstrained["properties"]["chain_of_thought_reasoning"])
+
     def test_judge_preflight_rejects_changed_native_criteria_and_source_identity(self):
         from scripts.helpfulness.core import write_json, append_jsonl
         import hashlib
