@@ -107,7 +107,7 @@
       }
     },
     "nemotron-3-super-120b-a12b-thinking": {
-      "description": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16, the final post-trained model (120B total, 12B active) with reasoning on (enable_thinking set on the server, full effort: low_effort stays off; --thinking with explicit <think> / </think> tokens). Window 262144, as the vLLM recipe serves it (the model supports up to 1M). Served on 2 nodes (TP4 x DP2 over ray) with vLLM `--reasoning-parser nemotron_v3 --tool-call-parser qwen3_coder --enable-auto-tool-choice`.",
+      "description": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16, the final post-trained model (120B total, 12B active) with reasoning on (enable_thinking set on the server, full effort: low_effort stays off; --no-bos, because its chat template writes no <s> and its tokenizer adds none, as NVIDIA serves it on the chat endpoint, so the BOS probe must not expect one; --thinking with explicit <think> / </think> tokens). Window 262144, as the vLLM recipe serves it (the model supports up to 1M). Served on 2 nodes (TP4 x DP2 over ray) with vLLM `--reasoning-parser nemotron_v3 --tool-call-parser qwen3_coder --enable-auto-tool-choice`.",
       "max_length": 262144,
       "sampling": "thinking",
       "launch": {
@@ -118,7 +118,7 @@
         "framework_args": ["--tensor-parallel-size", "4", "--data-parallel-size", "2", "--data-parallel-size-local", "1", "--data-parallel-backend", "ray", "--gpu-memory-utilization", "0.8", "--max-model-len", "262144", "--default-chat-template-kwargs.enable_thinking", "true", "--trust-remote-code", "--reasoning-parser", "nemotron_v3", "--tool-call-parser", "qwen3_coder", "--enable-auto-tool-choice"]
       },
       "flags": {
-        "lm_eval": ["--chat-template", "--tokenizer", "/capstor/store/cscs/swissai/infra01/hf_models/models/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16", "--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>"],
+        "lm_eval": ["--chat-template", "--no-bos", "--tokenizer", "/capstor/store/cscs/swissai/infra01/hf_models/models/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16", "--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>"],
         "inspect": ["--enable-thinking"],
         "bfcl": [],
         "tau2": ["--enable-thinking"],

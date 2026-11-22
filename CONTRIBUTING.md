@@ -3,7 +3,7 @@
 ## Principles
 
 - **Stand-alone:** no coupling to a downstream consumer.
-- **Generic:** no per-model special cases.
+- **Generic:** no model-specific fixes in shared code (launchers, probes, checks, scripts): no detection keyed on a model name, and no loosening of a shared check because one model trips it. A model that does not fit the generic mechanism gets an existing per-run flag in its suite setup (`flags`, `launch` in `configs/suites/`; e.g. Nemotron's `--no-bos`), or the generic workaround documented.
 - **Simple:** one code path over extra modes; small PRs.
 - **Pinned:** pin what you add (datasets, harness commits, packages) so runs can be repeated.
 
