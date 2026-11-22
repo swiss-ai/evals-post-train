@@ -44,6 +44,49 @@ invented by the batch script.
 
 ## Submit one benchmark/scope per job
 
+### WildBench v2 twenty-case native-rubric pilot
+
+`scripts.helpfulness.wildbench_pilot` separates full-history native checkpoint
+generation from source-bound rubric judging. It uses the frozen `v2` test
+release at `26c49eb39d7d5ce2099b0bbafed5a88dcce954ec` (1,024 cases) and toolkit
+pin `d6b8dcaf377d173d031980f97c16e1a82618c03d`. Deterministic ID hashing selects
+four cases from each of five primary task groups before inference. Licensing
+approval for this pilot was supplied by the user; this is not a new license audit.
+
+The checkpoint receives every original conversation turn. Native judging
+separately clips history, final query and candidate answer to their first 1,000
+literal-space-split words, preserving the pinned template and checklist.
+Report the raw 1–10 mean, `WB-Score = (score - 5) * 20` (range -80 to 100),
+and equal mean of observed task-group WB-Scores. All primary and secondary
+memberships, including duplicates, contribute to native group aggregation.
+Missing, invalid and unscored records remain in coverage/failure accounting,
+not in scored means. Controls never contribute to checkpoint metrics.
+There is no headline ranking, Elo or Reward-Mix.
+
+Use the hash-bound `wildbench_scalar_v1.txt` as an explicitly adapted
+`--calibration-prompt`, not as a replacement native user rubric. The bounded
+pilot requests exact `strengths`, `weaknesses` and integer `score` fields,
+with an explicit 1–10 enumeration. Public assessments have at most 24 words
+each, 32 characters per word and single spaces. This stricter output contract
+does not change the canonical adapter's broader numeric/string acceptance.
+Malformed, fenced, truncated or out-of-contract outputs fail rather than being
+repaired. Generation uses native low-reasoning rendering, temperature zero,
+seed 1234 and an adapted 2,048-token ceiling.
+
+Preflight binds source, selection, checkpoint replies, controls, calibration
+profile, endpoint/model and judge identity. Fresh local configuration/index
+and staged canonical tokenizer checks do not prove complete deployed weight
+contents. Both inference phases wait for the declared model before requests.
+Exact raw SDK replay checks requests, decoding schema, response order and model;
+partial replay cannot credit unattempted items. Frozen assistant-authored
+intervals and mixed synthetic controls remain diagnostic evidence, not
+independent human accuracy or authorization for automatic scoring.
+
+The v3 profile clarifies adjacent native anchors, partial task progress,
+critical code/conceptual errors, unsupported external audits and honest
+requests for unavailable inputs. It leaves source answers, frozen intervals,
+controls, the native user rubric and decoding schema unchanged.
+
 ### EQ-Bench 3 native-scenario pilot
 
 `scripts.helpfulness.eqbench_pilot` separates native checkpoint generation from
