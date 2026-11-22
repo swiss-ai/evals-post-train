@@ -302,10 +302,11 @@ HARBOR = "scripts/harbor/run_harbor_eval.sbatch"
 EVALSCOPE = "scripts/evalscope/run_evalscope_eval.sbatch"
 BFCL = "scripts/custom/run_bfcl.sbatch"
 TAU2 = "scripts/custom/run_tau2_bench.sbatch"
+HELPER_URL = "{helper_url}"
 
 
 def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, no_wandb=False,
-             qos=None, partition=None, fetch=False):
+             qos=None, partition=None, fetch=False, helper_url=None):
     """One launch per (model, benchmark), models in the order given, benchmarks in table order.
 
     `models` maps a setup name to the name the model is served under. Every launch is its own Slurm job
@@ -313,12 +314,17 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
     takes the served name separately from the model; qos and partition go to the lm_eval launcher or to
     sbatch. Every launch but tau2's uploads to the W&B project named after the suite (the tau2 runner has no upload), and the
     inspect, harbor, evalscope, bfcl and tau2 ones write to logs/<framework>/<suite>/<served name>/<task> (lm_eval's logs already sit
-    under the project). Returns [{"setup", "label", "framework", "argv"}]."""
+    under the project). A flag may carry `{helper_url}`: the endpoint of a helper model launched alongside (tau2's simulated user and
+    judge), which the caller names with helper_url. Returns [{"setup", "label", "framework", "argv"}]."""
     rows = []
     for setup_name, served in models.items():
         for bench in suite["benchmarks"]:
             framework = bench["framework"]
             flags = flags_for(suite, setup_name, bench["task"], fetch=fetch)
+            if any(HELPER_URL in f for f in flags):
+                if not helper_url:
+                    raise ValueError(f"{bench['label']} needs the endpoint of its helper model (user and judge): pass --helper-url")
+                flags = [f.replace(HELPER_URL, helper_url) for f in flags]
             common = ["--task", bench["task"], "--model", served]
             out_dir = f"logs/{framework}/{suite['name']}/{served}/{bench['task']}"
             if api_base_url:
@@ -407,6 +413,7 @@ def main(argv=None):
     run_p.add_argument("--model", action="append", required=True, metavar="SETUP=SERVED_NAME")
     run_p.add_argument("--api-base-url")
     run_p.add_argument("--api-model-name")
+    run_p.add_argument("--helper-url", help="endpoint of the helper model (tau2's simulated user and judge), served by a job of its own")
     run_p.add_argument("--limit", type=int)
     run_p.add_argument("--no-wandb", action="store_true")
     run_p.add_argument("--qos")
@@ -448,7 +455,7 @@ def main(argv=None):
                 setup(suite, setup_name)
                 models[setup_name] = served
             rows = commands(suite, models, args.api_base_url, args.api_model_name, args.limit, args.no_wandb,
-                            args.qos, args.partition, fetch=args.submit)
+                            args.qos, args.partition, fetch=args.submit, helper_url=args.helper_url)
             print(f"{len(rows)} launches: {len(models)} model{'s' * (len(models) != 1)} x "
                   f"{len(suite['benchmarks'])} benchmarks", file=sys.stderr)
             for row in rows:

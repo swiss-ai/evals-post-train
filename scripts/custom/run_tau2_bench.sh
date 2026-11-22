@@ -34,6 +34,10 @@
 #                               litellm with its own credentials (e.g. OPENAI_API_KEY).
 #                               With --api-base-url the NL-assertion judge (retail) is the model under test too, at
 #                               the same low effort and cap: upstream hardcodes an OpenAI model (tau2_judge/).
+#   --user-api-base-url <url>  The user's own endpoint, when it is not the one of --api-base-url (a model served in this
+#                               job, say, with the user on the shared deployment). Needs --user-llm, openai/<served name>
+#                               of a model that is not the one under test. Its key: USER_API_KEY (default: CSCS_SERVING_API;
+#                               both also from scripts/secrets.env); the user's llm args name it as "os.environ/USER_API_KEY".
 #   --user-llm-args <json>     Extra litellm kwargs for the user, merged over its default key by key. The default
 #                               user (the model under test) runs at reasoning_effort low with max_tokens 4096: at its
 #                               default effort a turn could run 15k tokens and end with no reply, and tau2 redoes the task.
@@ -105,6 +109,7 @@ API_BASE_URL=${API_BASE_URL:-""}
 AGENT_LLM_ARGS_OVERRIDE=""
 USER_LLM=""
 USER_LLM_ARGS_OVERRIDE=""
+USER_API_BASE_URL=""
 JUDGE_LLM=""
 JUDGE_LLM_ARGS_OVERRIDE=""
 JUDGE_API_BASE_URL=""
@@ -131,6 +136,7 @@ while (( $# > 0 )); do
         --agent-llm-args) AGENT_LLM_ARGS_OVERRIDE=$2; shift 2 ;;
         --user-llm) USER_LLM=$2; shift 2 ;;
         --user-llm-args) USER_LLM_ARGS_OVERRIDE=$2; shift 2 ;;
+        --user-api-base-url) USER_API_BASE_URL=$2; shift 2 ;;
         --judge-llm) JUDGE_LLM=$2; shift 2 ;;
         --judge-llm-args) JUDGE_LLM_ARGS_OVERRIDE=$2; shift 2 ;;
         --judge-api-base-url) JUDGE_API_BASE_URL=$2; shift 2 ;;
@@ -226,6 +232,17 @@ if [[ "$USER_LLM" == openai/* && -n "$API_BASE_URL" ]]; then
     USER_LLM_ARGS=$PINNED_LLM_ARGS
 else
     USER_LLM_ARGS='{}'
+fi
+if [[ -n "$USER_API_BASE_URL" ]]; then
+    [[ "$USER_LLM" == openai/* && "$USER_LLM" != "$AGENT_LLM" ]] || die "--user-api-base-url needs a --user-llm openai/<served name> that is not the model under test."
+    USER_BASE=$USER_API_BASE_URL
+    [[ "$USER_BASE" == */v1 || "$USER_BASE" == */v1/ ]] || USER_BASE="${USER_BASE%/}/v1"
+    export USER_API_KEY="${USER_API_KEY:-${CSCS_SERVING_API:-}}"
+    USER_LLM_ARGS=$(python3 -c '
+import json, sys
+args = json.loads(sys.argv[1])
+args.update({"api_base": sys.argv[2], "api_key": "os.environ/USER_API_KEY"})
+print(json.dumps(args))' "$USER_LLM_ARGS" "$USER_BASE")
 fi
 if [[ -n "$USER_LLM_ARGS_OVERRIDE" ]]; then
     USER_LLM_ARGS=$(python3 -c '

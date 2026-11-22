@@ -142,6 +142,15 @@ class LlmArgsTest(unittest.TestCase):
         _, _, user = self._llm_args("--user-llm", "gpt-4.1")
         self.assertEqual(user, {})
 
+    def test_a_user_on_its_own_endpoint_keeps_the_pins_and_names_its_own_key_not_the_value(self):
+        _, _, user = self._llm_args("--user-llm", "openai/RCP/openai/gpt-oss-120b", "--user-api-base-url", "https://u.example/")
+        self.assertEqual((user["api_base"], user["api_key"]), ("https://u.example/v1", "os.environ/USER_API_KEY"))
+        self.assertEqual((user["reasoning_effort"], user["max_tokens"]), ("low", 4096))
+
+    def test_a_user_endpoint_without_another_user_model_stops_the_run(self):
+        with self.assertRaises(Exception):
+            self._llm_args("--user-api-base-url", "https://u.example/v1")
+
 
 class JudgeTest(unittest.TestCase):
     """The NL-assertion judge is the model under test: the runner's environment for tau2 and the sitecustomize shim."""
