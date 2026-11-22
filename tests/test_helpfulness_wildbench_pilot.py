@@ -85,6 +85,17 @@ class WildBenchPilotTests(unittest.TestCase):
                 w.run(args)
             self.assertEqual(generate.call_args.args[2], sample["case"]["messages"])
             self.assertEqual(generate.call_args.args[1], sample["case"])
+            args.output = Path(directory)/"missing-reply"
+            with (patch.object(w, "load_selection", return_value=[sample["case"]]),
+                  patch.object(w.native, "staged_assets", return_value=assets),
+                  patch.object(w.teacher_smoke, "preflight", return_value={}),
+                  patch.object(w.teacher_smoke, "wait_for_server"),
+                  patch.object(w.teacher_smoke, "native_model", return_value="model"),
+                  patch.object(w.teacher_smoke, "generate_native", return_value=result),
+                  patch.object(w, "outcome_status", return_value="model_no_final_reply")):
+                report = w.run(args)
+            self.assertEqual(report["status"], "incomplete")
+            self.assertEqual(report["model_failure_cases"], 1)
 
 
 if __name__ == "__main__":

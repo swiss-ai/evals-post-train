@@ -192,6 +192,7 @@ def replay(samples, calls, assets, model, *, partial=False):
             response = None
         rows.append(judgment(sample, response, assets))
     report = summarize(rows)
+    report["status"] = "succeeded" if len(rows) == len(samples) and report["valid_items"] == len(samples) else "incomplete"
     if partial:
         report.update(raw_returned_calls=pairs, unreturned_request=bool(pending),
                       unattempted_calls=len(planned) - pairs - pending,
@@ -221,7 +222,8 @@ def run(args):
             decoding = {"temperature": 0, "max_gen_toks": 2048, "until": [],
                         "reasoning_effort": "low", "prefill": "after_think", "seed": 1234}
             report.update(decoding=decoding, selected_cases=20, full_benchmark=False,
-                          generation_limit_adaptation=True, automatic_scoring_ready=False)
+                          generation_limit_adaptation=True, automatic_scoring_ready=False,
+                          completed_cases=0, model_failure_cases=0, truncated_cases=0)
             teacher_smoke.wait_for_server(args.base_url, args.model, args.ready_timeout)
             model = teacher_smoke.native_model(args)
             for index, case in enumerate(cases):
@@ -230,6 +232,9 @@ def run(args):
                 row["status"] = outcome_status(row, True)
                 append_jsonl(args.output / "samples.jsonl", row)
                 report["recorded_cases"] += 1
+                report["completed_cases"] += row["status"] != "model_no_final_reply"
+                report["model_failure_cases"] += row["status"] == "model_no_final_reply"
+                report["truncated_cases"] += row["status"] == "generated_truncated"
                 write_json(args.output / "report.json", report)
         else:
             from openai import OpenAI
@@ -246,12 +251,13 @@ def run(args):
                     rows.append(row)
                     append_jsonl(args.output / "judgments.jsonl", row)
                     report = summarize(rows)
+                    report["status"] = "running"
                     write_json(args.output / "report.json", report)
             rebuilt, report = replay(samples, read_jsonl(args.output / "judge-calls.jsonl"), assets, args.model)
             if rebuilt != rows:
                 raise ValueError("WildBench raw replay differs from saved judgments")
         if generating:
-            report["status"] = "succeeded"
+            report["status"] = "succeeded" if report["completed_cases"] == len(cases) else "incomplete"
     except Exception as error:
         report.update(status="failed", error_type=type(error).__name__, error=str(error))
         logging.exception("WildBench pilot failed")
