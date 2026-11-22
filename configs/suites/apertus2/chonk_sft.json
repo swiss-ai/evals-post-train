@@ -64,8 +64,8 @@
       }
     },
     "apertus-1.5-8b-thinking": {
-      "description": "swiss-ai/Apertus-v1.5-8B reasoning (--thinking with its <|inner_prefix|> / <|inner_suffix|> tokens). Window 32768.",
-      "max_length": 32768,
+      "description": "swiss-ai/Apertus-v1.5-8B reasoning (--thinking with its <|inner_prefix|> / <|inner_suffix|> tokens). Window 262144, the context the release supports (max_position_embeddings in its config; the model card serves it with --max-model-len 262144). Serve it with that window.",
+      "max_length": 262144,
       "sampling": "thinking",
       "flags": {
         "lm_eval": ["--chat-template", "--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>"],
