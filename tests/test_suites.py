@@ -31,7 +31,8 @@ class SuiteTests(unittest.TestCase):
     def test_repeats_flag_only_where_the_task_has_no_repeats_of_its_own(self):
         suite = suites.load(SUITE)
         self.assertEqual(suites.flags_for(suite, THINK, "aime24_think"),
-                         ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>",
+                         ["--chat-template", "--tokenizer", "/capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/Apertus-v1.5-70B",
+                          "--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>",
                           "--api-num-concurrent", "256", "--max-length", "262144", "--repeats", "4"])
         self.assertNotIn("--repeats", suites.flags_for(suite, THINK, "minerva_math500_think"))
 
