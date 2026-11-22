@@ -100,7 +100,11 @@ else
     echo "Uploading merged results to wandb"
     WANDB_CMD="cd $PWD && python -m scripts.results.update_wandb_alignment --entity $WANDB_ENTITY --project $WANDB_PROJECT --logs_root $MERGED_DIR --name $NAME --main_metrics $TABLE_METRICS --eval_duration $DURATION"
     echo "Running: $WANDB_CMD"
+    # Run in the evaluation environment, like run_lm_eval.sbatch: the image's own python has no wandb
+    # (enroot/pyxis keep the base image's PATH, so its venv, LM_EVAL_VENV, is not first on it).
     srun -ul --mpi=pmix --environment=${EVAL_PREBUILT_CONTAINER_CONFIG:-./containers/env.toml} bash -c " \
+        set -euo pipefail
+        export PATH=\"\${LM_EVAL_VENV:-/opt/lm-eval-venv}/bin:\$PATH\"
         $WANDB_CMD
     "
 fi

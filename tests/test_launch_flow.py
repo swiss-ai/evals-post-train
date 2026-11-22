@@ -378,6 +378,14 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertIn('export PATH=\\"\\${LM_EVAL_VENV:-/opt/lm-eval-venv}/bin:\\$PATH\\"', SBATCH)
         self.assertIn("LM_EVAL_VENV=/opt/lm-eval-venv", (REPO_ROOT / "containers/Dockerfile.eval").read_text())
 
+    def test_aggregation_uploads_from_the_image_venv(self) -> None:
+        # The W&B upload of aggregate_chunks.sbatch (merging chunks, or results found complete) runs
+        # in the same container: without the venv on PATH its python has no wandb.
+        text = (REPO_ROOT / "scripts/lm_eval_harness/aggregate_chunks.sbatch").read_text()
+        upload = text[text.index("WANDB_CMD="):]
+        self.assertIn('export PATH=\\"\\${LM_EVAL_VENV:-/opt/lm-eval-venv}/bin:\\$PATH\\"', upload)
+        self.assertLess(upload.index("export PATH="), upload.index("$WANDB_CMD\n    \""))
+
     def test_prebuilt_environment_overlays_another_harness_commit(self) -> None:
         commit = "32b8b593890ec9a983c9aadf81a6a08d840beb63"
         args = ("single", "--task", "hellaswag", "--model", "test/model", "--harness-branch")
