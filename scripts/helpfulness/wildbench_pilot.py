@@ -258,6 +258,7 @@ def run(args):
                 report["truncated_cases"] += row["status"] == "generated_truncated"
                 write_json(args.output / "report.json", report)
         else:
+            teacher_smoke.wait_for_server(args.base_url, args.model, args.ready_timeout)
             from openai import OpenAI
             rows = []
             with (record_sdk_calls(args.output / "judge-calls.jsonl", args.base_url, args.model, plans),

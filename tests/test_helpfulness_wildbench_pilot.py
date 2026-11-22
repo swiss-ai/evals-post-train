@@ -118,6 +118,23 @@ class WildBenchPilotTests(unittest.TestCase):
             self.assertEqual(report["status"], "incomplete")
             self.assertEqual(report["model_failure_cases"], 1)
 
+    def test_judge_waits_for_declared_model_before_any_sdk_call(self):
+        sample, assets, _ = self.fixtures()
+        with tempfile.TemporaryDirectory() as directory:
+            args = SimpleNamespace(action="judge", output=Path(directory)/"output", upstream="upstream",
+                                   identity=Path(directory)/"identity.json",
+                                   base_url="http://localhost:8000/v1", model="open", ready_timeout=1)
+            with (patch.object(w, "load_selection", return_value=[sample["case"]]),
+                  patch.object(w.native, "staged_assets", return_value=assets),
+                  patch.object(w, "judge_preflight", return_value=([sample], {}, [])),
+                  patch.object(w, "deployed_metadata", return_value={}),
+                  patch.object(w.teacher_smoke, "wait_for_server", side_effect=TimeoutError("not ready")) as wait,
+                  self.assertLogs(level="ERROR")):
+                with self.assertRaises(TimeoutError):
+                    w.run(args)
+            wait.assert_called_once_with(args.base_url, args.model, 1)
+            self.assertFalse((args.output/"judge-calls.jsonl").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
