@@ -84,6 +84,26 @@ def request(sample, assets, model):
     }
 
 
+def deployed_metadata(identity, tokenizer):
+    checkpoint = Path(identity["checkpoint_directory"]).resolve()
+    metadata = identity["local_metadata_sha256"]
+    canonical = identity["canonical_tokenizer"]
+    if (set(metadata) != {"config.json", "model.safetensors.index.json"}
+        or canonical["public_revision"] != identity["public_repository_revision"]
+        or set(canonical["files"]) != {"config.json", "tokenizer_config.json", "chat_template.jinja", "tokenizer.json"}):
+        raise ValueError("WildBench judge metadata identity is incomplete")
+    for name, expected in metadata.items():
+        verified_bytes(checkpoint / name, expected)
+    for name, record in canonical["files"].items():
+        path = (tokenizer / name).resolve()
+        if not path.is_relative_to(tokenizer.resolve()):
+            raise ValueError("Judge tokenizer metadata escapes staged directory")
+        if len(verified_bytes(path, record["sha256"])) != record["bytes"]:
+            raise ValueError("Judge tokenizer byte count differs")
+    return {"local_metadata_sha256": metadata, "canonical_tokenizer_verified": True,
+            "full_deployed_weight_contents_verified": False}
+
+
 def judge_preflight(args, cases, assets):
     samples = load_samples(args, cases)
     if args.controls:
@@ -211,6 +231,7 @@ def run(args):
     else:
         samples, identity, plans = judge_preflight(args, cases, assets)
         checked.update(judge_identity=identity, judge_messages=plans)
+        checked["deployed_metadata"] = deployed_metadata(identity, args.identity.parent / "tokenizer")
     if args.action.startswith("preflight"):
         write_json(args.output, checked)
         return checked

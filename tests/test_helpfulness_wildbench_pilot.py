@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -67,6 +68,26 @@ class WildBenchPilotTests(unittest.TestCase):
         result = w.summarize([row, control])
         self.assertEqual(result["metrics"]["wb_score"]["value"], 60)
         self.assertEqual(result["groups"]["Math & Data Analysis"]["wb_score"]["denominator"], 2)
+
+    def test_deployed_metadata_rejects_changed_local_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "config.json"
+            index = root / "model.safetensors.index.json"
+            config.write_bytes(b"{}")
+            index.write_bytes(b"{}")
+            for name in ("tokenizer_config.json", "chat_template.jinja", "tokenizer.json"):
+                (root / name).write_bytes(b"{}")
+            digest = hashlib.sha256(b"{}").hexdigest()
+            identity = {"checkpoint_directory": directory, "public_repository_revision": "pinned",
+                        "local_metadata_sha256": {"config.json": digest, "model.safetensors.index.json": digest},
+                        "canonical_tokenizer": {"public_revision": "pinned", "files": {
+                            name: {"sha256": digest, "bytes": 2} for name in
+                            ("config.json", "tokenizer_config.json", "chat_template.jinja", "tokenizer.json")}}}
+            self.assertFalse(w.deployed_metadata(identity, root)["full_deployed_weight_contents_verified"])
+            config.write_bytes(b'{"changed":true}')
+            with self.assertRaises(ValueError):
+                w.deployed_metadata(identity, root)
 
     def test_generation_passes_all_history_to_native_checkpoint(self):
         sample, assets, _ = self.fixtures()
