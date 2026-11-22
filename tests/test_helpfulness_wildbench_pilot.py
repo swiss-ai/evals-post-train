@@ -88,6 +88,20 @@ class WildBenchPilotTests(unittest.TestCase):
             "strengths": " ".join(["Observed"] * 61), "weaknesses": "Grounded limitation.", "score": 6})
         self.assertEqual(w.judgment(sample, response, assets)["status"], "failed")
 
+    def test_calibration_reminder_keeps_native_message_and_binds_replay(self):
+        sample, assets, response = self.fixtures()
+        original = w.request(sample, assets, "open")["messages"]
+        sample["calibration_reminder"] = True
+        asked = w.request(sample, assets, "open")
+        self.assertEqual(asked["messages"][:2], original)
+        self.assertEqual(asked["messages"][-1]["content"],
+                         "Adapted calibration reminder:\n" + sample["calibration_prompt"])
+        calls = [{"phase": "requested", "request": asked}, {"phase": "returned", "response": response}]
+        self.assertEqual(w.replay([sample], calls, assets, "open")[0][0]["status"], "succeeded")
+        sample["calibration_reminder"] = False
+        with self.assertRaises(ValueError):
+            w.replay([sample], calls, assets, "open")
+
     def test_deployed_metadata_rejects_changed_local_configuration(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

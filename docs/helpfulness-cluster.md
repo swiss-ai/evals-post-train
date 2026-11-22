@@ -96,6 +96,11 @@ The v5 profile adds fresh illustrative anchor examples, rather than benchmark
 answers or frozen review labels, and explicitly checks that identified material
 omissions agree with the final rating. These prompt examples are calibration
 instructions, not additional independent validation evidence.
+`--calibration-reminder` repeats the hash-bound profile in a separate user
+message after the unchanged native user rubric. This explicitly adapted
+message placement tests persistent score/assessment contradictions without
+changing answers or review labels. Identity and exact raw replay bind the
+reminder flag; historical two-message requests remain independently replayable.
 
 ### EQ-Bench 3 native-scenario pilot
 

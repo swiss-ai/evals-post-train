@@ -75,12 +75,18 @@ def request(sample, assets, model):
     pattern = assessment_pattern(sample)
     fields = ("strengths", "weaknesses") if sample.get("assessment_schema_version", 1) == 1 else (
         "weaknesses", "strengths")
+    reminder = sample.get("calibration_reminder", False)
+    if type(reminder) is not bool:
+        raise ValueError("WildBench calibration reminder must be explicitly boolean")
+    messages = [
+        {"role": "system", "content": sample["calibration_prompt"]},
+        {"role": "user", "content": native.wildbench_prompt(sample["case"], sample["answer"], assets)},
+    ]
+    if reminder:
+        messages.append({"role": "user", "content": "Adapted calibration reminder:\n" + sample["calibration_prompt"]})
     return {
         "model": model, "temperature": 0, "seed": 1234, "max_tokens": 2048,
-        "messages": [
-            {"role": "system", "content": sample["calibration_prompt"]},
-            {"role": "user", "content": native.wildbench_prompt(sample["case"], sample["answer"], assets)},
-        ],
+        "messages": messages,
         "response_format": {"type": "json_schema", "json_schema": {
             "name": "wildbench_native_rubric", "strict": True, "schema": {
                 "type": "object", "additionalProperties": False,
@@ -133,6 +139,9 @@ def judge_preflight(args, cases, assets):
     version = getattr(args, "assessment_schema_version", 1)
     if type(version) is not int or version not in (1, 2):
         raise ValueError("Unsupported WildBench assessment schema version")
+    reminder = getattr(args, "calibration_reminder", False)
+    if type(reminder) is not bool:
+        raise ValueError("WildBench calibration reminder must be explicitly boolean")
     reject_closed(args.model)
     reject_closed(identity["public_model"])
     if (
@@ -145,11 +154,14 @@ def judge_preflight(args, cases, assets):
         or identity["structured_outputs_backend"] != "xgrammar"
         or type(identity.get("assessment_schema_version", 1)) is not int
         or identity.get("assessment_schema_version", 1) != version
+        or type(identity.get("calibration_reminder", False)) is not bool
+        or identity.get("calibration_reminder", False) != reminder
     ):
         raise ValueError("WildBench judge identity is not bound to source, prompt and structured backend")
     for sample in samples:
         sample["calibration_prompt"] = prompt
         sample["assessment_schema_version"] = version
+        sample["calibration_reminder"] = reminder
     plans = [{"case_id": s["case"]["id"], "messages": request(s, assets, args.model)["messages"]}
              for s in samples if s["status"] != "model_no_final_reply"]
     return samples, identity, plans
@@ -317,6 +329,7 @@ def main():
     parser.add_argument("--max-tokens", type=int, choices=(2048,), default=2048)
     parser.add_argument("--ready-timeout", type=int, default=1200)
     parser.add_argument("--assessment-schema-version", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--calibration-reminder", action="store_true")
     parser.add_argument("--samples", type=Path)
     parser.add_argument("--samples-sha256")
     parser.add_argument("--controls", type=Path)
