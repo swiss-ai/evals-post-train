@@ -301,6 +301,13 @@ class MainTests(unittest.TestCase):
 
         self.assertIn("echo prepare-the-node", script)
 
+    def test_every_serving_node_gets_a_ray_temp_dir_of_its_own_job(self) -> None:
+        script = self._render_main(self._suite_argv("--pre-launch-cmds", "echo prepare-the-node"))
+
+        # head and follower script, ahead of the user's commands (which may override it)
+        self.assertEqual(script.count("export RAY_TMPDIR=/tmp/ray-${SLURM_JOB_ID}; "), 2)
+        self.assertLess(script.index("export RAY_TMPDIR="), script.index("echo prepare-the-node"))
+
     def test_a_setups_env_is_exported_before_the_users_pre_launch_cmds(self) -> None:
         argv = ["--suite", "apertus2/chonk_sft", "--setup", "chonk-lc-16k-v0.2-sft", "--account", "infra01",
                 "--eval-image-commit", "abc123", "--eval", "echo hi", "--pre-launch-cmds", "echo prepare-the-node"]  # fmt: skip
