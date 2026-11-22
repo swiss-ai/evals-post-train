@@ -581,7 +581,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `BS` | `auto:20` | Batch size |
 | `SIZE` | `1` | Informational/legacy model-size metadata; topology inference uses the model name/path instead |
 | `MAX_LENGTH` | (backend/model default) | Optional total context limit, passed as the backend-native setting (`max_model_len` for vLLM/SGLang, `seq_length` for Megatron, `max_length` for HF/API) |
-| `MAX_NEW_TOKENS` | `32768` with thinking or a reasoning effort; otherwise unused | Generation budget of thinking/reasoning-effort runs, passed as `--gen_kwargs max_gen_toks=...` so it replaces every task's own `max_gen_toks`. An explicit value sets that budget. |
+| `MAX_NEW_TOKENS` | `32768` with thinking or a reasoning effort; otherwise unused | Generation budget of thinking/reasoning-effort runs, passed as `--gen_kwargs max_gen_toks=...` so it replaces every task's own `max_gen_toks`. An explicit value (`--max-new-tokens N` on the launcher) sets that budget; on the openai backend with the chat template it is clamped per request to `--max-length` minus the prompt, so a budget equal to the window means "window minus prompt". |
 | `VLLM_TP_SIZE` / `VLLM_DP_SIZE` | auto | Explicit vLLM topology; either value can be omitted and is derived from the four allocated GPUs. Both values must multiply to 4. |
 | `VLLM_AUTO_PARALLELISM` | `true` | With no explicit topology, use TP=1/DP=4 only when the model name unambiguously identifies `<30B`; otherwise retain TP=4/DP=1. |
 | `VLLM_MEMORY_FRACTION` | `0.8` | vLLM `gpu_memory_utilization` / SGLang `mem_fraction_static` |

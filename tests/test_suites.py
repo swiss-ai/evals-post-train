@@ -33,8 +33,18 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(suites.flags_for(suite, THINK, "aime24_think"),
                          ["--chat-template", "--tokenizer", "/capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/Apertus-v1.5-70B",
                           "--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>",
-                          "--api-num-concurrent", "256", "--max-length", "262144", "--repeats", "4"])
+                          "--api-num-concurrent", "256", "--max-length", "262144", "--max-new-tokens", "262144",
+                          "--repeats", "4"])
         self.assertNotIn("--repeats", suites.flags_for(suite, THINK, "minerva_math500_think"))
+
+    def test_generation_budget_is_the_window_only_where_the_setup_names_it(self):
+        # The harness clamps the budget per request to the window minus the prompt.
+        suite = suites.load(SUITE)
+        for name in (THINK, "glm-4.5-air-thinking", "nemotron-3-super-120b-a12b-thinking"):
+            flags = suites.flags_for(suite, name, "gsm8k_platinum_think")
+            self.assertEqual(flags[flags.index("--max-new-tokens") + 1], flags[flags.index("--max-length") + 1])
+        for name in ("qwen3-32b-thinking", "chonk-lc-16k-v0.2-sft"):
+            self.assertNotIn("--max-new-tokens", suites.flags_for(suite, name, "gsm8k_platinum_think"))
 
     def test_apertus_15_70b_runs_with_high_client_concurrency_on_every_lm_eval_row(self):
         # Its two replicas sit idle at the launcher's default of 8.
@@ -81,6 +91,9 @@ class SuiteTests(unittest.TestCase):
             (lambda s: s["benchmarks"][0].update(repeats=4), "repeats must be an object"),
             (lambda s: s.pop("description"), "description"),
             (lambda s: s["setups"][THINK].update(max_length="32k"), "max_length"),
+            (lambda s: s["setups"][THINK].update(max_new_tokens="32k"), "max_new_tokens"),
+            (lambda s: s["setups"][THINK].update(max_new_tokens=s["setups"][THINK]["max_length"] + 1), "may not exceed"),
+            (lambda s: s["setups"][THINK]["flags"]["lm_eval"].extend(["--max-new-tokens", "1"]), "--max-new-tokens"),
             (lambda s: s["benchmarks"][5].update(sampling="warm"), "unknown sampling profile"),
             (lambda s: s["setups"][THINK].update(sampling="greedy"), "not deterministic"),
             (lambda s: s["benchmarks"][5].update(sampling="non_thinking"), "not deterministic"),

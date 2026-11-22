@@ -27,7 +27,9 @@ Profiles are the ones of configs/sampling_defaults.json; a suite names one and h
 
 `repeats.via` says who repeats: "flag" (lm_eval gets --repeats n, inspect gets -- --epochs n) or
 "task" (the task already repeats n times, nothing is passed). max_length is the lm_eval --max-length;
-inspect has no such flag, the server's --max-model-len is the window. The code only reads the file and knows no model.
+inspect has no such flag, the server's --max-model-len is the window. An optional max_new_tokens is the lm_eval
+--max-new-tokens, the generation budget of thinking runs (default 32768; the harness clamps it per request to the
+window minus the prompt, so max_length is the largest useful value). The code only reads the file and knows no model.
 
     python -m scripts.common.suites list            # names, e.g. apertus2/chonk_sft
     python -m scripts.common.suites show apertus2/chonk_sft    # title and setups
@@ -67,7 +69,7 @@ def _positive_int(where, value):
 
 THINKING_FLAGS = ("--thinking", "--enable-thinking")
 # Flags the suite itself produces, so a setup may not list them.
-RESERVED = {"lm_eval": {"--max-length", "--repeats", "--reasoning-effort"},
+RESERVED = {"lm_eval": {"--max-length", "--max-new-tokens", "--repeats", "--reasoning-effort"},
             "inspect": {"--task-arg", "--epochs", "--", "--reasoning-effort"},
             "evalscope": set(), "harbor": {"--reasoning-effort"}, "tau2": {"--reasoning-effort", "--sampling-profile"},
             "bfcl": {"--reasoning-effort", "--version", "--sampling-profile"}}
@@ -152,7 +154,7 @@ def fetch_tokenizer(spec):
 def _no_reserved(where, framework, setup, items):
     reserved = (RESERVED[framework] | ({"--tokenizer"} if framework == "lm_eval" and "tokenizer" in setup else set())) & set(items)
     if reserved:
-        raise ValueError(f"{where} may not contain {sorted(reserved)[0]}: it comes from max_length, the benchmark's repeats or task_args")
+        raise ValueError(f"{where} may not contain {sorted(reserved)[0]}: it comes from max_length, max_new_tokens, the benchmark's repeats or task_args")
 
 
 def validate(suite):
@@ -205,6 +207,10 @@ def validate(suite):
         raise ValueError("setups: must not be empty")
     for name, setup in suite["setups"].items():
         _positive_int(f"setup {name} max_length", setup.get("max_length"))
+        if "max_new_tokens" in setup:
+            _positive_int(f"setup {name} max_new_tokens", setup["max_new_tokens"])
+            if setup["max_new_tokens"] > setup["max_length"]:
+                raise ValueError(f"setup {name}: max_new_tokens may not exceed max_length")
         _profile(f"setup {name} sampling", setup.get("sampling"), profiles)
         if "reasoning_effort" in setup and setup["reasoning_effort"] not in thinking.EFFORTS:
             raise ValueError(f"setup {name}: reasoning_effort must be one of {thinking.EFFORTS} (got {setup['reasoning_effort']!r})")
@@ -283,6 +289,8 @@ def flags_for(suite, setup_name, task, fetch=False):
         if "tokenizer" in chosen:
             flags += ["--tokenizer", str(fetch_tokenizer(chosen["tokenizer"]) if fetch else tokenizer_dir(chosen["tokenizer"]))]
         flags += ["--max-length", str(chosen["max_length"])]
+        if "max_new_tokens" in chosen:
+            flags += ["--max-new-tokens", str(chosen["max_new_tokens"])]
         if repeat:
             flags += ["--repeats", str(bench["repeats"]["n"])]
     elif bench["framework"] == "inspect":

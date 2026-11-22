@@ -55,6 +55,11 @@
 #                          max_model_len, Megatron seq_length, hf/openai max_length).
 #                          Default: the backend's own. loglikelihood_rolling tasks (e.g.
 #                          uncheatable_eval) cut documents into windows of this size.
+#   --max-new-tokens N   - Generation budget per request of thinking/reasoning-effort runs
+#                          (exports MAX_NEW_TOKENS; default 32768). On the openai backend with
+#                          the chat template the harness clamps it per request to what
+#                          --max-length leaves after the prompt, so a budget equal to the window
+#                          means "window minus prompt".
 #   --backend <backend>  - lm-eval backend: hf, vllm, sglang, megatron_lm, openai (default: from sbatch script)
 #   --api-base-url <url> - OpenAI-compatible endpoint for the 'openai' backend (required with it,
 #                          unless API_BASE_URL is exported). Bare host, /v1 root, or full endpoint URL.
@@ -189,6 +194,8 @@ FEWSHOT_FLAG=""
 HARNESS_LIMIT="${HARNESS_LIMIT:-}"
 # Same for an ambient MAX_LENGTH; --max-length overrides it.
 MAX_LENGTH="${MAX_LENGTH:-}"
+# Same for an ambient MAX_NEW_TOKENS; --max-new-tokens overrides it.
+MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-}"
 MEGATRON_ITER=""
 SINGLE_TASK=""
 HARNESS_BRANCH=""
@@ -255,6 +262,7 @@ while [[ $# -gt 0 ]]; do
         --megatron-iter) MEGATRON_ITER="$2";            shift 2 ;;
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --max-length) MAX_LENGTH="$2";          shift 2 ;;
+        --max-new-tokens) MAX_NEW_TOKENS="$2";  shift 2 ;;
         --harness-branch) HARNESS_BRANCH="$2";        shift 2 ;;
         --harness-repo)   HARNESS_REPO="$2";          shift 2 ;;
         --reservation)   RESERVATION_FLAG="$2";        shift 2 ;;
@@ -829,6 +837,10 @@ echo "  Judge model prefix: ${JUDGE_MODEL_PREFIX:-<none>}"
 if [[ -n "$MAX_LENGTH" ]]; then
     [[ "$MAX_LENGTH" =~ ^[1-9][0-9]*$ ]] || { echo "Error: --max-length must be a positive integer (got '$MAX_LENGTH')." >&2; exit 1; }
     export MAX_LENGTH
+fi
+if [[ -n "$MAX_NEW_TOKENS" ]]; then
+    [[ "$MAX_NEW_TOKENS" =~ ^[1-9][0-9]*$ ]] || { echo "Error: --max-new-tokens must be a positive integer (got '$MAX_NEW_TOKENS')." >&2; exit 1; }
+    export MAX_NEW_TOKENS
 fi
 [[ -n "$HARNESS_BRANCH" ]] && export LM_EVAL_HARNESS_BRANCH="$HARNESS_BRANCH"
 if [[ -n "$HARNESS_REPO" ]]; then

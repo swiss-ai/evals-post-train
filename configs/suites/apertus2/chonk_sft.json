@@ -47,6 +47,7 @@
     "apertus-1.5-70b-thinking": {
       "description": "swiss-ai/Apertus-v1.5-70B reasoning (--thinking with its <|inner_prefix|> / <|inner_suffix|> tokens). Window 262144, as evals-svc serves it. Client concurrency 256 (lm_eval): the default 8 leaves its two replicas idle (evals-svc runs it on 2 nodes, TP4 x DP2): 18 min instead of 28 for full gsm8k x4 at 64, 34 on one node; 512 gave nothing more (the longest generation bounds the run).",
       "max_length": 262144,
+      "max_new_tokens": 262144,
       "sampling": "thinking",
       "launch": {
         "model_path": "/capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/Apertus-v1.5-70B",
@@ -90,6 +91,7 @@
     "glm-4.5-air-thinking": {
       "description": "zai-org/GLM-4.5-Air, the final post-trained model (hybrid reasoning; 106B total, 12B active) with thinking on (enable_thinking set on the server; --thinking with explicit <think> / </think> tokens). Window 131072, its native 128K. Served on 2 nodes (TP4 x DP2 over ray) with vLLM `--reasoning-parser glm45 --tool-call-parser glm45 --enable-auto-tool-choice`.",
       "max_length": 131072,
+      "max_new_tokens": 131072,
       "sampling": "thinking",
       "launch": {
         "model_path": "/capstor/store/cscs/swissai/infra01/hf_models/models/zai-org/GLM-4.5-Air",
@@ -109,6 +111,7 @@
     "nemotron-3-super-120b-a12b-thinking": {
       "description": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16, the final post-trained model (120B total, 12B active) with reasoning on (enable_thinking set on the server, full effort: low_effort stays off; --thinking with explicit <think> / </think> tokens). Window 262144, as the vLLM recipe serves it (the model supports up to 1M). Served on 2 nodes (TP4 x DP2 over ray) with vLLM `--reasoning-parser nemotron_v3 --tool-call-parser qwen3_coder --enable-auto-tool-choice`.",
       "max_length": 262144,
+      "max_new_tokens": 262144,
       "sampling": "thinking",
       "launch": {
         "model_path": "/capstor/store/cscs/swissai/infra01/hf_models/models/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16",
