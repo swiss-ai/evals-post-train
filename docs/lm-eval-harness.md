@@ -350,7 +350,10 @@ Thinking runs also change **generation**: sampling is forced (`do_sample=true`,
 generation budget becomes 32768 tokens, replacing the task YAML's `max_gen_toks`: those were sized
 for a direct answer (mmlu_pro 2048, ifeval 1280) and the trace counts against them. 32768 is the
 largest task budget (AIME), so no task is lowered. Runs with `--reasoning-effort` get the same
-budget. Override via the `THINK_*` / `MAX_NEW_TOKENS` env vars (see
+budget. On the `openai` backend with `--max-length` (the suite always passes it) the budget is the
+window instead: every request is clamped to the window minus its prompt (`clamp_gen_toks`; the
+`apertus2` format clamps itself), so a model served with 262144 is not cut at 32768. Other backends
+never clamp and keep 32768. Override via the `THINK_*` / `MAX_NEW_TOKENS` env vars (see
 [SBATCH Scripts](#sbatch-scripts)); `NOTHINK_TEMPERATURE` enables the same sampling for no-think
 ablations.
 
@@ -581,7 +584,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `BS` | `auto:20` | Batch size |
 | `SIZE` | `1` | Informational/legacy model-size metadata; topology inference uses the model name/path instead |
 | `MAX_LENGTH` | (backend/model default) | Optional total context limit, passed as the backend-native setting (`max_model_len` for vLLM/SGLang, `seq_length` for Megatron, `max_length` for HF/API) |
-| `MAX_NEW_TOKENS` | `32768` with thinking or a reasoning effort; otherwise unused | Generation budget of thinking/reasoning-effort runs, passed as `--gen_kwargs max_gen_toks=...` so it replaces every task's own `max_gen_toks`. An explicit value sets that budget. |
+| `MAX_NEW_TOKENS` | `32768` with thinking or a reasoning effort, or `MAX_LENGTH` on the `openai` backend when it is set (clamped per request to the window minus the prompt); otherwise unused | Generation budget of thinking/reasoning-effort runs, passed as `--gen_kwargs max_gen_toks=...` so it replaces every task's own `max_gen_toks`. An explicit value sets that budget. |
 | `VLLM_TP_SIZE` / `VLLM_DP_SIZE` | auto | Explicit vLLM topology; either value can be omitted and is derived from the four allocated GPUs. Both values must multiply to 4. |
 | `VLLM_AUTO_PARALLELISM` | `true` | With no explicit topology, use TP=1/DP=4 only when the model name unambiguously identifies `<30B`; otherwise retain TP=4/DP=1. |
 | `VLLM_MEMORY_FRACTION` | `0.8` | vLLM `gpu_memory_utilization` / SGLang `mem_fraction_static` |

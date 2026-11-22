@@ -671,6 +671,28 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertEqual(_gen_kwargs(REASONING_EFFORT="low", MAX_NEW_TOKENS="8192"), "max_gen_toks=8192")
         self.assertEqual(_gen_kwargs(), "")
 
+    def test_thinking_budget_is_the_window_where_requests_are_clamped(self) -> None:
+        # openai: clamp_gen_toks (or apertus2's own clamp) lowers every request to window - prompt, so
+        # the budget is the window; other backends never clamp and keep 32768.
+        block = SBATCH[SBATCH.index('if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then'):]
+        block = block[: block.index("\nfi\n") + 4]
+
+        def budget(**env: str) -> str:
+            script = "set -e\n" + block + 'printf "%s" "$MAX_NEW_TOKENS"\n'
+            base = {"PATH": os.environ["PATH"], "ENABLE_THINKING": "True", "REASONING_EFFORT": "",
+                    "MAX_NEW_TOKENS_EXPLICIT": "0", "MAX_NEW_TOKENS": "2048", "LM_EVAL_BACKEND": "openai",
+                    "MAX_LENGTH": "262144"}
+            done = subprocess.run(["bash", "-c", script], env=base | env, capture_output=True, text=True, check=True)
+            return done.stdout.splitlines()[-1] if done.stdout.strip() else ""
+
+        self.assertEqual(budget(), "262144")
+        self.assertEqual(budget(MAX_LENGTH="131072"), "131072")
+        self.assertEqual(budget(MAX_LENGTH=""), "32768")  # no window given
+        self.assertEqual(budget(LM_EVAL_BACKEND="vllm"), "32768")  # no clamp there
+        self.assertEqual(budget(ENABLE_THINKING="False", REASONING_EFFORT="low"), "262144")
+        # a caller's value wins and the block is not entered
+        self.assertEqual(budget(MAX_NEW_TOKENS_EXPLICIT="1", MAX_NEW_TOKENS="8192"), "8192")
+
     def test_a_run_name_with_whitespace_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
