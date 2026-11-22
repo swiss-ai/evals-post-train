@@ -1,4 +1,5 @@
 import math
+import copy
 from types import SimpleNamespace
 import unittest
 
@@ -43,6 +44,36 @@ class EQBenchPilotTests(unittest.TestCase):
         self.assertEqual(request["messages"], [{"role": "user", "content": prompt}])
         self.assertEqual(request["temperature"], 0)
         self.assertNotIn("min_p", request)
+
+    def test_raw_replay_rejects_changed_requests_missing_calls_and_response_models(self):
+        n = SimpleNamespace(Task=SimpleNamespace(_parse_rubric_scores=lambda _: {"correctness": 12}),
+                            calculate_final_rubric_score=lambda _: (12, None))
+        sample = {"case": {"id": "401"}, "status": "generated", "criteria": ["correctness"],
+                  "judge_prompt": "Exact frozen native prompt", "task": {}}
+        response = {"model": "open-judge", "choices": [
+            {"finish_reason": "stop", "message": {"content": '{"correctness": 12}'}}]}
+        calls = [{"phase": "requested", "request": pilot.request(sample, "open-judge")},
+                 {"phase": "returned", "response": response}]
+        rows, report = pilot.replay(n, [sample], calls, "open-judge")
+        self.assertEqual(rows[0]["status"], "succeeded")
+        self.assertFalse(report["automatic_scoring_ready"])
+        for field, value in (("temperature", 1), ("max_tokens", 32),
+                             ("messages", [{"role": "user", "content": "changed"}])):
+            changed = copy.deepcopy(calls)
+            changed[0]["request"][field] = value
+            with self.assertRaises(ValueError):
+                pilot.replay(n, [sample], changed, "open-judge")
+        with self.assertRaises(ValueError):
+            pilot.replay(n, [sample], calls[:1], "open-judge")
+        calls[1]["response"]["model"] = "different-judge"
+        with self.assertRaises(ValueError):
+            pilot.replay(n, [sample], calls, "open-judge")
+
+    def test_failed_native_scenario_has_no_invented_judge_credit(self):
+        row = pilot.judgment(None, {"case": {"id": "3"}, "status": "model_no_final_reply"}, None)
+        self.assertEqual(row["status"], "failed")
+        self.assertEqual(row["scores"], {})
+        self.assertNotIn("native_rubric_score", row)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ from types import SimpleNamespace
 from scripts.helpfulness import arena_pilot, teacher_smoke
 from scripts.helpfulness.benchmark_pilot import record_sdk_calls, verified_bytes
 from scripts.helpfulness.core import append_jsonl, read_json, read_jsonl, write_json
+from scripts.helpfulness.open_models import reject_closed
 
 
 REVISION = "affc5a000bbdb965b807e09ca7875f8530fa8f56"
@@ -183,6 +184,36 @@ def request(sample, model, max_tokens=2048):
             "temperature": 0, "max_tokens": max_tokens, "seed": 1234}
 
 
+def judge_preflight(args, n, cases):
+    verified_bytes(args.samples, args.samples_sha256)
+    samples = read_jsonl(args.samples)
+    if [s["case"] for s in samples] != cases:
+        raise ValueError("EQ-Bench samples do not match selection")
+    for sample in samples:
+        if sample["status"] not in ("generated", "model_no_final_reply"):
+            raise ValueError("Unknown checkpoint outcome")
+        if sample["criteria"] != criteria(n, sample["case"]["id"]):
+            raise ValueError("Sample criteria differ from native source")
+        if sample["status"] == "generated" and sample["judge_prompt"] != rubric(n, sample["task"]):
+            raise ValueError("Frozen judge prompt differs from native task replay")
+    identity = read_json(args.identity)
+    reject_closed(args.model)
+    reject_closed(identity["public_model"])
+    if (
+        identity["served_model"] != args.model or identity["base_url"] != args.base_url
+        or identity["source_samples_sha256"] != args.samples_sha256
+        or identity["selection_sha256"] != args.selection_sha256
+        or identity["benchmark"] != "eqbench3" or identity["license"] != "Apache-2.0"
+        or not identity["public_repository_revision"]
+    ):
+        raise ValueError("Judge requires bound open-model, source, selection and licensing evidence")
+    plans = [{"case_id": s["case"]["id"], "messages": request(s, args.model)["messages"]}
+             for s in samples if s["status"] == "generated"]
+    if not plans:
+        raise ValueError("No complete EQ-Bench scenarios to judge")
+    return samples, identity, plans
+
+
 def parse_scores(n, sample, response):
     choice = response["choices"]
     if len(choice) != 1 or choice[0]["finish_reason"] != "stop":
@@ -196,50 +227,74 @@ def parse_scores(n, sample, response):
     return scores
 
 
+def judgment(n, sample, response):
+    row = {"case": sample["case"], "status": "failed", "scores": {}}
+    if sample["status"] != "generated":
+        row["error"] = "model_no_final_reply"
+        return row
+    row["response"] = response
+    try:
+        scores = parse_scores(n, sample, response)
+        t = {**sample["task"], "status": "rubric_scored", "rubric_scores": scores}
+        scalar, error = n.calculate_final_rubric_score({"scenario_tasks": {"1": {sample["case"]["id"]: t}}})
+        if error:
+            raise ValueError(error)
+        row.update(status="succeeded", scores=scores, native_rubric_score=scalar)
+    except (ValueError, KeyError, TypeError) as error:
+        row["error"] = str(error)
+    return row
+
+
+def summarize(n, samples, rows):
+    tasks = {s["case"]["id"]: {**s["task"], "status": "rubric_scored", "rubric_scores": r["scores"]}
+             for s, r in zip(samples, rows) if r["status"] == "succeeded"}
+    score, error = n.calculate_final_rubric_score({"scenario_tasks": {"1": tasks}})
+    return {
+        "protocol": PROTOCOL, "status": "succeeded" if len(tasks) == 20 else "incomplete",
+        "selected_cases": 20, "scored_cases": len(tasks), "native_rubric_score": score,
+        "aggregation_error": error, "scale": [0, 20], "elo_computed": False,
+        "automatic_scoring_ready": False,
+    }
+
+
+def replay(n, samples, calls, model):
+    valid = [s for s in samples if s["status"] == "generated"]
+    if len(calls) != 2 * len(valid):
+        raise ValueError("Incomplete EQ-Bench raw judge evidence")
+    responses = iter(calls[1::2])
+    for sample, sent, returned in zip(valid, calls[::2], calls[1::2]):
+        if (
+            sent.get("phase") != "requested" or returned.get("phase") != "returned"
+            or sent.get("request") != request(sample, model)
+            or returned.get("response", {}).get("model") != model
+        ):
+            raise ValueError("Raw EQ-Bench request or response differs from declared protocol")
+    rows = [judgment(n, s, next(responses)["response"] if s["status"] == "generated" else None)
+            for s in samples]
+    return rows, summarize(n, samples, rows)
+
+
 def judge(args):
     n, cases = preflight(args)
-    verified_bytes(args.samples, args.samples_sha256)
-    samples = read_jsonl(args.samples)
-    if [s["case"] for s in samples] != cases:
-        raise ValueError("EQ-Bench samples do not match selection")
-    for sample in samples:
-        if sample["status"] == "generated" and sample["judge_prompt"] != rubric(n, sample["task"]):
-            raise ValueError("Frozen judge prompt differs from native task replay")
+    samples, identity, plans = judge_preflight(args, n, cases)
     from openai import OpenAI
 
     args.output.mkdir(exist_ok=False, parents=True)
-    valid = [sample for sample in samples if sample["status"] == "generated"]
-    plans = [{"messages": request(sample, args.model)["messages"]} for sample in valid]
+    write_json(args.output / "report.json", {"status": "running", "judge_identity": identity,
+                                           "automatic_scoring_ready": False})
+    teacher_smoke.wait_for_server(args.base_url, args.model, 1200)
     with (
         record_sdk_calls(args.output / "judge-calls.jsonl", args.base_url, args.model, plans),
         OpenAI(base_url=args.base_url, api_key="allocation-local", max_retries=0, timeout=180) as sdk,
     ):
-        tasks = {}
+        rows = []
         for sample in samples:
-            row = {"case": sample["case"], "status": "failed", "scores": {}}
-            if sample["status"] == "generated":
-                response = sdk.chat.completions.create(**request(sample, args.model)).model_dump(mode="json")
-                row["response"] = response
-                try:
-                    scores = parse_scores(n, sample, response)
-                    t = {**sample["task"], "status": "rubric_scored", "rubric_scores": scores}
-                    scalar, error = n.calculate_final_rubric_score({"scenario_tasks": {"1": {sample["case"]["id"]: t}}})
-                    if error:
-                        raise ValueError(error)
-                    row.update(status="succeeded", scores=scores, native_rubric_score=scalar)
-                    tasks[sample["case"]["id"]] = t
-                except (ValueError, KeyError, TypeError) as error:
-                    row["error"] = str(error)
-            else:
-                row["error"] = "model_no_final_reply"
+            response = (sdk.chat.completions.create(**request(sample, args.model)).model_dump(mode="json")
+                        if sample["status"] == "generated" else None)
+            row = judgment(n, sample, response)
+            rows.append(row)
             append_jsonl(args.output / "judgments.jsonl", row)
-            score, error = n.calculate_final_rubric_score({"scenario_tasks": {"1": tasks}})
-            write_json(args.output / "report.json", {
-                "protocol": PROTOCOL, "status": "succeeded" if len(tasks) == 20 else "incomplete",
-                "selected_cases": 20, "scored_cases": len(tasks), "native_rubric_score": score,
-                "aggregation_error": error, "scale": [0, 20], "elo_computed": False,
-                "automatic_scoring_ready": False,
-            })
+            write_json(args.output / "report.json", summarize(n, samples, rows))
 
 
 def main():
@@ -250,6 +305,7 @@ def main():
     parser.add_argument("--selection-sha256", required=True)
     parser.add_argument("--samples", type=Path)
     parser.add_argument("--samples-sha256")
+    parser.add_argument("--identity", type=Path)
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--model", required=True)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
@@ -263,6 +319,9 @@ def main():
                  "debrief_calls": sum(c["category"] != "analysis" for c in cases)}
         if args.checkpoint:
             value["native_preflight"] = teacher_smoke.preflight(args.checkpoint)
+        else:
+            _, identity, plans = judge_preflight(args, n, cases)
+            value.update(judge_identity=identity, judge_messages=plans)
         write_json(args.output, value)
     elif args.action == "generate":
         generate(args)
