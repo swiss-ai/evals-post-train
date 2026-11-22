@@ -65,6 +65,11 @@ IMAGE_REPOSITORY = "swiss-ai/evals-post-train-eval"
 IMAGE_INPUTS = ("containers/Dockerfile.eval", "requirements", ".github/workflows/eval-image.yml")
 # sbatch/srun that run in place, so lm-eval's launcher (which submits Slurm jobs) runs inline.
 INLINE_SLURM_DIR = REPO_ROOT / "scripts" / "direct_serving" / "inline_slurm"
+# Ray keeps the address of the cluster it started in `<temp dir>/ray/ray_current_cluster`, and vLLM finds its cluster
+# there (`ray.init(address="auto")`). With a temp dir shared between jobs (TMPDIR on scratch) the file belongs to
+# whichever job wrote it last, so a job that starts later on the same TMPDIR sends the first one's vLLM to the wrong
+# cluster ("Failed to connect to Ray cluster"). One temp dir per job, on the node, keeps them apart.
+RAY_TMPDIR_EXPORT = "export RAY_TMPDIR=/tmp/ray-${SLURM_JOB_ID}"
 # What the eval image sees: this checkout, and the places runs read and write (as
 # containers/env.toml mounts them).
 DEFAULT_MOUNTS = (
@@ -432,6 +437,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     _apply_suite(args, parser)
+    args.pre_launch_cmds = "; ".join(filter(None, [RAY_TMPDIR_EXPORT, args.pre_launch_cmds]))
     user = getpass.getuser()
     launch_args = build_launch_args(
         model=args.model,

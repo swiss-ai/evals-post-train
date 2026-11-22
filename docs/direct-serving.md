@@ -8,7 +8,7 @@ sbatch
 '- srun   eval command 1, 2, ..  in the eval image, one after another
 ```
 
-The serving half is model-launch's rendering of a serving job (head and follower scripts, Ray across the nodes of a replica) with OpenTela, metrics and telemetry off, so a model on several nodes works. Only the end of that script is replaced: this job waits for `/health`, runs the commands, and ends, where model-launch waits for the server to exit. If the server dies before it is ready or during a command, the job stops that command and ends with status 1.
+The serving half is model-launch's rendering of a serving job (head and follower scripts, Ray across the nodes of a replica) with OpenTela, metrics and telemetry off, so a model on several nodes works. Every serving node runs with `RAY_TMPDIR=/tmp/ray-$SLURM_JOB_ID` (before `--pre-launch-cmds`, which can override it): Ray records its cluster address in a file under its temp dir, and with a temp dir shared between jobs (`TMPDIR` on scratch) a second job overwrites the first one's address and the first one's vLLM fails with `Failed to connect to Ray cluster`. Only the end of that script is replaced: this job waits for `/health`, runs the commands, and ends, where model-launch waits for the server to exit. If the server dies before it is ready or during a command, the job stops that command and ends with status 1.
 
 ## Run it
 
