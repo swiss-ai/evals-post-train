@@ -102,6 +102,23 @@ in-word repetition. Version 1 remains explicitly selectable only for historical
 replay; judge identity binds the version. The v5 prompt targets a shorter public
 assessment while keeping the same source-grounded grading principles.
 
+The retained twenty-scenario pilot completed 58 native checkpoint calls.
+Finite-schema v5 judge job `4004773` completed all sixty judgments in 17m22s:
+**17/20 frozen pilot-review matches, 20/20 development controls, and 20/20
+fresh-wording controls**, with 60/60 valid outputs and complete raw SDK replay.
+The observed native-rubric scalar is **3.49/20** for this adapted subset.
+Disagreements remain on scenarios 304, 136 and 412. These intervals are
+assistant-authored diagnostics, not independently validated human gold.
+
+Use the hash-bound `eqbench_scalar_v5.txt` profile with `--structured-output`
+and `--constrain-assessment` (schema version 2) for this retained diagnostic.
+Do not silently apply it as an official/native judge or enable automatic scoring.
+Ten of eleven roleplay scenarios have at least one turn missing required native
+parsed sections, and three of 58 target calls were truncated. All original raw
+replies, partial candidates, rejected fenced/over-budget outputs, and the
+word-only decoder's repetition failures remain preserved; no target regeneration
+or review-interval changes were used to obtain agreement.
+
 ### Arena-Hard v2 twenty-case open-reference pilot
 
 Structured v3 job `3998552` completed 78/78 valid comparison orders in 11m04s.
