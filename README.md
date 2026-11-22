@@ -92,7 +92,7 @@ scripts/evalscope/run_evalscope_eval.sh --benchmark swe_bench,swe_bench_pro --li
 
 ```bash
 python -m scripts.common.suites run apertus2/chonk_sft --api-base-url https://api.swissai.svc.cscs.ch/v1 \
-  --model chonk-lc-16k-v0.2-sft=<served name> --limit 5 --no-wandb      # add --submit to launch
+  --helper-url <gpt-oss server, docs/custom-tau2.md> --model chonk-lc-16k-v0.2-sft=<served name> --limit 5 --no-wandb      # add --submit to launch
 ```
 
 ### Launching the serving model

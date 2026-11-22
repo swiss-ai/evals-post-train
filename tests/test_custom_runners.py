@@ -142,6 +142,15 @@ class LlmArgsTest(unittest.TestCase):
         _, _, user = self._llm_args("--user-llm", "gpt-4.1")
         self.assertEqual(user, {})
 
+    def test_a_user_on_its_own_endpoint_keeps_the_pins_and_names_its_own_key_not_the_value(self):
+        _, _, user = self._llm_args("--user-llm", "openai/RCP/openai/gpt-oss-120b", "--user-api-base-url", "https://u.example/")
+        self.assertEqual((user["api_base"], user["api_key"]), ("https://u.example/v1", "os.environ/USER_API_KEY"))
+        self.assertEqual((user["reasoning_effort"], user["max_tokens"]), ("low", 4096))
+
+    def test_a_user_endpoint_without_another_user_model_stops_the_run(self):
+        with self.assertRaises(Exception):
+            self._llm_args("--user-api-base-url", "https://u.example/v1")
+
 
 class JudgeTest(unittest.TestCase):
     """The NL-assertion judge is the model under test: the runner's environment for tau2 and the sitecustomize shim."""
@@ -224,7 +233,7 @@ class JudgeTest(unittest.TestCase):
     def test_a_judge_on_its_own_endpoint_keeps_the_pins_and_its_own_endpoint_and_key(self):
         judge_base = self._endpoint_serving("RCP/openai/gpt-oss-120b", key="sk-judge-9876")[1]
         env, out = self._tau2_env("--reasoning-effort", "high", "--judge-llm", "openai/RCP/openai/gpt-oss-120b",
-                                  "--judge-api-base-url", judge_base, env_extra={"CSCS_SERVING_API": "sk-judge-9876"})
+                                  "--judge-api-base-url", judge_base, env_extra={"JUDGE_API_KEY": "sk-judge-9876"})
         self.assertEqual(env["TAU2_JUDGE_LLM"], "openai/RCP/openai/gpt-oss-120b")
         args = json.loads(env["TAU2_JUDGE_LLM_ARGS"])
         self.assertEqual((args["api_base"], args["api_key"]), (judge_base, "os.environ/JUDGE_API_KEY"))
@@ -232,6 +241,13 @@ class JudgeTest(unittest.TestCase):
         self.assertNotIn("sk-judge-9876", env["TAU2_JUDGE_LLM_ARGS"] + out)
         self.assertNotIn("sk-test-secret-1234", env["TAU2_JUDGE_LLM_ARGS"] + out)
         self.assertIn(f"(through {judge_base})", out)
+
+    def test_the_serving_key_is_never_sent_to_a_judge_on_its_own_endpoint_by_default(self):
+        judge_base = self._endpoint_serving("RCP/openai/gpt-oss-120b", key="local")[1]
+        env, out = self._tau2_env("--judge-llm", "openai/RCP/openai/gpt-oss-120b", "--judge-api-base-url", judge_base,
+                                  env_extra={"CSCS_SERVING_API": "sk-serving-5555"})
+        self.assertEqual(env["TAU2_JUDGE_LLM"], "openai/RCP/openai/gpt-oss-120b")
+        self.assertNotIn("sk-serving-5555", env["TAU2_JUDGE_LLM_ARGS"] + out)
 
     def test_a_judge_endpoint_without_a_judge_model_stops_the_run(self):
         env, out = self._tau2_env("--judge-api-base-url", "http://127.0.0.1:1/v1")
