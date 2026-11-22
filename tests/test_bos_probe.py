@@ -113,6 +113,13 @@ class ExpectedBosTests(unittest.TestCase):
         # add_bos_token=false and BOS=auto, but the host could not read the config: resolved false
         self.assertTrue(expected_bos("<s>", False, False, "auto", False))
 
+    def test_a_chat_template_leaves_the_bos_to_the_template(self):
+        # Nemotron: <s> defined, add_bos_token=false, a template that writes none: nothing is expected
+        self.assertFalse(expected_bos("<s>", False, False, "auto", False, chat_template=True))
+        # a run that prepends, or a tokenizer that adds one, still expects it
+        self.assertTrue(expected_bos("<s>", False, True, "auto", False, chat_template=True))
+        self.assertTrue(expected_bos("<s>", True, False, "auto", False, chat_template=True))
+
     def test_no_bos_is_respected(self):
         self.assertFalse(expected_bos("<s>", False, False, "false", False))
 

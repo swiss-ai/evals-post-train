@@ -159,18 +159,25 @@ def configured_add_bos_token(tokenizer: str):
 
 
 def expected_bos(
-    bos_token: str | None, adds_itself: bool, bos_resolved: bool, bos_requested: str, add_bos_token
+    bos_token: str | None,
+    adds_itself: bool,
+    bos_resolved: bool,
+    bos_requested: str,
+    add_bos_token,
+    chat_template: bool = False,
 ) -> bool:
     """Whether the run should deliver a BOS (none then fails; otherwise it only warns).
 
     Yes when the tokenizer adds one itself, when the run prepends one, or when BOS=auto would have
     (the tokenizer defines a BOS token and says add_bos_token=false) but the host-side lookup could not
-    tell: a failed lookup must not hide a missing BOS. A tokenizer that defines a BOS token and says
-    nothing is not expected to deliver one (GPT-2 style models were trained without): it is still probed,
-    and warned about."""
+    tell: a failed lookup must not hide a missing BOS. That last rule is bos_default's, which with a chat
+    template leaves the BOS to the template (only Gemma 4 gets one prepended), so it does not apply there:
+    a template that writes no BOS (Nemotron's) is not expected to deliver one. A tokenizer that defines a
+    BOS token and says nothing is not expected to deliver one (GPT-2 style models were trained without): it
+    is still probed, and warned about."""
     if not bos_token:
         return False
-    auto_would_prepend = bos_requested == "auto" and add_bos_token is False
+    auto_would_prepend = bos_requested == "auto" and add_bos_token is False and not chat_template
     return adds_itself or bos_resolved or auto_would_prepend
 
 
@@ -200,7 +207,7 @@ def main() -> int:
         print(f"BOS check skipped: {args.tokenizer} defines no BOS token")
         return 0
     expected = expected_bos(
-        tokenizer.bos_token, adds_itself, args.bos == "true", args.bos_requested, add_bos_token
+        tokenizer.bos_token, adds_itself, args.bos == "true", args.bos_requested, add_bos_token, args.chat_template
     )
     if args.bos_requested == "false" and not adds_itself and not args.chat_template:
         print("BOS check skipped: --no-bos (BOS=false) and the tokenizer adds none")
