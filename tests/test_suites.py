@@ -215,7 +215,8 @@ class SuiteTests(unittest.TestCase):
             argv = rows["chonk-lc-16k-v0.2-sft", f"tau2-bench {domain}"]
             self.assertEqual(argv, ["sbatch", "--qos=highprio", "--partition=highprio", "scripts/custom/run_tau2_bench.sbatch",
                                     "--domain", domain, "--model", "chonk", "--api-base-url", "http://x/v1",
-                                    "--num-tasks", "2", "--workdir", f"logs/tau2/{suite['name']}/chonk/{domain}",
+                                    "--num-tasks", "2", "--sampling-profile", suites.sampling_for(suite, "chonk-lc-16k-v0.2-sft", domain),
+                                    "--workdir", f"logs/tau2/{suite['name']}/chonk/{domain}",
                                     "--reasoning-effort", "high", "--user-llm-args", USER_LLM_ARGS]
                              + (["--retrieval-config", "bm25"] if domain == "banking_knowledge" else [])
                              + (["--judge-llm", JUDGE_LLM, "--judge-llm-args", USER_LLM_ARGS] if domain == "retail" else []))
