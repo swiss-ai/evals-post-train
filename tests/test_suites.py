@@ -47,7 +47,7 @@ class SuiteTests(unittest.TestCase):
         flags = suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "ifbench_think")
         self.assertEqual(flags[:4], ["--backend", "openai", "--chat-format", "apertus2"])
         self.assertIn("apertus2", suite["setups"]["chonk-lc-16k-v0.2-sft"]["serving"])
-        self.assertEqual(flags[flags.index("--max-length") + 1], "131072")
+        self.assertEqual(flags[flags.index("--max-length") + 1], "32768")
 
     def test_plan_has_one_row_per_benchmark_in_table_order(self):
         suite = suites.load(SUITE)

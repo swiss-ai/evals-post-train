@@ -88,8 +88,8 @@
       }
     },
     "chonk-lc-16k-v0.2-sft": {
-      "description": "SwissAI-Research/swiss-ai/chonk-lc-16k-v0.2-sft. No Jinja template exists: apertus-common renders the format, in lm_eval (--chat-format apertus2, completions endpoint, needs --backend openai and the verified Apertus_2_instruct tokenizer, pinned in `tokenizer`) and on the server for the other frameworks (vLLM plugin of apertus-common, see docs/thinking.md). Served with a 131072 window although the checkpoint's max_position_embeddings is 16384 (plain RoPE), so what it does past 16k is untrained: read those scores with that in mind. The server only starts with VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 (launch.env). It only reasons at effort high on non-math tasks.",
-      "max_length": 131072,
+      "description": "SwissAI-Research/swiss-ai/chonk-lc-16k-v0.2-sft. No Jinja template exists: apertus-common renders the format, in lm_eval (--chat-format apertus2, completions endpoint, needs --backend openai and the verified Apertus_2_instruct tokenizer, pinned in `tokenizer`) and on the server for the other frameworks (vLLM plugin of apertus-common, see docs/thinking.md). Served with a 131072 window (tau2 uses all of it; the other benchmarks keep max_length 32768) although the checkpoint's max_position_embeddings is 16384 (plain RoPE), so what it does past 16k is untrained: read those scores with that in mind. The server only starts with VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 (launch.env). It only reasons at effort high on non-math tasks.",
+      "max_length": 32768,
       "sampling": "thinking",
       "reasoning_effort": "high",
       "tokenizer": {"repo": "https://github.com/swiss-ai/apertus-omni-tokenizer.git", "revision": "b801ff1b00d933d10bba90b0c22307157299faa7", "path": "tokenizers/Apertus_2_instruct"},
@@ -107,12 +107,12 @@
         "inspect": [],
         "bfcl": [],
         "tau2": [],
-        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 131072}"]
+        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       }
     },
     "chonk-lc-16k-v0.1-ep1": {
-      "description": "Same settings as chonk-lc-16k-v0.2-sft (apertus-common format, 128k window, effort high, tokenizer and serving options), for the earlier chonk-lc-16k-v0.1-ep1 checkpoint.",
-      "max_length": 131072,
+      "description": "Same settings as chonk-lc-16k-v0.2-sft (apertus-common format, 128k served window, 32k max_length, effort high, tokenizer and serving options), for the earlier chonk-lc-16k-v0.1-ep1 checkpoint.",
+      "max_length": 32768,
       "sampling": "thinking",
       "reasoning_effort": "high",
       "tokenizer": {"repo": "https://github.com/swiss-ai/apertus-omni-tokenizer.git", "revision": "b801ff1b00d933d10bba90b0c22307157299faa7", "path": "tokenizers/Apertus_2_instruct"},
@@ -130,7 +130,7 @@
         "inspect": [],
         "bfcl": [],
         "tau2": [],
-        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 131072}"]
+        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       }
     }
   }
