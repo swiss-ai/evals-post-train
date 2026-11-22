@@ -92,6 +92,10 @@ contain up to 60 words. Version 1 remains the default for historical replay.
 Judge identity binds the selected version; requests and returned word bounds
 must match it. The longer public evidence is intended to expose multiple
 substantive errors before selecting an anchor, not to request hidden reasoning.
+The v5 profile adds fresh illustrative anchor examples, rather than benchmark
+answers or frozen review labels, and explicitly checks that identified material
+omissions agree with the final rating. These prompt examples are calibration
+instructions, not additional independent validation evidence.
 
 ### EQ-Bench 3 native-scenario pilot
 
