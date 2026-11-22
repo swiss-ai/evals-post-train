@@ -265,6 +265,23 @@ def arena_messages(case: dict, answer: str, assets: dict) -> list[dict]:
     return result
 
 
+def wildbench_prompt(case: dict, answer: str, assets: dict) -> str:
+    template = assets["files"]["evaluation/eval_template.score.v2.md"]
+
+    def shorten(value):
+        return " ".join(value.split(" ")[:1000]) + "... (truncated)" if len(value.split(" ")) > 1000 else value
+
+    history = "".join(
+        ("USER: " if item["role"] == "user" else "ASSISTANT: ") + item["content"] + "\n\n"
+        for item in case["messages"][:-1]
+    )
+    values = {"history": shorten(history), "user_query": shorten(case["messages"][-1]["content"]),
+              "model_output": shorten(answer), "checklist": "".join("- " + item + "\n" for item in case["checklist"])}
+    for key, value in values.items():
+        template = template.replace("{$" + key + "}", value)
+    return template
+
+
 def score(name: str, case: dict, answer: str, judge, assets: dict, options: dict, context: dict,
           trace: list | None = None) -> tuple[dict, list[dict]]:
     files = assets["files"]
@@ -315,18 +332,7 @@ def score(name: str, case: dict, answer: str, judge, assets: dict, options: dict
             credit += battle_weight * (1 if margin > 0 else 0 if margin < 0 else 0.5)
         return {"win_credit": credit, "battle_weight": weight}, trace
     if name == "wildbench_v2":
-        template = files["evaluation/eval_template.score.v2.md"]
-        def shorten(value):
-            return " ".join(value.split(" ")[:1000]) + "... (truncated)" if len(value.split(" ")) > 1000 else value
-        history = "".join(
-            ("USER: " if item["role"] == "user" else "ASSISTANT: ") + item["content"] + "\n\n"
-            for item in case["messages"][:-1]
-        )
-        values = {"history": shorten(history), "user_query": shorten(case["messages"][-1]["content"]),
-                  "model_output": shorten(answer), "checklist": "".join("- " + item + "\n" for item in case["checklist"])}
-        for key, value in values.items():
-            template = template.replace("{$" + key + "}", value)
-        result = strict_json(call(template))
+        result = strict_json(call(wildbench_prompt(case, answer, assets)))
         if not all(isinstance(result.get(key), str) for key in ("strengths", "weaknesses")):
             raise ValueError("WildBench judgment requires strengths and weaknesses")
         value = result.get("score")
