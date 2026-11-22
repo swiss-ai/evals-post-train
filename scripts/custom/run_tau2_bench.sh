@@ -36,8 +36,9 @@
 #                               the same low effort and cap: upstream hardcodes an OpenAI model (tau2_judge/).
 #   --user-api-base-url <url>  The user's own endpoint, when it is not the one of --api-base-url (a model served in this
 #                               job, say, with the user on the shared deployment). Needs --user-llm, openai/<served name>
-#                               of a model that is not the one under test. Its key: USER_API_KEY (default: CSCS_SERVING_API;
-#                               both also from scripts/secrets.env); the user's llm args name it as "os.environ/USER_API_KEY".
+#                               of a model that is not the one under test. Its key: USER_API_KEY (default: "local", as for a
+#                               server launched with scripts/direct_serving/job.sh, which checks none: the serving key is never sent to
+#                               it; set USER_API_KEY for a model on the shared API); the user's llm args name it as "os.environ/USER_API_KEY".
 #   --user-llm-args <json>     Extra litellm kwargs for the user, merged over its default key by key. The default
 #                               user (the model under test) runs at reasoning_effort low with max_tokens 4096: at its
 #                               default effort a turn could run 15k tokens and end with no reply, and tau2 redoes the task.
@@ -50,8 +51,8 @@
 #                               Only used with --api-base-url, else the judge is upstream's own.
 #   --judge-api-base-url <url> The judge's own endpoint, when it is not the one of --api-base-url (a model served in this
 #                               job, say, with the judge on the shared deployment). Needs --judge-llm, named as above and
-#                               looked up in this endpoint's /models. Its key: JUDGE_API_KEY (default: CSCS_SERVING_API; both
-#                               also from scripts/secrets.env); the judge's llm args name it as "os.environ/JUDGE_API_KEY".
+#                               looked up in this endpoint's /models. Its key: JUDGE_API_KEY (default: "local", like USER_API_KEY
+#                               above; set JUDGE_API_KEY for a model on the shared API); the judge's llm args name it as "os.environ/JUDGE_API_KEY".
 #   --judge-llm-args <json>    Extra litellm kwargs for the judge, merged over its default key by key (the default
 #                               judge runs at reasoning_effort low with max_tokens 4096, like the default user).
 #   --retrieval-config <name>  banking_knowledge: the retrieval pipeline (default: bm25, offline keyword search).
@@ -237,7 +238,7 @@ if [[ -n "$USER_API_BASE_URL" ]]; then
     [[ "$USER_LLM" == openai/* && "$USER_LLM" != "$AGENT_LLM" ]] || die "--user-api-base-url needs a --user-llm openai/<served name> that is not the model under test."
     USER_BASE=$USER_API_BASE_URL
     [[ "$USER_BASE" == */v1 || "$USER_BASE" == */v1/ ]] || USER_BASE="${USER_BASE%/}/v1"
-    export USER_API_KEY="${USER_API_KEY:-${CSCS_SERVING_API:-}}"
+    export USER_API_KEY="${USER_API_KEY:-local}"
     USER_LLM_ARGS=$(python3 -c '
 import json, sys
 args = json.loads(sys.argv[1])
@@ -347,7 +348,7 @@ if [[ -n "$API_BASE_URL" ]]; then
         [[ "$JUDGE_LLM" == openai/* && "$JUDGE_LLM" != "$AGENT_LLM" ]] || die "--judge-api-base-url needs a --judge-llm openai/<served name> that is not the model under test."
         JUDGE_BASE=$JUDGE_API_BASE_URL
         [[ "$JUDGE_BASE" == */v1 || "$JUDGE_BASE" == */v1/ ]] || JUDGE_BASE="${JUDGE_BASE%/}/v1"
-        export JUDGE_API_KEY="${JUDGE_API_KEY:-${CSCS_SERVING_API:-}}"
+        export JUDGE_API_KEY="${JUDGE_API_KEY:-local}"
         JUDGE_KEY_VAR=JUDGE_API_KEY
     fi
     if [[ "$JUDGE_LLM" == openai/* && "$JUDGE_LLM" != "$AGENT_LLM" ]]; then
