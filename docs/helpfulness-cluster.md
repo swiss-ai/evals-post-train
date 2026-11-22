@@ -44,6 +44,33 @@ invented by the batch script.
 
 ## Submit one benchmark/scope per job
 
+### EQ-Bench 3 native-scenario pilot
+
+`scripts.helpfulness.eqbench_pilot` separates native checkpoint generation from
+rubric judging. The reviewed MIT upstream pin is
+`affc5a000bbdb965b807e09ca7875f8530fa8f56`; its code, scenario turns, master
+prompts, debriefs, parsing, rubric formatting, criterion selection, and weighting
+are bound to a frozen source manifest. The pilot selects twenty native scenarios
+by deterministic ID hash: eleven roleplay/direct, the one released
+message-drafting scenario, and eight analysis cases. The pinned release has 45
+scenarios (25 roleplay/direct, one drafting, 19 analysis), not every ID named in
+its category constants. All selected turns are retained, with native debriefs
+except for analysis. This selection requires 58 checkpoint calls.
+
+The pilot is one iteration, a 2,048-token per-call limit rather than the native
+12,000-token maximum, and native low-reasoning checkpoint rendering.
+These bounds adapt the evaluation; the result is not a full headline score.
+Native temperature 0.7 and `min_p=0.1` are retained for scenario turns; debriefs
+use temperature 0.5 without `min_p`. Explicit no-final-reply model failures are
+persisted, stop that scenario, and do not stop later scenarios. Transport and
+unknown native failures stop the allocation rather than becoming scores.
+
+Judge criterion outputs must include every native criterion with a finite
+0–20 value; malformed, missing, or truncated results remain failures.
+The scalar uses the pinned native per-task criterion selection/weighting then
+task averaging, **without Elo or inherited leaderboard state**. A replacement
+open judge remains an adaptation and requires separate calibration.
+
 ### Arena-Hard v2 twenty-case open-reference pilot
 
 Structured v3 job `3998552` completed 78/78 valid comparison orders in 11m04s.
