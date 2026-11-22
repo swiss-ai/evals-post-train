@@ -1,5 +1,6 @@
 import copy
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -35,6 +36,15 @@ class SuiteTests(unittest.TestCase):
                           "--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>",
                           "--api-num-concurrent", "256", "--max-length", "262144", "--repeats", "4"])
         self.assertNotIn("--repeats", suites.flags_for(suite, THINK, "minerva_math500_think"))
+
+    def test_harbor_is_told_the_window_each_setup_is_run_with(self):
+        # max_input_tokens is the window of the setup (max_length): one number, stated twice.
+        suite = suites.load(SUITE)
+        for name, setup in suite["setups"].items():
+            harbor = setup["flags"].get("harbor", [])
+            for flag in harbor:
+                if "max_input_tokens" in flag:
+                    self.assertEqual(json.loads(flag.split("=", 1)[1])["max_input_tokens"], setup["max_length"], name)
 
     def test_apertus_15_70b_runs_with_high_client_concurrency_on_every_lm_eval_row(self):
         # Its two replicas sit idle at the launcher's default of 8.

@@ -72,7 +72,7 @@
         "inspect": ["--enable-thinking"],
         "bfcl": [],
         "tau2": ["--enable-thinking"],
-        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
+        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 262144}"]
       }
     },
     "qwen3-32b-thinking": {
