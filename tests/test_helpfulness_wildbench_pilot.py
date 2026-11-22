@@ -37,7 +37,7 @@ class WildBenchPilotTests(unittest.TestCase):
 
     def test_compact_failures_remain_failed_without_scores(self):
         sample, assets, response = self.fixtures()
-        for score in (True, "8", 0, 11, float("nan")):
+        for score in (True, "8", 8.5, 0, 11, float("nan")):
             response["choices"][0]["message"]["content"] = json.dumps({
                 "strengths": "Grounded.", "weaknesses": "Observed.", "score": score})
             row = w.judgment(sample, response, assets)

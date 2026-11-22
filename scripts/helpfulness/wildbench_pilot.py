@@ -77,7 +77,7 @@ def request(sample, assets, model):
                 "properties": {
                     "strengths": {"type": "string", "pattern": ASSESSMENT_PATTERN},
                     "weaknesses": {"type": "string", "pattern": ASSESSMENT_PATTERN},
-                    "score": {"type": "number", "minimum": 1, "maximum": 10},
+                    "score": {"type": "integer", "enum": list(range(1, 11))},
                 }, "required": ["strengths", "weaknesses", "score"],
             },
         }},
@@ -157,7 +157,7 @@ def judgment(sample, response, assets):
             not isinstance(data, dict) or set(data) != {"strengths", "weaknesses", "score"}
             or any(not isinstance(data[k], str) or not re.fullmatch(ASSESSMENT_PATTERN, data[k])
                    for k in ("strengths", "weaknesses"))
-            or type(data["score"]) not in (int, float)
+            or type(data["score"]) is not int
         ):
             raise ValueError("WildBench compact output violates exact numeric JSON or finite assessment bounds")
 
