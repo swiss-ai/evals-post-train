@@ -184,8 +184,18 @@ def request(sample, model, max_tokens=2048):
     if sample.get("calibration_prompt"):
         messages.append({"role": "system", "content": sample["calibration_prompt"]})
     messages.append({"role": "user", "content": sample["judge_prompt"]})
-    return {"model": model, "messages": messages,
-            "temperature": 0, "max_tokens": max_tokens, "seed": 1234}
+    value = {"model": model, "messages": messages,
+             "temperature": 0, "max_tokens": max_tokens, "seed": 1234}
+    if sample.get("structured_output"):
+        properties = {"chain_of_thought_reasoning": {"type": "string", "minLength": 1}}
+        properties.update({key: {"type": "number", "minimum": 0, "maximum": 20}
+                           for key in sample["criteria"]})
+        value["response_format"] = {"type": "json_schema", "json_schema": {
+            "name": "eqbench3_native_criteria", "strict": True,
+            "schema": {"type": "object", "properties": properties,
+                       "required": list(properties), "additionalProperties": False},
+        }}
+    return value
 
 
 def judge_preflight(args, n, cases):
@@ -231,8 +241,14 @@ def judge_preflight(args, n, cases):
         or not identity["public_repository_revision"]
         or identity.get("controls_sha256") != getattr(args, "controls_sha256", None)
         or identity.get("calibration_prompt_sha256") != getattr(args, "calibration_prompt_sha256", None)
+        or identity.get("structured_output", False) != getattr(args, "structured_output", False)
     ):
         raise ValueError("Judge requires bound open-model, source, selection and licensing evidence")
+    if getattr(args, "structured_output", False):
+        if not calibration or identity.get("structured_outputs_backend") != "xgrammar":
+            raise ValueError("Structured EQ-Bench output requires explicit calibration and backend evidence")
+        for sample in samples:
+            sample["structured_output"] = True
     if calibration:
         for sample in samples:
             sample["calibration_prompt"] = calibration
@@ -397,6 +413,7 @@ def main():
     parser.add_argument("--controls-sha256")
     parser.add_argument("--calibration-prompt", type=Path)
     parser.add_argument("--calibration-prompt-sha256")
+    parser.add_argument("--structured-output", action="store_true")
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--model", required=True)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")

@@ -100,6 +100,28 @@ class EQBenchPilotTests(unittest.TestCase):
             {"role": "user", "content": "native rubric"},
         ])
 
+    def test_structured_output_preserves_native_criteria_and_is_bound_in_raw_replay(self):
+        sample = {"case": {"id": "401"}, "status": "generated", "task": {},
+                  "judge_prompt": "unchanged native rubric", "criteria": ["correctness"],
+                  "calibration_prompt": "compact profile", "structured_output": True}
+        request = pilot.request(sample, "open")
+        schema = request["response_format"]["json_schema"]["schema"]
+        self.assertEqual(set(schema["required"]), {"correctness", "chain_of_thought_reasoning"})
+        self.assertFalse(schema["additionalProperties"])
+        self.assertEqual(schema["properties"]["correctness"], {
+            "type": "number", "minimum": 0, "maximum": 20})
+        self.assertEqual(request["messages"][-1]["content"], sample["judge_prompt"])
+        n = SimpleNamespace(Task=SimpleNamespace(_parse_rubric_scores=lambda _: {"correctness": 12}),
+                            calculate_final_rubric_score=lambda _: (12, None))
+        response = {"model": "open", "choices": [{"finish_reason": "stop", "message": {
+            "content": '{"correctness":12,"chain_of_thought_reasoning":"Grounded partial insight."}'}}]}
+        calls = [{"phase": "requested", "request": request},
+                 {"phase": "returned", "response": response}]
+        self.assertEqual(pilot.replay(n, [sample], calls, "open")[0][0]["status"], "succeeded")
+        del calls[0]["request"]["response_format"]
+        with self.assertRaises(ValueError):
+            pilot.replay(n, [sample], calls, "open")
+
     def test_judge_preflight_rejects_changed_native_criteria_and_source_identity(self):
         from scripts.helpfulness.core import write_json, append_jsonl
         import hashlib
@@ -123,6 +145,10 @@ class EQBenchPilotTests(unittest.TestCase):
                 samples, _, plans = pilot.judge_preflight(args, None, [sample["case"]])
                 self.assertEqual(len(plans), 1)
                 self.assertEqual(samples[0]["split"], "pilot")
+                args.structured_output = True
+                with self.assertRaises(ValueError):
+                    pilot.judge_preflight(args, None, [sample["case"]])
+                args.structured_output = False
                 identity["source_samples_sha256"] = "changed"
                 write_json(root / "identity.json", identity)
                 with self.assertRaises(ValueError):

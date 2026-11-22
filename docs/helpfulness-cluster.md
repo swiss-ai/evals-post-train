@@ -85,6 +85,12 @@ assessment profile; pass it as a hash-bound `--calibration-prompt`, never as the
 upstream native prompt. Native verbose judging can exceed a bounded allocation.
 `replay_partial` verifies each completed raw call and any next unreturned
 request without assigning credit to unattempted items or declaring completeness.
+The v3 compact profile adds source-grounded grading and the exact native analysis
+anchors. With `--structured-output`, requests constrain JSON to the scenario's
+native criteria; preflight requires matching identity and xgrammar evidence.
+The native user rubric is unchanged. Numeric bounds and the 60-word assessment
+limit are still validated on actual responses; historical fenced outputs remain
+failures rather than being repaired and credited.
 
 ### Arena-Hard v2 twenty-case open-reference pilot
 
