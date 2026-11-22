@@ -33,7 +33,7 @@ usage() {
 	echo " REVISION: Only used in huggingface models. If set, this revision of the model will be evaluated."
 	echo " SIZE: Legacy/informational approximate model size in billions."
 	echo " MAX_LENGTH: Optional backend context limit (vLLM max_model_len; Megatron seq_length)."
-	echo " MAX_NEW_TOKENS: Generation budget of thinking/reasoning-effort runs; replaces every task's own max_gen_toks (default: 32768 when thinking)."
+	echo " MAX_NEW_TOKENS: Generation budget of thinking/reasoning-effort runs; replaces every task's own max_gen_toks (default when thinking: 32768; on the openai backend with MAX_LENGTH set, MAX_LENGTH, which the harness clamps per request to the window minus the prompt)."
 	echo " VLLM_TP_SIZE / VLLM_DP_SIZE: Explicit vLLM topology. Defaults to TP=4/DP=1, or TP=1/DP=4 when a model name unambiguously indicates <30B."
 	echo " VLLM_MEMORY_FRACTION: vLLM/SGLang GPU memory fraction (default: 0.8)."
 	echo " MEGATRON_MICRO_BATCH_SIZE: Megatron micro-batch override; otherwise uses numeric BS or 1 when BS=auto."
@@ -325,6 +325,13 @@ esac
 # 32768 is the largest task-local budget (AIME), so the override below lowers no task.
 if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then
     MAX_NEW_TOKENS=32768
+    # On the openai backend every generation request is clamped to the window minus its prompt
+    # (clamp_gen_toks; apertus2 clamps itself), so the budget is the whole window: a model served
+    # with more than 32768 is not cut there. Other backends never clamp, and a budget equal to the
+    # window would leave no room for the prompt.
+    if [[ "$LM_EVAL_BACKEND" == "openai" && -n "$MAX_LENGTH" ]]; then
+        MAX_NEW_TOKENS=$MAX_LENGTH
+    fi
     echo "ENABLE_THINKING=True or REASONING_EFFORT set: raising default MAX_NEW_TOKENS to $MAX_NEW_TOKENS"
 fi
 
