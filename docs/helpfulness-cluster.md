@@ -86,6 +86,12 @@ The v3 profile clarifies adjacent native anchors, partial task progress,
 critical code/conceptual errors, unsupported external audits and honest
 requests for unavailable inputs. It leaves source answers, frozen intervals,
 controls, the native user rubric and decoding schema unchanged.
+The v4 audit-first profile uses `--assessment-schema-version 2`: weaknesses
+precede strengths in the requested schema, and each finite assessment can
+contain up to 60 words. Version 1 remains the default for historical replay.
+Judge identity binds the selected version; requests and returned word bounds
+must match it. The longer public evidence is intended to expose multiple
+substantive errors before selecting an anchor, not to request hidden reasoning.
 
 ### EQ-Bench 3 native-scenario pilot
 

@@ -69,6 +69,25 @@ class WildBenchPilotTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["wb_score"]["value"], 60)
         self.assertEqual(result["groups"]["Math & Data Analysis"]["wb_score"]["denominator"], 2)
 
+    def test_audit_first_schema_keeps_historical_replay_strict(self):
+        sample, assets, response = self.fixtures()
+        response["choices"][0]["message"]["content"] = json.dumps({
+            "strengths": " ".join(["Observed"] * 40), "weaknesses": "Grounded limitation.", "score": 6})
+        self.assertEqual(w.judgment(sample, response, assets)["status"], "failed")
+        historical = w.request(sample, assets, "open")
+        sample["assessment_schema_version"] = 2
+        current = w.request(sample, assets, "open")
+        self.assertEqual(current["response_format"]["json_schema"]["schema"]["required"],
+                         ["weaknesses", "strengths", "score"])
+        self.assertEqual(w.judgment(sample, response, assets)["status"], "succeeded")
+        calls = [{"phase": "requested", "request": historical},
+                 {"phase": "returned", "response": response}]
+        with self.assertRaises(ValueError):
+            w.replay([sample], calls, assets, "open")
+        response["choices"][0]["message"]["content"] = json.dumps({
+            "strengths": " ".join(["Observed"] * 61), "weaknesses": "Grounded limitation.", "score": 6})
+        self.assertEqual(w.judgment(sample, response, assets)["status"], "failed")
+
     def test_deployed_metadata_rejects_changed_local_configuration(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
