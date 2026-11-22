@@ -1,7 +1,7 @@
 {
   "name": "apertus2-chonk-sft",
   "title": "Compare Chonk to other post-trained thinking models",
-  "description": "Benchmarks for Apertus 2 Chonk SFT and the models it is compared with (Apertus 1.5 70B and 8B, Qwen3 32B), in table order. Mean@4 default, some agentic's pass@1. GSM8K Platinum runs the gsm8k_platinum_think lm-eval task (same DAPO prompt, 4 samples inside the task). AIME runs the aime24_think and aime25_think lm-eval tasks (the DAPO prompt asking for a final \"Answer: $Answer\" line),, repeated 4 times by the launcher like the other rows: mean@4. IFEval and IFBench run the ifeval_think and ifbench_think lm-eval tasks (same prompts and checks, scored on the final reply with the reasoning stripped, 4 samples inside the task, loose prompt-level accuracy). MATH-500 runs the minerva_math500_think lm-eval task (the same DAPO prompt, scored with math_verify, 4 samples inside the task). HLE is judged by GLM-5.3 (plain-text judge prompt), SciCode and GDPval run their code in OpenSandbox (Kata); GDPval only generates, its grading is a separate submission. HarmBench, MultiJail and Aya red-teaming are lm-eval groups judged by a fixed model through the SwissAI API (HarmBench's classifier cais/HarmBench-Llama-2-13b-cls, Llama-3.3-70B-Instruct for the other two; lower is safer); only HarmBench repeats in the harness, the other two score once.",
+  "description": "Benchmarks for Apertus 2 Chonk SFT and the models it is compared with (Apertus 1.5 70B and 8B, Qwen3 32B, GLM-4.5-Air, Nemotron 3 Super 120B-A12B), in table order. Mean@4 default, some agentic's pass@1. GSM8K Platinum runs the gsm8k_platinum_think lm-eval task (same DAPO prompt, 4 samples inside the task). AIME runs the aime24_think and aime25_think lm-eval tasks (the DAPO prompt asking for a final \"Answer: $Answer\" line),, repeated 4 times by the launcher like the other rows: mean@4. IFEval and IFBench run the ifeval_think and ifbench_think lm-eval tasks (same prompts and checks, scored on the final reply with the reasoning stripped, 4 samples inside the task, loose prompt-level accuracy). MATH-500 runs the minerva_math500_think lm-eval task (the same DAPO prompt, scored with math_verify, 4 samples inside the task). HLE is judged by GLM-5.3 (plain-text judge prompt), SciCode and GDPval run their code in OpenSandbox (Kata); GDPval only generates, its grading is a separate submission. HarmBench, MultiJail and Aya red-teaming are lm-eval groups judged by a fixed model through the SwissAI API (HarmBench's classifier cais/HarmBench-Llama-2-13b-cls, Llama-3.3-70B-Instruct for the other two; lower is safer); only HarmBench repeats in the harness, the other two score once.",
   "benchmarks": [
     {"label": "GPQA Diamond", "task": "gpqa_diamond", "framework": "inspect",
      "repeats": {"n": 4, "via": "task"}, "metric": {"label": "mean@4", "key": null}},
@@ -56,7 +56,7 @@
         "framework_args": ["--chat-template-content-format", "string", "--tensor-parallel-size", "4", "--data-parallel-size", "2", "--data-parallel-size-local", "1", "--data-parallel-backend", "ray", "--gpu-memory-utilization", "0.8", "--max-model-len", "262144", "--reasoning-parser", "apertus", "--default-chat-template-kwargs.enable_thinking", "true", "--compilation-config.pass_config.fuse_allreduce_rms", "false", "--enable-auto-tool-choice", "--tool-call-parser", "apertus"]
       },
       "flags": {
-        "lm_eval": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>", "--api-num-concurrent", "256"],
+        "lm_eval": ["--chat-template", "--tokenizer", "/capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/Apertus-v1.5-70B", "--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>", "--api-num-concurrent", "256"],
         "inspect": ["--enable-thinking"],
         "bfcl": [],
         "tau2": ["--enable-thinking"],
@@ -68,7 +68,7 @@
       "max_length": 32768,
       "sampling": "thinking",
       "flags": {
-        "lm_eval": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>"],
+        "lm_eval": ["--chat-template", "--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>"],
         "inspect": ["--enable-thinking"],
         "bfcl": [],
         "tau2": ["--enable-thinking"],
@@ -80,11 +80,49 @@
       "max_length": 32768,
       "sampling": "thinking",
       "flags": {
-        "lm_eval": ["--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>"],
+        "lm_eval": ["--chat-template", "--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>"],
         "inspect": ["--enable-thinking"],
         "bfcl": [],
         "tau2": ["--enable-thinking"],
         "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
+      }
+    },
+    "glm-4.5-air-thinking": {
+      "description": "zai-org/GLM-4.5-Air, the final post-trained model (hybrid reasoning; 106B total, 12B active) with thinking on (enable_thinking set on the server; --thinking with explicit <think> / </think> tokens). Window 131072, its native 128K. Served on 2 nodes (TP4 x DP2 over ray) with vLLM `--reasoning-parser glm45 --tool-call-parser glm45 --enable-auto-tool-choice`.",
+      "max_length": 131072,
+      "sampling": "thinking",
+      "launch": {
+        "model_path": "/capstor/store/cscs/swissai/infra01/hf_models/models/zai-org/GLM-4.5-Air",
+        "environment": "containers/env_vllm_0.30.0.toml",
+        "nodes": 2,
+        "time": "24:00:00",
+        "framework_args": ["--tensor-parallel-size", "4", "--data-parallel-size", "2", "--data-parallel-size-local", "1", "--data-parallel-backend", "ray", "--gpu-memory-utilization", "0.8", "--max-model-len", "131072", "--default-chat-template-kwargs.enable_thinking", "true", "--reasoning-parser", "glm45", "--tool-call-parser", "glm45", "--enable-auto-tool-choice"]
+      },
+      "flags": {
+        "lm_eval": ["--chat-template", "--tokenizer", "/capstor/store/cscs/swissai/infra01/hf_models/models/zai-org/GLM-4.5-Air", "--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>"],
+        "inspect": ["--enable-thinking"],
+        "bfcl": [],
+        "tau2": ["--enable-thinking"],
+        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 131072}"]
+      }
+    },
+    "nemotron-3-super-120b-a12b-thinking": {
+      "description": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16, the final post-trained model (120B total, 12B active) with reasoning on (enable_thinking set on the server, full effort: low_effort stays off; --thinking with explicit <think> / </think> tokens). Window 262144, as the vLLM recipe serves it (the model supports up to 1M). Served on 2 nodes (TP4 x DP2 over ray) with vLLM `--reasoning-parser nemotron_v3 --tool-call-parser qwen3_coder --enable-auto-tool-choice`.",
+      "max_length": 262144,
+      "sampling": "thinking",
+      "launch": {
+        "model_path": "/capstor/store/cscs/swissai/infra01/hf_models/models/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16",
+        "environment": "containers/env_vllm_0.30.0.toml",
+        "nodes": 2,
+        "time": "24:00:00",
+        "framework_args": ["--tensor-parallel-size", "4", "--data-parallel-size", "2", "--data-parallel-size-local", "1", "--data-parallel-backend", "ray", "--gpu-memory-utilization", "0.8", "--max-model-len", "262144", "--default-chat-template-kwargs.enable_thinking", "true", "--trust-remote-code", "--reasoning-parser", "nemotron_v3", "--tool-call-parser", "qwen3_coder", "--enable-auto-tool-choice"]
+      },
+      "flags": {
+        "lm_eval": ["--chat-template", "--tokenizer", "/capstor/store/cscs/swissai/infra01/hf_models/models/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16", "--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>"],
+        "inspect": ["--enable-thinking"],
+        "bfcl": [],
+        "tau2": ["--enable-thinking"],
+        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 262144}"]
       }
     },
     "chonk-lc-16k-v0.2-sft": {
