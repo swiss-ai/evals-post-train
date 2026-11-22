@@ -33,7 +33,7 @@ inspect has no such flag, the server's --max-model-len is the window. The code o
     python -m scripts.common.suites show apertus2/chonk_sft    # title and setups
     python -m scripts.common.suites plan apertus2/chonk_sft --setup apertus-1.5-70b-thinking
     python -m scripts.common.suites flags apertus2/chonk_sft --setup apertus-1.5-70b-thinking --task ifbench
-    python -m scripts.common.suites run apertus2/chonk_sft --api-base-url <url> \\
+    python -m scripts.common.suites run apertus2/chonk_sft --api-base-url <url> --helper-url <url> \\
         --model chonk-lc-16k-v0.2-sft=<served name> --model qwen3-32b-thinking=<served name> [--submit]
 """
 

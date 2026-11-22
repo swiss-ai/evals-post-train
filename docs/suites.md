@@ -36,7 +36,7 @@ python -m scripts.common.suites flags apertus2/chonk_sft --setup apertus-1.5-70b
 
 ```bash
 python -m scripts.common.suites run apertus2/chonk_sft --api-base-url https://api.swissai.svc.cscs.ch/v1 \
-  --model chonk-lc-16k-v0.2-sft=<served name> --model qwen3-32b-thinking=<served name> \
+  --helper-url <gpt-oss server, see custom-tau2.md> --model chonk-lc-16k-v0.2-sft=<served name> --model qwen3-32b-thinking=<served name> \
   --qos highprio --partition highprio --limit 5 --no-wandb           # prints the commands
 ... --submit                                                          # runs them
 ```
