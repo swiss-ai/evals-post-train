@@ -283,7 +283,9 @@ def summarize(n, samples, rows):
              if r["status"] == "succeeded" and s.get("split", "pilot") == "pilot"}
     score, error = n.calculate_final_rubric_score({"scenario_tasks": {"1": tasks}})
     return {
-        "protocol": PROTOCOL, "status": "succeeded" if len(tasks) == 20 else "incomplete",
+        "protocol": PROTOCOL,
+        "status": "succeeded" if len(tasks) == 20 and len(rows) == len(samples)
+        and all(r["status"] == "succeeded" for r in rows) else "incomplete",
         "selected_cases": 20, "scored_cases": len(tasks), "native_rubric_score": score,
         "aggregation_error": error, "scale": [0, 20], "elo_computed": False,
         "automatic_scoring_ready": False,
@@ -317,19 +319,25 @@ def judge(args):
     args.output.mkdir(exist_ok=False, parents=True)
     write_json(args.output / "report.json", {"status": "running", "judge_identity": identity,
                                            "automatic_scoring_ready": False})
-    teacher_smoke.wait_for_server(args.base_url, args.model, 1200)
-    with (
-        record_sdk_calls(args.output / "judge-calls.jsonl", args.base_url, args.model, plans),
-        OpenAI(base_url=args.base_url, api_key="allocation-local", max_retries=0, timeout=180) as sdk,
-    ):
-        rows = []
-        for sample in samples:
-            response = (sdk.chat.completions.create(**request(sample, args.model)).model_dump(mode="json")
-                        if sample["status"] == "generated" else None)
-            row = judgment(n, sample, response)
-            rows.append(row)
-            append_jsonl(args.output / "judgments.jsonl", row)
-            write_json(args.output / "report.json", summarize(n, samples, rows))
+    rows = []
+    try:
+        teacher_smoke.wait_for_server(args.base_url, args.model, 1200)
+        with (
+            record_sdk_calls(args.output / "judge-calls.jsonl", args.base_url, args.model, plans),
+            OpenAI(base_url=args.base_url, api_key="allocation-local", max_retries=0, timeout=180) as sdk,
+        ):
+            for sample in samples:
+                response = (sdk.chat.completions.create(**request(sample, args.model)).model_dump(mode="json")
+                            if sample["status"] == "generated" else None)
+                row = judgment(n, sample, response)
+                rows.append(row)
+                append_jsonl(args.output / "judgments.jsonl", row)
+                write_json(args.output / "report.json", summarize(n, samples, rows))
+    except Exception as error:
+        report = summarize(n, samples, rows)
+        report.update(status="failed", error_type=type(error).__name__, error=str(error))
+        write_json(args.output / "report.json", report)
+        raise
 
 
 def main():

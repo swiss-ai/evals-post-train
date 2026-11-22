@@ -2,6 +2,9 @@ import math
 import copy
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
+from pathlib import Path
+import tempfile
 
 from scripts.helpfulness import eqbench_pilot as pilot
 
@@ -95,6 +98,37 @@ class EQBenchPilotTests(unittest.TestCase):
             {"role": "system", "content": "calibration"},
             {"role": "user", "content": "native rubric"},
         ])
+
+    def test_judge_preflight_rejects_changed_native_criteria_and_source_identity(self):
+        from scripts.helpfulness.core import write_json, append_jsonl
+        import hashlib
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sample = {"case": {"id": "401"}, "status": "generated", "task": {},
+                      "criteria": ["correctness"], "judge_prompt": "native"}
+            append_jsonl(root / "samples.jsonl", sample)
+            sha = hashlib.sha256((root / "samples.jsonl").read_bytes()).hexdigest()
+            identity = {"served_model": "gemma-local", "base_url": "http://127.0.0.1:8000/v1",
+                        "source_samples_sha256": sha, "selection_sha256": "selection",
+                        "benchmark": "eqbench3", "license": "Apache-2.0",
+                        "public_model": "google/gemma-4-31B-it", "public_repository_revision": "pinned"}
+            write_json(root / "identity.json", identity)
+            args = SimpleNamespace(samples=root / "samples.jsonl", samples_sha256=sha,
+                                   identity=root / "identity.json", selection_sha256="selection",
+                                   model="gemma-local", base_url=identity["base_url"])
+            with patch.object(pilot, "criteria", return_value=["correctness"]), patch.object(
+                pilot, "rubric", return_value="native"
+            ):
+                samples, _, plans = pilot.judge_preflight(args, None, [sample["case"]])
+                self.assertEqual(len(plans), 1)
+                self.assertEqual(samples[0]["split"], "pilot")
+                identity["source_samples_sha256"] = "changed"
+                write_json(root / "identity.json", identity)
+                with self.assertRaises(ValueError):
+                    pilot.judge_preflight(args, None, [sample["case"]])
+            with patch.object(pilot, "criteria", return_value=["missing"]):
+                with self.assertRaises(ValueError):
+                    pilot.judge_preflight(args, None, [sample["case"]])
 
 
 if __name__ == "__main__":
