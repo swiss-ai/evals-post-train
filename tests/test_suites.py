@@ -18,6 +18,7 @@ USER_LLM_ARGS = '{"reasoning_effort": "low", "max_tokens": 4096}'  # the tau2 us
 
 
 JUDGE_LLM = "openai/RCP-AIaaS/openai/gpt-oss-120b"  # retail's NL-assertion judge, a shared model on the CSCS API
+JUDGE_BASE = "https://api.swissai.svc.cscs.ch/v1"  # where it is reached, whatever serves the agent
 
 
 class SuiteTests(unittest.TestCase):
@@ -219,10 +220,11 @@ class SuiteTests(unittest.TestCase):
                                     "--workdir", f"logs/tau2/{suite['name']}/chonk/{domain}",
                                     "--reasoning-effort", "high", "--user-llm-args", USER_LLM_ARGS]
                              + (["--retrieval-config", "bm25"] if domain == "banking_knowledge" else [])
-                             + (["--judge-llm", JUDGE_LLM, "--judge-llm-args", USER_LLM_ARGS] if domain == "retail" else []))
+                             + (["--judge-llm", JUDGE_LLM, "--judge-api-base-url", JUDGE_BASE, "--judge-llm-args", USER_LLM_ARGS] if domain == "retail" else []))
         qwen = rows["qwen3-32b-thinking", "tau2-bench retail"]
         self.assertIn("--enable-thinking", qwen)
-        self.assertEqual(qwen[-6:], ["--user-llm-args", USER_LLM_ARGS, "--judge-llm", JUDGE_LLM, "--judge-llm-args", USER_LLM_ARGS])
+        self.assertEqual(qwen[-8:], ["--user-llm-args", USER_LLM_ARGS, "--judge-llm", JUDGE_LLM, "--judge-api-base-url", JUDGE_BASE,
+                                     "--judge-llm-args", USER_LLM_ARGS])
 
     def test_every_launch_uploads_to_the_suites_wandb_project(self):
         suite = suites.load(SUITE)

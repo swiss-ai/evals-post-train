@@ -44,6 +44,10 @@
 #                               <user>/<served name>: give the served name, the launcher finds the hosted id in
 #                               the endpoint's /models and stops when the model is not served.
 #                               Only used with --api-base-url, else the judge is upstream's own.
+#   --judge-api-base-url <url> The judge's own endpoint, when it is not the one of --api-base-url (a model served in this
+#                               job, say, with the judge on the shared deployment). Needs --judge-llm, named as above and
+#                               looked up in this endpoint's /models. Its key: JUDGE_API_KEY (default: CSCS_SERVING_API; both
+#                               also from scripts/secrets.env); the judge's llm args name it as "os.environ/JUDGE_API_KEY".
 #   --judge-llm-args <json>    Extra litellm kwargs for the judge, merged over its default key by key (the default
 #                               judge runs at reasoning_effort low with max_tokens 4096, like the default user).
 #   --retrieval-config <name>  banking_knowledge: the retrieval pipeline (default: bm25, offline keyword search).
@@ -103,6 +107,7 @@ USER_LLM=""
 USER_LLM_ARGS_OVERRIDE=""
 JUDGE_LLM=""
 JUDGE_LLM_ARGS_OVERRIDE=""
+JUDGE_API_BASE_URL=""
 RETRIEVAL_CONFIG=""
 NUM_TRIALS=1
 MAX_STEPS=100
@@ -128,6 +133,7 @@ while (( $# > 0 )); do
         --user-llm-args) USER_LLM_ARGS_OVERRIDE=$2; shift 2 ;;
         --judge-llm) JUDGE_LLM=$2; shift 2 ;;
         --judge-llm-args) JUDGE_LLM_ARGS_OVERRIDE=$2; shift 2 ;;
+        --judge-api-base-url) JUDGE_API_BASE_URL=$2; shift 2 ;;
         --retrieval-config) RETRIEVAL_CONFIG=$2; shift 2 ;;
         --num-trials) NUM_TRIALS=$2; shift 2 ;;
         --max-steps) MAX_STEPS=$2; shift 2 ;;
@@ -318,12 +324,21 @@ echo "+ tau2 run --domain $DOMAIN --agent-llm $AGENT_LLM --user-llm $USER_LLM" \
 # endpoint, it is --judge-llm, else the model under test (tau2_judge/sitecustomize.py repoints it).
 if [[ -n "$API_BASE_URL" ]]; then
     JUDGE_LLM=${JUDGE_LLM:-$AGENT_LLM}
+    JUDGE_BASE=$API_BASE_URL
+    JUDGE_KEY_VAR=TARGET_API_KEY
+    if [[ -n "$JUDGE_API_BASE_URL" ]]; then
+        [[ "$JUDGE_LLM" == openai/* && "$JUDGE_LLM" != "$AGENT_LLM" ]] || die "--judge-api-base-url needs a --judge-llm openai/<served name> that is not the model under test."
+        JUDGE_BASE=$JUDGE_API_BASE_URL
+        [[ "$JUDGE_BASE" == */v1 || "$JUDGE_BASE" == */v1/ ]] || JUDGE_BASE="${JUDGE_BASE%/}/v1"
+        export JUDGE_API_KEY="${JUDGE_API_KEY:-${CSCS_SERVING_API:-}}"
+        JUDGE_KEY_VAR=JUDGE_API_KEY
+    fi
     if [[ "$JUDGE_LLM" == openai/* && "$JUDGE_LLM" != "$AGENT_LLM" ]]; then
         # A launched judge is hosted under its launcher's scope (<user>/<served name>); a shared one as named.
         JUDGE_HOSTED=$(python3 -c '
 import getpass, json, os, sys, urllib.request
-base, name = sys.argv[1:]
-request = urllib.request.Request(base.rstrip("/") + "/models", headers={"Authorization": "Bearer " + os.environ.get("TARGET_API_KEY", "")})
+base, name, key_var = sys.argv[1:]
+request = urllib.request.Request(base.rstrip("/") + "/models", headers={"Authorization": "Bearer " + os.environ.get(key_var, "")})
 try:
     with urllib.request.urlopen(request, timeout=30) as response:
         served = [m["id"] for m in json.load(response)["data"]]
@@ -335,10 +350,18 @@ for candidate in (f"{getpass.getuser()}/{name}", name):
         break
 else:
     sys.exit(f"judge {name!r} is not served on {base} (looked for {getpass.getuser()}/{name} and {name}); start it with scripts/lm_eval_harness/launch_judge.py")
-' "$API_BASE_URL" "${JUDGE_LLM#openai/}") || exit 1
+' "$JUDGE_BASE" "${JUDGE_LLM#openai/}" "$JUDGE_KEY_VAR") || exit 1
         JUDGE_LLM="openai/$JUDGE_HOSTED"
     fi
     if [[ "$JUDGE_LLM" == openai/* ]]; then JUDGE_LLM_ARGS=$PINNED_LLM_ARGS; else JUDGE_LLM_ARGS='{}'; fi
+    if [[ -n "$JUDGE_API_BASE_URL" ]]; then
+        # The pin is the model under test's args: the judge keeps its sampling and effort but not its endpoint or key.
+        JUDGE_LLM_ARGS=$(python3 -c '
+import json, sys
+args = json.loads(sys.argv[1])
+args.update({"api_base": sys.argv[2], "api_key": "os.environ/JUDGE_API_KEY"})
+print(json.dumps(args))' "$JUDGE_LLM_ARGS" "$JUDGE_BASE")
+    fi
     if [[ -n "$JUDGE_LLM_ARGS_OVERRIDE" ]]; then
         JUDGE_LLM_ARGS=$(python3 -c '
 import json, sys
@@ -348,7 +371,7 @@ print(json.dumps(merged))' "$JUDGE_LLM_ARGS" "$JUDGE_LLM_ARGS_OVERRIDE")
     fi
     export TAU2_JUDGE_LLM=$JUDGE_LLM TAU2_JUDGE_LLM_ARGS=$JUDGE_LLM_ARGS
     if [[ "$JUDGE_LLM" == "$AGENT_LLM" ]]; then echo "NL-assertion judge: $TAU2_JUDGE_LLM (the model under test, through $API_BASE_URL)"
-    else echo "NL-assertion judge: $TAU2_JUDGE_LLM"; fi
+    else echo "NL-assertion judge: $TAU2_JUDGE_LLM${JUDGE_API_BASE_URL:+ (through $JUDGE_BASE)}"; fi
 else
     echo "NL-assertion judge: upstream's own (OpenAI; needs OPENAI_API_KEY for retail)"
 fi
