@@ -75,6 +75,27 @@ class EQBenchPilotTests(unittest.TestCase):
         self.assertEqual(row["scores"], {})
         self.assertNotIn("native_rubric_score", row)
 
+    def test_constructed_controls_do_not_replace_checkpoint_aggregation(self):
+        received = []
+        n = SimpleNamespace(calculate_final_rubric_score=lambda data: (received.append(data) or 12, None))
+        samples = [
+            {"case": {"id": "401"}, "task": {}, "split": "pilot"},
+            {"case": {"id": "401"}, "task": {}, "split": "development"},
+        ]
+        rows = [{"status": "succeeded", "scores": {"correctness": 12}},
+                {"status": "succeeded", "scores": {"correctness": 1}}]
+        report = pilot.summarize(n, samples, rows)
+        self.assertEqual(received[0]["scenario_tasks"]["1"]["401"]["rubric_scores"], {"correctness": 12})
+        self.assertEqual(report["scored_cases"], 1)
+        self.assertEqual(report["valid_items"], 2)
+
+    def test_calibration_is_explicit_and_does_not_change_native_user_prompt(self):
+        request = pilot.request({"judge_prompt": "native rubric", "calibration_prompt": "calibration"}, "open")
+        self.assertEqual(request["messages"], [
+            {"role": "system", "content": "calibration"},
+            {"role": "user", "content": "native rubric"},
+        ])
+
 
 if __name__ == "__main__":
     unittest.main()

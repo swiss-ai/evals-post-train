@@ -71,6 +71,16 @@ The scalar uses the pinned native per-task criterion selection/weighting then
 task averaging, **without Elo or inherited leaderboard state**. A replacement
 open judge remains an adaptation and requires separate calibration.
 
+Judge preflight binds endpoint/model, open-weight licensing, selected source
+samples, and optional constructed controls/calibration instructions. The full
+native user rubric remains unchanged when an explicitly adapted calibration
+system message is supplied. Raw SDK requests and responses are replayed against
+the declared prompts before reporting. Controls are separate from checkpoint
+aggregation, even when they reuse the same native scenario IDs. Constructed
+controls and assistant-reviewed score intervals are diagnostic evidence, not
+independent human correctness; low-quality-only controls cannot establish
+discrimination among competent answers. Automatic scoring remains disabled.
+
 ### Arena-Hard v2 twenty-case open-reference pilot
 
 Structured v3 job `3998552` completed 78/78 valid comparison orders in 11m04s.

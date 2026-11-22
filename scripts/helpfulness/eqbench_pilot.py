@@ -180,7 +180,11 @@ def generate(args):
 
 
 def request(sample, model, max_tokens=2048):
-    return {"model": model, "messages": [{"role": "user", "content": sample["judge_prompt"]}],
+    messages = []
+    if sample.get("calibration_prompt"):
+        messages.append({"role": "system", "content": sample["calibration_prompt"]})
+    messages.append({"role": "user", "content": sample["judge_prompt"]})
+    return {"model": model, "messages": messages,
             "temperature": 0, "max_tokens": max_tokens, "seed": 1234}
 
 
@@ -190,6 +194,23 @@ def judge_preflight(args, n, cases):
     if [s["case"] for s in samples] != cases:
         raise ValueError("EQ-Bench samples do not match selection")
     for sample in samples:
+        sample.update(evaluation_id="pilot-" + sample["case"]["id"], split="pilot")
+    if getattr(args, "controls", None):
+        verified_bytes(args.controls, args.controls_sha256)
+        controls = read_jsonl(args.controls)
+        known = {c["id"]: c for c in cases}
+        for control in controls:
+            if (
+                control["case"] != known.get(control["case"]["id"])
+                or control["status"] != "generated"
+                or control["split"] not in ("development", "transfer")
+                or control["task"]["scenario_id"] != control["case"]["id"]
+            ):
+                raise ValueError("Invalid native constructed-control source or split")
+        samples.extend(controls)
+    if len({s["evaluation_id"] for s in samples}) != len(samples):
+        raise ValueError("Duplicate EQ-Bench evaluation identity")
+    for sample in samples:
         if sample["status"] not in ("generated", "model_no_final_reply"):
             raise ValueError("Unknown checkpoint outcome")
         if sample["criteria"] != criteria(n, sample["case"]["id"]):
@@ -197,6 +218,9 @@ def judge_preflight(args, n, cases):
         if sample["status"] == "generated" and sample["judge_prompt"] != rubric(n, sample["task"]):
             raise ValueError("Frozen judge prompt differs from native task replay")
     identity = read_json(args.identity)
+    calibration = None
+    if getattr(args, "calibration_prompt", None):
+        calibration = verified_bytes(args.calibration_prompt, args.calibration_prompt_sha256).decode("utf-8")
     reject_closed(args.model)
     reject_closed(identity["public_model"])
     if (
@@ -205,8 +229,13 @@ def judge_preflight(args, n, cases):
         or identity["selection_sha256"] != args.selection_sha256
         or identity["benchmark"] != "eqbench3" or identity["license"] != "Apache-2.0"
         or not identity["public_repository_revision"]
+        or identity.get("controls_sha256") != getattr(args, "controls_sha256", None)
+        or identity.get("calibration_prompt_sha256") != getattr(args, "calibration_prompt_sha256", None)
     ):
         raise ValueError("Judge requires bound open-model, source, selection and licensing evidence")
+    if calibration:
+        for sample in samples:
+            sample["calibration_prompt"] = calibration
     plans = [{"case_id": s["case"]["id"], "messages": request(s, args.model)["messages"]}
              for s in samples if s["status"] == "generated"]
     if not plans:
@@ -229,6 +258,9 @@ def parse_scores(n, sample, response):
 
 def judgment(n, sample, response):
     row = {"case": sample["case"], "status": "failed", "scores": {}}
+    for key in ("evaluation_id", "split"):
+        if key in sample:
+            row[key] = sample[key]
     if sample["status"] != "generated":
         row["error"] = "model_no_final_reply"
         return row
@@ -247,13 +279,16 @@ def judgment(n, sample, response):
 
 def summarize(n, samples, rows):
     tasks = {s["case"]["id"]: {**s["task"], "status": "rubric_scored", "rubric_scores": r["scores"]}
-             for s, r in zip(samples, rows) if r["status"] == "succeeded"}
+             for s, r in zip(samples, rows)
+             if r["status"] == "succeeded" and s.get("split", "pilot") == "pilot"}
     score, error = n.calculate_final_rubric_score({"scenario_tasks": {"1": tasks}})
     return {
         "protocol": PROTOCOL, "status": "succeeded" if len(tasks) == 20 else "incomplete",
         "selected_cases": 20, "scored_cases": len(tasks), "native_rubric_score": score,
         "aggregation_error": error, "scale": [0, 20], "elo_computed": False,
         "automatic_scoring_ready": False,
+        "judged_items": len(rows), "valid_items": sum(r["status"] == "succeeded" for r in rows),
+        "replacement_prompt_adaptation": any(s.get("calibration_prompt") for s in samples),
     }
 
 
@@ -306,6 +341,10 @@ def main():
     parser.add_argument("--samples", type=Path)
     parser.add_argument("--samples-sha256")
     parser.add_argument("--identity", type=Path)
+    parser.add_argument("--controls", type=Path)
+    parser.add_argument("--controls-sha256")
+    parser.add_argument("--calibration-prompt", type=Path)
+    parser.add_argument("--calibration-prompt-sha256")
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--model", required=True)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
