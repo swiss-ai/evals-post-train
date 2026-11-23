@@ -397,6 +397,34 @@ class SummaryTest(unittest.TestCase):
         self.assertIn("task 1: no reward (infrastructure_error)", result.stderr)
         self.assertNotIn("task 2", result.stderr)
 
+    def test_a_context_overflow_counts_for_the_model_only_when_the_agents_call_overflowed(self):
+        agent_trace = 'File "/opt/tau2/src/tau2/orchestrator/orchestrator.py", line 1, in step\nFile "/opt/tau2/src/tau2/agent/llm_agent.py", line 138, in generate_next_message'
+        user_trace = 'File "/opt/tau2/src/tau2/orchestrator/orchestrator.py", line 1, in step\nFile "/opt/tau2/src/tau2/user/user_simulator.py", line 194, in generate_next_message'
+        judge_trace = 'File "/opt/tau2/src/tau2/evaluator/evaluator_communicate.py", line 140, in evaluate_communicate_info'
+
+        def overflow(task, trace):
+            return {**self._sim(task, None, "infrastructure_error"),
+                    "info": {"error": "litellm.ContextWindowExceededError: maximum context length", "error_type": "ContextWindowExceededError",
+                             "error_traceback": trace}}
+
+        # the model under test overflowed its own window: a failed task, reward 0, the run is complete
+        result = self._run([self._sim("0", 1.0), overflow("1", agent_trace)], "--num-tasks", "2")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout[result.stdout.index("{"):])
+        self.assertEqual((summary["pass^1"], summary["n_agent_failures"], summary["n_unscored"]), (0.5, 1, 0))
+
+        # the same error from the user simulator's or the judge's window is not the model's: not counted, the run fails
+        result = self._run([self._sim("0", 1.0), overflow("1", user_trace), overflow("2", judge_trace)], "--num-tasks", "3")
+        self.assertEqual(result.returncode, 1)
+        summary = json.loads(result.stdout[result.stdout.index("{"):])
+        self.assertEqual((summary["pass^1"], summary["n_agent_failures"], summary["n_unscored"]), (1.0, 0, 2))
+        self.assertIn("task 1: no reward", result.stderr)
+        self.assertIn("task 2: no reward", result.stderr)
+
+        # an overflow record without a traceback (an older results file) is not assumed to be the model's
+        bare = {**self._sim("1", None, "infrastructure_error"), "info": {"error": "ContextWindowExceededError", "error_type": "ContextWindowExceededError"}}
+        self.assertEqual(self._run([self._sim("0", 1.0), bare], "--num-tasks", "2").returncode, 1)
+
     def test_a_simulation_missing_from_the_file_fails_the_run(self):
         result = self._run([self._sim("0", 1.0)], "--num-tasks", "3")
         self.assertEqual(result.returncode, 1)

@@ -87,11 +87,12 @@
 #
 # Results: <--workdir>/tau2-data/simulations/<--save-to>/results.json (every simulation, reward and
 # messages); this script prints avg_reward and pass^k computed from it. tau2 gives up on a task after 4 attempts
-# (an infrastructure error, no reward) and leaves it out of its own metrics. The cause is in the task's info.error:
-# when the model under test is to blame (it replied with neither content nor tool calls) the task counts as failed,
-# reward 0 (n_agent_failures); any other cause (the user simulator, the judge, the server, a missing key) is
-# not the model's and is not counted: those tasks are listed, with the ones missing altogether, and the script
-# exits 1, so a task that is not the model's fault is rerun and never passes as a score.
+# (an infrastructure error, no reward) and leaves it out of its own metrics. The cause is in the task's info
+# (error, error_type, error_traceback): when the model under test is to blame (it replied with neither content nor
+# tool calls, or its conversation overflowed its context window) the task counts as failed, reward 0
+# (n_agent_failures); any other cause (the user simulator, the judge, the server, a missing key) is not the
+# model's and is not counted: those tasks are listed, with the ones missing altogether, and the script exits 1,
+# so a task that is not the model's fault is rerun and never passes as a score.
 #
 # Example (retail smoke test against a CSCS-served model):
 #   scripts/custom/run_tau2_bench.sh --domain retail --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
@@ -419,12 +420,20 @@ with open(sys.argv[1]) as f:
 num_trials = int(sys.argv[2])
 expected = int(sys.argv[3]) if sys.argv[3] else None
 
-# What the model under test is to blame for: tau2 rejects its reply as an AssistantMessage without content or tool calls.
+# What the model under test is to blame for: tau2 rejects its reply as an AssistantMessage without content or tool
+# calls, or its conversation outgrows its context window. A context overflow counts only when the failing call was the
+# agent's (the traceback passes through tau2/agent/): the user simulator and the judge are other models with windows of
+# their own.
 AGENT_ERRORS = ("AssistantMessage must have either content or tool_calls",)
 
 
 def agent_failed(sim):
-    return sim.get("termination_reason") == "infrastructure_error" and str((sim.get("info") or {}).get("error", "")).startswith(AGENT_ERRORS)
+    if sim.get("termination_reason") != "infrastructure_error":
+        return False
+    info = sim.get("info") or {}
+    if str(info.get("error", "")).startswith(AGENT_ERRORS):
+        return True
+    return info.get("error_type") == "ContextWindowExceededError" and "/tau2/agent/" in str(info.get("error_traceback", ""))
 
 
 all_sims = data.get("simulations") or []
