@@ -376,6 +376,27 @@ class SummaryTest(unittest.TestCase):
         self.assertIn('"n_unscored": 1', result.stdout)
         self.assertIn("task 2: no reward (infrastructure_error)", result.stderr)
 
+    def test_the_models_own_failure_counts_as_failed_and_another_models_does_not(self):
+        empty = "AssistantMessage must have either content or tool_calls. Got AssistantMessage"
+        judge = "litellm.AuthenticationError: Incorrect API key provided: None"
+
+        def failed(task, error):
+            return {**self._sim(task, None, "infrastructure_error"), "info": {"error": error}}
+
+        # the model's empty reply is a failed task, over all of them: 1 of 3 passed, and the run is complete
+        result = self._run([self._sim("0", 1.0), self._sim("1", 0.0), failed("2", empty)], "--num-tasks", "3")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout[result.stdout.index("{"):])
+        self.assertEqual((summary["pass^1"], summary["n_agent_failures"], summary["n_unscored"]), (1 / 3, 1, 0))
+
+        # the judge's (or the user simulator's, or a server's) is not the model's: not counted, and the run fails
+        result = self._run([self._sim("0", 1.0), failed("1", judge), failed("2", empty)], "--num-tasks", "3")
+        self.assertEqual(result.returncode, 1)
+        summary = json.loads(result.stdout[result.stdout.index("{"):])
+        self.assertEqual((summary["pass^1"], summary["n_agent_failures"], summary["n_unscored"]), (0.5, 1, 1))
+        self.assertIn("task 1: no reward (infrastructure_error)", result.stderr)
+        self.assertNotIn("task 2", result.stderr)
+
     def test_a_simulation_missing_from_the_file_fails_the_run(self):
         result = self._run([self._sim("0", 1.0)], "--num-tasks", "3")
         self.assertEqual(result.returncode, 1)
