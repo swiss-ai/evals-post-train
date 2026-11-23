@@ -2,8 +2,8 @@
 
 Upstream hardcodes both judges to an OpenAI model with no option to change them: the natural-language-assertion
 judge (tau2/config.py: DEFAULT_LLM_NL_ASSERTIONS) and the semantic judge of a task's required information
-(`communicate_info`, which six airline tasks carry), whose model is pinned in each task's
-CommunicateScoring.judge. run_tau2_bench.sh puts this directory on PYTHONPATH of the `tau2` process;
+(`communicate_info`, which six airline tasks carry), whose model (DEFAULT_SEMANTIC_COMMUNICATE_MODEL) is
+resolved into each task's CommunicateScoring.judge. run_tau2_bench.sh puts this directory on PYTHONPATH of the `tau2` process;
 Python imports a `sitecustomize` module at startup. With TAU2_JUDGE_LLM unset nothing happens. With it set (a
 litellm model string) and TAU2_JUDGE_LLM_ARGS (a json object of litellm kwargs; the key as
 "os.environ/<NAME>", never the key itself), the NL-assertion evaluator's two module-level names are replaced
@@ -47,7 +47,7 @@ if os.environ.get("TAU2_JUDGE_LLM"):
     _communicate_generate = _unfenced(evaluator_communicate.generate)
 
     def _generate_communicate(*, messages, call_name, **_pinned):
-        # The model and arguments pinned in the task (`_pinned`, with its `model`) are dropped.
+        # The model and arguments of the task's CommunicateScoring.judge (`_pinned`, with its `model`) are dropped.
         return _communicate_generate(
             model=os.environ["TAU2_JUDGE_LLM"],
             messages=messages,
