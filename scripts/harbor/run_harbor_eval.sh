@@ -188,6 +188,9 @@ for key in ANTHROPIC_API_KEY PORTKEY_API_KEY; do
 done
 # Not HARBOR_API_KEY: Harbor reads that as its Harbor Hub credential.
 export EVAL_MODEL_API_KEY="${TARGET_API_KEY:-${CSCS_SERVING_API:-}}"
+# shellcheck source=scripts/common/preflight.sh
+source scripts/common/preflight.sh
+preflight_done
 
 # Harbor and the Multi-SWE-bench adapter are installed with uv (Harbor needs Python >= 3.12,
 # which uv fetches where the system has none, e.g. Clariden's 3.6).

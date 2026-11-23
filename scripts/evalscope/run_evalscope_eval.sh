@@ -218,6 +218,9 @@ if [[ "$GOLD" != "1" ]]; then
 fi
 
 export EVALSCOPE_API_KEY="${TARGET_API_KEY:-${CSCS_SERVING_API:-}}"
+# shellcheck source=scripts/common/preflight.sh
+source scripts/common/preflight.sh
+preflight_done
 
 if [[ "${SKIP_INSTALL:-0}" == "1" ]]; then
     PY=python3

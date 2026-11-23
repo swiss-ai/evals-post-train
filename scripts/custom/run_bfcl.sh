@@ -114,6 +114,9 @@ source scripts/common/wandb.sh
 if (( NO_WANDB )); then wandb_setup "--no-wandb"; else wandb_setup || exit 1; fi
 NAME=${NAME:-$(echo "$MODEL" | tr '/: ' '---')}
 export TARGET_API_KEY="${TARGET_API_KEY:-${CSCS_SERVING_API:-}}"
+# shellcheck source=scripts/common/preflight.sh
+source scripts/common/preflight.sh
+preflight_done
 
 # Sampling (scripts/common/sampling.py), then thinking and reasoning effort (scripts/common/thinking.py), as the
 # keyword arguments of every request: temperature goes to the handler, the rest to chat.completions.create.
