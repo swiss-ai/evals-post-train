@@ -232,6 +232,9 @@ fi
 # harmless to export for tasks that never look at it. Optional: unset just means that Hook
 # writes its submission batch to a local file instead of posting it.
 [[ -n "${CRITPT_API_KEY:-}" ]] && export CRITPT_API_KEY
+# shellcheck source=scripts/common/preflight.sh
+source scripts/common/preflight.sh
+preflight_done
 
 mkdir -p "$LOGS_DIR"
 

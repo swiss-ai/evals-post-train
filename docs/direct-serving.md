@@ -10,6 +10,12 @@ sbatch
 
 The serving half is model-launch's rendering of a serving job (head and follower scripts, Ray across the nodes of a replica) with OpenTela, metrics and telemetry off, so a model on several nodes works. Every serving node runs with `RAY_TMPDIR=/tmp/ray-$SLURM_JOB_ID` (before `--pre-launch-cmds`, which can override it): Ray records its cluster address in a file under its temp dir, and with a temp dir shared between jobs (`TMPDIR` on scratch) a second job overwrites the first one's address and the first one's vLLM fails with `Failed to connect to Ray cluster`. Only the end of that script is replaced: this job waits for `/health`, runs the commands, and ends, where model-launch waits for the server to exit. If the server dies before it is ready or during a command, the job stops that command and ends with status 1.
 
+## Preflight
+
+A model takes up to half an hour to load, and a missing key used to show only after that: the runner checks its keys when it starts. So the job starts by running every `--eval` command once with `EVAL_PREFLIGHT=1`, in the eval image (which it pulls there, on the first run), before the model loads. Each runner (`scripts/common/preflight.sh`: `preflight_done`) stops right after its own checks of arguments and keys, before it installs, downloads or submits anything, and exits 0 (`preflight ok: <runner>`). The checks that matter most: a W&B upload that was asked for (`--wandb-entity`/`--wandb-project`, which the suites give) needs `WANDB_API_KEY`, `--sandbox opensandbox` needs `OPENSANDBOX_API_KEY`. If any command fails, the job logs every failure, never loads the model and ends with status 1. There is no switch to skip it: it takes seconds once the image is on the node.
+
+A command of your own has to source `scripts/common/preflight.sh` and call `preflight_done` after its checks, or the preflight would run the whole eval before the model is there: each command gets 15 minutes (the first includes the image pull), then it is killed and counted as failed (exit 124).
+
 ## Run it
 
 On a Clariden login node, from the root of this checkout; `scripts/direct_serving/job.sh` runs `job.py` from a cached venv of `requirements/direct-serving.lock` (the model-launch commit it renders its serving job from, pinned; `uv` finds or fetches the Python, 3.11 or newer), so there is nothing to install by hand. `DIRECT_SERVING_VENV` points it at another venv instead. 2-node Apertus 2 Chonk, one benchmark:
@@ -24,7 +30,7 @@ scripts/direct_serving/job.sh \
   --submit
 ```
 
-`--submit` prints the job id (`sbatch --parsable`); without it the job script is printed instead, to submit another way. The checkout is mounted into the eval image and the commands run from it, so it must be on storage the compute nodes see. While the model loads, the job pulls the eval image on the head node. Each `--eval` is run with `bash -c` from this checkout inside the eval image, in the order given; pass as many as you like, from any framework. Every command finds the server's URL in `$EVAL_API_BASE_URL`.
+`--submit` prints the job id (`sbatch --parsable`); without it the job script is printed instead, to submit another way. The checkout is mounted into the eval image and the commands run from it, so it must be on storage the compute nodes see. Each `--eval` is first run once with `EVAL_PREFLIGHT=1` before the model loads (see [Preflight](#preflight)), then with `bash -c` from this checkout inside the eval image, in the order given; pass as many as you like, from any framework. Every command finds the server's URL in `$EVAL_API_BASE_URL`.
 
 ## The frameworks' commands
 

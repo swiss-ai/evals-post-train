@@ -122,14 +122,43 @@ class RenderTests(unittest.TestCase):
         self.assertIn('export TARGET_API_KEY="${TARGET_API_KEY:-local}"', script)
         self.assertNotIn("export CSCS_SERVING_API", script)
 
-    def test_eval_image_is_pulled_while_the_model_loads(self) -> None:
-        script = _render(self, ["echo hi"])
+    def test_every_eval_is_preflighted_before_the_model_loads(self) -> None:
+        script = _render(self, ["echo one", "echo two"])
 
-        pull = script.index('--environment="$eval_edf" true &')
-        self.assertLess(script.index("EVAL_EDF_EOF'"), pull)
-        self.assertLess(pull, script.index("until ready"))
-        self.assertLess(script.index("The model server is ready after"), script.index('wait "$prefetch_pid"'))
-        self.assertLess(script.index('wait "$prefetch_pid"'), script.index("run_eval 1 "))
+        # the EDF first (the preflight runs in the image), then each eval's checks in order, then the model
+        self.assertLess(script.index("EVAL_EDF_EOF'"), script.index("preflight 1 "))
+        self.assertLess(script.index("preflight 1 "), script.index("preflight 2 "))
+        self.assertLess(script.index("preflight 2 "), script.index("critical_pids+=($!)"))
+        self.assertLess(script.index("Not loading the model"), script.index("critical_pids+=($!)"))
+        self.assertLess(script.index("until ready"), script.index("run_eval 1 "))
+
+    @unittest.skipUnless(shutil.which("bash"), "bash is needed")
+    def test_a_failing_preflight_stops_the_job_before_the_model_and_names_every_failure(self) -> None:
+        def run(*evals: str) -> subprocess.CompletedProcess:
+            with tempfile.TemporaryDirectory() as d:
+                srun = Path(d, "srun")  # the eval image's srun step: the command, here
+                srun.write_text('#!/bin/bash\nwhile [[ "$1" == --* ]]; do shift; done\nexec "$@"\n')
+                srun.chmod(0o755)
+                timeout = Path(d, "timeout")  # macOS has none; the limit itself is not what is tested
+                timeout.write_text('#!/bin/bash\nshift\nexec "$@"\n')
+                timeout.chmod(0o755)
+                script = job.preamble("edf\n", list(evals)) + "echo MODEL LOADS\n"
+                return subprocess.run(
+                    ["bash", "-c", script], capture_output=True, text=True, cwd=d, timeout=60,
+                    env={"PATH": f"{d}:/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin", "SLURM_JOB_ID": "1"},
+                )
+
+        ok = run('[[ "$EVAL_PREFLIGHT" == 1 ]] && [[ "$EVAL_API_BASE_URL" == http://127.0.0.1:8080/v1 ]] && echo "preflight ok"')
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        self.assertIn("MODEL LOADS", ok.stdout)
+
+        bad = run("echo fine", "echo key missing >&2; exit 3", "exit 4")
+        self.assertEqual(bad.returncode, 1)
+        self.assertNotIn("MODEL LOADS", bad.stdout)
+        self.assertIn("key missing", bad.stderr)
+        self.assertIn("Eval 2 failed its preflight (exit 3", bad.stderr)
+        self.assertIn("Eval 3 failed its preflight (exit 4", bad.stderr)  # all of them, not just the first
+        self.assertNotIn("Eval 1 failed", bad.stderr)
 
     def test_changed_model_launch_footer_is_refused(self) -> None:
         with patch.object(ml_framework, "render_master", return_value="echo a script without it\n"):
@@ -171,6 +200,7 @@ class EvalImageTests(unittest.TestCase):
         script = _render(self, ["echo hi"])
 
         self.assertLess(script.index("EVAL_EDF_EOF'"), script.index("run_eval 1 "))
+        self.assertLess(script.index("EVAL_EDF_EOF'"), script.index("preflight 1 "))
 
     def test_image_inputs_are_the_paths_ci_builds_the_image_for(self) -> None:
         workflow = (job.REPO_ROOT / ".github" / "workflows" / "eval-image.yml").read_text()

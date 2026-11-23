@@ -12,13 +12,17 @@ the server, and ends:
     |- srun   model server(s)         model-launch's script
     '- srun   eval command 1, 2, ..   in the eval image, against http://127.0.0.1:8080/v1
 
-The evals call the server directly, so the gateway's 503s, rate limits and header timeout
+Before the model loads, every eval command runs once with EVAL_PREFLIGHT=1 in the eval image
+and stops after its own checks of arguments and keys (scripts/common/preflight.sh), so a missing
+key fails the job in minutes, not after the server's half hour: the job ends with status 1 and
+the model is never loaded. The evals call the server directly, so the gateway's 503s, rate limits and header timeout
 never reach them, and the model is loaded once for all of them. Every eval command sees
 the server's URL as $EVAL_API_BASE_URL. The job ends with status 1 if the server died or
 any command failed, and the other commands still run.
 
 The commands are the launchers of any framework here (lm-eval's launch_evaluations.sh,
-run_inspect_eval.sh, run_harbor_eval.sh, run_evalscope_eval.sh). Each runs with `bash -c`
+run_inspect_eval.sh, run_harbor_eval.sh, run_evalscope_eval.sh, run_bfcl.sh, run_tau2_bench.sh):
+all of them stop at EVAL_PREFLIGHT=1, which a command of your own must do too. Each runs with `bash -c`
 from this checkout, with `sbatch` and `srun` that run in place (inline_slurm/), inside the
 prebuilt eval image (docs/lm-eval-harness.md): the image of the last commit that changed what
 it is built from, which CI published (.github/workflows/eval-image.yml). The job writes the
@@ -57,6 +61,7 @@ from scripts.common import suites
 HEALTH_URL = f"http://127.0.0.1:{FRAMEWORK_PORT}/health"
 API_BASE_URL = f"http://127.0.0.1:{FRAMEWORK_PORT}/v1"
 HEALTH_POLL_SECONDS = 10
+PREFLIGHT_TIMEOUT_SECONDS = 900
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 IMAGE_REPOSITORY = "swiss-ai/evals-post-train-eval"
@@ -218,11 +223,7 @@ def _fill(template: str, **values: str) -> str:
 # Raw text with @@NAME@@ marks, so it reads as bash. `nodes`, `critical_pids` and
 # `health_checker_pid` come from model-launch's script above it.
 _FOOTER = r"""
-prefetch_pid=""
 cleanup() {
-    if [[ -n "$prefetch_pid" ]]; then
-        kill "$prefetch_pid" 2>/dev/null || true
-    fi
     if [[ -n "$health_checker_pid" ]]; then
         kill "$health_checker_pid" 2>/dev/null || true
     fi
@@ -233,15 +234,6 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
-
-# The eval image's EDF, next to the job's logs (the job runs from its working directory).
-eval_edf="$PWD/eval_image_${SLURM_JOB_ID}.toml"
-cat > "$eval_edf" <<'EVAL_EDF_EOF'
-@@EDF@@EVAL_EDF_EOF
-
-# Pull the eval image on the head node while the model loads: minutes of waiting anyway.
-srun --overlap --nodes=1 --ntasks=1 --nodelist="${nodes[0]}" --environment="$eval_edf" true &
-prefetch_pid=$!
 
 server_alive() {
     local pid
@@ -275,14 +267,7 @@ until ready; do
     waited=$((waited + @@POLL@@))
 done
 echo "The model server is ready after ${waited}s"
-if ! wait "$prefetch_pid"; then
-    echo "The eval image could not be pulled ahead of time; the first eval tries itself" >&2
-fi
 
-export EVAL_API_BASE_URL=@@API_BASE_URL@@
-# The runners send TARGET_API_KEY to --api-base-url and insist on one; this server has no
-# auth, so any value will do. A key already set is kept, and judge keys are never touched.
-export TARGET_API_KEY="${TARGET_API_KEY:-local}"
 failed=0
 
 # run_eval <number> <command>: the command in the eval image on the head node, beside
@@ -312,19 +297,68 @@ exit "$failed"
 """
 
 
-def footer(edf: str, evals: list[str], ready_timeout: int) -> str:
-    prefix = f"cd {shlex.quote(str(REPO_ROOT))} && export PATH={shlex.quote(str(INLINE_SLURM_DIR))}:$PATH && "
+# The start of the job, before the model loads: every eval command runs once with EVAL_PREFLIGHT=1, in the eval
+# image, and stops after its own checks of arguments and keys (scripts/common/preflight.sh), so a missing key
+# fails the job in minutes, not after the server's half hour. The commands are also what the evals run later:
+# one that does not stop would run its eval here, so each gets PREFLIGHT_TIMEOUT seconds (the image is pulled
+# in the first one).
+_PREFLIGHT = r"""
+# The eval image's EDF, next to the job's logs (the job runs from its working directory).
+eval_edf="$PWD/eval_image_${SLURM_JOB_ID}.toml"
+cat > "$eval_edf" <<'EVAL_EDF_EOF'
+@@EDF@@EVAL_EDF_EOF
+
+export EVAL_API_BASE_URL=@@API_BASE_URL@@
+# The runners send TARGET_API_KEY to --api-base-url and insist on one; this server has no
+# auth, so any value will do. A key already set is kept, and judge keys are never touched.
+export TARGET_API_KEY="${TARGET_API_KEY:-local}"
+
+preflight_failed=0
+# preflight <number> <command>
+preflight() {
+    echo "== preflight of eval $1: $2"
+    EVAL_PREFLIGHT=1 timeout @@PREFLIGHT_TIMEOUT@@ srun --nodes=1 --ntasks=1 \
+        --environment="$eval_edf" bash -c "$2" || {
+        echo "Eval $1 failed its preflight (exit $?; 124 means it did not stop: does the runner source scripts/common/preflight.sh?)" >&2
+        preflight_failed=1
+    }
+}
+@@CHECKS@@
+if (( preflight_failed )); then
+    echo "Not loading the model: fix the above and submit again." >&2
+    exit 1
+fi
+"""
+
+
+def eval_command(command: str) -> str:
+    """`command` as an eval runs it: from the checkout, with the inline sbatch/srun first on PATH."""
+    return f"cd {shlex.quote(str(REPO_ROOT))} && export PATH={shlex.quote(str(INLINE_SLURM_DIR))}:$PATH && {command}"
+
+
+def preamble(edf: str, evals: list[str]) -> str:
+    checks = "\n".join(
+        f"preflight {number} {shlex.quote(eval_command(command))}" for number, command in enumerate(evals, start=1)
+    )
+    return _fill(
+        _PREFLIGHT,
+        EDF=edf,
+        API_BASE_URL=shlex.quote(API_BASE_URL),
+        PREFLIGHT_TIMEOUT=str(PREFLIGHT_TIMEOUT_SECONDS),
+        CHECKS=checks,
+    )
+
+
+def footer(evals: list[str], ready_timeout: int) -> str:
     calls = "\n".join(
-        f"run_eval {number} {shlex.quote(prefix + command)} || failed=1"
+        f"run_eval {number} {shlex.quote(eval_command(command))} || failed=1"
         for number, command in enumerate(evals, start=1)
     )
     return _fill(
         _FOOTER,
         HEALTH_URL=HEALTH_URL,
-        API_BASE_URL=shlex.quote(API_BASE_URL),
         READY_TIMEOUT=str(ready_timeout),
         POLL=str(HEALTH_POLL_SECONDS),
-        EDF=edf,
         EVALS=calls,
     )
 
@@ -347,8 +381,9 @@ def render(
     return (
         "\n".join(["#!/bin/bash", *header])
         + "\n"
+        + preamble(eval_edf(image_commit, mounts), evals)
         + serving_half(launch_args)
-        + footer(eval_edf(image_commit, mounts), evals, ready_timeout)
+        + footer(evals, ready_timeout)
     )
 
 

@@ -852,6 +852,15 @@ if [[ "$JUDGE_MODE" == "none" ]]; then
     fi
 fi
 
+# A W&B upload asked for with --wandb-entity/--wandb-project needs the key, as in the other runners (the
+# sbatch job only warns and skips the upload), so a missing one stops here.
+# (secrets.sh only sets shell variables, so the key is passed on.)
+WANDB_ENTITY=$WANDB_ENTITY_FLAG WANDB_PROJECT=$WANDB_PROJECT_FLAG WANDB_API_KEY=${WANDB_API_KEY:-} \
+    bash -c 'source scripts/common/wandb.sh && wandb_setup > /dev/null' || exit 1
+# shellcheck source=scripts/common/preflight.sh
+source scripts/common/preflight.sh
+preflight_done
+
 # --- Dispatch based on model selection mode ---
 EVAL_JOB_IDS=()
 

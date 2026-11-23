@@ -172,6 +172,9 @@ done
 [[ "$DOMAIN" =~ ^[A-Za-z0-9_-]+$ ]] || die "--domain must be a domain name, got: $DOMAIN"
 SAVE_TO=${SAVE_TO:-"$DOMAIN-$(date +%Y%m%d-%H%M%S)"}
 [[ "$SAVE_TO" =~ ^[A-Za-z0-9_.-]+$ ]] || die "--save-to must be a plain name, got: $SAVE_TO"
+# shellcheck source=scripts/common/preflight.sh
+source scripts/common/preflight.sh
+preflight_done
 
 # The agent: through the endpoint like run_inspect_eval.sh does, or a bare litellm model string.
 AGENT_LLM_ARGS='{}'
