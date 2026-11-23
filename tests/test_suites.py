@@ -22,6 +22,15 @@ JUDGE_LLM = "openai/openai/gpt-oss-120b"  # the tau2 user and retail's NL-assert
 JUDGE_BASE = "http://helper:8080/v1"  # where it is reached (--helper-url), whatever serves the agent
 
 
+def with_inspect_row(suite):
+    """A copy of `suite` with one inspect row first: the shipped chonk_sft has none (GPQA Diamond runs in lm-eval now),
+    so the inspect paths of suites.py are exercised with this probe."""
+    suite = copy.deepcopy(suite)
+    suite["benchmarks"].insert(0, {"label": "Inspect probe", "task": "gpqa_diamond", "framework": "inspect",
+                                   "repeats": {"n": 4, "via": "task"}, "metric": {"label": "mean@4", "key": None}})
+    return suite
+
+
 class SuiteTests(unittest.TestCase):
     def test_every_shipped_suite_is_valid(self):
         names = [str(p.relative_to(suites.SUITES_DIR).with_suffix("")) for p in suites.SUITES_DIR.rglob("*.json")]
@@ -138,8 +147,8 @@ class SuiteTests(unittest.TestCase):
                 suites.validate(suite)
 
     def test_inspect_rows_get_their_own_flags_task_args_and_epochs(self):
-        suite = suites.load("apertus2/chonk_sft")
-        # No shipped inspect row repeats via the flag at the moment: the epochs path is exercised with a row set here.
+        suite = with_inspect_row(suites.load("apertus2/chonk_sft"))
+        # The probe repeats via the task; the epochs path is exercised with it set to the flag here.
         next(b for b in suite["benchmarks"] if b["task"] == "gpqa_diamond")["repeats"]["via"] = "flag"
         self.assertEqual(suites.flags_for(suite, "qwen3-32b-thinking", "gpqa_diamond"),
                          ["--enable-thinking", "--", "--epochs", "4"])
@@ -159,7 +168,7 @@ class SuiteTests(unittest.TestCase):
             suites.validate(suite)
 
     def test_a_pinned_tokenizer_becomes_the_lm_eval_tokenizer_flag(self):
-        suite = suites.load(SUITE)
+        suite = with_inspect_row(suites.load(SUITE))
         spec = suite["setups"]["chonk-lc-16k-v0.2-sft"]["tokenizer"]
         with mock.patch.dict(os.environ, {"EVAL_ENV_CACHE_ROOT": "/cache"}):
             flags = suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "ifbench_think")
@@ -202,16 +211,16 @@ class SuiteTests(unittest.TestCase):
                     suites.fetch_tokenizer({**spec, "revision": "0" * 40})
 
     def test_one_launch_per_model_and_benchmark(self):
-        suite = suites.load(SUITE)
+        suite = with_inspect_row(suites.load(SUITE))
         models = {"chonk-lc-16k-v0.2-sft": "chonk", "qwen3-32b-thinking": "qwen"}
         rows = suites.commands(suite, models, api_base_url="http://x/v1", limit=5, no_wandb=True,
                                qos="highprio", partition="highprio", helper_url=JUDGE_BASE)
         self.assertEqual(len(rows), len(models) * len(suite["benchmarks"]))
-        self.assertEqual([(r["setup"], r["label"]) for r in rows[:2]], [("chonk-lc-16k-v0.2-sft", "GPQA Diamond"), ("chonk-lc-16k-v0.2-sft", "IFBench")])
+        self.assertEqual([(r["setup"], r["label"]) for r in rows[:2]], [("chonk-lc-16k-v0.2-sft", "Inspect probe"), ("chonk-lc-16k-v0.2-sft", "GPQA Diamond")])
         inspect_row, lm_eval_row = rows[0]["argv"], rows[1]["argv"]
         self.assertEqual(inspect_row[:3], ["sbatch", "--qos=highprio", "--partition=highprio"])
         self.assertEqual(lm_eval_row[:3], ["bash", "scripts/lm_eval_harness/launch_evaluations.sh", "single"])
-        self.assertEqual(lm_eval_row[lm_eval_row.index("--task") + 1], "ifbench_think")
+        self.assertEqual(lm_eval_row[lm_eval_row.index("--task") + 1], "gpqa_diamond_think")
         self.assertEqual(lm_eval_row.count("--backend"), 1)  # the Chonk setup already names it
         qwen_lm_eval = next(r["argv"] for r in rows if r["setup"] == "qwen3-32b-thinking" and r["framework"] == "lm_eval")
         self.assertEqual(qwen_lm_eval[qwen_lm_eval.index("--backend") + 1], "openai")
@@ -304,7 +313,7 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual([retail[retail.index(f) + 1] for f in ("--user-api-base-url", "--judge-api-base-url")], [JUDGE_BASE] * 2)
 
     def test_a_setups_reasoning_effort_reaches_all_its_lm_eval_and_inspect_rows(self):
-        suite = suites.load(SUITE)
+        suite = with_inspect_row(suites.load(SUITE))
         chonk = "chonk-lc-16k-v0.2-sft"
         for name in (chonk, "chonk-lc-16k-v0.1-ep1"):
             self.assertEqual(suite["setups"][name]["reasoning_effort"], "high")
@@ -319,7 +328,7 @@ class SuiteTests(unittest.TestCase):
                 self.assertNotIn("--reasoning-effort", suites.flags_for(suite, other, bench["task"]))
 
     def test_a_benchmarks_flags_follow_the_setups(self):
-        suite = suites.load(SUITE)
+        suite = with_inspect_row(suites.load(SUITE))
         # No shipped row carries flags of its own at the moment: the mechanism is exercised with a row set here.
         next(b for b in suite["benchmarks"] if b["task"] == "gpqa_diamond")["flags"] = ["--sandbox", "opensandbox"]
         suites.validate(suite)
