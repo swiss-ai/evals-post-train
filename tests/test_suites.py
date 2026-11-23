@@ -59,7 +59,7 @@ class SuiteTests(unittest.TestCase):
         row = next(b for b in suites.load(SUITE)["benchmarks"] if b["task"] == "swe_bench")
         self.assertEqual(row["framework"], "harbor")
         flags = row["flags"]
-        for flag, value in (("--agent", "terminus-2"), ("--max-concurrency", "200"), ("--attempts", "4"), ("--sandbox", "opensandbox")):
+        for flag, value in (("--agent", "terminus-2"), ("--max-concurrency", "100"), ("--attempts", "4"), ("--sandbox", "opensandbox")):
             self.assertEqual(flags[flags.index(flag) + 1], value)
 
     def test_apertus_15_70b_runs_with_high_client_concurrency_on_every_lm_eval_row(self):
