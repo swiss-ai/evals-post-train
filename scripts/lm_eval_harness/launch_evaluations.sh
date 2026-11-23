@@ -859,10 +859,12 @@ WANDB_ENTITY=$WANDB_ENTITY_FLAG WANDB_PROJECT=$WANDB_PROJECT_FLAG WANDB_API_KEY=
     bash -c 'source scripts/common/wandb.sh && wandb_setup > /dev/null' || exit 1
 # The datasets of these tasks are gated on Hugging Face (the terms are accepted once, then a token reads them).
 # Without HF_TOKEN (environment or scripts/secrets.env) or a logged-in token file the run fails when it loads
-# the dataset, after the model has loaded: stop here. Add a task when its dataset is gated.
+# the dataset, after the model has loaded: stop here (unless the run is offline, from the cache). Add a task when
+# its dataset is gated.
 GATED_TASKS_PATTERN='(^|[[:space:],])(gpqa|flores_plus|bouquet|harmbench)'
 if [[ -f "${TASKS:-}" ]]; then GATED_CHECK_TASKS=$(<"$TASKS"); else GATED_CHECK_TASKS=${TASKS:-}; fi
-if [[ -z "${HF_TOKEN:-}" && ! -s "${HF_HOME:-$HOME/.cache/huggingface}/token" && "$GATED_CHECK_TASKS" =~ $GATED_TASKS_PATTERN ]]; then
+if [[ -z "${HF_TOKEN:-}" && ! -s "${HF_HOME:-$HOME/.cache/huggingface}/token" && "${HF_HUB_OFFLINE:-0}" != 1 \
+      && "${HF_DATASETS_OFFLINE:-0}" != 1 && "$GATED_CHECK_TASKS" =~ $GATED_TASKS_PATTERN ]]; then
     echo "Error: ${BASH_REMATCH[2]}* loads a gated Hugging Face dataset: set HF_TOKEN (environment or scripts/secrets.env)," \
          "or log in with huggingface-cli, and accept the dataset's terms." >&2
     exit 1

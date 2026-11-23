@@ -107,6 +107,11 @@ class PreflightTest(unittest.TestCase):
         self.addCleanup(secrets.unlink)
         self.assertEqual(self._lm_eval("gpqa_diamond_think").returncode, 0)
 
+    def test_an_offline_run_reads_the_cache_and_needs_no_token(self):
+        self.assertEqual(self._lm_eval("gpqa_diamond_think", HF_HUB_OFFLINE="1").returncode, 0)
+        self.assertEqual(self._lm_eval("gpqa_diamond_think", HF_DATASETS_OFFLINE="1").returncode, 0)
+        self.assertEqual(self._lm_eval("gpqa_diamond_think", HF_HUB_OFFLINE="0").returncode, 1)
+
     def test_an_ungated_dataset_needs_no_token(self):
         for task in ("gsm8k_platinum_think", "ifbench_think", "aime24_think"):
             with self.subTest(task=task):
