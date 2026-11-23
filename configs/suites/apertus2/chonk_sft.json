@@ -165,7 +165,7 @@
         "inspect": ["--enable-thinking"],
         "bfcl": [],
         "tau2": ["--enable-thinking"],
-        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 262144}"]
+        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       }
     },
     "glm-4.5-air-thinking": {
@@ -227,7 +227,7 @@
         "inspect": [],
         "bfcl": [],
         "tau2": [],
-        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 262144}"]
+        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       }
     },
     "chonk-lc-16k-v0.1-ep1": {
@@ -250,7 +250,7 @@
         "inspect": [],
         "bfcl": [],
         "tau2": [],
-        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 262144}"]
+        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       }
     }
   }
