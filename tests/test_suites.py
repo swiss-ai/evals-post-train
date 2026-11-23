@@ -55,6 +55,13 @@ class SuiteTests(unittest.TestCase):
                 if "max_input_tokens" in flag:
                     self.assertEqual(json.loads(flag.split("=", 1)[1])["max_input_tokens"], setup["max_length"], name)
 
+    def test_swe_bench_row_states_its_agent_concurrency_and_attempts(self):
+        row = next(b for b in suites.load(SUITE)["benchmarks"] if b["task"] == "swe_bench")
+        self.assertEqual(row["framework"], "harbor")
+        flags = row["flags"]
+        for flag, value in (("--agent", "terminus-2"), ("--max-concurrency", "200"), ("--attempts", "4"), ("--sandbox", "opensandbox")):
+            self.assertEqual(flags[flags.index(flag) + 1], value)
+
     def test_apertus_15_70b_runs_with_high_client_concurrency_on_every_lm_eval_row(self):
         # Its two replicas sit idle at the launcher's default of 8.
         suite = suites.load(SUITE)
@@ -299,7 +306,7 @@ class SuiteTests(unittest.TestCase):
         with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
             self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m", "--model", "qwen3-32b-thinking=q", "--helper-url", JUDGE_BASE]), 0)
-        self.assertIn("78 launches: 2 models x 39 benchmarks", err.getvalue())
+        self.assertIn("80 launches: 2 models x 40 benchmarks", err.getvalue())
         for bad in (["--model", "m"], ["--model", "nope=m"], ["--model", f"{THINK}=a", "--model", f"{THINK}=b"]):
             self.assertEqual(suites.main(["run", SUITE, *bad]), 1)
 
