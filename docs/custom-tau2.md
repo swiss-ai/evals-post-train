@@ -20,7 +20,7 @@ In a Slurm job: `sbatch scripts/custom/run_tau2_bench.sbatch <same arguments>` r
 
 ## The user and judge model of `chonk_sft`
 
-The suite's tau2 rows name `openai/openai/gpt-oss-120b` as user and judge (`reasoning_effort: low`, its lowest) at `{helper_url}`, which `suites run --helper-url <url>` fills in. Launch it once, for as long as the runs last, on its own node (`--tensor-parallel-size 4`; the tool parser is for the telecom user's phone tools):
+The suite's tau2 rows name `openai/openai/gpt-oss-120b` as user and judge (`reasoning_effort: low`, its lowest) at `{helper_url}`, which `suites run --helper-url <url>` fills in. Their sampling is stated on the rows too, `temperature` 0.6 and `top_p` 0.95 with `reasoning_effort: low` and `max_tokens` 4096 (`--user-llm-args`, `--judge-llm-args`). Without them the launcher copies the sampling of the model under test's profile to the user and judge, so these values would follow that profile; and the server sets none (vLLM's own defaults would be 1.0 and 1.0): they are sent with each request. The runs before 2026-11-23 sent the same values, inherited. Launch it once, for as long as the runs last, on its own node (`--tensor-parallel-size 4`; the tool parser is for the telecom user's phone tools):
 
 ```bash
 scripts/direct_serving/job.sh --model /capstor/store/cscs/swissai/infra01/hf_models/models/openai/gpt-oss-120b \
