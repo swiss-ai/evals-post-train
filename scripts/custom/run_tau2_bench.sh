@@ -86,9 +86,12 @@
 #   -- <extra args>             Forwarded verbatim to `tau2 run` (e.g. a domain's own options).
 #
 # Results: <--workdir>/tau2-data/simulations/<--save-to>/results.json (every simulation, reward and
-# messages); this script prints avg_reward and pass^k computed from it over the simulations that got a reward,
-# lists the ones that did not (tau2 gives up on a task after 4 attempts: an infrastructure error, no reward) and
-# the ones missing altogether, and exits 1 if there are any, so a lost task never passes as a score.
+# messages); this script prints avg_reward and pass^k computed from it. tau2 gives up on a task after 4 attempts
+# (an infrastructure error, no reward) and leaves it out of its own metrics. The cause is in the task's info.error:
+# when the model under test is to blame (it replied with neither content nor tool calls) the task counts as failed,
+# reward 0 (n_agent_failures); any other cause (the user simulator, the judge, the server, a missing key) is
+# not the model's and is not counted: those tasks are listed, with the ones missing altogether, and the script
+# exits 1, so a task that is not the model's fault is rerun and never passes as a score.
 #
 # Example (retail smoke test against a CSCS-served model):
 #   scripts/custom/run_tau2_bench.sh --domain retail --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
@@ -416,9 +419,20 @@ with open(sys.argv[1]) as f:
 num_trials = int(sys.argv[2])
 expected = int(sys.argv[3]) if sys.argv[3] else None
 
+# What the model under test is to blame for: tau2 rejects its reply as an AssistantMessage without content or tool calls.
+AGENT_ERRORS = ("AssistantMessage must have either content or tool_calls",)
+
+
+def agent_failed(sim):
+    return sim.get("termination_reason") == "infrastructure_error" and str((sim.get("info") or {}).get("error", "")).startswith(AGENT_ERRORS)
+
+
 all_sims = data.get("simulations") or []
 sims = [s for s in all_sims if (s.get("reward_info") or {}).get("reward") is not None]
 unscored = [s for s in all_sims if (s.get("reward_info") or {}).get("reward") is None]
+agent_failures = [s for s in unscored if agent_failed(s)]
+unscored = [s for s in unscored if not agent_failed(s)]
+sims += [{**s, "reward_info": {"reward": 0.0}} for s in agent_failures]
 per_task = defaultdict(list)
 for s in sims:
     per_task[s["task_id"]].append(s)
@@ -446,6 +460,7 @@ for k in range(1, num_trials + 1):
         metrics[f"pass^{k}"] = sum(vals) / len(vals)
 metrics["n_tasks"] = len(per_task)
 metrics["n_simulations"] = len(sims)
+metrics["n_agent_failures"] = len(agent_failures)
 metrics["n_unscored"] = len(unscored)
 if expected is not None:
     metrics["n_missing"] = max(expected - len(all_sims), 0)
