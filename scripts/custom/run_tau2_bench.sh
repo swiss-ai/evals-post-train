@@ -428,7 +428,7 @@ AGENT_ERRORS = ("AssistantMessage must have either content or tool_calls",)
 
 
 def agent_failure_cause(sim):
-    """"empty_reply" or "context_overflow" when the model under test is to blame for a task without reward, else None."""
+    """Why the model under test is to blame for a task without reward: "empty_reply" or "context_overflow"; else None."""
     if sim.get("termination_reason") != "infrastructure_error":
         return None
     info = sim.get("info") or {}
