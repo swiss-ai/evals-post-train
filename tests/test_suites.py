@@ -49,13 +49,15 @@ class SuiteTests(unittest.TestCase):
     def test_harbor_agent_is_told_the_window_of_its_setup(self):
         # max_input_tokens is the window terminus-2 is told (it summarises before it fills). It is
         # independent of max_length (lm_eval's generation window) and of the served --max-model-len.
-        # Qwen3 (native 32k) and Chonk (trained to 16k) get 32768; the long-context models 262144.
-        short = {"qwen3-32b-thinking", "chonk-lc-16k-v0.2-sft", "chonk-lc-16k-v0.1-ep1"}
+        # Qwen3 (native 32k) and Chonk (trained to 16k) get 32768, GLM-4.5-Air its native 128K,
+        # the long-context models 262144.
+        window = {"qwen3-32b-thinking": 32768, "chonk-lc-16k-v0.2-sft": 32768, "chonk-lc-16k-v0.1-ep1": 32768,
+                  "glm-4.5-air-thinking": 131072}
         suite = suites.load(SUITE)
         for name, setup in suite["setups"].items():
             windows = [json.loads(f.split("=", 1)[1])["max_input_tokens"]
                        for f in setup["flags"].get("harbor", []) if "max_input_tokens" in f]
-            self.assertEqual(windows, [32768 if name in short else 262144], name)
+            self.assertEqual(windows, [window.get(name, 262144)], name)
 
     def test_apertus_15_70b_runs_with_high_client_concurrency_on_every_lm_eval_row(self):
         # Its two replicas sit idle at the launcher's default of 8.
