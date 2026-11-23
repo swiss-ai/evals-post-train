@@ -75,6 +75,63 @@ class PreflightTest(unittest.TestCase):
                 result = self._run(runner, "--wandb-project", "p")
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    LM_EVAL = "scripts/lm_eval_harness/launch_evaluations.sh"
+
+    def _lm_eval(self, task, *extra, **env):
+        """The lm-eval launcher's preflight for `task` (replacing the runner's own --task), with no W&B asked for."""
+        args = [a for a in RUNNERS[self.LM_EVAL]]
+        args[args.index("--task") + 1] = task
+        return subprocess.run(
+            ["bash", str(self.root / self.LM_EVAL), *args, "--no-wandb", *extra],
+            cwd=self.root, capture_output=True, text=True, timeout=120,
+            env={"PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", "HOME": str(self.root), "EVAL_PREFLIGHT": "1", **env},
+        )
+
+    def test_a_gated_dataset_without_a_hugging_face_token_fails_the_preflight(self):
+        for task in ("gpqa_diamond_think", "flores_plus_chrf_eng_Latn-deu_Latn", "bouquet_eng_Latn-deu_Latn", "harmbench"):
+            with self.subTest(task=task):
+                result = self._lm_eval(task)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("gated Hugging Face dataset", result.stderr)
+                self.assertNotIn("preflight ok", result.stdout)
+
+    def test_a_token_in_the_environment_secrets_env_or_a_token_file_passes(self):
+        self.assertEqual(self._lm_eval("gpqa_diamond_think", HF_TOKEN="x").returncode, 0)
+        hf_home = self.root / "hf_home"
+        hf_home.mkdir(exist_ok=True)
+        (hf_home / "token").write_text("x")
+        self.addCleanup((hf_home / "token").unlink)
+        self.assertEqual(self._lm_eval("gpqa_diamond_think", HF_HOME=str(hf_home)).returncode, 0)
+        secrets = self.root / "scripts/secrets.env"
+        secrets.write_text("HF_TOKEN=from-the-file\n")
+        self.addCleanup(secrets.unlink)
+        self.assertEqual(self._lm_eval("gpqa_diamond_think").returncode, 0)
+
+    def test_an_offline_run_reads_the_cache_and_needs_no_token(self):
+        self.assertEqual(self._lm_eval("gpqa_diamond_think", HF_HUB_OFFLINE="1").returncode, 0)
+        self.assertEqual(self._lm_eval("gpqa_diamond_think", HF_DATASETS_OFFLINE="1").returncode, 0)
+        self.assertEqual(self._lm_eval("gpqa_diamond_think", HF_HUB_OFFLINE="0").returncode, 1)
+
+    def test_an_ungated_dataset_needs_no_token(self):
+        for task in ("gsm8k_platinum_think", "ifbench_think", "aime24_think"):
+            with self.subTest(task=task):
+                result = self._lm_eval(task)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("preflight ok", result.stdout)
+
+    def test_a_gated_task_in_a_task_file_is_found_too(self):
+        task_file = self.root / "tasks.txt"
+        task_file.write_text("gsm8k_platinum_think\ngpqa_diamond_think\n")
+        self.addCleanup(task_file.unlink)
+        result = subprocess.run(
+            ["bash", str(self.root / self.LM_EVAL), "custom", "--task-file", str(task_file), "--model", "m", "--backend", "openai",
+             "--api-model-name", "m", *ENDPOINT, "--no-wandb"],
+            cwd=self.root, capture_output=True, text=True, timeout=120,
+            env={"PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", "HOME": str(self.root), "EVAL_PREFLIGHT": "1"},
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("gated Hugging Face dataset", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
