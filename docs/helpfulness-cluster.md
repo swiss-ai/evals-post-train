@@ -102,6 +102,44 @@ message placement tests persistent score/assessment contradictions without
 changing answers or review labels. Identity and exact raw replay bind the
 reminder flag; historical two-message requests remain independently replayable.
 
+Target job `4005044` recorded all twenty checkpoint attempts: eighteen final
+replies, two no-final-reply budget failures, and three truncated calls
+(including one partial final reply). Preserve these originals rather than
+regenerating them for calibration. Judge v1 `4005176` returned no outputs
+because it requested inference before server readiness; this is a startup
+failure, not measured judge accuracy. Later allocations fixed readiness.
+
+Completed judge candidates, each with 58/58 valid outputs and complete raw
+SDK replay, gave the following unchanged twenty-item-split match counts:
+
+| Candidate / job | Pilot review | Development | Fresh wording |
+| --- | --- | --- | --- |
+| v2 / `4005210` | 10/20 | 14/20 | 13/20 |
+| v3 / `4005275` | 11/20 | 18/20 | 18/20 |
+| v4 / `4005408` | 14/20 | 14/20 | 12/20 |
+| v5 / `4005486` | 14/20 | 20/20 | 19/20 |
+| v6 / `4005533` | 13/20 | 20/20 | 20/20 |
+
+Retain **v5 as a diagnostic only**: it ties the best pilot agreement and
+improves both control splits over v4; the reminder-only v6 regresses on the
+pilot. Use `wildbench_scalar_v5.txt`, `--assessment-schema-version 2`, and no
+reminder. Its conditional eighteen-reply raw mean is **4.94/10**, WB-Score
+**-1.11**, and task-macro WB-Score **2.62**. Coverage is **18/20**; two missing
+replies cannot earn matches, so pilot agreement is 14/20 selected, not 14/18
+successful-generation accuracy. The frozen >=17/20-per-split screen remains
+failed. Four available replies remain outside review intervals: JavaScript
+explanation, Azure integration, marketing proposal and literary comparison.
+The judge still over-scores acknowledged material omissions and nonfunctional
+code; one poor arithmetic control is below its frozen interval.
+
+These intervals are not independent human gold. Some control disagreements
+concern adjacent poor anchors rather than failure to identify an incorrect
+answer. Do not shift intervals, transform returned scores, selectively combine
+candidates or continue fitting these repeatedly inspected cases to claim
+acceptance. Independent adjudication and a genuinely unseen mixed-quality
+validation set are needed before operational scoring. All candidate evidence
+and original target failures are retained; automatic scoring remains disabled.
+
 ### EQ-Bench 3 native-scenario pilot
 
 `scripts.helpfulness.eqbench_pilot` separates native checkpoint generation from
