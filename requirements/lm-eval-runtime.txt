@@ -10,7 +10,8 @@ jinja2
 jsonlines
 pytablewriter
 rouge-score>=0.0.4
-sacrebleu>=1.5.0
+# [ja]: mecab-python3 + ipadic, for WMT24++ Japanese BLEU (ja-mecab tokenizer, harness wmt24pp_chrf)
+sacrebleu[ja]>=2.0
 scikit-learn>=0.24.1
 sqlitedict
 zstandard
