@@ -388,6 +388,9 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         summary = json.loads(result.stdout[result.stdout.index("{"):])
         self.assertEqual((summary["pass^1"], summary["n_agent_failures"], summary["n_unscored"]), (1 / 3, 1, 0))
+        # the failures are reported by cause, with what tau2 itself prints (the failed task left out)
+        self.assertEqual(summary["agent_failures_by_cause"], {"empty_reply": 1, "context_overflow": 0})
+        self.assertEqual(summary["excluding_agent_failures"]["pass^1"], 0.5)
 
         # the judge's (or the user simulator's, or a server's) is not the model's: not counted, and the run fails
         result = self._run([self._sim("0", 1.0), failed("1", judge), failed("2", empty)], "--num-tasks", "3")
@@ -412,12 +415,15 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         summary = json.loads(result.stdout[result.stdout.index("{"):])
         self.assertEqual((summary["pass^1"], summary["n_agent_failures"], summary["n_unscored"]), (0.5, 1, 0))
+        self.assertEqual(summary["agent_failures_by_cause"], {"empty_reply": 0, "context_overflow": 1})
+        self.assertEqual(summary["excluding_agent_failures"]["pass^1"], 1.0)
 
         # the same error from the user simulator's or the judge's window is not the model's: not counted, the run fails
         result = self._run([self._sim("0", 1.0), overflow("1", user_trace), overflow("2", judge_trace)], "--num-tasks", "3")
         self.assertEqual(result.returncode, 1)
         summary = json.loads(result.stdout[result.stdout.index("{"):])
         self.assertEqual((summary["pass^1"], summary["n_agent_failures"], summary["n_unscored"]), (1.0, 0, 2))
+        self.assertNotIn("excluding_agent_failures", summary)  # nothing was counted as the model's, so nothing to compare
         self.assertIn("task 1: no reward", result.stderr)
         self.assertIn("task 2: no reward", result.stderr)
 

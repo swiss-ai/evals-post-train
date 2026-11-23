@@ -427,49 +427,61 @@ expected = int(sys.argv[3]) if sys.argv[3] else None
 AGENT_ERRORS = ("AssistantMessage must have either content or tool_calls",)
 
 
-def agent_failed(sim):
+def agent_failure_cause(sim):
+    """"empty_reply" or "context_overflow" when the model under test is to blame for a task without reward, else None."""
     if sim.get("termination_reason") != "infrastructure_error":
-        return False
+        return None
     info = sim.get("info") or {}
     if str(info.get("error", "")).startswith(AGENT_ERRORS):
-        return True
-    return info.get("error_type") == "ContextWindowExceededError" and "/tau2/agent/" in str(info.get("error_traceback", ""))
-
-
-all_sims = data.get("simulations") or []
-sims = [s for s in all_sims if (s.get("reward_info") or {}).get("reward") is not None]
-unscored = [s for s in all_sims if (s.get("reward_info") or {}).get("reward") is None]
-agent_failures = [s for s in unscored if agent_failed(s)]
-unscored = [s for s in unscored if not agent_failed(s)]
-sims += [{**s, "reward_info": {"reward": 0.0}} for s in agent_failures]
-per_task = defaultdict(list)
-for s in sims:
-    per_task[s["task_id"]].append(s)
-
-if not per_task:
-    print("no scored simulations")
-    raise SystemExit(1)
-
-rewards = [s["reward_info"]["reward"] for s in sims]
-metrics = {"avg_reward": sum(rewards) / len(rewards)}
+        return "empty_reply"
+    if info.get("error_type") == "ContextWindowExceededError" and "/tau2/agent/" in str(info.get("error_traceback", "")):
+        return "context_overflow"
+    return None
 
 
 def is_success(reward):
     return (1 - 1e-6) <= reward <= (1 + 1e-6)
 
 
-for k in range(1, num_trials + 1):
-    vals = []
-    for runs in per_task.values():
-        n = len(runs)
-        c = sum(is_success(s["reward_info"]["reward"]) for s in runs)
-        if n >= k:
-            vals.append(math.comb(c, k) / math.comb(n, k))
-    if vals:
-        metrics[f"pass^{k}"] = sum(vals) / len(vals)
+def summarize(rows):
+    """avg_reward and pass^k of `rows`, and their simulations per task."""
+    per_task = defaultdict(list)
+    for s in rows:
+        per_task[s["task_id"]].append(s)
+    rewards = [s["reward_info"]["reward"] for s in rows]
+    out = {"avg_reward": sum(rewards) / len(rewards)}
+    for k in range(1, num_trials + 1):
+        vals = []
+        for runs in per_task.values():
+            n = len(runs)
+            c = sum(is_success(s["reward_info"]["reward"]) for s in runs)
+            if n >= k:
+                vals.append(math.comb(c, k) / math.comb(n, k))
+        if vals:
+            out[f"pass^{k}"] = sum(vals) / len(vals)
+    return out, per_task
+
+
+all_sims = data.get("simulations") or []
+scored = [s for s in all_sims if (s.get("reward_info") or {}).get("reward") is not None]
+unscored = [s for s in all_sims if (s.get("reward_info") or {}).get("reward") is None]
+agent_failures = [s for s in unscored if agent_failure_cause(s)]
+unscored = [s for s in unscored if not agent_failure_cause(s)]
+sims = scored + [{**s, "reward_info": {"reward": 0.0}} for s in agent_failures]
+
+if not sims:
+    print("no scored simulations")
+    raise SystemExit(1)
+
+metrics, per_task = summarize(sims)
 metrics["n_tasks"] = len(per_task)
 metrics["n_simulations"] = len(sims)
 metrics["n_agent_failures"] = len(agent_failures)
+metrics["agent_failures_by_cause"] = {cause: sum(agent_failure_cause(s) == cause for s in agent_failures)
+                                      for cause in ("empty_reply", "context_overflow")}
+if agent_failures and scored:
+    # What tau2 itself prints: the failed tasks left out, which flatters a model that fails often.
+    metrics["excluding_agent_failures"] = summarize(scored)[0]
 metrics["n_unscored"] = len(unscored)
 if expected is not None:
     metrics["n_missing"] = max(expected - len(all_sims), 0)
