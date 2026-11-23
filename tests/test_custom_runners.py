@@ -271,6 +271,9 @@ class JudgeTest(unittest.TestCase):
             pkg.mkdir(parents=True)
             Path(d, "tau2/__init__.py").write_text("")
             (pkg / "__init__.py").write_text("")
+            (pkg / "evaluator_communicate.py").write_text(
+                'import types\n'
+                'def generate(**kwargs):\n    return types.SimpleNamespace(content="```json\\n" + repr(sorted(kwargs)) + "\\n```", kwargs=kwargs)\n')
             (pkg / "evaluator_nl_assertions.py").write_text(
                 'import json, types\n'
                 'DEFAULT_LLM_NL_ASSERTIONS = "gpt"\nDEFAULT_LLM_NL_ASSERTIONS_ARGS = {"x": 1}\n'
@@ -287,6 +290,9 @@ class JudgeTest(unittest.TestCase):
                     "m = sys.modules.get('tau2.evaluator.evaluator_nl_assertions')\n"
                     "if not m: print('untouched'); raise SystemExit\n"
                     "print(m.DEFAULT_LLM_NL_ASSERTIONS, m.DEFAULT_LLM_NL_ASSERTIONS_ARGS)\n"
+                    "c = sys.modules['tau2.evaluator.evaluator_communicate']\n"
+                    "r = c.generate(model='gpt', messages=['q'], call_name='communicate_info_eval', reasoning_effort='low')\n"
+                    "print(r.content, r.kwargs['model'])\n"
                     "ev = m.NLAssertionsEvaluator\n"
                     "for _ in range(4):\n"
                     "    try: print(len(ev.evaluate_nl_assertions([], ['a', 'b'])))\n"
@@ -296,6 +302,9 @@ class JudgeTest(unittest.TestCase):
             out = run({"TAU2_JUDGE_LLM": "openai/m", "TAU2_JUDGE_LLM_ARGS": '{"max_tokens": 5}'})
             lines = [line for line in out.splitlines() if not line.startswith("NL-assertion judge reply unusable")]
             self.assertEqual(lines[0], "openai/m {'max_tokens': 5}")
+            # the semantic communicate judge: its pinned model and arguments dropped, ours used, a fence removed
+            self.assertEqual(lines[1], "['call_name', 'max_tokens', 'messages', 'model'] openai/m")
+            lines = lines[1:]
             self.assertEqual(lines[1:4], ["2", "2", "2"])  # a fenced reply parses; a clean one passes; {bad, an empty list and None are retried
             self.assertTrue(lines[4].startswith("raised NL-assertion judge gave no usable reply in 8 attempts"), lines[4])  # never usable
             self.assertEqual(out.count("reply unusable"), 3 + 8)
