@@ -231,7 +231,7 @@ class SuiteTests(unittest.TestCase):
                                     "--workdir", f"logs/tau2/{suite['name']}/chonk/{domain}",
                                     "--reasoning-effort", "high", "--user-llm", JUDGE_LLM, "--user-api-base-url", JUDGE_BASE, "--user-llm-args", USER_LLM_ARGS]
                              + (["--retrieval-config", "bm25"] if domain == "banking_knowledge" else [])
-                             + (["--judge-llm", JUDGE_LLM, "--judge-api-base-url", JUDGE_BASE, "--judge-llm-args", USER_LLM_ARGS] if domain == "retail" else []))
+                             + (["--judge-llm", JUDGE_LLM, "--judge-api-base-url", JUDGE_BASE, "--judge-llm-args", USER_LLM_ARGS] if domain in ("airline", "retail") else []))
         qwen = rows["qwen3-32b-thinking", "tau2-bench retail"]
         self.assertIn("--enable-thinking", qwen)
         self.assertEqual(qwen[-12:], ["--user-llm", JUDGE_LLM, "--user-api-base-url", JUDGE_BASE, "--user-llm-args", USER_LLM_ARGS, "--judge-llm", JUDGE_LLM, "--judge-api-base-url", JUDGE_BASE,
