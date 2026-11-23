@@ -15,7 +15,7 @@ SUITE = "apertus2/chonk_sft"
 THINK = "apertus-1.5-70b-thinking"
 
 
-USER_LLM_ARGS = '{"reasoning_effort": "low", "max_tokens": 4096}'  # the tau2 user, pinned on the suite's rows
+USER_LLM_ARGS = '{"reasoning_effort": "low", "max_tokens": 4096, "temperature": 0.6, "top_p": 0.95}'  # the tau2 user and judge, pinned on the suite's rows
 
 
 JUDGE_LLM = "openai/openai/gpt-oss-120b"  # the tau2 user and retail's NL-assertion judge, a model launched alongside
