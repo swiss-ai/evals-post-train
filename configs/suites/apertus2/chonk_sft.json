@@ -39,6 +39,18 @@
     {"label": "tau2-bench banking_knowledge", "task": "banking_knowledge", "framework": "tau2",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "pass@1", "key": null},
      "flags": ["--user-llm", "openai/openai/gpt-oss-120b", "--user-api-base-url", "{helper_url}", "--user-llm-args", "{\"reasoning_effort\": \"low\", \"max_tokens\": 4096, \"temperature\": 0.6, \"top_p\": 0.95}", "--retrieval-config", "bm25"]},
+    {"label": "Terminal-Bench 2", "task": "terminal_bench_2", "framework": "harbor",
+     "repeats": {"n": 4, "via": "task"}, "metric": {"label": "pass@1, pass@4, mean@4", "key": null},
+     "flags": ["--agent", "terminus-2", "--sandbox", "opensandbox", "--max-concurrency", "300", "--attempts", "4"]},
+    {"label": "SWE-bench Verified", "task": "swe_bench", "framework": "harbor",
+     "repeats": {"n": 4, "via": "task"}, "metric": {"label": "pass@1, pass@4, mean@4", "key": null},
+     "flags": ["--agent", "terminus-2", "--sandbox", "opensandbox", "--max-concurrency", "300", "--attempts", "4"]},
+    {"label": "Multi-SWE-bench", "task": "multi_swe_bench", "framework": "harbor",
+     "repeats": {"n": 4, "via": "task"}, "metric": {"label": "pass@1, pass@4, mean@4", "key": null},
+     "flags": ["--agent", "terminus-2", "--sandbox", "opensandbox", "--max-concurrency", "300", "--attempts", "4"]},
+    {"label": "DeepSWE", "task": "deep_swe", "framework": "harbor",
+     "repeats": {"n": 4, "via": "task"}, "metric": {"label": "pass@1, pass@4, mean@4", "key": null},
+     "flags": ["--agent", "terminus-2", "--sandbox", "opensandbox", "--max-concurrency", "300", "--attempts", "4"]},
     {"label": "HarmBench", "task": "harmbench", "framework": "lm_eval",
      "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null}},
     {"label": "MultiJail", "task": "multijail", "framework": "lm_eval",
@@ -153,11 +165,11 @@
         "inspect": ["--enable-thinking"],
         "bfcl": [],
         "tau2": ["--enable-thinking"],
-        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
+        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 262144}"]
       }
     },
     "glm-4.5-air-thinking": {
-      "description": "zai-org/GLM-4.5-Air, the final post-trained model (hybrid reasoning; 106B total, 12B active) with thinking on (enable_thinking set on the server; --thinking with explicit <think> / </think> tokens). Window 131072, its native 128K. Served on 2 nodes (TP4 x DP2 over ray) with vLLM `--reasoning-parser glm45 --tool-call-parser glm45 --enable-auto-tool-choice`.",
+      "description": "zai-org/GLM-4.5-Air, the final post-trained model (hybrid reasoning; 106B total, 12B active) with thinking on (enable_thinking set on the server; --thinking with explicit <think> / </think> tokens). Window 131072, its native 128K; served with 262144 (VLLM_ALLOW_LONG_MAX_MODEL_LEN, beyond the native context) so the Harbor agent can use 262144. Served on 2 nodes (TP4 x DP2 over ray) with vLLM `--reasoning-parser glm45 --tool-call-parser glm45 --enable-auto-tool-choice`.",
       "max_length": 131072,
       "sampling": "thinking",
       "launch": {
@@ -165,14 +177,15 @@
         "environment": "containers/env_vllm_0.30.0.toml",
         "nodes": 2,
         "time": "24:00:00",
-        "framework_args": ["--tensor-parallel-size", "4", "--data-parallel-size", "2", "--data-parallel-size-local", "1", "--data-parallel-backend", "ray", "--gpu-memory-utilization", "0.8", "--max-model-len", "131072", "--default-chat-template-kwargs.enable_thinking", "true", "--reasoning-parser", "glm45", "--tool-call-parser", "glm45", "--enable-auto-tool-choice"]
+        "env": {"VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1"},
+        "framework_args": ["--tensor-parallel-size", "4", "--data-parallel-size", "2", "--data-parallel-size-local", "1", "--data-parallel-backend", "ray", "--gpu-memory-utilization", "0.8", "--max-model-len", "262144", "--default-chat-template-kwargs.enable_thinking", "true", "--reasoning-parser", "glm45", "--tool-call-parser", "glm45", "--enable-auto-tool-choice"]
       },
       "flags": {
         "lm_eval": ["--chat-template", "--tokenizer", "/capstor/store/cscs/swissai/infra01/hf_models/models/zai-org/GLM-4.5-Air", "--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>"],
         "inspect": ["--enable-thinking"],
         "bfcl": [],
         "tau2": ["--enable-thinking"],
-        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 131072}"]
+        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 262144}"]
       }
     },
     "nemotron-3-super-120b-a12b-thinking": {
@@ -195,7 +208,7 @@
       }
     },
     "chonk-lc-16k-v0.2-sft": {
-      "description": "SwissAI-Research/swiss-ai/chonk-lc-16k-v0.2-sft. No Jinja template exists: apertus-common renders the format, in lm_eval (--chat-format apertus2, completions endpoint, needs --backend openai and the verified Apertus_2_instruct tokenizer, pinned in `tokenizer`) and on the server for the other frameworks (vLLM plugin of apertus-common, see docs/thinking.md). Served with a 131072 window (tau2 uses all of it; the other benchmarks keep max_length 32768) although the checkpoint's max_position_embeddings is 16384 (plain RoPE), so what it does past 16k is untrained: read those scores with that in mind. The server only starts with VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 (launch.env). It only reasons at effort high on non-math tasks.",
+      "description": "SwissAI-Research/swiss-ai/chonk-lc-16k-v0.2-sft. No Jinja template exists: apertus-common renders the format, in lm_eval (--chat-format apertus2, completions endpoint, needs --backend openai and the verified Apertus_2_instruct tokenizer, pinned in `tokenizer`) and on the server for the other frameworks (vLLM plugin of apertus-common, see docs/thinking.md). Served with a 262144 window (the Harbor agent and tau2 may use all of it; the other benchmarks keep max_length 32768) although the checkpoint's max_position_embeddings is 16384 (plain RoPE), so what it does past 16k is untrained: read those scores with that in mind. The server only starts with VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 (launch.env). It only reasons at effort high on non-math tasks.",
       "max_length": 32768,
       "sampling": "thinking",
       "reasoning_effort": "high",
@@ -207,18 +220,18 @@
         "nodes": 2,
         "time": "24:00:00",
         "env": {"VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1"},
-        "framework_args": ["--trust-remote-code", "--dtype", "bfloat16", "--max-model-len", "131072", "--tensor-parallel-size", "1", "--data-parallel-size", "8", "--data-parallel-size-local", "4", "--data-parallel-backend", "ray", "--enable-expert-parallel", "--all2all-backend", "allgather_reducescatter", "--moe-backend", "triton", "--numa-bind", "--load-format", "runai_streamer", "--gpu-memory-utilization", "0.95", "--max-num-seqs", "8", "--max-num-batched-tokens", "512", "--api-server-count", "4"]
+        "framework_args": ["--trust-remote-code", "--dtype", "bfloat16", "--max-model-len", "262144", "--tensor-parallel-size", "1", "--data-parallel-size", "8", "--data-parallel-size-local", "4", "--data-parallel-backend", "ray", "--enable-expert-parallel", "--all2all-backend", "allgather_reducescatter", "--moe-backend", "triton", "--numa-bind", "--load-format", "runai_streamer", "--gpu-memory-utilization", "0.95", "--max-num-seqs", "8", "--max-num-batched-tokens", "512", "--api-server-count", "4"]
       },
       "flags": {
         "lm_eval": ["--backend", "openai", "--chat-format", "apertus2"],
         "inspect": [],
         "bfcl": [],
         "tau2": [],
-        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
+        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 262144}"]
       }
     },
     "chonk-lc-16k-v0.1-ep1": {
-      "description": "Same settings as chonk-lc-16k-v0.2-sft (apertus-common format, 128k served window, 32k max_length, effort high, tokenizer and serving options), for the earlier chonk-lc-16k-v0.1-ep1 checkpoint.",
+      "description": "Same settings as chonk-lc-16k-v0.2-sft (apertus-common format, 256k served window, 32k max_length, effort high, tokenizer and serving options), for the earlier chonk-lc-16k-v0.1-ep1 checkpoint.",
       "max_length": 32768,
       "sampling": "thinking",
       "reasoning_effort": "high",
@@ -230,14 +243,14 @@
         "nodes": 2,
         "time": "24:00:00",
         "env": {"VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1"},
-        "framework_args": ["--trust-remote-code", "--dtype", "bfloat16", "--max-model-len", "131072", "--tensor-parallel-size", "1", "--data-parallel-size", "8", "--data-parallel-size-local", "4", "--data-parallel-backend", "ray", "--enable-expert-parallel", "--all2all-backend", "allgather_reducescatter", "--moe-backend", "triton", "--numa-bind", "--load-format", "runai_streamer", "--gpu-memory-utilization", "0.95", "--max-num-seqs", "8", "--max-num-batched-tokens", "512", "--api-server-count", "4"]
+        "framework_args": ["--trust-remote-code", "--dtype", "bfloat16", "--max-model-len", "262144", "--tensor-parallel-size", "1", "--data-parallel-size", "8", "--data-parallel-size-local", "4", "--data-parallel-backend", "ray", "--enable-expert-parallel", "--all2all-backend", "allgather_reducescatter", "--moe-backend", "triton", "--numa-bind", "--load-format", "runai_streamer", "--gpu-memory-utilization", "0.95", "--max-num-seqs", "8", "--max-num-batched-tokens", "512", "--api-server-count", "4"]
       },
       "flags": {
         "lm_eval": ["--backend", "openai", "--chat-format", "apertus2"],
         "inspect": [],
         "bfcl": [],
         "tau2": [],
-        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
+        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 262144}"]
       }
     }
   }
