@@ -1,43 +1,41 @@
 {
   "name": "apertus2-chonk-sft",
   "title": "Compare Chonk to other post-trained thinking models",
-  "description": "Benchmarks for Apertus 2 Chonk SFT and the models it is compared with (Apertus 1.5 70B and 8B, Qwen3 32B), in table order. Mean@8 for AIME, mean@4 for the rest. MATH is not listed yet: its task (hendrycks_math or minerva_math) is undecided. HLE is judged by GLM-5.3 (plain-text judge prompt), SciCode and GDPval run their code in OpenSandbox (Kata); GDPval only generates, its grading is a separate submission. HarmBench, MultiJail and Aya red-teaming are lm-eval groups judged by a fixed model through the SwissAI API (HarmBench's classifier cais/HarmBench-Llama-2-13b-cls, Llama-3.3-70B-Instruct for the other two; lower is safer); only HarmBench repeats in the harness, the other two score once. PopQA and SimpleQA Verified are task files in scripts/inspect_ai/tasks that strip the inline reasoning before scoring; SimpleQA is judged by GLM-5.3 through the SwissAI gateway (rate-limited, so it is slow).",
+  "description": "Benchmarks for Apertus 2 Chonk SFT and the models it is compared with (Apertus 1.5 70B and 8B, Qwen3 32B, GLM-4.5-Air, Nemotron 3 Super 120B-A12B), in table order. Mean@4 default, some agentic's pass@1. Thinking rows generate up to the setup's window minus the prompt per request (the harness clamps each request on the openai backend; runs before 2026-11-22 used a fixed 32768 per request, so the Apertus 1.5 70B, GLM and Nemotron numbers of those runs are not comparable). GSM8K Platinum runs the gsm8k_platinum_think lm-eval task (same DAPO prompt, 4 samples inside the task). AIME runs the aime24_think and aime25_think lm-eval tasks (the DAPO prompt asking for a final \"Answer: $Answer\" line),, repeated 4 times by the launcher like the other rows: mean@4. IFEval and IFBench run the ifeval_think and ifbench_think lm-eval tasks (same prompts and checks, scored on the final reply with the reasoning stripped, 4 samples inside the task, loose prompt-level accuracy). MATH-500 runs the minerva_math500_think lm-eval task (the same DAPO prompt, scored with math_verify, 4 samples inside the task). HLE is judged by GLM-5.3 (plain-text judge prompt), SciCode and GDPval run their code in OpenSandbox (Kata); GDPval only generates, its grading is a separate submission. HarmBench, MultiJail and Aya red-teaming are lm-eval groups judged by a fixed model through the SwissAI API (HarmBench's classifier cais/HarmBench-Llama-2-13b-cls, Llama-3.3-70B-Instruct for the other two; lower is safer); only HarmBench repeats in the harness, the other two score once. PopQA and SimpleQA Verified are task files in scripts/inspect_ai/tasks that strip the inline reasoning before scoring; SimpleQA is judged by GLM-5.3 through the SwissAI gateway (rate-limited, so it is slow).",
   "benchmarks": [
-    {"label": "MMLU", "task": "mmlu_0_shot", "framework": "inspect",
-     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null},
-     "task_args": {"cot": "true"}},
-    {"label": "GPQA", "task": "gpqa_diamond", "framework": "inspect",
+    {"label": "GPQA Diamond", "task": "gpqa_diamond", "framework": "inspect",
      "repeats": {"n": 4, "via": "task"}, "metric": {"label": "mean@4", "key": null}},
-    {"label": "IFBench", "task": "ifbench", "framework": "lm_eval",
-     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": "prompt_level_loose_acc_mean_repeats,none"}},
-    {"label": "IFEval", "task": "ifeval", "framework": "inspect",
-     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null}},
-    {"label": "GSM8K", "task": "gsm8k", "framework": "inspect",
-     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null},
-     "task_args": {"fewshot": "0"}},
-    {"label": "MATH-500", "task": "minerva_math500_self_consistency", "framework": "lm_eval",
+    {"label": "IFBench", "task": "ifbench_think", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "task"}, "metric": {"label": "mean@4", "key": "prompt_level_loose_acc,mean@4"}},
+    {"label": "IFEval", "task": "ifeval_think", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "task"}, "metric": {"label": "mean@4", "key": "prompt_level_loose_acc,mean@4"}},
+    {"label": "GSM8K Platinum", "task": "gsm8k_platinum_think", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "task"}, "metric": {"label": "mean@4", "key": "exact_match,mean@4"}},
+    {"label": "MATH-500", "task": "minerva_math500_think", "framework": "lm_eval",
      "repeats": {"n": 4, "via": "task"}, "metric": {"label": "mean@4", "key": "math_verify,mean@4"}},
-    {"label": "AIME 24", "task": "aime2024", "framework": "inspect",
-     "repeats": {"n": 8, "via": "flag"}, "metric": {"label": "mean@8", "key": null}},
-    {"label": "AIME 25", "task": "aime2025", "framework": "inspect",
-     "repeats": {"n": 8, "via": "flag"}, "metric": {"label": "mean@8", "key": null}},
-    {"label": "BFCL v3 (FC)", "task": "bfcl_v3_fc", "framework": "lm_eval",
-     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null}},
-    {"label": "BFCL v4 (tool-call signal)", "task": "bfcl_v4", "framework": "evalscope",
-     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null}},
-    {"label": "HLE", "task": "hle", "framework": "inspect",
-     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null},
-     "flags": ["--model-role", "grader=openai-api/swissai/CSCS-Inference/zai-org/GLM-5.3", "--model-role", "grader_2=openai-api/swissai/CSCS-Inference/zai-org/GLM-5.3"],
-     "task_args": {"judge_prompt": "grade_c_i"}},
-    {"label": "SciCode", "task": "scicode", "framework": "inspect",
-     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null},
-     "flags": ["--sandbox", "opensandbox"]},
-    {"label": "GDPval", "task": "gdpval", "framework": "inspect",
-     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null},
-     "flags": ["--sandbox", "opensandbox"]},
-    {"label": "SWE-bench Verified", "task": "swe_bench", "framework": "harbor",
-     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "resolved", "key": null},
-     "flags": ["--sandbox", "opensandbox"]},
+    {"label": "AIME 24", "task": "aime24_think", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": "exact_match_mean_repeats,score-first"}},
+    {"label": "AIME 25", "task": "aime25_think", "framework": "lm_eval",
+     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": "exact_match_mean_repeats,score-first"}},
+    {"label": "BFCL v3", "task": "bfcl_v3", "framework": "bfcl",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": "overall"}},
+    {"label": "BFCL v4", "task": "bfcl_v4", "framework": "bfcl",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc, no web search", "key": "overall_no_web_search"}},
+    {"label": "tau2-bench airline", "task": "airline", "framework": "tau2",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "pass@1", "key": null},
+     "flags": ["--user-llm", "openai/openai/gpt-oss-120b", "--user-api-base-url", "{helper_url}", "--user-llm-args", "{\"reasoning_effort\": \"low\", \"max_tokens\": 4096}"]},
+    {"label": "tau2-bench retail", "task": "retail", "framework": "tau2",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "pass@1", "key": null},
+     "flags": ["--user-llm", "openai/openai/gpt-oss-120b", "--user-api-base-url", "{helper_url}", "--user-llm-args", "{\"reasoning_effort\": \"low\", \"max_tokens\": 4096}",
+               "--judge-llm", "openai/openai/gpt-oss-120b",
+               "--judge-api-base-url", "{helper_url}",
+               "--judge-llm-args", "{\"reasoning_effort\": \"low\", \"max_tokens\": 4096}"]},
+    {"label": "tau2-bench telecom", "task": "telecom", "framework": "tau2",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "pass@1", "key": null},
+     "flags": ["--user-llm", "openai/openai/gpt-oss-120b", "--user-api-base-url", "{helper_url}", "--user-llm-args", "{\"reasoning_effort\": \"low\", \"max_tokens\": 4096}"]},
+    {"label": "tau2-bench banking_knowledge", "task": "banking_knowledge", "framework": "tau2",
+     "repeats": {"n": 1, "via": "task"}, "metric": {"label": "pass@1", "key": null},
+     "flags": ["--user-llm", "openai/openai/gpt-oss-120b", "--user-api-base-url", "{helper_url}", "--user-llm-args", "{\"reasoning_effort\": \"low\", \"max_tokens\": 4096}", "--retrieval-config", "bm25"]},
     {"label": "HarmBench", "task": "harmbench", "framework": "lm_eval",
      "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": null}},
     {"label": "MultiJail", "task": "multijail", "framework": "lm_eval",
@@ -104,9 +102,6 @@
      "flags": ["--harness-branch", "02d5b21106efd91781dc8d50a8a40a72a474f3b5"]},
     {"label": "RealGuardrails (S-IFEval)", "task": "realguardrails_s_ifeval", "framework": "lm_eval",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "loose acc", "key": "prompt_level_loose_acc,none"}},
-    {"label": "GSM8K Platinum", "task": "gsm8k_platinum_cot", "framework": "lm_eval",
-     "repeats": {"n": 4, "via": "flag"}, "metric": {"label": "mean@4", "key": "exact_match_mean_repeats,flexible-extract"},
-     "flags": ["--harness-branch", "1232b0e4f362da7c82b74f9ccc8aa770cbc6326c"]},
     {"label": "PopQA", "task": "scripts/inspect_ai/tasks/popqa.py", "framework": "inspect",
      "repeats": {"n": 1, "via": "task"}, "metric": {"label": "acc", "key": null},
      "task_args": {"max_tokens": "16384"}},
@@ -116,31 +111,34 @@
   ],
   "setups": {
     "apertus-1.5-70b-thinking": {
-      "description": "swiss-ai/Apertus-v1.5-70B reasoning (--thinking with its <|inner_prefix|> / <|inner_suffix|> tokens). Window 32768. Client concurrency 256 (lm_eval): the default 8 leaves its two replicas idle (evals-svc runs it on 2 nodes, TP4 x DP2): 18 min instead of 28 for full gsm8k x4 at 64, 34 on one node; 512 gave nothing more (the longest generation bounds the run).",
-      "max_length": 32768,
+      "description": "swiss-ai/Apertus-v1.5-70B reasoning (--thinking with its <|inner_prefix|> / <|inner_suffix|> tokens). Window 262144, as evals-svc serves it. Client concurrency 256 (lm_eval): the default 8 leaves its two replicas idle (evals-svc runs it on 2 nodes, TP4 x DP2): 18 min instead of 28 for full gsm8k x4 at 64, 34 on one node; 512 gave nothing more (the longest generation bounds the run).",
+      "max_length": 262144,
       "sampling": "thinking",
-      "flags": {
-        "lm_eval": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>", "--api-num-concurrent", "256"],
-        "inspect": ["--enable-thinking"],
-        "evalscope": [],
-        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
+      "launch": {
+        "model_path": "/capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/Apertus-v1.5-70B",
+        "environment": "containers/env_vllm_apertus1p5.toml",
+        "nodes": 2,
+        "time": "24:00:00",
+        "framework_args": ["--chat-template-content-format", "string", "--tensor-parallel-size", "4", "--data-parallel-size", "2", "--data-parallel-size-local", "1", "--data-parallel-backend", "ray", "--gpu-memory-utilization", "0.8", "--max-model-len", "262144", "--reasoning-parser", "apertus", "--default-chat-template-kwargs.enable_thinking", "true", "--compilation-config.pass_config.fuse_allreduce_rms", "false", "--enable-auto-tool-choice", "--tool-call-parser", "apertus"]
       },
-      "task_flags": {
-        "bfcl_v3_fc": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>", "--api-endpoint", "chat-completions", "--api-num-concurrent", "256"]
+      "flags": {
+        "lm_eval": ["--chat-template", "--tokenizer", "/capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/Apertus-v1.5-70B", "--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>", "--api-num-concurrent", "256"],
+        "inspect": ["--enable-thinking"],
+        "bfcl": [],
+        "tau2": ["--enable-thinking"],
+        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 262144}"]
       }
     },
     "apertus-1.5-8b-thinking": {
-      "description": "swiss-ai/Apertus-v1.5-8B reasoning (--thinking with its <|inner_prefix|> / <|inner_suffix|> tokens). Window 32768, as for the 70B.",
-      "max_length": 32768,
+      "description": "swiss-ai/Apertus-v1.5-8B reasoning (--thinking with its <|inner_prefix|> / <|inner_suffix|> tokens). Window 262144, the context the release supports (max_position_embeddings in its config; the model card serves it with --max-model-len 262144). Serve it with that window.",
+      "max_length": 262144,
       "sampling": "thinking",
       "flags": {
-        "lm_eval": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>"],
+        "lm_eval": ["--chat-template", "--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>"],
         "inspect": ["--enable-thinking"],
-        "evalscope": [],
-        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
-      },
-      "task_flags": {
-        "bfcl_v3_fc": ["--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>", "--api-endpoint", "chat-completions"]
+        "bfcl": [],
+        "tau2": ["--enable-thinking"],
+        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 262144}"]
       }
     },
     "qwen3-32b-thinking": {
@@ -148,47 +146,95 @@
       "max_length": 32768,
       "sampling": "thinking",
       "flags": {
-        "lm_eval": ["--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>"],
+        "lm_eval": ["--chat-template", "--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>"],
         "inspect": ["--enable-thinking"],
-        "evalscope": [],
+        "bfcl": [],
+        "tau2": ["--enable-thinking"],
         "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
+      }
+    },
+    "glm-4.5-air-thinking": {
+      "description": "zai-org/GLM-4.5-Air, the final post-trained model (hybrid reasoning; 106B total, 12B active) with thinking on (enable_thinking set on the server; --thinking with explicit <think> / </think> tokens). Window 131072, its native 128K. Served on 2 nodes (TP4 x DP2 over ray) with vLLM `--reasoning-parser glm45 --tool-call-parser glm45 --enable-auto-tool-choice`.",
+      "max_length": 131072,
+      "sampling": "thinking",
+      "launch": {
+        "model_path": "/capstor/store/cscs/swissai/infra01/hf_models/models/zai-org/GLM-4.5-Air",
+        "environment": "containers/env_vllm_0.30.0.toml",
+        "nodes": 2,
+        "time": "24:00:00",
+        "framework_args": ["--tensor-parallel-size", "4", "--data-parallel-size", "2", "--data-parallel-size-local", "1", "--data-parallel-backend", "ray", "--gpu-memory-utilization", "0.8", "--max-model-len", "131072", "--default-chat-template-kwargs.enable_thinking", "true", "--reasoning-parser", "glm45", "--tool-call-parser", "glm45", "--enable-auto-tool-choice"]
       },
-      "task_flags": {
-        "bfcl_v3_fc": ["--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>", "--api-endpoint", "chat-completions"]
+      "flags": {
+        "lm_eval": ["--chat-template", "--tokenizer", "/capstor/store/cscs/swissai/infra01/hf_models/models/zai-org/GLM-4.5-Air", "--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>"],
+        "inspect": ["--enable-thinking"],
+        "bfcl": [],
+        "tau2": ["--enable-thinking"],
+        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 131072}"]
+      }
+    },
+    "nemotron-3-super-120b-a12b-thinking": {
+      "description": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16, the final post-trained model (120B total, 12B active) with reasoning on (enable_thinking set on the server, full effort: low_effort stays off; --no-bos, because its chat template writes no <s> and its tokenizer adds none, as NVIDIA serves it on the chat endpoint, so the BOS probe must not expect one; --thinking with explicit <think> / </think> tokens). Window 262144, as the vLLM recipe serves it (the model supports up to 1M). Served on 2 nodes (TP4 x DP2 over ray) with vLLM `--reasoning-parser nemotron_v3 --tool-call-parser qwen3_coder --enable-auto-tool-choice`.",
+      "max_length": 262144,
+      "sampling": "thinking",
+      "launch": {
+        "model_path": "/capstor/store/cscs/swissai/infra01/hf_models/models/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16",
+        "environment": "containers/env_vllm_0.30.0.toml",
+        "nodes": 2,
+        "time": "24:00:00",
+        "framework_args": ["--tensor-parallel-size", "4", "--data-parallel-size", "2", "--data-parallel-size-local", "1", "--data-parallel-backend", "ray", "--gpu-memory-utilization", "0.8", "--max-model-len", "262144", "--default-chat-template-kwargs.enable_thinking", "true", "--trust-remote-code", "--reasoning-parser", "nemotron_v3", "--tool-call-parser", "qwen3_coder", "--enable-auto-tool-choice"]
+      },
+      "flags": {
+        "lm_eval": ["--chat-template", "--no-bos", "--tokenizer", "/capstor/store/cscs/swissai/infra01/hf_models/models/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16", "--thinking", "--think-end-token", "</think>", "--think-start-token", "<think>"],
+        "inspect": ["--enable-thinking"],
+        "bfcl": [],
+        "tau2": ["--enable-thinking"],
+        "harbor": ["--enable-thinking", "--agent-kwarg", "model_info={\"max_input_tokens\": 262144}"]
       }
     },
     "chonk-lc-16k-v0.2-sft": {
-      "description": "SwissAI-Research/swiss-ai/chonk-lc-16k-v0.2-sft. No Jinja template exists: apertus-common renders the format, in lm_eval (--chat-format apertus2, completions endpoint, needs --backend openai and the verified Apertus_2_instruct tokenizer, pinned in `tokenizer`) and on the server for the other frameworks (vLLM plugin of apertus-common PR #5, see docs/thinking.md). The window 16384 is the checkpoint's name (16k), not a decided maximum. It only reasons at effort high on non-math tasks.",
-      "max_length": 16384,
+      "description": "SwissAI-Research/swiss-ai/chonk-lc-16k-v0.2-sft. No Jinja template exists: apertus-common renders the format, in lm_eval (--chat-format apertus2, completions endpoint, needs --backend openai and the verified Apertus_2_instruct tokenizer, pinned in `tokenizer`) and on the server for the other frameworks (vLLM plugin of apertus-common, see docs/thinking.md). Served with a 131072 window (tau2 uses all of it; the other benchmarks keep max_length 32768) although the checkpoint's max_position_embeddings is 16384 (plain RoPE), so what it does past 16k is untrained: read those scores with that in mind. The server only starts with VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 (launch.env). It only reasons at effort high on non-math tasks.",
+      "max_length": 32768,
       "sampling": "thinking",
       "reasoning_effort": "high",
       "tokenizer": {"repo": "https://github.com/swiss-ai/apertus-omni-tokenizer.git", "revision": "b801ff1b00d933d10bba90b0c22307157299faa7", "path": "tokenizers/Apertus_2_instruct"},
       "serving": ["--tokenizer-mode", "apertus2", "--reasoning-parser", "apertus2", "--enable-auto-tool-choice", "--tool-call-parser", "apertus2"],
+      "launch": {
+        "model_path": "/capstor/store/cscs/swissai/infra01/hf-checkpoints/swiss-ai/chonk-lc-16k-v0.2-sft",
+        "environment": "containers/env_vllm_apertus2.toml",
+        "nodes": 2,
+        "time": "24:00:00",
+        "env": {"VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1"},
+        "framework_args": ["--trust-remote-code", "--dtype", "bfloat16", "--max-model-len", "131072", "--tensor-parallel-size", "1", "--data-parallel-size", "8", "--data-parallel-size-local", "4", "--data-parallel-backend", "ray", "--enable-expert-parallel", "--all2all-backend", "allgather_reducescatter", "--moe-backend", "triton", "--numa-bind", "--load-format", "runai_streamer", "--gpu-memory-utilization", "0.95", "--max-num-seqs", "8", "--max-num-batched-tokens", "512", "--api-server-count", "4"]
+      },
       "flags": {
         "lm_eval": ["--backend", "openai", "--chat-format", "apertus2"],
         "inspect": [],
-        "evalscope": [],
-        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 16384}"]
-      },
-      "task_flags": {
-        "bfcl_v3_fc": ["--backend", "openai", "--api-endpoint", "chat-completions", "--enable-thinking"]
+        "bfcl": [],
+        "tau2": [],
+        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       }
     },
     "chonk-lc-16k-v0.1-ep1": {
-      "description": "Same settings as chonk-lc-16k-v0.2-sft (apertus-common format, 16k window, effort high, tokenizer and serving options), for the earlier chonk-lc-16k-v0.1-ep1 checkpoint.",
-      "max_length": 16384,
+      "description": "Same settings as chonk-lc-16k-v0.2-sft (apertus-common format, 128k served window, 32k max_length, effort high, tokenizer and serving options), for the earlier chonk-lc-16k-v0.1-ep1 checkpoint.",
+      "max_length": 32768,
       "sampling": "thinking",
       "reasoning_effort": "high",
       "tokenizer": {"repo": "https://github.com/swiss-ai/apertus-omni-tokenizer.git", "revision": "b801ff1b00d933d10bba90b0c22307157299faa7", "path": "tokenizers/Apertus_2_instruct"},
       "serving": ["--tokenizer-mode", "apertus2", "--reasoning-parser", "apertus2", "--enable-auto-tool-choice", "--tool-call-parser", "apertus2"],
+      "launch": {
+        "model_path": "/capstor/store/cscs/swissai/infra01/hf-checkpoints/chonk-lc-16k-v0.1-ep1/iter_0019374",
+        "environment": "containers/env_vllm_apertus2.toml",
+        "nodes": 2,
+        "time": "24:00:00",
+        "env": {"VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1"},
+        "framework_args": ["--trust-remote-code", "--dtype", "bfloat16", "--max-model-len", "131072", "--tensor-parallel-size", "1", "--data-parallel-size", "8", "--data-parallel-size-local", "4", "--data-parallel-backend", "ray", "--enable-expert-parallel", "--all2all-backend", "allgather_reducescatter", "--moe-backend", "triton", "--numa-bind", "--load-format", "runai_streamer", "--gpu-memory-utilization", "0.95", "--max-num-seqs", "8", "--max-num-batched-tokens", "512", "--api-server-count", "4"]
+      },
       "flags": {
         "lm_eval": ["--backend", "openai", "--chat-format", "apertus2"],
         "inspect": [],
-        "evalscope": [],
-        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 16384}"]
-      },
-      "task_flags": {
-        "bfcl_v3_fc": ["--backend", "openai", "--api-endpoint", "chat-completions", "--enable-thinking"]
+        "bfcl": [],
+        "tau2": [],
+        "harbor": ["--agent-kwarg", "model_info={\"max_input_tokens\": 32768}"]
       }
     }
   }

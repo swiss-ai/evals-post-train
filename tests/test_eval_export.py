@@ -113,6 +113,60 @@ def fixture_sample() -> dict:
     }
 
 
+# The lm-eval tasks of the post-training evaluation (49), as the exporter must map or name each one.
+POSTTRAIN_FINAL_TASKS = (
+    "mmlu_flan_cot_zeroshot",
+    "mmlu_pro",
+    "agieval",
+    "arc_challenge_chat",
+    "truthfulqa_mc2",
+    "commonsense_qa",
+    "squadv2",
+    "hellaswag",
+    "ifeval",
+    "multi-if",
+    "alpaca_eval",
+    "arena_hard_v01",
+    "arena_hard_v2",
+    "gsm8k_cot",
+    "hendrycks_math",
+    "minerva_math",
+    "mathqa",
+    "gsm8k_platinum_cot_zeroshot",
+    "minerva_math500",
+    "aime24",
+    "aime25",
+    "humaneval_instruct",
+    "mbpp_instruct",
+    "bbh",
+    "gpqa_main_cot_zeroshot",
+    "acp_bench",
+    "drop",
+    "global_mmlu_gen_0shot",
+    "mgsm_en_cot",
+    "truthfulqa_multilingual_mc2",
+    "include_base_44_gen_0shot",
+    "include_base_new_45_gen_0shot",
+    "mlogiqa_gen",
+    "xnli",
+    "arc_multilingual",
+    "blend_sample",
+    "cultural_bench",
+    "switzerland_qa_0shot",
+    "bbq",
+    "toxigen",
+    "wmdp",
+    "orbench",
+    "harmbench",
+    "polyglotoxicitypromptsllama_small",
+    "realtoxicitypromptsllama_small",
+    "realguardrails_s_ifeval",
+    "realguardrails_tensortrust",
+    "realguardrails_s_rules",
+    "swiss_ai_charter_alignment",
+)
+
+
 class EvalExportTests(unittest.TestCase):
     def test_sample_file_does_not_match_aggregate_to_subtask(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -1177,16 +1231,8 @@ class EvalExportTests(unittest.TestCase):
                 self.assertTrue(degeneration["metric_config"]["lower_is_better"])
 
     def test_posttrain_final_inventory_is_fully_exported(self):
-        task_file = (
-            Path(__file__).resolve().parents[1]
-            / "configs/archive/apertus/tasks_posttrain_final.txt"
-        )
-        task_names = [
-            line.strip()
-            for line in task_file.read_text(encoding="utf-8").splitlines()
-            if line.strip() and not line.lstrip().startswith("#")
-        ]
-        self.assertEqual(len(task_names), 50)
+        task_names = list(POSTTRAIN_FINAL_TASKS)
+        self.assertEqual(len(task_names), 49)
 
         raw = fixture_results()
         raw["results"] = {name: {"acc,none": 0.5} for name in task_names}
@@ -1224,7 +1270,6 @@ class EvalExportTests(unittest.TestCase):
             self.assertNotIn(
                 "gpqa_main_cot_zeroshot", manifest["internally_named_tasks"]
             )
-            self.assertIn("bfcl_v3", manifest["internally_named_tasks"])
             self.assertIn(
                 "swiss_ai_charter_alignment", manifest["internally_named_tasks"]
             )

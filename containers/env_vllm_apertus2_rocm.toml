@@ -1,0 +1,42 @@
+# Container engine EDF for serving Apertus 2 (Chonk, Apertus2KDAForCausalLM) on Beverin (AMD MI300A):
+# the ROCm counterpart of env_vllm_apertus2.toml.
+# The image is the same swiss-ai/vllm fork built for gfx942 (swiss-ai/vllm d4d41485 on vllm/vllm-openai-rocm:v0.28.0),
+# built by hand on Beverin from images/vllm_apertus2_rocm on swiss-ai/model-launch-images'
+# branch rocm-apertus-images (ee11600) and kept in the team's image folder.
+# Use it instead of env_vllm_apertus2.toml when serving on Beverin.
+image = "/capstor/store/cscs/swissai/infra01/container-images/vllm_apertus2_rocm.sqsh"
+
+mounts = [
+  "/capstor/store/cscs/swissai/infra01/opentela-share:/opentelabin",
+  "/capstor",
+  "/iopsstor",
+]
+
+workdir = "/opt"
+
+[env]
+# NCCL_DEBUG = "INFO"  # uncomment for debugging
+# NCCL_DEBUG_SUBSYS = "INIT,NET"  # uncomment for debugging
+# Node-local, as in the CUDA environment: nodes of a multi-node replica compiling
+# into one network-FS directory crash a worker with "Stale file handle".
+VLLM_CACHE_ROOT = "/tmp/vllm-cache"
+TRITON_CACHE_DIR = "/tmp/triton-cache"
+TORCHINDUCTOR_CACHE_DIR = "/tmp/inductor-cache"
+# vLLM's default 600 s is too short for the large checkpoints' first load.
+VLLM_ENGINE_READY_TIMEOUT_S = "1800"
+# vLLM rejects a request with more stop strings than this (default 4); lm-eval
+# tasks send more. 10 as in apertus2_experiments' Megachonk config (eval-megachonk,
+# inference/megachonk_vllm.py).
+VLLM_MAX_STOP_STRINGS = "10"
+# Settings from swiss-ai/uncheatable-eval's validated Beverin vLLM runs
+# (env/vllm-rocm-beverin*.toml).
+HSA_NO_SCRATCH_RECLAIM = "1"
+
+[annotations]
+# No CXI / aws-ofi-nccl (rocm6) hooks: with them RCCL hangs in the plugin's init
+# on every rank -- one node too -- because model-launch starts one SLURM task per
+# node and Ray spawns the GPU processes, while uncheatable-eval's working
+# multi-node setup runs one SLURM task per GPU (Beverin, 2026-10-26: a 4-GPU
+# all-reduce hangs with the hooks, passes in 15 s without). Without them RCCL
+# goes over TCP sockets, across nodes too (Kimi-K2 on 4 nodes, 2026-10-26).
+com.hooks.cxi.enabled = "false"

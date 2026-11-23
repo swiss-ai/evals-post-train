@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Launcher inputs a caller's shell may export; the dry runs start without them.
 _LAUNCH_INPUTS = {
-    "TOKENIZER", "MAX_LENGTH", "BOS", "CHAT_FORMAT", "PREFILL_MODE", "EVAL_PREBUILT_ENV",
+    "TOKENIZER", "MAX_LENGTH", "BOS", "CHAT_FORMAT", "PREFILL_MODE", "ANSWER_FRAME", "EVAL_PREBUILT_ENV",
     "LM_EVAL_BACKEND", "LM_EVAL_HARNESS_BRANCH", "LM_EVAL_HARNESS_REPO", "EVAL_ENV_CACHE_ROOT", "API_CHAT_ENDPOINT", "ENABLE_THINKING",
 }
 ENV = {key: value for key, value in os.environ.items() if key not in _LAUNCH_INPUTS}
@@ -345,26 +345,14 @@ class LaunchFlowTests(unittest.TestCase):
                     manifest,
                 )
 
-    def test_prebuilt_apertus2_run_names_the_wheel_of_the_pinned_apertus_common(self) -> None:
-        pin = (REPO_ROOT / "requirements/apertus2.txt").read_text().rsplit("@", 1)[1].strip()
-        api = ["single", "--task", "gsm8k", "--backend", "openai", "--api-base-url", "http://localhost:8000",
-               "--api-model-name", "test-model"]
-        with tempfile.TemporaryDirectory() as cache:
-            completed, manifest = _prebuilt_dry_run(
-                *api, "--chat-format", "apertus2", "--tokenizer", "/ckpt", "--max-length", "65536",
-                EVAL_ENV_CACHE_ROOT=cache,
-            )
-            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
-            # The image has no apertus-common: the launcher names the wheel it builds for the pin
-            # (a dry run builds nothing), and the job installs that offline.
-            self.assertIn(f"EVAL_APERTUS_COMMON_WHEELS={cache}/apertus-common/{pin}", manifest)
-            self.assertFalse(list(Path(cache).rglob("*.whl")))
-            # Other runs don't need it.
-            completed, manifest = _prebuilt_dry_run(*api, EVAL_ENV_CACHE_ROOT=cache)
-            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
-            self.assertNotIn("EVAL_APERTUS_COMMON_WHEELS", manifest)
-        self.assertIn("'$EVAL_APERTUS_COMMON_WHEELS'/*.whl", SBATCH)
-        self.assertIn("--no-index", SBATCH)
+    def test_prebuilt_image_has_the_pinned_apertus_common(self) -> None:
+        # The image installs requirements/apertus2.txt and the job checks the import: the launcher
+        # builds and names no wheel.
+        dockerfile = (REPO_ROOT / "containers/Dockerfile.eval").read_text()
+        self.assertIn("-r /tmp/requirements/apertus2.txt", dockerfile)
+        self.assertIn("lm_eval, apertus_common'", SBATCH)
+        self.assertNotIn("EVAL_APERTUS_COMMON_WHEELS", SBATCH)
+        self.assertNotIn("EVAL_APERTUS_COMMON_WHEELS", (REPO_ROOT / "scripts/lm_eval_harness/evaluation_orchestrator.sh").read_text())
 
     def test_prebuilt_container_config_names_the_edf_of_the_jobs(self) -> None:
         api = ["single", "--task", "gsm8k", "--backend", "openai", "--api-base-url", "http://localhost:8000",
@@ -389,6 +377,14 @@ class LaunchFlowTests(unittest.TestCase):
         # would be the image's own, without lm-eval's packages (nor Python 3.13 for apertus-common).
         self.assertIn('export PATH=\\"\\${LM_EVAL_VENV:-/opt/lm-eval-venv}/bin:\\$PATH\\"', SBATCH)
         self.assertIn("LM_EVAL_VENV=/opt/lm-eval-venv", (REPO_ROOT / "containers/Dockerfile.eval").read_text())
+
+    def test_aggregation_uploads_from_the_image_venv(self) -> None:
+        # The W&B upload of aggregate_chunks.sbatch (merging chunks, or results found complete) runs
+        # in the same container: without the venv on PATH its python has no wandb.
+        text = (REPO_ROOT / "scripts/lm_eval_harness/aggregate_chunks.sbatch").read_text()
+        upload = text[text.index("WANDB_CMD="):]
+        self.assertIn('export PATH=\\"\\${LM_EVAL_VENV:-/opt/lm-eval-venv}/bin:\\$PATH\\"', upload)
+        self.assertLess(upload.index("export PATH="), upload.index("$WANDB_CMD\n    \""))
 
     def test_prebuilt_environment_overlays_another_harness_commit(self) -> None:
         commit = "32b8b593890ec9a983c9aadf81a6a08d840beb63"
@@ -675,6 +671,28 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertEqual(_gen_kwargs(REASONING_EFFORT="low", MAX_NEW_TOKENS="8192"), "max_gen_toks=8192")
         self.assertEqual(_gen_kwargs(), "")
 
+    def test_thinking_budget_is_the_window_where_requests_are_clamped(self) -> None:
+        # openai: clamp_gen_toks (or apertus2's own clamp) lowers every request to window - prompt, so
+        # the budget is the window; other backends never clamp and keep 32768.
+        block = SBATCH[SBATCH.index('if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then'):]
+        block = block[: block.index("\nfi\n") + 4]
+
+        def budget(**env: str) -> str:
+            script = "set -e\n" + block + 'printf "%s" "$MAX_NEW_TOKENS"\n'
+            base = {"PATH": os.environ["PATH"], "ENABLE_THINKING": "True", "REASONING_EFFORT": "",
+                    "MAX_NEW_TOKENS_EXPLICIT": "0", "MAX_NEW_TOKENS": "2048", "LM_EVAL_BACKEND": "openai",
+                    "MAX_LENGTH": "262144"}
+            done = subprocess.run(["bash", "-c", script], env=base | env, capture_output=True, text=True, check=True)
+            return done.stdout.splitlines()[-1] if done.stdout.strip() else ""
+
+        self.assertEqual(budget(), "262144")
+        self.assertEqual(budget(MAX_LENGTH="131072"), "131072")
+        self.assertEqual(budget(MAX_LENGTH=""), "32768")  # no window given
+        self.assertEqual(budget(LM_EVAL_BACKEND="vllm"), "32768")  # no clamp there
+        self.assertEqual(budget(ENABLE_THINKING="False", REASONING_EFFORT="low"), "262144")
+        # a caller's value wins and the block is not entered
+        self.assertEqual(budget(MAX_NEW_TOKENS_EXPLICIT="1", MAX_NEW_TOKENS="8192"), "8192")
+
     def test_a_run_name_with_whitespace_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
@@ -802,9 +820,20 @@ class LaunchFlowTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, output)
             self.assertIn("Chat format: apertus2 (prefill=after_think)", output)
             self.assertIn("Name:   test-model-apertus2-after_think-effort-medium", output)
+            self.assertNotIn("Answer frame", output)
             # Built environments get the pinned harness, which has apertus2-completions.
             self.assertIn(f"(swiss-ai/lm-evaluation-harness@{_harness_pin()})", output)
             config = _run_config(tmp)["configuration"]
+        # The default run records no answer frame; --answer-frame claim is named, recorded and announced.
+        self.assertNotIn("answer_frame", config)
+        with tempfile.TemporaryDirectory() as tmp:
+            claimed = _launch("single", "--task", "gsm8k", *apertus2, "--answer-frame", "claim",
+                              "--logs-root", tmp)
+            claimed_output = claimed.stdout + claimed.stderr
+            self.assertEqual(claimed.returncode, 0, claimed_output)
+            self.assertIn("Answer frame: claim", claimed_output)
+            self.assertIn("Name:   test-model-apertus2-after_think-claim-effort-medium", claimed_output)
+            self.assertEqual(_run_config(tmp)["configuration"]["answer_frame"], "claim")
         library = (REPO_ROOT / "requirements/apertus2.txt").read_text().rsplit("@", 1)[1].strip()
         self.assertEqual(
             {key: config[key] for key in ("chat_format", "prefill_mode", "reasoning_effort",
@@ -848,11 +877,12 @@ class LaunchFlowTests(unittest.TestCase):
             "prefill mode": ([*apertus2, "--prefill-mode", "reject"], "--prefill-mode must be"),
             "prefill without apertus2": ([*api, "--prefill-mode", "empty_think"],
                                          "--prefill-mode only applies with --chat-format apertus2"),
+            "answer frame": ([*apertus2, "--answer-frame", "think"], "--answer-frame must be"),
+            "answer frame without apertus2": ([*api, "--answer-frame", "claim"],
+                                              "--answer-frame only applies with --chat-format apertus2"),
             "unknown format": ([*api, "--chat-format", "harmony"], "--chat-format must be"),
             "bos": ([*apertus2, "--bos"], "drop --bos"),
             "ambient bos": (apertus2, "drop --bos", {"BOS": "true"}),
-            "convert": ([*apertus2, "--model", "/meg/ckpt", "--convert-to-hf", "--megatron-iter", "1000"],
-                        "drop --convert-to-hf"),
             "effort": ([*apertus2, "--reasoning-effort", "xhigh"], "low, medium or high"),
         }
         for name, (arguments, message, *env) in cases.items():
@@ -871,7 +901,7 @@ class LaunchFlowTests(unittest.TestCase):
     def test_evaluate_checks_apertus2_runs(self) -> None:
         accepted = _chat_format()
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
-        # The prebuilt image runs this format too (the job installs apertus-common).
+        # The prebuilt image runs this format too (the image has apertus-common).
         prebuilt = _chat_format(EVAL_ENV_KIND="prebuilt")
         self.assertEqual(prebuilt.returncode, 0, prebuilt.stderr)
         refusals = {
@@ -882,6 +912,7 @@ class LaunchFlowTests(unittest.TestCase):
             "no tokenizer": ({"TOKENIZER": ""}, "needs TOKENIZER"),
             "bos": ({"BOS": "true"}, "unset BOS"),
             "prefill mode": ({"PREFILL_MODE": "reject"}, "PREFILL_MODE must be"),
+            "answer frame": ({"ANSWER_FRAME": "think"}, "ANSWER_FRAME must be"),
             "thinking switch": ({"ENABLE_THINKING_EXPLICIT": "1"}, "always reasons"),
             "think token": ({"THINK_END_TOKEN": "</think>"}, "always reasons"),
             "autodetect": ({"AUTODETECT_THINK_TOKENS": "True"}, "always reasons"),
@@ -905,6 +936,10 @@ class LaunchFlowTests(unittest.TestCase):
             "max_retries=3,timeout=3600,tokenizer=/ckpt,prefill=after_think,reasoning_effort=medium,"
             "max_gen_toks=32768,max_model_len=65536",
         )
+        # --answer-frame claim reaches the model; the default leaves the arguments as they were.
+        self.assertIn(",max_gen_toks=32768,answer_frame=claim,max_model_len=65536",
+                      model(CHAT_FORMAT="apertus2", ANSWER_FRAME="claim"))
+        self.assertNotIn("answer_frame", model(CHAT_FORMAT="apertus2"))
         # ruler's detected length bounds the template path's context, not the server's.
         self.assertTrue(model(CHAT_FORMAT="apertus2", BACKEND_MAX_LENGTH="8792").endswith(",max_model_len=65536"))
         # The template path keeps its own model, context argument and chat_template_args token.

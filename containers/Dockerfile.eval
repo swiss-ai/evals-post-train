@@ -8,32 +8,32 @@
 # ghcr.io/swiss-ai/evals-post-train-eval:<commit>; run it with the scripts from
 # that same commit. Built from the repository root:
 #   docker build -f containers/Dockerfile.eval .
+#
+# Every environment is built in its own stage and the last stage only copies the results
+# into place, so a changed lock rebuilds that environment alone (a single stage rebuilt
+# every environment after the first one that changed), and the stages build in parallel.
+# A venv embeds its path: each is built at the path it has in the image.
 
 # Pinned by digest, and every package below comes from a requirements/*.lock
 # (scripts/common/lock_requirements.sh), so builds of different commits get the
 # same packages unless a lock changed.
-FROM python:3.12-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30
+FROM python:3.12-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30 AS base
 
 RUN apt-get update -qq \
     && apt-get install -y -qq --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=ghcr.io/astral-sh/uv:0.11.28 /uv /usr/local/bin/uv
 
 # lm-eval-harness's packages get their own virtualenv like every other tool below, and its
 # bin comes first on PATH (end of file), so the image's `python` is this one. It runs on
 # Python 3.13 (the image's own 3.12 stays for the other venvs): uv installs the interpreter, pinned like the lock, as scripts/common/locked_venv.sh does
 # outside the image. No model is loaded in this image, so the lock has CPU torch, from
 # PyTorch's index. The lock's hashes decide which file is accepted, whichever index has it.
-COPY --from=ghcr.io/astral-sh/uv:0.11.28 /uv /usr/local/bin/uv
-COPY requirements/lm-eval-runtime.lock requirements/inspect-runtime.lock requirements/inspect-ifeval.txt /tmp/requirements/
-# tree_sitter==0.21.3 (bfcl scoring) has no Python 3.13 wheel, so it is built from source:
-# the compiler is only there for this layer.
-RUN apt-get update -qq \
-    && apt-get install -y -qq --no-install-recommends build-essential \
-    && UV_PYTHON_INSTALL_DIR=/opt/python uv venv --seed --python 3.13.14 /opt/lm-eval-venv \
+FROM base AS lm-eval-env
+COPY requirements/lm-eval-runtime.lock /tmp/requirements/
+RUN UV_PYTHON_INSTALL_DIR=/opt/python uv venv --seed --python 3.13.14 /opt/lm-eval-venv \
     && /opt/lm-eval-venv/bin/pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
-        -r /tmp/requirements/lm-eval-runtime.lock \
-    && apt-get purge -y -qq --auto-remove build-essential \
-    && rm -rf /var/lib/apt/lists/*
+        -r /tmp/requirements/lm-eval-runtime.lock
 
 # NLTK's data (ifeval, multi_if, ruler, ifbench) is baked in: /opt/lm-eval-venv/nltk_data is on
 # NLTK's search path, root-owned and read-only. Downloading at run time put it in the run's
@@ -43,10 +43,35 @@ RUN /opt/lm-eval-venv/bin/python -m nltk.downloader -d /opt/lm-eval-venv/nltk_da
         punkt punkt_tab stopwords averaged_perceptron_tagger_eng \
     && /opt/lm-eval-venv/bin/python -c "import nltk; nltk.data.find('tokenizers/punkt_tab/english/')"
 
+# apertus-common (--chat-format apertus2), at the commit requirements/apertus2.txt pins: --no-deps,
+# its dependencies are in the lock above.
+COPY requirements/apertus2.txt /tmp/requirements/
+RUN /opt/lm-eval-venv/bin/pip install --no-cache-dir --no-deps -r /tmp/requirements/apertus2.txt \
+    && /opt/lm-eval-venv/bin/python -c "import apertus_common"
+
+# Each pinned harness as its own --no-deps overlay, the same layout
+# build_eval_env.sh produces, so several forks (all the lm_eval package)
+# could live side by side. run_lm_eval.sbatch checks .commit against the pin
+# in the checkout it runs from. A stage of its own: a new harness commit reinstalls
+# only this, not the environment above.
+FROM lm-eval-env AS lm-eval-harness
+COPY requirements/lm-eval-harness.txt /tmp/requirements/
+RUN grep -Ev '^[[:space:]]*(#|$)' /tmp/requirements/lm-eval-harness.txt \
+    | while read -r repo commit; do \
+        target="/opt/lm-eval-harness/$repo"; \
+        /opt/lm-eval-venv/bin/pip install --no-cache-dir --no-deps --target "$target" \
+            "git+https://github.com/$repo.git@$commit" || exit 1; \
+        PYTHONPATH="$target" /opt/lm-eval-venv/bin/python -c "import lm_eval" || exit 1; \
+        printf '%s\n' "$commit" > "$target/.commit"; \
+        touch "$target/.complete"; \
+    done
+
 # Inspect gets its own virtualenv: lm-eval-harness pins datasets==4.0.0, and
 # in one environment pip would resolve inspect-evals to the last release that
 # accepts it (January 2026) instead of the pinned one. run_inspect_eval.sh puts
 # EVAL_INSPECT_VENV/bin first on PATH.
+FROM base AS inspect-env
+COPY requirements/inspect-runtime.lock requirements/inspect-ifeval.txt /tmp/requirements/
 RUN python -m venv /opt/inspect-venv \
     && /opt/inspect-venv/bin/pip install --no-cache-dir -r /tmp/requirements/inspect-runtime.lock \
     && /opt/inspect-venv/bin/pip install --no-cache-dir --no-deps -r /tmp/requirements/inspect-ifeval.txt \
@@ -63,12 +88,10 @@ RUN /opt/inspect-venv/bin/python -m nltk.downloader -d /opt/inspect-venv/nltk_da
 # its math-verify pin conflicts with lm-eval-runtime.txt's antlr4. SWE-bench_Pro-os,
 # which EvalScope would otherwise clone at run time, is checked out at the commit
 # the installed EvalScope pins (EVALSCOPE_SWE_BENCH_PRO_REPO).
-COPY requirements/evalscope-runtime.lock requirements/evalscope-bfcl.txt /tmp/requirements/
+FROM base AS evalscope-env
+COPY requirements/evalscope-runtime.lock /tmp/requirements/
 RUN python -m venv /opt/evalscope-venv \
-    && /opt/evalscope-venv/bin/pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
-        -r /tmp/requirements/evalscope-runtime.lock \
-    && /opt/evalscope-venv/bin/pip install --no-cache-dir --no-deps -r /tmp/requirements/evalscope-bfcl.txt \
-    && /opt/evalscope-venv/bin/python -c "import bfcl_eval.model_handler.api_inference.openai_completion" \
+    && /opt/evalscope-venv/bin/pip install --no-cache-dir -r /tmp/requirements/evalscope-runtime.lock \
     && pro=$(/opt/evalscope-venv/bin/python -c \
         "from evalscope.benchmarks.swe_bench_pro.utils import PRO_REPO_URL, PINNED_COMMIT; print(PRO_REPO_URL, PINNED_COMMIT)") \
     && set -- $pro \
@@ -77,12 +100,24 @@ RUN python -m venv /opt/evalscope-venv \
     && git -C /opt/swe-bench-pro-os rev-parse HEAD > /opt/swe-bench-pro-os.commit \
     && rm -rf /opt/swe-bench-pro-os/.git
 
+# BFCL (run_bfcl.sh) in its own: bfcl-eval's official package with the lock of its dependencies, installed
+# the way scripts/common/locked_venv.sh would (requirements/bfcl-runtime.lock, then bfcl-eval without dependencies).
+FROM base AS bfcl-env
+COPY requirements/bfcl-runtime.lock requirements/bfcl-eval.txt /tmp/requirements/
+RUN python -m venv /opt/bfcl-venv \
+    && /opt/bfcl-venv/bin/pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
+        -r /tmp/requirements/bfcl-runtime.lock \
+    && /opt/bfcl-venv/bin/pip install --no-cache-dir --no-deps -r /tmp/requirements/bfcl-eval.txt \
+    && BFCL_PROJECT_ROOT=/tmp/bfcl-check /opt/bfcl-venv/bin/python -c \
+        "import bfcl_eval._llm_response_generation, bfcl_eval.eval_checker.eval_runner"
+
 # Harbor (agentic benchmarks, run_harbor_eval.sh) in a fourth: it pins its own
 # dependency set. Multi-SWE-bench has no published Harbor dataset, only an
 # adapter that generates the tasks; run.py would fetch it with uvx at run time,
 # so it is installed here from the same Harbor tag (HARBOR_VERSION in
 # scripts/harbor/run.py, the harbor pin in harbor-runtime.txt), as
 # HARBOR_ADAPTERS_ROOT/<adapter>/bin/<adapter>.
+FROM base AS harbor-env
 COPY requirements/harbor-runtime.lock requirements/harbor-adapters.lock /tmp/requirements/
 RUN python -m venv /opt/harbor-venv \
     && /opt/harbor-venv/bin/pip install --no-cache-dir -r /tmp/requirements/harbor-runtime.lock \
@@ -94,6 +129,7 @@ RUN python -m venv /opt/harbor-venv \
 # dependency set. It is not on PyPI and reads its tasks from a data directory next to
 # the code, so that directory is checked out at the commit the lock pins
 # (TAU2_DATA_DIR); run_tau2_bench.sh compares --git-ref against TAU2_COMMIT_FILE.
+FROM base AS tau2-env
 COPY requirements/tau2-runtime.lock /tmp/requirements/
 RUN python -m venv /opt/tau2-venv \
     && /opt/tau2-venv/bin/pip install --no-cache-dir -r /tmp/requirements/tau2-runtime.lock \
@@ -106,27 +142,49 @@ RUN python -m venv /opt/tau2-venv \
     && rm -rf /opt/tau2-bench/.git \
     && TAU2_DATA_DIR=/opt/tau2-bench/data /opt/tau2-venv/bin/python -c "import tau2"
 
+# Upstream tau2-bench as it ships (scripts/custom/run_tau2_bench.sh, which uses it from here instead of
+# installing at run time): its checkout at the commit requirements/tau2-upstream.commit pins, with the
+# dependencies of upstream's own uv.lock in its .venv (the image's Python 3.12, no downloads).
+FROM base AS tau2-upstream-env
+COPY requirements/tau2-upstream.commit /tmp/requirements/
+RUN set -- $(grep -vE '^[[:space:]]*(#|$)' /tmp/requirements/tau2-upstream.commit) \
+    && test "$#" -eq 2 \
+    && git init --quiet /opt/tau2-upstream \
+    && git -C /opt/tau2-upstream fetch --quiet --depth 1 https://github.com/sierra-research/tau2-bench.git "$2" \
+    && git -C /opt/tau2-upstream checkout --quiet FETCH_HEAD \
+    && test "$(git -C /opt/tau2-upstream rev-parse HEAD)" = "$2" \
+    && rm -rf /opt/tau2-upstream/.git \
+    && (cd /opt/tau2-upstream && UV_PYTHON_DOWNLOADS=never uv sync --frozen --no-cache --extra knowledge --python 3.12) \
+    && grep -vE '^[[:space:]]*(#|$)' /tmp/requirements/tau2-upstream.commit > /opt/tau2-upstream.ref \
+    && TAU2_DATA_DIR=/opt/tau2-upstream/data /opt/tau2-upstream/.venv/bin/python -c "import tau2" \
+    && /opt/tau2-upstream/.venv/bin/tau2 --help >/dev/null
+
 # GDPval-AA (run_gdpval.sh) in a sixth: the Stirrup agent, the dataset download and
 # the judge-panel clients.
+FROM base AS gdpval-env
 COPY requirements/gdpval-runtime.lock /tmp/requirements/
 RUN python -m venv /opt/gdpval-venv \
     && /opt/gdpval-venv/bin/pip install --no-cache-dir -r /tmp/requirements/gdpval-runtime.lock \
     && /opt/gdpval-venv/bin/python -c "import stirrup.tools.code_backends.e2b"
 
-# Each pinned harness as its own --no-deps overlay, the same layout
-# build_eval_env.sh produces, so several forks (all the lm_eval package)
-# could live side by side. run_lm_eval.sbatch checks .commit against the pin
-# in the checkout it runs from.
-COPY requirements/lm-eval-harness.txt /tmp/requirements/
-RUN grep -Ev '^[[:space:]]*(#|$)' /tmp/requirements/lm-eval-harness.txt \
-    | while read -r repo commit; do \
-        target="/opt/lm-eval-harness/$repo"; \
-        /opt/lm-eval-venv/bin/pip install --no-cache-dir --no-deps --target "$target" \
-            "git+https://github.com/$repo.git@$commit" || exit 1; \
-        PYTHONPATH="$target" /opt/lm-eval-venv/bin/python -c "import lm_eval" || exit 1; \
-        printf '%s\n' "$commit" > "$target/.commit"; \
-        touch "$target/.complete"; \
-    done
+# The image: the environments above, copied to the paths they were built at.
+FROM base
+COPY --from=lm-eval-env /opt/python /opt/python
+COPY --from=lm-eval-env /opt/lm-eval-venv /opt/lm-eval-venv
+COPY --from=lm-eval-harness /opt/lm-eval-harness /opt/lm-eval-harness
+COPY --from=inspect-env /opt/inspect-venv /opt/inspect-venv
+COPY --from=evalscope-env /opt/evalscope-venv /opt/evalscope-venv
+COPY --from=evalscope-env /opt/swe-bench-pro-os /opt/swe-bench-pro-os
+COPY --from=evalscope-env /opt/swe-bench-pro-os.commit /opt/swe-bench-pro-os.commit
+COPY --from=bfcl-env /opt/bfcl-venv /opt/bfcl-venv
+COPY --from=harbor-env /opt/harbor-venv /opt/harbor-venv
+COPY --from=harbor-env /opt/harbor-adapters /opt/harbor-adapters
+COPY --from=tau2-env /opt/tau2-venv /opt/tau2-venv
+COPY --from=tau2-env /opt/tau2-bench /opt/tau2-bench
+COPY --from=tau2-env /opt/tau2-bench.commit /opt/tau2-bench.commit
+COPY --from=tau2-upstream-env /opt/tau2-upstream /opt/tau2-upstream
+COPY --from=tau2-upstream-env /opt/tau2-upstream.ref /opt/tau2-upstream.ref
+COPY --from=gdpval-env /opt/gdpval-venv /opt/gdpval-venv
 
 ENV PATH=/opt/lm-eval-venv/bin:$PATH \
     LM_EVAL_VENV=/opt/lm-eval-venv \
@@ -135,11 +193,14 @@ ENV PATH=/opt/lm-eval-venv/bin:$PATH \
     EVAL_INSPECT_VENV=/opt/inspect-venv \
     EVALSCOPE_VENV=/opt/evalscope-venv \
     EVALSCOPE_SWE_BENCH_PRO_REPO=/opt/swe-bench-pro-os \
+    BFCL_VENV=/opt/bfcl-venv \
     HARBOR_VENV=/opt/harbor-venv \
     HARBOR_ADAPTERS_ROOT=/opt/harbor-adapters \
     TAU2_VENV=/opt/tau2-venv \
     TAU2_DATA_DIR=/opt/tau2-bench/data \
     TAU2_COMMIT_FILE=/opt/tau2-bench.commit \
+    TAU2_UPSTREAM_DIR=/opt/tau2-upstream \
+    TAU2_UPSTREAM_REF_FILE=/opt/tau2-upstream.ref \
     GDPVAL_VENV=/opt/gdpval-venv
 
 WORKDIR /work

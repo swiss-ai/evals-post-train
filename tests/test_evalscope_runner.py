@@ -462,6 +462,23 @@ class TaskConfigTest(unittest.TestCase):
                 run.evaluation_errors(work_dir), {"gold/swe_bench_pro_default": {"count": 1, "instances": ["lost"]}}
             )
 
+    def test_review_progress(self):
+        def sample(value, status="success"):
+            return json.dumps({"sample_score": {"score": {"value": {"acc": value}, "status": status}}})
+
+        with tempfile.TemporaryDirectory() as work_dir:
+            reviews = Path(work_dir, "reviews", "m")
+            reviews.mkdir(parents=True)
+            Path(reviews, "live_code_bench_v6.jsonl.rerun-abc").write_text(
+                "\n".join([sample(1.0), sample(0.0), sample(0.0, "error"), '{"sample_sc'])
+            )
+            old = Path(reviews, "live_code_bench_v5.jsonl")
+            old.write_text(sample(1.0) + "\n")
+            os.utime(old, (1, 1))
+            self.assertEqual(
+                run.review_progress(work_dir, since=100.0), {"m/live_code_bench_v6": {"done": 3, "passed": 1, "failed": 1}}
+            )
+
     def test_only_the_two_benchmarks(self):
         for bad in ("gsm8k", "swe_bench_verified_agentic", ""):
             with self.assertRaises(SystemExit):
@@ -619,71 +636,3 @@ class CompletionsFlagTest(unittest.TestCase):
         with self.assertRaises(SystemExit) as refused:
             run.main(["--benchmark", "swe_bench", "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", "--completions"])
         self.assertIn("only live_code_bench", str(refused.exception))
-
-
-class BfclV4Test(unittest.TestCase):
-    def _cfg(self, *extra):
-        args = run.parse_args(["--benchmark", "bfcl_v4", "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", *extra])
-        return run.build_task_config(args, ["bfcl_v4"], run.resolved_revisions(["bfcl_v4"], []))
-
-    def test_has_no_dataset_revision_and_no_sandbox(self):
-        cfg = self._cfg()
-        self.assertEqual(cfg["datasets"], ["bfcl_v4"])
-        args = cfg["dataset_args"]["bfcl_v4"]
-        self.assertNotIn("hf_dataset_revision", args)
-        self.assertNotIn("dataset_revision", args)
-        self.assertNotIn("sandbox", cfg)
-        self.assertFalse(run.needs_sandbox(["bfcl_v4"]))
-        self.assertTrue(run.needs_sandbox(["bfcl_v4", "swe_bench"]))
-
-    def test_default_subsets_leave_out_the_ones_that_need_serpapi(self):
-        subsets = self._cfg()["dataset_args"]["bfcl_v4"]["subset_list"]
-        self.assertFalse([s for s in subsets if s.startswith("web_search")])
-        self.assertIn("memory_vector", subsets)
-        self.assertEqual(len(subsets), 20)
-        self.assertEqual(self._cfg("--subset", "simple_python")["dataset_args"]["bfcl_v4"]["subset_list"], ["simple_python"])
-
-    def test_extra_params_pass_through(self):
-        cfg = self._cfg("--extra-param", "is_fc_model=false")
-        self.assertEqual(cfg["dataset_args"]["bfcl_v4"]["extra_params"], {"is_fc_model": False})
-
-    def test_gold_is_refused(self):
-        with self.assertRaises(SystemExit) as gold:
-            run.main(["--benchmark", "bfcl_v4", "--work-dir", "/w", "--gold"])
-        self.assertIn("reference solutions", str(gold.exception))
-
-    def test_settings_the_handler_does_not_send_are_warned_about(self):
-        with mock.patch("sys.stderr") as err:
-            self._cfg("--top-p", "0.9")
-        self.assertIn("ignoring top_p", "".join(c.args[0] for c in err.write.call_args_list))
-
-    def test_the_sampling_defaults_do_not_warn(self):
-        with mock.patch("sys.stderr") as err:
-            self._cfg()
-        self.assertEqual(err.write.call_args_list, [])
-
-    def test_subsets_that_would_silently_score_zero_are_refused(self):
-        with mock.patch("importlib.util.find_spec", return_value=None):
-            problems = run.bfcl_subset_problems(["memory_vector", "web_search_base", "simple_python"], {}, {})
-        self.assertEqual(len(problems), 2)
-        self.assertIn("sentence-transformers", problems[0])
-        self.assertIn("web_search_base need a SerpAPI key", problems[1])
-        self.assertIn("not --extra-param", run.bfcl_subset_problems(["web_search_base"], {"SERPAPI_API_KEY": "k"}, {})[0])
-        self.assertEqual(run.bfcl_subset_problems(["web_search_base"], {}, {"SERPAPI_API_KEY": "k"}), [])
-        self.assertEqual(run.bfcl_subset_problems(["simple_python", "memory_kv"], {}, {}), [])
-        with mock.patch("importlib.util.find_spec", return_value=object()):
-            self.assertEqual(run.bfcl_subset_problems(["memory_vector"], {}, {}), [])
-
-    def test_main_refuses_them_before_running(self):
-        with mock.patch.dict(os.environ, {}, clear=False), self.assertRaises(SystemExit) as refused:
-            run.main(["--benchmark", "bfcl_v4", "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1",
-                      "--subset", "web_search_base"])
-        self.assertIn("SerpAPI", str(refused.exception))
-
-    def test_the_logged_config_masks_secret_extra_params(self):
-        cfg = self._cfg("--extra-param", "SERPAPI_API_KEY=secret", "--extra-param", "is_fc_model=false")
-        shown = run.printable_config({**cfg, "api_key": "k"})
-        self.assertNotIn("secret", json.dumps(shown))
-        self.assertNotIn("api_key", shown)
-        self.assertEqual(shown["dataset_args"]["bfcl_v4"]["extra_params"], {"SERPAPI_API_KEY": "***", "is_fc_model": False})
-        self.assertEqual(cfg["dataset_args"]["bfcl_v4"]["extra_params"]["SERPAPI_API_KEY"], "secret")

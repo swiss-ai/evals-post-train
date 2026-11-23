@@ -46,11 +46,9 @@ _eval_container_for_backend() {
 }
 
 _eval_prestart_dependency() {
-    # Jobs the first eval wave must wait on: an optional Megatron->HF conversion
-    # (--convert-to-hf) and the environment-preparation job. Both are one-time
-    # setup, so only the attempt==0 / fail-fast submissions need this.
+    # Jobs the first eval wave must wait on: the environment-preparation job. It is
+    # one-time setup, so only the attempt==0 / fail-fast submissions need this.
     local -a jobs=()
-    [[ -n "${EVAL_CONVERT_JOB_ID:-}" ]] && jobs+=("$EVAL_CONVERT_JOB_ID")
     [[ -n "${EVAL_PREP_JOB_ID:-}" ]] && jobs+=("$EVAL_PREP_JOB_ID")
     (( ${#jobs[@]} > 0 )) || return 0
     local IFS=:
@@ -164,6 +162,7 @@ _eval_create_run_config() {
     if [[ "${CHAT_FORMAT:-template}" == "apertus2" ]]; then
         fields+=(--field "chat_format=apertus2" --field "prefill_mode=${PREFILL_MODE:-after_think}"
                  --field "apertus_common=$(grep -oE '[0-9a-f]{40}' requirements/apertus2.txt)")
+        [[ "${ANSWER_FRAME:-reply}" == "claim" ]] && fields+=(--field "answer_frame=claim")
     fi
     [[ -n "${THINK_TOP_K:-}" ]] && fields+=(--field "think_top_k=$THINK_TOP_K")
     [[ -n "${THINK_MIN_P:-}" ]] && fields+=(--field "think_min_p=$THINK_MIN_P")
@@ -393,18 +392,11 @@ _eval_use_prebuilt_environment() {
             "name one with --harness-branch" >&2
         return 1
     fi
-    # apertus-common is private and not in the image: build its pinned wheel here, where the launcher's
-    # git access is, and let the job install that offline (see prepare_apertus_common.sh).
-    local apertus_common_wheels=""
-    if [[ "${CHAT_FORMAT:-template}" == "apertus2" ]]; then
-        apertus_common_wheels=$(bash scripts/lm_eval_harness/prepare_apertus_common.sh) || return 1
-    fi
     {
         printf 'EVAL_ENV_KIND=prebuilt\n'
         printf 'EVAL_HARNESS_OVERLAY=%q\n' "$overlay"
         printf 'EVAL_RESOLVED_HARNESS_REPO=%q\n' "$repo"
         printf 'EVAL_RESOLVED_HARNESS_COMMIT=%q\n' "${commit,,}"
-        [[ -z "$apertus_common_wheels" ]] || printf 'EVAL_APERTUS_COMMON_WHEELS=%q\n' "$apertus_common_wheels"
     } > "$EVAL_ENV_MANIFEST"
     EVAL_PREP_JOB_ID=""
     export EVAL_PREP_JOB_ID
@@ -466,7 +458,7 @@ submit_evaluation() {
     repo_root=$(_eval_repo_root)
     cd "$repo_root"
 
-    logs_root=${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}
+    logs_root=${LOGS_ROOT:-$PWD/logs/lm_eval}
     run_root="$logs_root/${WANDB_ENTITY:-apertus}/${WANDB_PROJECT:-swissai-evals-test}/$name"
     EVAL_HARNESS_DIR="$run_root/harness"
     legacy_project="${WANDB_PROJECT:-swissai-evals-test}"
@@ -548,10 +540,10 @@ evaluation_controller() {
     local model="$1" name="$2" state_dir="$3" attempt="$4" chunk_size="$5"
     local missing_count completed_count next_attempt next_chunk aggregate_job legacy_project
     cd "$(_eval_repo_root)"
-    EVAL_HARNESS_DIR="${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}/${WANDB_ENTITY:-apertus}/${WANDB_PROJECT:-swissai-evals-test}/$name/harness"
+    EVAL_HARNESS_DIR="${LOGS_ROOT:-$PWD/logs/lm_eval}/${WANDB_ENTITY:-apertus}/${WANDB_PROJECT:-swissai-evals-test}/$name/harness"
     legacy_project="${WANDB_PROJECT:-swissai-evals-test}"
     [[ "$legacy_project" == *-single ]] || legacy_project="${legacy_project}-single"
-    EVAL_LEGACY_HARNESS_DIR="${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}/${WANDB_ENTITY:-apertus}/$legacy_project/$name/harness"
+    EVAL_LEGACY_HARNESS_DIR="${LOGS_ROOT:-$PWD/logs/lm_eval}/${WANDB_ENTITY:-apertus}/$legacy_project/$name/harness"
     export EVAL_HARNESS_DIR EVAL_LEGACY_HARNESS_DIR EVAL_ENV_MANIFEST="$state_dir/environment.sh"
     export EVAL_RUN_CONFIG="$state_dir/run_config.json"
 

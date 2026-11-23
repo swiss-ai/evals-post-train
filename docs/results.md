@@ -6,34 +6,29 @@ Where results go after a run: W&B (all four frameworks share one upload path in 
 
 ### Metrics Upload
 
-Results are automatically uploaded to W&B after evaluation completes (or after aggregation for chunked jobs), whenever a W&B key is available; `--no-wandb` (or `WANDB_MODE=disabled`) skips it. The same holds for Inspect AI, Harbor and EvalScope runs. Each model gets a W&B run with:
+Results are uploaded to W&B after evaluation completes (or after aggregation for chunked jobs) whenever a W&B key is available; `--no-wandb` (or `WANDB_MODE=disabled`) skips it. The same holds for Inspect AI, Harbor and EvalScope runs. Each model gets a W&B run with:
 
 - **`main_results`** table: summary metrics specified in the `*_main_table.txt` config
 - **Flat metrics**: all task metrics logged as `task_name/metric_name`
 - **`eval_duration`**: evaluation-only runtime for a direct/fail-fast evaluation; chunk aggregation sums the runtimes recorded by completed chunks (an explicit `EVAL_DURATION` overrides this for legacy recovery)
 
-Because *every* flat metric is uploaded — not just the `*_main_table.txt` subset — the
+Because *every* flat metric is uploaded, not just the `*_main_table.txt` subset, the
 [thinking metrics](lm-eval-harness.md#thinking--reasoning-metrics) reach W&B as `task_name/thinking_format_correct`
 without any uploader configuration. The length families (`task_name/thinking_length_tokens`,
-`task_name/response_length_tokens`, …) arrive the same way, but only once the eval was launched
-with `--log-length-metrics`, which is what makes the harness aggregate them in the first place.
+`task_name/response_length_tokens`, ...) arrive the same way, but only if the eval was launched
+with `--log-length-metrics`, which makes the harness aggregate them.
 
 ### Sample Upload (Stratified)
 
 Per task, example prompts are uploaded as W&B tables below `samples/{task_name}`.
-The model name is not repeated in the table key because the table already belongs
-to that model's W&B run. Long run IDs and task names are shortened with stable
-hashes, leaving room for W&B's generated artifact suffix and avoiding its
-128-character artifact-name limit. The run keeps its full display name.
+The table key omits the model name because the table belongs to that model's W&B run. Long run IDs and task names are shortened with stable hashes, leaving room for W&B's generated artifact suffix and staying under its 128-character artifact-name limit. The run keeps its full display name.
 
 - **2 positive samples** by default (correctly answered, metric = 1.0)
 - **3 negative samples** by default (incorrectly answered, metric = 0.0)
 
-Samples are classified using binary metrics (`acc`, `exact_match`, `em`, `pass@1`). Each sample includes an `is_correct` field (`true`/`false`/`null`) for downstream filtering. If a task has no binary metric (e.g., perplexity), 10 random samples are uploaded instead.
+Samples are classified using binary metrics (`acc`, `exact_match`, `em`, `pass@1`). Each sample has an `is_correct` field (`true`/`false`/`null`) for filtering. If a task has no binary metric (e.g., perplexity), 10 random samples are uploaded instead. If one group is underrepresented (e.g., a model gets almost everything right), the remaining slots are filled from the other group.
 
-If one group is underrepresented (e.g., a model gets almost everything right), the remaining slots are filled from the other group.
-
-The stratified counts are configurable via `n_positive` and `n_negative` parameters in `create_model_evaluation_from_results()`.
+The counts are configurable via `n_positive` and `n_negative` in `create_model_evaluation_from_results()`.
 
 ### Retrieving Samples via API
 
@@ -98,7 +93,7 @@ model_eval = create_model_evaluation_from_results(
 )
 ```
 
-The binary metrics used for correctness classification are defined in `BINARY_METRICS` at the top of `wandb_alignment_utils.py`. Add new metric names there if your tasks use different correctness indicators.
+The binary metrics used for correctness classification are defined in `BINARY_METRICS` at the top of `wandb_alignment_utils.py`. Add new metric names there if your tasks use other correctness indicators.
 
 ---
 
@@ -110,14 +105,11 @@ Completed lm-evaluation-harness runs can be converted into:
 - optional EEE instance-level JSONL records from lm-eval sample logs
 - reviewable Hugging Face `.eval_results/*.yaml` previews for registered Hub benchmarks
 
-The exporter is deliberately local-only: it does not upload files, open pull
-requests, or read an HF token.
+The exporter is local-only: it does not upload files, open pull requests, or read an HF token.
 
 ### Export a completed run
 
-Point the exporter at either a single `results_*.json` file or a directory that
-contains exactly one result file. For chunked runs, use the merged directory
-produced by `merge_split_results.py`.
+Point the exporter at a single `results_*.json` file or a directory containing exactly one result file. For chunked runs, use the merged directory produced by `merge_split_results.py`.
 
 ```bash
 python scripts/results/export_eval_results.py export \
@@ -129,13 +121,13 @@ python scripts/results/export_eval_results.py export \
 ```
 
 For a compact, reproducible datastore submission, use a per-task instance cap
-and one collection directory. This preserves every aggregate score and keeps
-up to 10 scorable examples from each lm-eval task, selected by a stable SHA-256
-priority rather than by file order. The cap does not rescore or recompute
-aggregates. Rows without a numeric per-sample value for an exported metric
-(such as deferred LLM-judge payloads) are omitted instead of being reported as
-zero. The manifest records capped, unscored, and missing-sample tasks; each
-record retains source, scorable, and exported instance-row counts.
+and one collection directory. This keeps every aggregate score and up to 10
+scorable examples per lm-eval task, selected by a stable SHA-256 priority
+rather than file order. The cap does not rescore or recompute aggregates. Rows
+without a numeric per-sample value for an exported metric (such as deferred
+LLM-judge payloads) are omitted instead of reported as zero. The manifest
+records capped, unscored, and missing-sample tasks; each record retains source,
+scorable, and exported instance-row counts.
 
 ```bash
 python scripts/results/export_eval_results.py export RESULTS.json \
@@ -148,20 +140,19 @@ python scripts/results/export_eval_results.py export RESULTS.json \
 
 The resulting EEE files can be copied directly from
 `eee/data/swissai_apertus_evals/<developer>/<model>/` into the same datastore
-path. Aggregate JSON filenames remain stable; only the record paths and the
+path. Aggregate JSON filenames stay stable; only the record paths and the
 optional instance companions differ from a benchmark-folder export. Use a
 fresh output directory when changing sample-cap settings.
 
 `--model-id` is optional when the result log contains an `owner/model` ID, but
-it is required when the evaluation used a local checkpoint path.
+required when the evaluation used a local checkpoint path.
 EEE `model_info.id` uses this Hub ID, and `model_info.additional_details`
-includes its direct Hugging Face model URL for self-deployed models. API models
-do not receive a guessed Hub URL. Use `--model-name` when the release/display
+includes its Hugging Face model URL for self-deployed models. API models
+get no guessed Hub URL. Use `--model-name` when the release/display
 name differs from the repository name; it is written to `model_info.name`
 without changing the ID or URL.
 Evaluator provenance defaults to `first_party` for `swiss-ai/*` models and
-`third_party` for other owners; override it with `--evaluator-relationship`
-when a run was collaborative or has a different relationship.
+`third_party` for other owners; override it with `--evaluator-relationship`.
 
 The output is organized for review and later submission:
 
@@ -201,28 +192,24 @@ The export manifest (`manifest.yaml`, containing JSON-compatible YAML) lists:
 - missing run-level metadata such as generation temperature or maximum tokens
 - `publishing_performed: false`, confirming that the exporter only wrote local files
 
-The YAML extension is intentional: the official EEE validator recursively
-treats every `.json` file as an aggregate `EvaluationLog`. Keeping exporter
-bookkeeping out of `.json` means the complete output directory can be passed
-directly to `every_eval_ever validate`. The local validator still accepts
-legacy exports containing `manifest.json`, and re-exporting migrates that file
-to `manifest.yaml`.
+The manifest is YAML because the official EEE validator treats every `.json`
+file recursively as an aggregate `EvaluationLog`; this way the complete output
+directory can be passed directly to `every_eval_ever validate`. The local
+validator still accepts legacy exports containing `manifest.json`, and
+re-exporting migrates that file to `manifest.yaml`.
 
-Every task with numeric results is exported. Use `--strict-mappings` when every
-numeric task in a run must have a reviewed mapping instead of using the fallback
-described below.
+Every task with numeric results is exported. Use `--strict-mappings` to require a reviewed mapping for every numeric task instead of using the fallback described below.
 
-By default, aggregate and non-aggregate rows are all retained. Omit
-`--aggregate-only-task` when preparing a full-data submission. The option below
-is available only for intentionally compact exports.
+By default, aggregate and non-aggregate rows are all retained; omit
+`--aggregate-only-task` for a full-data submission.
 
 Use `--exclude-task TASK` to omit an exact result. For benchmark groups with
 many language or subject results, prefer `--aggregate-only-task GROUP`: it keeps
 the group's aggregate score and recursively excludes its subtasks. The exporter
 uses lm-eval's `group_subtasks` metadata when available and falls back to the
-generated suite's task-name prefix when lm-eval omits that metadata. Both
-options are repeatable. Generated suites can be selected by either their base
-group name or their full aggregate result task. For example:
+generated suite's task-name prefix otherwise. Both options are repeatable.
+Generated suites can be selected by either their base group name or their full
+aggregate result task. For example:
 
 ```bash
 python scripts/results/export_eval_results.py export RESULTS.json \
@@ -243,7 +230,7 @@ exact lm-eval task name to:
 - the canonical EEE datastore collection directory
 - the optional composite, benchmark family, benchmark, and split used to build
   the EEE `evaluation_name`
-- an optional `collection` when the datastore folder must retain a historical
+- an optional `collection` when the datastore folder must keep a historical
   name that differs from the benchmark component in `evaluation_name`
 - the source dataset ID in Hugging Face `owner/dataset` format
 - optional ordered EEE metric candidates and canonical metric-ID overrides
@@ -257,33 +244,25 @@ exact lm-eval task name to:
 
 Mappings are resolvers, not an export allowlist. An exact mapping wins; reviewed
 subtask patterns and the controlled `_self_consistency` suffix may resolve to a
-base mapping. For unmapped tasks, the exporter detects a scored configless
+base mapping. For other tasks, the exporter detects a scored configless
 aggregate prefix and uses it as the internal family/benchmark, putting the
-remaining task name in the split. Truly standalone tasks retain their exact
-internal identifier as family and benchmark with `overall` as the split. Logged
+remaining task name in the split. Truly standalone tasks keep their exact
+lm-eval identifier as family and benchmark with `overall` as the split; for
+example, an unmapped `aime24` result becomes `aime24.aime24.overall`. Logged
 Hugging Face dataset IDs are preserved, including for configless aggregates
 when all related children share one unambiguous ID. The manifest lists fallback
 tasks in `internally_named_tasks`; `skipped_unmapped_tasks` remains an empty
 compatibility field.
 
-Mappings are resolvers, not an export allowlist. An exact mapping wins; the
-controlled `_self_consistency` suffix may resolve to its reviewed base mapping.
-Any other scored task is exported under its lm-eval identifier, with that
-identifier used as both family and benchmark and `overall` as the split. For
-example, an unmapped `aime24` result becomes `aime24.aime24.overall`. Its logged
-`dataset_path` is still used as the dataset ID when present. The manifest lists
-these fallbacks in `internally_named_tasks`; `skipped_unmapped_tasks` remains an
-empty compatibility field.
-
 Evaluation names use dot notation:
-`{composite}.{family}.{benchmark}.{split}`. An empty composite is omitted, so a
-standalone benchmark such as GSM8K exports as `gsm8k.gsm8k.overall`, without a
-leading dot. The split defaults to `overall`; lm-eval filters such as
-`strict-match` or `mean@32` describe scoring methodology and are retained in
-metric and generation metadata rather than being treated as benchmark splits.
+`{composite}.{family}.{benchmark}.{split}`. An empty composite is omitted, so
+GSM8K exports as `gsm8k.gsm8k.overall`, without a leading dot. The split
+defaults to `overall`; lm-eval filters such as `strict-match` or `mean@32`
+describe scoring methodology and are kept in metric and generation metadata
+rather than treated as benchmark splits.
 
 For Hugging Face datasets, both `source_data.dataset_name` and
-`source_data.hf_repo` contain the `owner/dataset` ID. The direct dataset URL is
+`source_data.hf_repo` contain the `owner/dataset` ID. The dataset URL is
 recorded in `source_data.additional_details.hf_dataset_url`.
 
 Benchmark-specific metric IDs use dot namespaces (for example,
@@ -291,22 +270,21 @@ Benchmark-specific metric IDs use dot namespaces (for example,
 record containing the corresponding lm-eval task instead of copying the run's
 entire hash map into every record.
 
-The repository's `_self_consistency` suffix is handled as a controlled task
-variant: the exporter removes only that exact suffix and requires the remaining
-base task to have a reviewed mapping. Its mapping can define
+The repository's `_self_consistency` suffix is a controlled task variant: the
+exporter removes only that exact suffix and requires the remaining base task to
+have a reviewed mapping. Its mapping can define
 `self_consistency_metric_candidates`; `{repeats}` is expanded from the lm-eval
-task config so, for example, `exact_match,mean@{repeats}` selects
-`exact_match,mean@32`. The original task name, repeat count, and
-`self_consistency` variant remain recorded in the exported metadata.
+task config, so `exact_match,mean@{repeats}` selects `exact_match,mean@32`. The
+original task name, repeat count, and `self_consistency` variant are recorded in
+the exported metadata.
 
-Do not otherwise use fuzzy matching for benchmark variants. For example,
-`gsm8k_platinum` is not mapped to `gsm8k`. Until a mapping is reviewed, tasks
-such as `bfcl_v3` and `swiss_ai_charter_alignment` are exported under safe
-internal names rather than being omitted or assigned to a possibly incorrect
-external benchmark.
+There is no other fuzzy matching of benchmark variants: `gsm8k_platinum` is not
+mapped to `gsm8k`. Until a mapping is reviewed, tasks such as
+`swiss_ai_charter_alignment` are exported under safe internal names rather than
+omitted or assigned to a possibly incorrect external benchmark.
 
 The exporter preserves scores in their native lm-eval scale. It never
-automatically multiplies proportions by 100.
+multiplies proportions by 100.
 
 The `polyglotoxicitypromptsllama_small.score` and
 `realtoxicitypromptsllama_small.score` metrics are unsafe-continuation rates,
@@ -331,7 +309,7 @@ headers in the metrics file.
 
 ```bash
 python scripts/results/make_html_table.py \
-  --metrics-file configs/archive/apertus/tasks_posttrain_final_main_table.txt \
+  --metrics-file tasks_main_table.txt \
   --entity apertus --project apertus-1.5-post-training-v0.0 \
   --models my-run-a my-run-b \
   --output eval_table.html
@@ -363,7 +341,7 @@ with `--absolute`). Writes `eval_table.png` **and** `eval_table.csv` into the `-
 python scripts/results/make_table.py \
   --base-model-path /path/to/sweep_runs \
   --entity apertus --project apertus-1.5-post-training-v0.0 \
-  --metrics-file configs/archive/apertus/tasks_posttrain_main_table.txt \
+  --metrics-file tasks_main_table.txt \
   --output ./eval_tables
 ```
 
@@ -372,7 +350,7 @@ python scripts/results/make_table.py \
 - **Baselines**: the base run defaults to `baseline-apertus-1-sft` (override `--baseline`); a DPO
   baseline row is shown unless `--no-dpo-baseline`. Add `--extra-baseline` / `--extra-run` (with
   matching `-name` flags) for extra rows.
-- **Benchmark selection**: `--include` / `--exclude` (substring match), `--metrics-file` (one or
+- **Benchmark selection**: `--include` / `--exclude` (substring match), `--metrics-file` (required, one or
   more, merged).
 - **Rows**: `--top-n` (best N by `Avg_Imp`), `--complete-only` (drop rows with any N/A),
   `--model-order`, `--raw-names` (don't parse lr/beta/ebs), `--rename`, `--label`, `--filter`.

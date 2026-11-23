@@ -9,11 +9,12 @@ configs/suites/<name>.json holds two things:
   setups      named kinds of model setup: max_length, sampling (a profile name), flags (the
               launcher flags of each framework the suite uses: thinking, chat format, ...) and
               optionally serving (the arguments the server itself needs, e.g. a reasoning parser;
-              nothing here runs them, whoever launches the model passes them to `vllm serve`) and
+              nothing here runs them; scripts/direct_serving/job.py --suite appends them to the launch
+              block's) and launch {model_path, environment, nodes, time, framework_args} (how the
+              model is served: the checkpoint, the serving EDF, the nodes of the one replica, the
+              wall time and the layout arguments; scripts/direct_serving/job.py --suite/--setup reads it) and
               tokenizer {repo, revision, path} (a tokenizer pinned in a git repository; lm_eval
-              gets --tokenizer <local copy>, which `flags` fetches once into the cache) and
-              task_flags {task: [flags]} (replaces the setup's flags of that one task, e.g. the
-              chat-completions endpoint that native function calling needs)
+              gets --tokenizer <local copy>, which `flags` fetches once into the cache)
 
 `run` starts every (model, benchmark) pair as its own launch, so each one is its own Slurm job (lm_eval: the
 launcher's `single` mode; inspect: `sbatch run_inspect_eval.sbatch`). --model SETUP=SERVED_NAME names a
@@ -32,7 +33,7 @@ inspect has no such flag, the server's --max-model-len is the window. The code o
     python -m scripts.common.suites show apertus2/chonk_sft    # title and setups
     python -m scripts.common.suites plan apertus2/chonk_sft --setup apertus-1.5-70b-thinking
     python -m scripts.common.suites flags apertus2/chonk_sft --setup apertus-1.5-70b-thinking --task ifbench
-    python -m scripts.common.suites run apertus2/chonk_sft --api-base-url <url> \\
+    python -m scripts.common.suites run apertus2/chonk_sft --api-base-url <url> --helper-url <url> \\
         --model chonk-lc-16k-v0.2-sft=<served name> --model qwen3-32b-thinking=<served name> [--submit]
 """
 
@@ -49,8 +50,14 @@ from pathlib import Path
 from scripts.common import sampling, thinking
 
 SUITES_DIR = Path(__file__).resolve().parents[2] / "configs" / "suites"
-FRAMEWORKS = ("lm_eval", "inspect", "evalscope", "harbor", "tau2")
+FRAMEWORKS = ("lm_eval", "inspect", "evalscope", "harbor", "tau2", "bfcl")
 VIA = ("flag", "task")
+
+
+LAUNCH_KEYS = ("model_path", "environment", "nodes", "time", "framework_args")
+LAUNCH_OPTIONAL = ("env",)
+# What scripts/direct_serving/job.py sets itself on the serving command.
+LAUNCH_OWN_FLAGS = ("--model", "--served-model-name", "--host", "--port")
 
 
 def _positive_int(where, value):
@@ -62,12 +69,35 @@ THINKING_FLAGS = ("--thinking", "--enable-thinking")
 # Flags the suite itself produces, so a setup may not list them.
 RESERVED = {"lm_eval": {"--max-length", "--repeats", "--reasoning-effort"},
             "inspect": {"--task-arg", "--epochs", "--", "--reasoning-effort"},
-            "evalscope": set(), "harbor": {"--reasoning-effort"}, "tau2": set()}
+            "evalscope": set(), "harbor": {"--reasoning-effort"}, "tau2": {"--reasoning-effort", "--sampling-profile"},
+            "bfcl": {"--reasoning-effort", "--version", "--sampling-profile"}}
 
 
 def _profile(where, name, profiles):
     if name not in profiles:
         raise ValueError(f"{where}: unknown sampling profile {name!r} ({', '.join(profiles)})")
+
+
+def _launch(where, launch):
+    if not isinstance(launch, dict) or not set(LAUNCH_KEYS) <= set(launch) <= {*LAUNCH_KEYS, *LAUNCH_OPTIONAL}:
+        raise ValueError(f"{where}: launch must be an object with {', '.join(LAUNCH_KEYS)} and optionally {', '.join(LAUNCH_OPTIONAL)}")
+    env = launch.get("env", {})
+    if not isinstance(env, dict) or not all(
+        re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(k)) and isinstance(v, str) for k, v in env.items()
+    ):
+        raise ValueError(f"{where}: launch.env must map variable names to string values")
+    for key in ("model_path", "environment"):
+        if not isinstance(launch[key], str) or not launch[key]:
+            raise ValueError(f"{where}: launch.{key} must be a non-empty string")
+    _positive_int(f"{where} launch.nodes", launch["nodes"])
+    if not isinstance(launch["time"], str) or not re.fullmatch(r"\d+:[0-5]\d:[0-5]\d", launch["time"]):
+        raise ValueError(f"{where}: launch.time must be HH:MM:SS (got {launch['time']!r})")
+    args = launch["framework_args"]
+    if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+        raise ValueError(f"{where}: launch.framework_args must be a list of strings")
+    for flag in LAUNCH_OWN_FLAGS:
+        if flag in args:
+            raise ValueError(f"{where}: launch.framework_args must not hold {flag}: the launcher sets it")
 
 
 def _tokenizer(where, spec):
@@ -180,6 +210,8 @@ def validate(suite):
             raise ValueError(f"setup {name}: reasoning_effort must be one of {thinking.EFFORTS} (got {setup['reasoning_effort']!r})")
         if "tokenizer" in setup:
             _tokenizer(f"setup {name}", setup["tokenizer"])
+        if "launch" in setup:
+            _launch(f"setup {name}", setup["launch"])
         serving = setup.get("serving", [])
         if not isinstance(serving, list) or not all(isinstance(a, str) for a in serving):
             raise ValueError(f"setup {name}: serving must be a list of strings")
@@ -192,17 +224,9 @@ def validate(suite):
             if not isinstance(items, list) or not all(isinstance(f, str) for f in items):
                 raise ValueError(f"setup {name}: flags.{framework} must be a list of strings")
             _no_reserved(f"setup {name}: flags.{framework}", framework, setup, items)
-        task_flags = setup.get("task_flags", {})
-        if not isinstance(task_flags, dict) or set(task_flags) - tasks:
-            raise ValueError(f"setup {name}: task_flags must be an object keyed by a task of the suite")
-        for task, items in task_flags.items():
-            if not isinstance(items, list) or not all(isinstance(f, str) for f in items):
-                raise ValueError(f"setup {name}: task_flags.{task} must be a list of strings")
-            framework = next(b["framework"] for b in suite["benchmarks"] if b["task"] == task)
-            _no_reserved(f"setup {name}: task_flags.{task}", framework, setup, items)
         for bench in suite["benchmarks"]:
             profile = bench.get("sampling", setup["sampling"])
-            row_flags = task_flags.get(bench["task"], flags[bench["framework"]])
+            row_flags = flags[bench["framework"]]
             if any(f in THINKING_FLAGS for f in row_flags) and profiles[profile].get("temperature") == 0:
                 raise ValueError(f"setup {name}: thinking runs are not deterministic, but {bench['task']} samples with {profile!r}")
     return suite
@@ -229,14 +253,29 @@ def setup(suite, name):
     return suite["setups"][name]
 
 
+def launch_for(suite, setup_name):
+    """How a setup's model is served, for scripts/direct_serving/job.py: its launch block, the
+    EDF as an absolute path and the setup's `serving` arguments appended to the framework
+    arguments (a string). ValueError when the setup has no launch block."""
+    chosen = setup(suite, setup_name)
+    if "launch" not in chosen:
+        raise ValueError(f"setup {setup_name!r} has no launch block")
+    launch = chosen["launch"]
+    return {
+        **launch,
+        "environment": str(REPO_ROOT / launch["environment"]),
+        "framework_args": shlex.join([*launch["framework_args"], *chosen.get("serving", [])]),
+    }
+
+
 def flags_for(suite, setup_name, task, fetch=False):
     """Launcher flags for one benchmark of the suite under one setup, for the benchmark's framework.
 
     A setup's pinned tokenizer becomes lm_eval's --tokenizer <local copy>; fetch=True downloads the
     copy first (once), otherwise the flag names where it will be."""
     bench, chosen = benchmark(suite, task), setup(suite, setup_name)
-    flags = list(chosen.get("task_flags", {}).get(task, chosen["flags"][bench["framework"]]))
-    if "reasoning_effort" in chosen and bench["framework"] in ("lm_eval", "inspect", "harbor"):
+    flags = list(chosen["flags"][bench["framework"]])
+    if "reasoning_effort" in chosen and bench["framework"] in ("lm_eval", "inspect", "evalscope", "harbor", "bfcl", "tau2"):
         flags += ["--reasoning-effort", chosen["reasoning_effort"]]
     flags += bench.get("flags", [])
     repeat = bench["repeats"]["via"] == "flag"
@@ -261,28 +300,41 @@ LM_EVAL = ["bash", "scripts/lm_eval_harness/launch_evaluations.sh", "single"]
 INSPECT = "scripts/inspect_ai/run_inspect_eval.sbatch"
 HARBOR = "scripts/harbor/run_harbor_eval.sbatch"
 EVALSCOPE = "scripts/evalscope/run_evalscope_eval.sbatch"
+BFCL = "scripts/custom/run_bfcl.sbatch"
+TAU2 = "scripts/custom/run_tau2_bench.sbatch"
+HELPER_URL = "{helper_url}"
 
 
 def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, no_wandb=False,
-             qos=None, partition=None, fetch=False):
+             qos=None, partition=None, fetch=False, helper_url=None):
     """One launch per (model, benchmark), models in the order given, benchmarks in table order.
 
     `models` maps a setup name to the name the model is served under. Every launch is its own Slurm job
-    (lm_eval: one `single` launch; inspect, harbor and evalscope: one sbatch). api_model_name only applies to lm_eval, which
+    (lm_eval: one `single` launch; inspect, harbor, evalscope, bfcl and tau2: one sbatch). api_model_name only applies to lm_eval, which
     takes the served name separately from the model; qos and partition go to the lm_eval launcher or to
-    sbatch. Returns [{"setup", "label", "framework", "argv"}]."""
+    sbatch. Every launch but tau2's uploads to the W&B project named after the suite (the tau2 runner has no upload), and the
+    inspect, harbor, evalscope, bfcl and tau2 ones write to logs/<framework>/<suite>/<served name>/<task> (lm_eval's logs already sit
+    under the project). A flag may carry `{helper_url}`: the endpoint of a helper model launched alongside (tau2's simulated user and
+    judge), which the caller names with helper_url. Returns [{"setup", "label", "framework", "argv"}]."""
     rows = []
     for setup_name, served in models.items():
         for bench in suite["benchmarks"]:
             framework = bench["framework"]
             flags = flags_for(suite, setup_name, bench["task"], fetch=fetch)
+            if any(HELPER_URL in f for f in flags):
+                if not helper_url:
+                    raise ValueError(f"{bench['label']} needs the endpoint of its helper model (user and judge): pass --helper-url")
+                flags = [f.replace(HELPER_URL, helper_url) for f in flags]
             common = ["--task", bench["task"], "--model", served]
+            out_dir = f"logs/{framework}/{suite['name']}/{served}/{bench['task']}"
             if api_base_url:
                 common += ["--api-base-url", api_base_url]
             if limit:
                 common += ["--limit", str(limit)]
             if no_wandb:
                 common += ["--no-wandb"]
+            else:
+                common += ["--wandb-project", suite["name"]]
             if framework == "lm_eval":
                 if api_base_url:
                     common += ["--api-model-name", api_model_name or served]
@@ -292,13 +344,33 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
                 argv = [*LM_EVAL[:3], *common[:2], *common[2:], *scheduling, *flags]
             elif framework == "inspect":
                 scheduling = ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])
-                argv = ["sbatch", *scheduling, INSPECT, *common, *flags]
+                argv = ["sbatch", *scheduling, INSPECT, *common, "--logs-dir", out_dir, *flags]
             elif framework == "harbor":
                 scheduling = ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])
-                argv = ["sbatch", *scheduling, HARBOR, "--benchmark", bench["task"], *common[2:], *flags]
+                argv = ["sbatch", *scheduling, HARBOR, "--benchmark", bench["task"], *common[2:],
+                        "--work-dir", out_dir, *flags]
             elif framework == "evalscope":
                 scheduling = ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])
-                argv = ["sbatch", *scheduling, EVALSCOPE, "--benchmark", bench["task"], *common[2:], *flags]
+                argv = ["sbatch", *scheduling, EVALSCOPE, "--benchmark", bench["task"], *common[2:],
+                        "--work-dir", out_dir, *flags]
+            elif framework == "bfcl":
+                # bfcl_v3 / bfcl_v4 -> --version v3 / v4; --limit is the number of entries per category.
+                scheduling = ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])
+                argv = ["sbatch", *scheduling, BFCL, "--version", bench["task"].removeprefix("bfcl_"), "--model", served,
+                        *(["--api-base-url", api_base_url] if api_base_url else []),
+                        *(["--num-tasks", str(limit)] if limit else []),
+                        *(["--no-wandb"] if no_wandb else ["--wandb-project", suite["name"]]),
+                        "--sampling-profile", sampling_for(suite, setup_name, bench["task"]),
+                        "--workdir", out_dir, *flags]
+            elif framework == "tau2":
+                # The domain is the task; --limit is --num-tasks; no W&B (the runner prints its summary and keeps results.json).
+                # The agent samples with the setup's profile, as the other rows do.
+                scheduling = ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])
+                argv = ["sbatch", *scheduling, TAU2, "--domain", bench["task"], "--model", served,
+                        *(["--api-base-url", api_base_url] if api_base_url else []),
+                        *(["--num-tasks", str(limit)] if limit else []),
+                        "--sampling-profile", sampling_for(suite, setup_name, bench["task"]),
+                        "--workdir", out_dir, *flags]
             else:
                 raise ValueError(f"{bench['task']}: no launcher for the {framework} framework yet")
             rows.append({"setup": setup_name, "label": bench["label"], "framework": framework, "argv": argv})
@@ -341,6 +413,7 @@ def main(argv=None):
     run_p.add_argument("--model", action="append", required=True, metavar="SETUP=SERVED_NAME")
     run_p.add_argument("--api-base-url")
     run_p.add_argument("--api-model-name")
+    run_p.add_argument("--helper-url", help="endpoint of the helper model (tau2's simulated user and judge), served by a job of its own")
     run_p.add_argument("--limit", type=int)
     run_p.add_argument("--no-wandb", action="store_true")
     run_p.add_argument("--qos")
@@ -364,6 +437,9 @@ def main(argv=None):
                     print(f"  tokenizer: {t['repo']}@{t['revision'][:12]} {t['path']}")
                 if s.get("serving"):
                     print(f"  server: {shlex.join(s['serving'])}")
+                if s.get("launch"):
+                    launch = s["launch"]
+                    print(f"  launch: {launch['nodes']} node(s), {launch['time']}, {launch['model_path']}")
         elif args.command == "plan":
             suite = load(args.suite)
             print(_table([[r["label"], r["task"], shlex.join(r["flags"]), r["sampling"], r["metric"],
@@ -379,7 +455,7 @@ def main(argv=None):
                 setup(suite, setup_name)
                 models[setup_name] = served
             rows = commands(suite, models, args.api_base_url, args.api_model_name, args.limit, args.no_wandb,
-                            args.qos, args.partition, fetch=args.submit)
+                            args.qos, args.partition, fetch=args.submit, helper_url=args.helper_url)
             print(f"{len(rows)} launches: {len(models)} model{'s' * (len(models) != 1)} x "
                   f"{len(suite['benchmarks'])} benchmarks", file=sys.stderr)
             for row in rows:

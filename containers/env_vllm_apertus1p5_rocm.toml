@@ -1,0 +1,33 @@
+# Container engine EDF for serving Apertus 1.5 (Apertus1p5ForConditionalGeneration) on Beverin (AMD MI300A):
+# the ROCm counterpart of env_vllm_apertus1p5.toml (and model-launch's vllm_apertus_1.5_release.toml).
+# The image is the same swiss-ai/vllm fork built for gfx942 (swiss-ai/vllm a601a9d + transformers 3797303 on vllm/vllm-openai-rocm:v0.26.0),
+# built by hand on Beverin from images/vllm_apertus_1.5_rocm on swiss-ai/model-launch-images'
+# branch rocm-apertus-images (ee11600) and kept in the team's image folder.
+# Use it instead of env_vllm_apertus1p5.toml when serving on Beverin.
+image = "/capstor/store/cscs/swissai/infra01/container-images/vllm_apertus_1.5_rocm.sqsh"
+
+mounts = [
+  "/capstor/store/cscs/swissai/infra01/opentela-share:/opentelabin",
+  "/capstor",
+  "/iopsstor",
+]
+
+workdir = "/opt"
+
+[env]
+# NCCL_DEBUG = "INFO"  # uncomment for debugging
+# NCCL_DEBUG_SUBSYS = "INIT,NET"  # uncomment for debugging
+# Node-local, as in the CUDA environment: nodes of a multi-node replica compiling
+# into one network-FS directory crash a worker with "Stale file handle".
+VLLM_CACHE_ROOT = "/tmp/vllm-cache"
+TRITON_CACHE_DIR = "/tmp/triton-cache"
+TORCHINDUCTOR_CACHE_DIR = "/tmp/inductor-cache"
+# vLLM's default 600 s is too short for the large checkpoints' first load.
+VLLM_ENGINE_READY_TIMEOUT_S = "1800"
+# Settings from swiss-ai/uncheatable-eval's validated Beverin vLLM runs
+# (env/vllm-rocm-beverin*.toml).
+HSA_NO_SCRATCH_RECLAIM = "1"
+
+[annotations]
+# Single node (the 70B serves with TP4 on one node): no RCCL hooks needed.
+com.hooks.cxi.enabled = "false"

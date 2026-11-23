@@ -25,10 +25,6 @@ filelock<3.30
 transformers==5.16.0
 accelerate>=1.1.0
 antlr4-python3-runtime==4.11
-# bfcl_v3 Java/JavaScript scoring (the harness's [bfcl] extra; the harness itself is installed --no-deps)
-tree_sitter==0.21.3
-tree-sitter-java==0.21.0
-tree-sitter-javascript==0.21.4
 datasketch<2.0
 segtok
 tokenizers>=0.23.2,<0.24.0

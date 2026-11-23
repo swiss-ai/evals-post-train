@@ -51,7 +51,8 @@ export SANDBOX_K8S_RUN_LABEL="${SANDBOX_K8S_RUN_LABEL:-evalscope-$SLURM_JOB_ID}"
 # sandboxes' limit so their pods schedule (they can still use up to the limit). The memory
 # request already sits below the limit (scripts/evalscope/run.py).
 export SANDBOX_K8S_CPU_REQUEST="${SANDBOX_K8S_CPU_REQUEST:-1}"
-command -v kubectl >/dev/null && kubectl -n "$SANDBOX_K8S_NAMESPACE" auth can-i create pods >/dev/null ||
+# Bounded: with an expired kubelogin token, kubectl waits for a browser login that never comes.
+command -v kubectl >/dev/null && timeout 30 kubectl -n "$SANDBOX_K8S_NAMESPACE" auth can-i create pods >/dev/null ||
     echo "warning: cannot confirm pod access in $SANDBOX_K8S_NAMESPACE (expired kubelogin token?)" >&2
 
 ARGS=("$@")

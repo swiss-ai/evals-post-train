@@ -17,17 +17,6 @@
 #   --script <path>           - Run a model-list script (e.g. scripts/lm_eval_harness/runners/example_models.sh)
 #   --megatron-iter <iter>    - For Megatron models, specify the iteration number to evaluate
 #                               (e.g. 8926), defaults to "latest"
-#   --convert-to-hf           - Convert the Megatron checkpoint at --model to a Hugging Face
-#                               checkpoint before evaluating (via swiss-ai/Megatron-LM's
-#                               tools/checkpoint/convert.py, loader=core saver=swissai_hf).
-#                               Requires --megatron-iter <int> (no "latest": the source tree
-#                               has no latest_checkpointed_iteration.txt). Runs as its own
-#                               sbatch job that the eval job depends on; use --backend
-#                               vllm/sglang/hf afterwards, not megatron_lm.
-#   --hf-output-dir <path>    - Destination for the converted checkpoint (only with
-#                               --convert-to-hf). Default:
-#                               /capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/<name>-iter<N>
-#                               Conversion is skipped if this already has a config.json.
 #
 # Options:
 #   --name <name>        - Override the eval run name (default: auto-derived from model path)
@@ -76,10 +65,12 @@
 #   --api-num-concurrent N - 'openai' backend: concurrent requests (default 8)
 #   --api-endpoint <e>   - 'completions' (default) or 'chat-completions' for the 'openai' backend.
 #                          chat-completions lets the server render the chat template (generative
-#                          tasks only; required by FC tasks such as bfcl_v3_fc).
+#                          tasks only; required by tasks that send `tools` in the request).
 #   --chat-format <f>    - 'template' (default) or 'apertus2' (Apertus 2 native format, a thinking
 #                          run; needs --backend openai, --tokenizer, --max-length; see the docs)
 #   --prefill-mode <m>   - apertus2 answer prefills: 'after_think' (default) or 'empty_think'
+#   --answer-frame <f>   - apertus2: score the 'reply' (default) or the 'claim', the frame the
+#                          Apertus 2 RL math reward grades (needs a harness with answer_frame)
 #   --temperature V, --top-p V, --top-k V, --min-p V, --repetition-penalty V
 #                        - Sampling of thinking/apertus2 runs (defaults: configs/sampling_defaults.json,
 #                          0.6 / 0.95); 'none' leaves one out. On other runs, --temperature turns sampling on.
@@ -142,10 +133,10 @@
 #   bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model meta-llama/Llama-3.1-8B-Instruct
 #
 #   # Single model in resumable chunks
-#   bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/archive/olmo/olmo3_main.txt --table-metrics configs/archive/olmo/olmo3_main_main_table.txt --model allenai/OLMo-2-1124-7B --chunk-size 8
+#   bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file tasks.txt --table-metrics tasks_main_table.txt --model allenai/OLMo-2-1124-7B --chunk-size 8
 #
 #   # Base model, explicit no chat template
-#   bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file configs/archive/olmo/olmo3_easy.txt --table-metrics configs/archive/olmo/olmo3_easy_main_table.txt --model Qwen/Qwen2.5-7B --no-chat-template
+#   bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file tasks.txt --table-metrics tasks_main_table.txt --model Qwen/Qwen2.5-7B --no-chat-template
 #
 #   # Run a multi-model script
 #   bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --script scripts/lm_eval_harness/runners/example_models.sh
@@ -153,10 +144,6 @@
 #   # Run a single task
 #   bash scripts/lm_eval_harness/launch_evaluations.sh single --task hellaswag --model meta-llama/Llama-3.1-8B-Instruct
 #
-#   # Convert a Megatron checkpoint to HF, then evaluate it with vLLM
-#   bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k \
-#     --model /capstor/store/cscs/swissai/infra01/apertus_checkpoints/v1p5/megatron/8B/pretraining \
-#     --backend vllm --convert-to-hf --megatron-iter 430000
 
 set -euo pipefail
 mkdir -p logs
@@ -195,6 +182,7 @@ API_NUM_CONCURRENT_FLAG=""
 API_ENDPOINT_FLAG=""
 CHAT_FORMAT_FLAG="${CHAT_FORMAT:-}"
 PREFILL_MODE_FLAG=""
+ANSWER_FRAME_FLAG=""
 FEWSHOT_FLAG=""
 # Keep an ambient HARNESS_LIMIT (the graceful launcher has no --limit flag, so callers export
 # it); blanking it here would ship the cleared value into the job. --limit still overrides.
@@ -233,8 +221,6 @@ SBATCH_ACCOUNT_FLAG=""
 FORCE_TASKS=""
 EVAL_MERGE_ONLY="false"
 EVAL_DRY_RUN="false"
-CONVERT_TO_HF="false"
-HF_OUTPUT_DIR_FLAG=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -265,6 +251,7 @@ while [[ $# -gt 0 ]]; do
         --api-endpoint) API_ENDPOINT_FLAG="$2";       shift 2 ;;
         --chat-format)  CHAT_FORMAT_FLAG="$2";        shift 2 ;;
         --prefill-mode) PREFILL_MODE_FLAG="$2";       shift 2 ;;
+        --answer-frame) ANSWER_FRAME_FLAG="$2";       shift 2 ;;
         --megatron-iter) MEGATRON_ITER="$2";            shift 2 ;;
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --max-length) MAX_LENGTH="$2";          shift 2 ;;
@@ -307,8 +294,6 @@ while [[ $# -gt 0 ]]; do
         --sampling-profile)          SAMPLING_PROFILE_FLAG="$2";            shift 2 ;;
         --sampling-config)           SAMPLING_CONFIG_FLAG="$2";             shift 2 ;;
         --log-length-metrics)        LOG_LENGTH_METRICS="true";         shift ;;
-        --convert-to-hf) CONVERT_TO_HF="true";           shift ;;
-        --hf-output-dir) HF_OUTPUT_DIR_FLAG="$2";         shift 2 ;;
         *)
             echo "Error: Unknown option '$1'"
             echo "Run with no arguments for usage."
@@ -368,29 +353,9 @@ if [[ -n "$MEGATRON_ITER" ]] && [[ "$MEGATRON_ITER" != "latest" ]] && [[ ! "$MEG
     exit 1
 fi
 
-if [[ "$CONVERT_TO_HF" == "true" ]]; then
-    if [[ ! "$MEGATRON_ITER" =~ ^[0-9]+$ ]]; then
-        echo "Error: --convert-to-hf requires --megatron-iter <integer> (the checkpoint tree" \
-             "has no latest_checkpointed_iteration.txt, so 'latest' can't be resolved automatically)."
-        if [[ -n "$MODEL_PATH" && -d "$MODEL_PATH" ]]; then
-            echo "Available iter_* snapshots under $MODEL_PATH:"
-            find "$MODEL_PATH" -maxdepth 1 -type d -name 'iter_*' -printf '  %f\n' 2>/dev/null
-        fi
-        exit 1
-    fi
-elif [[ -n "$HF_OUTPUT_DIR_FLAG" ]]; then
-    echo "Error: --hf-output-dir requires --convert-to-hf"
-    exit 1
-fi
-
 # Can't specify both --model and --script
 if [[ -n "$MODEL_PATH" && -n "$SCRIPT_PATH" ]]; then
     echo "Error: --model and --script are mutually exclusive"
-    exit 1
-fi
-
-if [[ "$CONVERT_TO_HF" == "true" && -z "$MODEL_PATH" ]]; then
-    echo "Error: --convert-to-hf requires --model <megatron_checkpoint_dir> (not --script)"
     exit 1
 fi
 
@@ -468,7 +433,11 @@ case "${CHAT_FORMAT_FLAG:-template}" in
             echo "Error: --prefill-mode only applies with --chat-format apertus2"
             exit 1
         fi
-        unset CHAT_FORMAT PREFILL_MODE
+        if [[ -n "$ANSWER_FRAME_FLAG" ]]; then
+            echo "Error: --answer-frame only applies with --chat-format apertus2"
+            exit 1
+        fi
+        unset CHAT_FORMAT PREFILL_MODE ANSWER_FRAME
         ;;
     apertus2)
         if [[ "$EFFECTIVE_BACKEND" != "openai" || -z "${CUSTOM_TOKENIZER:-${TOKENIZER:-}}" || -z "$MAX_LENGTH" ]]; then
@@ -477,10 +446,6 @@ case "${CHAT_FORMAT_FLAG:-template}" in
         fi
         if [[ "$BOS_FLAG" == "true" || "${BOS:-}" == "true" ]]; then
             echo "Error: --chat-format apertus2 renders the BOS token itself; drop --bos (or BOS=true)"
-            exit 1
-        fi
-        if [[ "$CONVERT_TO_HF" == "true" ]]; then
-            echo "Error: --chat-format apertus2 evaluates a served model; convert and serve the checkpoint separately (drop --convert-to-hf)"
             exit 1
         fi
         if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" || "$CHAT_TEMPLATE_OVERRIDE" == "by-type" \
@@ -500,13 +465,18 @@ case "${CHAT_FORMAT_FLAG:-template}" in
             echo "Error: --prefill-mode must be 'after_think' or 'empty_think' (got '$PREFILL_MODE_FLAG')"
             exit 1
         fi
+        ANSWER_FRAME_FLAG="${ANSWER_FRAME_FLAG:-${ANSWER_FRAME:-reply}}"
+        if [[ "$ANSWER_FRAME_FLAG" != "reply" && "$ANSWER_FRAME_FLAG" != "claim" ]]; then
+            echo "Error: --answer-frame must be 'reply' or 'claim' (got '$ANSWER_FRAME_FLAG')"
+            exit 1
+        fi
         REASONING_EFFORT="${REASONING_EFFORT:-medium}"
         if [[ ! "$REASONING_EFFORT" =~ ^(low|medium|high)$ ]]; then
             echo "Error: --chat-format apertus2 takes --reasoning-effort low, medium or high (got '$REASONING_EFFORT')"
             exit 1
         fi
         LOG_LENGTH_METRICS="true"
-        export CHAT_FORMAT=apertus2 PREFILL_MODE="$PREFILL_MODE_FLAG"
+        export CHAT_FORMAT=apertus2 PREFILL_MODE="$PREFILL_MODE_FLAG" ANSWER_FRAME="$ANSWER_FRAME_FLAG"
         ;;
     *)
         echo "Error: --chat-format must be 'template' or 'apertus2' (got '$CHAT_FORMAT_FLAG')"
@@ -743,7 +713,7 @@ fi
 [[ -n "$PARTITION_FLAG" ]] && export SBATCH_PARTITION="$PARTITION_FLAG"
 export WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 export WANDB_PROJECT=${WANDB_PROJECT:-e-p-t-pool}
-export LOGS_ROOT=${LOGS_ROOT:-${SCRATCH:-/tmp}/eval_logs_start}
+export LOGS_ROOT=${LOGS_ROOT:-$PWD/logs/lm_eval}
 [[ -n "$WANDB_ENTITY_FLAG" ]] && export WANDB_ENTITY="$WANDB_ENTITY_FLAG"
 [[ -n "$WANDB_PROJECT_FLAG" ]] && export WANDB_PROJECT="$WANDB_PROJECT_FLAG"
 [[ -n "$LOGS_ROOT_FLAG" ]] && export LOGS_ROOT="$LOGS_ROOT_FLAG"
@@ -843,6 +813,7 @@ if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
         echo "  API endpoint: completions"
     fi
     [[ "${CHAT_FORMAT:-}" == "apertus2" ]] && echo "  Chat format: apertus2 (prefill=$PREFILL_MODE)"
+    [[ "${ANSWER_FRAME:-reply}" == "claim" ]] && echo "  Answer frame: claim (scored as by the Apertus 2 RL math reward)"
 fi
 echo "  Slurm:  partition=${SBATCH_PARTITION:-normal} qos=${SBATCH_QOS:-<default>}${SBATCH_RESERVATION:+ reservation=$SBATCH_RESERVATION}"
 echo "  Judge RPM: ${JUDGE_REQUESTS_PER_MINUTE:-unlimited}"
@@ -881,6 +852,15 @@ if [[ "$JUDGE_MODE" == "none" ]]; then
     fi
 fi
 
+# A W&B upload asked for with --wandb-entity/--wandb-project needs the key, as in the other runners (the
+# sbatch job only warns and skips the upload), so a missing one stops here.
+# (secrets.sh only sets shell variables, so the key is passed on.)
+WANDB_ENTITY=$WANDB_ENTITY_FLAG WANDB_PROJECT=$WANDB_PROJECT_FLAG WANDB_API_KEY=${WANDB_API_KEY:-} \
+    bash -c 'source scripts/common/wandb.sh && wandb_setup > /dev/null' || exit 1
+# shellcheck source=scripts/common/preflight.sh
+source scripts/common/preflight.sh
+preflight_done
+
 # --- Dispatch based on model selection mode ---
 EVAL_JOB_IDS=()
 
@@ -892,36 +872,9 @@ if [[ -n "$MODEL_PATH" ]]; then
             MODEL_NAME="${MODEL_NAME}-think"
         fi
         [[ "${CHAT_FORMAT:-}" == "apertus2" ]] && MODEL_NAME="${MODEL_NAME}-apertus2-${PREFILL_MODE}"
+        [[ "${ANSWER_FRAME:-reply}" == "claim" ]] && MODEL_NAME="${MODEL_NAME}-claim"
         [[ -n "$REASONING_EFFORT" ]] && MODEL_NAME="${MODEL_NAME}-effort-${REASONING_EFFORT}"
     fi
-
-    # --- Convert a Megatron checkpoint to HF before evaluating it ---
-    # Submitted as its own sbatch job; the eval job(s) below depend on it (afterok),
-    # and MODEL_PATH is rewritten to the (not-yet-populated) destination now, since
-    # that's what the conversion job will have produced by the time the dependent
-    # eval job actually runs.
-    EVAL_CONVERT_JOB_ID=""
-    if [[ "$CONVERT_TO_HF" == "true" ]]; then
-        MEGATRON_LOAD_DIR="$MODEL_PATH/iter_$(printf '%07d' "$MEGATRON_ITER")"
-        if [[ ! -d "$MEGATRON_LOAD_DIR" ]]; then
-            echo "Error: Megatron checkpoint directory not found: $MEGATRON_LOAD_DIR"
-            echo "Available iter_* snapshots under $MODEL_PATH:"
-            find "$MODEL_PATH" -maxdepth 1 -type d -name 'iter_*' -printf '  %f\n' 2>/dev/null
-            exit 1
-        fi
-        HF_SAVE_DIR="${HF_OUTPUT_DIR_FLAG:-/capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/${MODEL_NAME}-iter${MEGATRON_ITER}}"
-        echo "  Convert: $MEGATRON_LOAD_DIR -> $HF_SAVE_DIR"
-        if [[ "$EVAL_DRY_RUN" == "true" ]]; then
-            echo "[DRY RUN] sbatch scripts/lm_eval_harness/convert_megatron_checkpoint.sbatch $MEGATRON_LOAD_DIR $HF_SAVE_DIR" >&2
-            EVAL_CONVERT_JOB_ID="dry-convert"
-        else
-            EVAL_CONVERT_JOB_ID=$(HF_TOKENIZER="${CUSTOM_TOKENIZER:-alehc/swissai-tokenizer}" \
-                sbatch --parsable scripts/lm_eval_harness/convert_megatron_checkpoint.sbatch "$MEGATRON_LOAD_DIR" "$HF_SAVE_DIR")
-            echo "  Conversion job: $EVAL_CONVERT_JOB_ID"
-        fi
-        MODEL_PATH="$HF_SAVE_DIR"
-    fi
-    export EVAL_CONVERT_JOB_ID
 
     export APPLY_CHAT_TEMPLATE="${CHAT_TEMPLATE_OVERRIDE:-true}"
 

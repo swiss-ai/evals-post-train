@@ -10,7 +10,7 @@ Usage:
     python3 scripts/lm_eval_harness/launch_judge.py --preset qwen3.5-27b
 
     # Auto-detect from task list
-    python3 scripts/lm_eval_harness/launch_judge.py --detect-from-tasks configs/archive/apertus/tasks_default.txt
+    python3 scripts/lm_eval_harness/launch_judge.py --detect-from-tasks tasks.txt
 
     # Cancel a running judge
     python3 scripts/lm_eval_harness/launch_judge.py --cancel-job-id 12345
@@ -97,6 +97,20 @@ JUDGE_PRESETS = {
             # This model's config.json caps max_position_embeddings at 2048 (unlike the
             # other judge presets); vLLM refuses to start above that, so keep it in bounds.
             "--tensor-parallel-size 4 --max-model-len 2048"
+        ),
+    },
+    "gpt-oss-120b": {
+        "served_model_name": "openai/gpt-oss-120b",
+        "framework": "vllm",
+        "nodes": 1,
+        "time": "04:00:00",
+        "account": "infra01",
+        "partition": "normal",
+        "framework_args": (
+            f"--model {MODEL_REGISTRY / 'openai/gpt-oss-120b'} "
+            "--host 0.0.0.0 "
+            "--served-model-name openai/gpt-oss-120b "
+            "--tensor-parallel-size 4 --max-model-len 32768"
         ),
     },
     "llama-guard": {

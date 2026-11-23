@@ -3,7 +3,7 @@
 ## Principles
 
 - **Stand-alone:** no coupling to a downstream consumer.
-- **Generic:** no per-model special cases.
+- **Generic:** no model-specific fixes in shared code (launchers, probes, checks, scripts): no detection keyed on a model name, and no loosening of a shared check because one model trips it. A model that does not fit the generic mechanism gets an existing per-run flag in its suite setup (`flags`, `launch` in `configs/suites/`; e.g. Nemotron's `--no-bos`), or the generic workaround documented.
 - **Simple:** one code path over extra modes; small PRs.
 - **Pinned:** pin what you add (datasets, harness commits, packages) so runs can be repeated.
 
@@ -29,15 +29,15 @@ Run `bash -n` on edited shell scripts; they must work on macOS bash 3.2 (`${ARR[
 | needs its own scorer, an LLM judge or a simulated user | Inspect AI |
 | is agentic coding or terminal work, one container per task | Harbor |
 
-EvalScope covers SWE-bench Verified and Pro, LiveCodeBench and BFCL v4. Results are uploaded by the framework's existing W&B uploader.
+EvalScope covers SWE-bench Verified and Pro and LiveCodeBench. Results are uploaded by the framework's existing W&B uploader.
 
-**lm-evaluation-harness:** add the task to a task list in `configs/` and its `task/metric` to the matching `*_main_table.txt`. A task missing from [swiss-ai/lm-evaluation-harness](https://github.com/swiss-ai/lm-evaluation-harness) goes there first; then bump the commit in `requirements/lm-eval-harness.txt`. Details: [Adding a New Task](docs/lm-eval-harness.md#adding-a-new-task).
+**lm-evaluation-harness:** add the task to your task list and its `task/metric` to the matching `*_main_table.txt`. A task missing from [swiss-ai/lm-evaluation-harness](https://github.com/swiss-ai/lm-evaluation-harness) goes there first; then bump the commit in `requirements/lm-eval-harness.txt`. Details: [Adding a New Task](docs/lm-eval-harness.md#adding-a-new-task).
 
 **Inspect AI:** a task in [inspect_evals](https://github.com/UKGovernmentBEIS/inspect_evals) needs no code (`--task <name>`); add an example to [docs/inspect-ai.md](docs/inspect-ai.md). Otherwise write a `@task` file, run it by path (`--task path/to/task.py`), and test it. `scripts/aaii/aa_lcr.py` and its `tests/test_aa_lcr.py` are an example with a judge.
 
 **Harbor:** add a pinned entry to `BENCHMARKS` in `scripts/harbor/run.py` (`name@1.0` or `@sha256:...`), list it in `run_harbor_eval.sh`'s header and [docs/harbor.md](docs/harbor.md), and check that `--gold --limit 2` scores 1 on each sandbox it supports. Tasks that need fixing after download get a patch in `scripts/harbor/task_patches.py`, with a test.
 
-**Before a new benchmark counts as done**, it runs end to end, not just with `--limit`/`--gold`:
+**A new benchmark is done** only when it runs end to end, not just with `--limit`/`--gold`:
 
 - against an OpenAI-compatible endpoint (`--api-base-url`; `--backend openai` for lm-eval),
 - with W&B logging, and
@@ -63,4 +63,4 @@ Edit the `requirements/*.txt`, run `scripts/common/lock_requirements.sh` (needs 
 | `inspect-runtime`, `evalscope-runtime`, `harbor-runtime`, `harbor-adapters` | the `.lock` |
 | `lm-eval-runtime` | the `.lock` in the prebuilt image (`openai` backend); the `.txt` by in-job backends, whose containers provide torch |
 | `lm-eval-harness.txt` | no lock: the harness commit, installed `--no-deps` (its dependencies go in `lm-eval-runtime.txt`) |
-| `apertus2.txt` | no lock: the `apertus-common` commit, installed `--no-deps` for `--chat-format apertus2` runs: into the harness overlay of built environments, and from a wheel the launcher builds (`prepare_apertus_common.sh`) on the prebuilt image (not in the image: private repository); its dependencies are in `lm-eval-runtime.lock` |
+| `apertus2.txt` | no lock: the `apertus-common` commit, installed `--no-deps` for `--chat-format apertus2` runs: into the harness overlay of built environments, and into the venv of the prebuilt image; it is also the vLLM plugin of `docs/thinking.md`; its dependencies are in `lm-eval-runtime.lock` |

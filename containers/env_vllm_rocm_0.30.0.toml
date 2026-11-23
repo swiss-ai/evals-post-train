@@ -1,0 +1,45 @@
+# Container engine EDF for serving with vLLM on Beverin (AMD MI300A, gfx942): the
+# ROCm twin of model-launch's Clariden vllm_0.30.0.toml (ci/vllm_0.30.0-{arch}.sqsh),
+# for measuring how far Beverin results are from Clariden ones.
+#
+# Hand-built on Beverin (2026-11-03) from model-launch's images/vllm_0.30.0
+# recipe, step for step: rocm/dev-ubuntu-24.04:7.2.3-complete instead of the CUDA
+# base, miniforge Python 3.12, vllm==0.30.0+rocm723 from vLLM's ROCm 7.2.3 wheel
+# index, ray 2.55.0, curl, plus the runtime libraries the ROCm torch needs. Every
+# other Python package is pinned to the version in the Clariden image (198 of the
+# 235 packages both share are identical, transformers 5.17.0 among them). The ROCm
+# wheel forces torch 2.12.0 (Clariden: 2.13.0+cu130), xgrammar 0.2.7 and a few
+# build tools, and it brings aiter / ROCm flash-attn instead of FlashInfer.
+# Served Qwen3-32B with TP4 on Beverin 2026-11-03: echo with log-probabilities and
+# generation work. Mistral-Small-3.2 (Pixtral) fails on it, as on the Clariden
+# image: vLLM 0.30.0 imports a class transformers 5.17.0 no longer has.
+#
+# Mounts are the Clariden TOML's, minus the host libraries it maps in for the
+# CXI hooks (off here).
+image = "/capstor/store/cscs/swissai/infra01/container-images/vllm_0.30.0_rocm.sqsh"
+
+mounts = [
+  "/capstor/store/cscs/swissai/infra01/opentela-share:/opentelabin",
+  "/capstor",
+  "/iopsstor",
+]
+
+workdir = "/opt"
+
+[env]
+# NCCL_DEBUG = "INFO"  # uncomment for debugging
+# NCCL_DEBUG_SUBSYS = "INIT,NET"  # uncomment for debugging
+# Node-local: nodes of a multi-node replica compiling into one network-FS
+# directory crash a worker with "Stale file handle".
+VLLM_CACHE_ROOT = "/tmp/vllm-cache"
+TRITON_CACHE_DIR = "/tmp/triton-cache"
+TORCHINDUCTOR_CACHE_DIR = "/tmp/inductor-cache"
+# vLLM's default 600 s is too short for the large checkpoints' first load.
+VLLM_ENGINE_READY_TIMEOUT_S = "3600"
+# Settings from swiss-ai/uncheatable-eval's validated Beverin vLLM runs.
+HSA_NO_SCRATCH_RECLAIM = "1"
+
+[annotations]
+# No CXI / aws-ofi-nccl hooks, as in vllm_rocm_0.29.toml: with them RCCL hangs in
+# the plugin's init under model-launch; without them RCCL goes over TCP sockets.
+com.hooks.cxi.enabled = "false"

@@ -33,14 +33,15 @@ usage() {
 	echo " REVISION: Only used in huggingface models. If set, this revision of the model will be evaluated."
 	echo " SIZE: Legacy/informational approximate model size in billions."
 	echo " MAX_LENGTH: Optional backend context limit (vLLM max_model_len; Megatron seq_length)."
-	echo " MAX_NEW_TOKENS: Generation budget of thinking/reasoning-effort runs; replaces every task's own max_gen_toks (default: 32768 when thinking)."
+	echo " MAX_NEW_TOKENS: Generation budget of thinking/reasoning-effort runs; replaces every task's own max_gen_toks (default when thinking: 32768; on the openai backend with MAX_LENGTH set, MAX_LENGTH, which the harness clamps per request to the window minus the prompt)."
 	echo " VLLM_TP_SIZE / VLLM_DP_SIZE: Explicit vLLM topology. Defaults to TP=4/DP=1, or TP=1/DP=4 when a model name unambiguously indicates <30B."
 	echo " VLLM_MEMORY_FRACTION: vLLM/SGLang GPU memory fraction (default: 0.8)."
 	echo " MEGATRON_MICRO_BATCH_SIZE: Megatron micro-batch override; otherwise uses numeric BS or 1 when BS=auto."
 	echo " BOS: 'true' prepends the BOS token, 'false' leaves it to the tokenizer; default 'auto' = true for models whose tokenizer never adds the BOS token they need (Gemma 4, scripts/lm_eval_harness/bos_default.py)."
 	echo " TRUST_REMOTE_CODE: 'true' loads the tokenizer (hf/vllm: also the model) with trust_remote_code=True; hf, vllm and openai backends."
-	echo " LOGS_ROOT: Where are your evaluation wandb&harness logs going to."
-	echo " TASKS: Tasks to run with lm eval harness."
+	echo " LOGS_ROOT: Where the evaluation wandb&harness logs go (default: <repo>/logs/lm_eval)."
+	echo " TASKS: Required. Tasks to run with lm eval harness: a task list file (one name per line, # comments) or comma-separated names."
+	echo " TABLE_METRICS: task/metric pairs for the W&B summary table: a file (one pair per line, # group headers) or space-separated pairs (default: TASKS)."
 	echo " WANDB_ENTITY: WandB entity name for uploading results (default: apertus)."
 	echo " WANDB_PROJECT: WandB project name for uploading results (default: swissai-evals-test)."
 	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: vllm). - options are: hf, vllm, sglang, megatron_lm, openai"
@@ -76,6 +77,7 @@ usage() {
     echo " THINK_TEMPERATURE, THINK_TOP_P, THINK_TOP_K, THINK_MIN_P, THINK_REPETITION_PENALTY: sampling of thinking runs (defaults in configs/sampling_defaults.json: 0.6 / 0.95, the others unset; 'none' leaves one out)."
     echo " CHAT_FORMAT: 'apertus2' for the Apertus 2 native format (openai backend, harness model apertus2-completions; needs TOKENIZER and MAX_LENGTH). Default: template."
     echo " PREFILL_MODE: apertus2 answer prefills, 'after_think' (default) or 'empty_think'."
+    echo " ANSWER_FRAME: apertus2: score the 'reply' (default) or the 'claim', the frame the Apertus 2 RL math reward grades."
 	echo "For more information see the README: https://github.com/swiss-ai/evals?tab=readme-ov-file."
 }
 die() {
@@ -103,9 +105,9 @@ BS=${BS:-"auto:20"}
 SIZE=${SIZE:-1}
 BOS=${BOS:-auto}
 TRUST_REMOTE_CODE=${TRUST_REMOTE_CODE:-false}
-LOGS_ROOT=${LOGS_ROOT:-$SCRATCH/eval_logs_start/}
-TASKS=${TASKS:-./configs/archive/apertus/tasks_default.txt}
-TABLE_METRICS=${TABLE_METRICS:-./configs/archive/apertus/tasks_default_main_table.txt}
+LOGS_ROOT=${LOGS_ROOT:-$PWD/logs/lm_eval}
+TASKS=${TASKS:-}
+TABLE_METRICS=${TABLE_METRICS:-$TASKS}
 WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
 LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
@@ -137,6 +139,7 @@ if [[ -n "$EVAL_CHUNKS_FILE" ]]; then
     [[ -n "$TASKS" ]] || die "No task chunk at array index $SLURM_ARRAY_TASK_ID"
     echo "Array chunk $SLURM_ARRAY_TASK_ID: $TASKS"
 fi
+[[ -n "$TASKS" ]] || die "TASKS is not set: a task list file or comma-separated task names"
 
 [[ -n "$EVAL_ENV_MANIFEST" ]] || die "EVAL_ENV_MANIFEST is required; launch through scripts/lm_eval_harness/launch_evaluations.sh"
 [[ -f "$EVAL_RUN_CONFIG" ]] || die "EVAL_RUN_CONFIG is required and must be a readable file"
@@ -144,8 +147,7 @@ fi
 load_prepared_eval_env() {
     EVAL_ENV_CHECK_ERROR=""
     unset EVAL_ENV_KIND EVAL_BASE_ENV EVAL_HARNESS_OVERLAY EVAL_HARNESS_ARCHIVE \
-        EVAL_RESOLVED_HARNESS_REPO EVAL_RESOLVED_HARNESS_COMMIT EVAL_RESOLVED_BASE_KEY \
-        EVAL_APERTUS_COMMON_WHEELS
+        EVAL_RESOLVED_HARNESS_REPO EVAL_RESOLVED_HARNESS_COMMIT EVAL_RESOLVED_BASE_KEY
     if [[ ! -f "$EVAL_ENV_MANIFEST" ]]; then
         EVAL_ENV_CHECK_ERROR="manifest is missing: $EVAL_ENV_MANIFEST"
         return 1
@@ -300,6 +302,7 @@ case "$CHAT_FORMAT" in
     template) ;;
     apertus2)
         PREFILL_MODE=${PREFILL_MODE:-after_think}
+        ANSWER_FRAME=${ANSWER_FRAME:-reply}
         [[ -n "${TOKENIZER:-}" ]] || die "CHAT_FORMAT=apertus2 needs TOKENIZER, the checkpoint's tokenizer."
         [[ "$BOS" != "true" ]] || die "CHAT_FORMAT=apertus2 renders the BOS token itself: unset BOS."
         [[ "$LM_EVAL_BACKEND" == "openai" && "${API_CHAT_ENDPOINT:-false}" != "true" && $APPLY_CHAT_TEMPLATE = true ]] \
@@ -307,6 +310,8 @@ case "$CHAT_FORMAT" in
         [[ -n "$MAX_LENGTH" ]] || die "CHAT_FORMAT=apertus2 needs MAX_LENGTH, the server's --max-model-len."
         [[ "$PREFILL_MODE" == "after_think" || "$PREFILL_MODE" == "empty_think" ]] \
             || die "PREFILL_MODE must be after_think or empty_think (got '$PREFILL_MODE')."
+        [[ "$ANSWER_FRAME" == "reply" || "$ANSWER_FRAME" == "claim" ]] \
+            || die "ANSWER_FRAME must be reply or claim (got '$ANSWER_FRAME')."
         [[ $ENABLE_THINKING_EXPLICIT == 0 && -z "$THINK_END_TOKEN$THINK_START_TOKEN$TRACK_THINKING_METRICS" \
            && "$AUTODETECT_THINK_TOKENS" == "False" ]] \
             || die "CHAT_FORMAT=apertus2 always reasons and separates the reasoning itself: unset ENABLE_THINKING, THINK_END_TOKEN, THINK_START_TOKEN, AUTODETECT_THINK_TOKENS and TRACK_THINKING_METRICS."
@@ -320,6 +325,13 @@ esac
 # 32768 is the largest task-local budget (AIME), so the override below lowers no task.
 if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then
     MAX_NEW_TOKENS=32768
+    # On the openai backend every generation request is clamped to the window minus its prompt
+    # (clamp_gen_toks; apertus2 clamps itself), so the budget is the whole window: a model served
+    # with more than 32768 is not cut there. Other backends never clamp, and a budget equal to the
+    # window would leave no room for the prompt.
+    if [[ "$LM_EVAL_BACKEND" == "openai" && -n "$MAX_LENGTH" ]]; then
+        MAX_NEW_TOKENS=$MAX_LENGTH
+    fi
     echo "ENABLE_THINKING=True or REASONING_EFFORT set: raising default MAX_NEW_TOKENS to $MAX_NEW_TOKENS"
 fi
 
@@ -610,6 +622,8 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
         # The model reads the effort itself (no chat template); the context goes in as
         # max_model_len (below).
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer=$TOKENIZER,prefill=$PREFILL_MODE,reasoning_effort=$REASONING_EFFORT${THINKING_DEFAULT_MODEL_ARG}"
+        # Only when asked: default runs keep their model arguments.
+        [[ "${ANSWER_FRAME:-reply}" == "claim" ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,answer_frame=claim"
         CHAT_TEMPLATE_ARGS=""
     elif [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then
         # tokenizer_backend/tokenizer is local bookkeeping only (max context length, decoding,
@@ -655,6 +669,9 @@ fi
 
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
 mkdir -p "$HARNESS_EVAL_DIR"
+# Keep the job's output from here on with the results (stdout and stderr stay separate streams
+# for Slurm). Nothing in the results pipeline reads it: the readers glob results_*.json and samples_*.jsonl.
+exec > >(tee -a "$HARNESS_EVAL_DIR/run.log") 2> >(tee -a "$HARNESS_EVAL_DIR/run.log" >&2)
 cp "$EVAL_RUN_CONFIG" "$HARNESS_EVAL_DIR/.eval-run-config.json"
 
 # Generation kwargs supplied through the CLI update every task's YAML. Thinking and
@@ -799,25 +816,7 @@ echo "Using lm-evaluation-harness: $EVAL_RESOLVED_HARNESS_REPO@$EVAL_RESOLVED_HA
 if [[ "${EVAL_ENV_KIND:-}" == "prebuilt" ]]; then
 # EVAL_PREBUILT_ENV=1: the container (containers/Dockerfile.eval) already has
 # every package and the pinned harness. Check it, never install: a mismatch means the job runs
-# in an image built from a different commit. The one exception is apertus-common (a private
-# repository, so not in the image): an apertus2 run installs the wheel the launcher built from the
-# commit requirements/apertus2.txt pins (prepare_apertus_common.sh), offline and --no-deps like
-# the harness, into a directory of its own ahead of the overlay.
-APERTUS_COMMON_INSTALL=""
-APERTUS_COMMON_IMPORT=""
-if [[ "$CHAT_FORMAT" == "apertus2" ]]; then
-[[ -n "${EVAL_APERTUS_COMMON_WHEELS:-}" ]] \
-    || die "CHAT_FORMAT=apertus2 on the prebuilt image needs EVAL_APERTUS_COMMON_WHEELS in the manifest (the launcher writes it)."
-APERTUS_COMMON_IMPORT=", apertus_common"
-APERTUS_COMMON_INSTALL="
-if [[ ! -f '$EVAL_APERTUS_COMMON_WHEELS/.complete' ]]; then
-    echo 'The apertus-common wheel is not visible in the container: $EVAL_APERTUS_COMMON_WHEELS (mount EVAL_ENV_CACHE_ROOT).' >&2
-    exit 1
-fi
-apertus_common_dir=\$(mktemp -d)
-python -m pip install --quiet --no-deps --no-index --target \"\$apertus_common_dir\" '$EVAL_APERTUS_COMMON_WHEELS'/*.whl || exit 1
-export PYTHONPATH=\"\$apertus_common_dir\"\${PYTHONPATH:+:\$PYTHONPATH}"
-fi
+# in an image built from a different commit.
 LOAD_ENV_CMD="
 echo Container entered: \$(date -Is)
 # lm-eval's packages are in the image's venv, first on PATH by the image's ENV. Not every runtime
@@ -833,8 +832,7 @@ if [[ \"\$container_harness_commit\" != '$EVAL_RESOLVED_HARNESS_COMMIT' ]]; then
     exit 1
 fi
 export PYTHONPATH='$EVAL_HARNESS_OVERLAY'\${PYTHONPATH:+:\$PYTHONPATH}
-$APERTUS_COMMON_INSTALL
-if ! python -c 'import accelerate, datasets, transformers, wandb, lm_eval${APERTUS_COMMON_IMPORT}'; then
+if ! python -c 'import accelerate, datasets, transformers, wandb, lm_eval, apertus_common'; then
     echo 'EVAL_PREBUILT_ENV=1, but this container is missing evaluation packages (import check above).' >&2
     exit 1
 fi
@@ -1178,7 +1176,10 @@ else
     WANDB_CMD="cd $PWD && python -m scripts.results.update_wandb_alignment --entity $WANDB_ENTITY --project $WANDB_PROJECT --logs_root $HARNESS_EVAL_DIR --name $NAME --main_metrics $TABLE_METRICS --eval_duration $DURATION"
     echo "Running command to upload results to wandb:"
     echo "$WANDB_CMD"
+    # Run in the evaluation environment, like the evaluation itself: the container's own python has no wandb.
     srun -ul --mpi=pmix --environment=$BASE_CONTAINER_ENV bash -c " \
+        set -euo pipefail
+        $LOAD_ENV_CMD
         $WANDB_CMD
     "
 fi
