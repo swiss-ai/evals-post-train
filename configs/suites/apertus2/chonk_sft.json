@@ -208,7 +208,7 @@
       }
     },
     "chonk-lc-16k-v0.2-sft": {
-      "description": "SwissAI-Research/swiss-ai/chonk-lc-16k-v0.2-sft. No Jinja template exists: apertus-common renders the format, in lm_eval (--chat-format apertus2, completions endpoint, needs --backend openai and the verified Apertus_2_instruct tokenizer, pinned in `tokenizer`) and on the server for the other frameworks (vLLM plugin of apertus-common, see docs/thinking.md). Served with a 262144 window (the Harbor agent and tau2 may use all of it; the other benchmarks keep max_length 32768) although the checkpoint's max_position_embeddings is 16384 (plain RoPE), so what it does past 16k is untrained: read those scores with that in mind. The server only starts with VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 (launch.env). It only reasons at effort high on non-math tasks.",
+      "description": "SwissAI-Research/swiss-ai/chonk-lc-16k-v0.2-sft. No Jinja template exists: apertus-common renders the format, in lm_eval (--chat-format apertus2, completions endpoint, needs --backend openai and the verified Apertus_2_instruct tokenizer, pinned in `tokenizer`) and on the server for the other frameworks (vLLM plugin of apertus-common, see docs/thinking.md). Served with a 262144 window (tau2 and BFCL v4 may use it; the Harbor agent is told 32768 and the other benchmarks keep max_length 32768) although the checkpoint's max_position_embeddings is 16384 (plain RoPE), so what it does past 16k is untrained: read those scores with that in mind. The server only starts with VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 (launch.env). It only reasons at effort high on non-math tasks.",
       "max_length": 32768,
       "sampling": "thinking",
       "reasoning_effort": "high",
