@@ -49,6 +49,22 @@ class BfclWandbTests(unittest.TestCase):
         self.assertEqual(flat["bfcl_v4/overall_no_web_search"], 0.4)
         self.assertEqual(flat["bfcl_v4/memory"], 0.3)
 
+    def test_inference_errors_are_uploaded_next_to_the_scores(self):
+        summary = {"version": "v4", "overall": None, "groups": {}, "categories": {"simple": {"accuracy": 0.5, "correct": 1, "total": 2}},
+                   "inference_errors": {"n_entries": 2, "n_errors": 1, "by_cause": {"context_overflow": 1, "other": 0}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "summary.json").write_text(json.dumps(summary))
+            evaluation, _ = create_model_evaluation_from_bfcl_run("m", Path(tmp))
+        flat = evaluation.get_flattened_metrics()
+        self.assertEqual((flat["bfcl_v4/n_inference_errors"], flat["bfcl_v4/n_context_overflows"]), (1, 1))
+
+    def test_a_summary_from_before_the_error_count_still_uploads(self):
+        summary = {"version": "v4", "overall": None, "groups": {}, "categories": {}}
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "summary.json").write_text(json.dumps(summary))
+            evaluation, _ = create_model_evaluation_from_bfcl_run("m", Path(tmp))
+        self.assertNotIn("bfcl_v4/n_inference_errors", evaluation.get_flattened_metrics())
+
 
 if __name__ == "__main__":
     unittest.main()

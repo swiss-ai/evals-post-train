@@ -182,5 +182,34 @@ class SummaryTest(unittest.TestCase):
         self.assertIsNone(bfcl.v4_without_web_search(categories))
 
 
+class InferenceErrorsTest(unittest.TestCase):
+    def _result_dir(self, tmp, lines_by_file):
+        root = Path(tmp)
+        for relative, lines in lines_by_file.items():
+            path = root / "custom-m-FC" / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("\n".join(json.dumps(line) for line in lines) + "\n")
+        return root
+
+    def test_entries_that_ended_in_an_inference_error_are_counted_by_cause(self):
+        overflow = "Error during inference: Error code: 400 - This model's maximum context length is 32768 tokens"
+        timeout = "Error during inference: Request timed out."
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._result_dir(tmp, {
+                "BFCL_v4_simple_result.json": [{"id": "a", "result": "[f(x=1)]"}, {"id": "b", "result": timeout}],
+                "multi_turn/BFCL_v4_multi_turn_long_context_result.json": [
+                    {"id": "c", "result": overflow}, {"id": "d", "result": [["call"], ["call"]]}],
+                "memory/BFCL_v4_memory_kv_result.json": [{"id": "e", "result": "Error occurred during inference: " + overflow}],
+            })
+            found = bfcl.inference_errors(root, "custom-m-FC")
+        self.assertEqual(found, {"n_entries": 5, "n_errors": 3, "by_cause": {"context_overflow": 2, "other": 1}})
+
+    def test_a_run_without_errors_or_results_reports_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._result_dir(tmp, {"BFCL_v3_simple_result.json": [{"id": "a", "result": "[f()]"}]})
+            self.assertEqual(bfcl.inference_errors(root, "custom-m-FC")["n_errors"], 0)
+            self.assertEqual(bfcl.inference_errors(root, "another-model"), {"n_entries": 0, "n_errors": 0, "by_cause": {"context_overflow": 0, "other": 0}})
+
+
 if __name__ == "__main__":
     unittest.main()

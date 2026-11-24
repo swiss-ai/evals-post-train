@@ -37,5 +37,9 @@ def create_model_evaluation_from_bfcl_run(model_name: str, work_dir: Path) -> Tu
     for name, category in summary["categories"].items():
         metrics.append(Metric(name=name, score=category["accuracy"]))
     metrics.append(Metric(name="n_samples", score=sum(c["total"] for c in summary["categories"].values())))
+    if errors := summary.get("inference_errors"):
+        # Entries bfcl-eval scored wrong because their generation raised (counted in the accuracies above).
+        metrics.append(Metric(name="n_inference_errors", score=errors["n_errors"]))
+        metrics.append(Metric(name="n_context_overflows", score=errors["by_cause"]["context_overflow"]))
     task = Task(task_name=task_name(summary), metrics=metrics, samples=[])
     return ModelEvaluation(model_name=model_name, tasks=[task]), int(summary.get("duration_s") or 0)

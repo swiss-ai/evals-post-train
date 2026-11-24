@@ -221,6 +221,32 @@ def v4_without_web_search(categories: dict[str, dict[str, Any]]) -> dict[str, fl
     return scores
 
 
+INFERENCE_ERROR_MARKERS = ("Error during inference", "Error occurred during inference")
+
+
+def inference_errors(result_dir: Path, registry: str) -> dict[str, Any]:
+    """How many generated entries ended in an inference error, by cause.
+
+    bfcl-eval writes "Error during inference: ..." as the result of an entry whose generation raised, and
+    scores it wrong like any other wrong answer (it stays in the category's total). A context overflow
+    (the conversation outgrew the served window) is a limit of the model under test; any other error (a timeout,
+    a server error) is not necessarily the model's, so those are reported apart: rerun the run if there are any."""
+    entries = errors = 0
+    by_cause = {"context_overflow": 0, "other": 0}
+    for path in sorted(result_dir.glob(f"{registry}/**/*_result.json")):
+        for line in path.read_text().splitlines():
+            try:
+                result = json.loads(line).get("result", "")
+            except (json.JSONDecodeError, AttributeError):
+                continue
+            entries += 1
+            text = json.dumps(result)[:1000]
+            if any(marker in text for marker in INFERENCE_ERROR_MARKERS):
+                errors += 1
+                by_cause["context_overflow" if "context length" in text or "context_length" in text else "other"] += 1
+    return {"n_entries": entries, "n_errors": errors, "by_cause": by_cause}
+
+
 def summarize(version: str, registry: str, score_dir: Path) -> dict[str, Any]:
     """Per-category scores and the official groups; the overall BFCL v3 computed (bfcl-eval 3.0.0's
     total: the unweighted mean of the live, non-live and multi-turn groups). For v4 there is no official overall
@@ -277,9 +303,16 @@ def main(argv: list[str] | None = None) -> int:
     evaluate([registry], categories, None, None, partial_eval=bool(args.num_tasks))
 
     summary = summarize(args.version, registry, workdir / "score")
+    summary["inference_errors"] = inference_errors(workdir / "result", registry)
     summary.update(model=args.model, api_base_url=args.api_base_url, num_tasks=args.num_tasks, duration_s=int(time.time() - started))
     (workdir / "summary.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
+    errors = summary["inference_errors"]
+    print(f"inference errors counted as wrong answers: {errors['n_errors']} of {errors['n_entries']} entries "
+          f"(context overflow {errors['by_cause']['context_overflow']}, other {errors['by_cause']['other']})")
+    if errors["by_cause"]["other"]:
+        print("WARNING: errors other than a context overflow (a timeout, a server error) are not necessarily the "
+              "model's fault; consider rerunning.", file=sys.stderr)
     return 0
 
 
