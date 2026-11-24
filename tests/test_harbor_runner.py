@@ -257,6 +257,7 @@ class SummaryTest(unittest.TestCase):
             summary = run.summarize_job(Path(job))
         self.assertEqual((summary["mean_reward"], summary["n_trials"], summary["n_scored"]), (0.5, 3, 2))
         self.assertEqual(summary["evaluation_errors"], [{"task": "c", "trial": "c__1", "error": "RuntimeError: pod OOMKilled"}])
+        self.assertEqual(summary["errors_by_type"], {"RuntimeError": 1})
 
     def test_named_metrics_without_reward(self):
         with tempfile.TemporaryDirectory() as job:

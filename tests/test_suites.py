@@ -46,14 +46,18 @@ class SuiteTests(unittest.TestCase):
                           "--api-num-concurrent", "256", "--max-length", "262144", "--repeats", "4"])
         self.assertNotIn("--repeats", suites.flags_for(suite, THINK, "minerva_math500_think"))
 
-    def test_harbor_is_told_the_window_each_setup_is_run_with(self):
-        # max_input_tokens is the window of the setup (max_length): one number, stated twice.
+    def test_harbor_agent_is_told_the_window_of_its_setup(self):
+        # max_input_tokens is the window terminus-2 is told (it summarises before it fills). It is
+        # independent of max_length (lm_eval's generation window) and of the served --max-model-len.
+        # Qwen3 (native 32k) and Chonk (trained to 16k) get 32768, GLM-4.5-Air its native 128K,
+        # the long-context models 262144.
+        window = {"qwen3-32b-thinking": 32768, "chonk-lc-16k-v0.2-sft": 32768, "chonk-lc-16k-v0.1-ep1": 32768,
+                  "glm-4.5-air-thinking": 131072}
         suite = suites.load(SUITE)
         for name, setup in suite["setups"].items():
-            harbor = setup["flags"].get("harbor", [])
-            for flag in harbor:
-                if "max_input_tokens" in flag:
-                    self.assertEqual(json.loads(flag.split("=", 1)[1])["max_input_tokens"], setup["max_length"], name)
+            windows = [json.loads(f.split("=", 1)[1])["max_input_tokens"]
+                       for f in setup["flags"].get("harbor", []) if "max_input_tokens" in f]
+            self.assertEqual(windows, [window.get(name, 262144)], name)
 
     def test_apertus_15_70b_runs_with_high_client_concurrency_on_every_lm_eval_row(self):
         # Its two replicas sit idle at the launcher's default of 8.
@@ -299,7 +303,7 @@ class SuiteTests(unittest.TestCase):
         with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
             self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m", "--model", "qwen3-32b-thinking=q", "--helper-url", JUDGE_BASE]), 0)
-        self.assertIn("78 launches: 2 models x 39 benchmarks", err.getvalue())
+        self.assertIn("86 launches: 2 models x 43 benchmarks", err.getvalue())
         for bad in (["--model", "m"], ["--model", "nope=m"], ["--model", f"{THINK}=a", "--model", f"{THINK}=b"]):
             self.assertEqual(suites.main(["run", SUITE, *bad]), 1)
 

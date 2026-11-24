@@ -344,7 +344,7 @@ class MainTests(unittest.TestCase):
         script = self._render_main(argv)
 
         self.assertIn("export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1; echo prepare-the-node", script)
-        self.assertIn("--max-model-len 131072", script)
+        self.assertIn("--max-model-len 262144", script)
 
     def test_suite_and_setup_go_together_and_a_model_is_needed_without_them(self) -> None:
         for argv in (
