@@ -1,7 +1,7 @@
 """Attach a run's full trace file (every sample's conversation or generation) to its W&B run as a compressed artifact.
 
 The sample tables of an upload hold a handful of samples to browse; this is the complete file, kept next to the scores
-of the same run (one artifact per task, type "traces", in the model's W&B run). The files are text and compress about
+of the same run (one artifact per model and task, type "traces", logged by the model's W&B run). The files are text and compress about
 6 to 25 times (a 65 MB tau2 results.json to 10 MB, a 245 MB lm-eval samples file to 10 MB), and an artifact is only
 downloaded on demand, unlike a table that every viewer loads. A file whose compressed size exceeds `max_mb` is not
 uploaded, with a warning: raise the limit on purpose.
@@ -13,9 +13,15 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from .wandb_names import make_wandb_run_id
+from .wandb_names import WANDB_ARTIFACT_NAME_LIMIT, WANDB_ARTIFACT_SUFFIX_RESERVE, _shorten_with_hash, make_wandb_run_id
 
 DEFAULT_MAX_MB = 500
+
+
+def trace_artifact_name(model_name: str, task_name: str) -> str:
+    """The artifact of a model's task: artifacts are versioned by name inside the project, so the model is part of it
+    (one collection per model and task, one version per upload)."""
+    return _shorten_with_hash(f"traces-{model_name}-{task_name}", WANDB_ARTIFACT_NAME_LIMIT - WANDB_ARTIFACT_SUFFIX_RESERVE)
 
 
 def compress_trace(path: Path, directory: Path) -> Path:
@@ -35,7 +41,7 @@ def upload_trace(
     max_mb: int = DEFAULT_MAX_MB,
     metadata: Optional[dict] = None,
 ) -> Optional[str]:
-    """Upload `trace_path` compressed, as the artifact traces-<task_name> of the model's run; its name, or None when
+    """Upload `trace_path` compressed, as the artifact traces-<model>-<task_name> of the model's run; its name, or None when
     the compressed file is over `max_mb`."""
     with tempfile.TemporaryDirectory() as tmp:
         compressed = compress_trace(Path(trace_path), Path(tmp))
@@ -45,7 +51,7 @@ def upload_trace(
             return None
         import wandb  # only where the upload happens: the eval image has it, the unit tests do not
 
-        name = f"traces-{task_name}"
+        name = trace_artifact_name(model_name, task_name)
         with wandb.init(id=make_wandb_run_id(model_name, "-001"), resume="allow", entity=entity, project=project,
                         name=model_name) as run:
             artifact = wandb.Artifact(name, type="traces", metadata={"source": trace_path.name, **(metadata or {})})

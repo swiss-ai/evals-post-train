@@ -6,7 +6,7 @@ from pathlib import Path
 
 from scripts.custom.tau2_summary import summarize_results
 from scripts.results.tau2_wandb_utils import create_model_evaluation_from_tau2_run
-from scripts.results.trace_upload import compress_trace, upload_trace
+from scripts.results.trace_upload import compress_trace, trace_artifact_name, upload_trace
 
 EMPTY = "AssistantMessage must have either content or tool_calls. Got AssistantMessage"
 
@@ -74,6 +74,13 @@ class TraceUploadTests(unittest.TestCase):
             self.assertEqual(packed.name, "results.json.gz")
             self.assertLess(packed.stat().st_size, source.stat().st_size / 10)
             self.assertEqual(gzip.open(packed).read(), source.read_bytes())
+
+    def test_the_artifact_is_named_after_the_model_and_the_task_and_stays_short(self):
+        self.assertEqual(trace_artifact_name("glm-4.5-air-thinking", "tau2_airline"), "traces-glm-4.5-air-thinking-tau2_airline")
+        self.assertNotEqual(trace_artifact_name("glm", "tau2_airline"), trace_artifact_name("nemotron", "tau2_airline"))
+        long_name = trace_artifact_name("m" * 300, "tau2_banking_knowledge")
+        self.assertLessEqual(len(long_name), 104)
+        self.assertNotEqual(long_name, trace_artifact_name("m" * 301, "tau2_banking_knowledge"))  # distinct long names do not collide
 
     def test_a_trace_over_the_limit_is_not_uploaded_and_wandb_is_not_needed_to_say_so(self):
         with tempfile.TemporaryDirectory() as tmp:
