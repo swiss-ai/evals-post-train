@@ -409,6 +409,7 @@ def summarize_job(job_dir: Path, missing_reward_is_zero: bool = False) -> Dict[s
     rewards: List[float] = []
     metrics: Dict[str, List[float]] = {}
     errors: List[Dict[str, str]] = []
+    errors_by_type: Dict[str, int] = {}
     no_reward_file: List[Dict[str, str]] = []
     for path in sorted(glob.glob(str(job_dir / "*" / "result.json"))):
         with open(path) as f:
@@ -426,11 +427,13 @@ def summarize_job(job_dir: Path, missing_reward_is_zero: bool = False) -> Dict[s
             metrics.setdefault("reward", []).append(0.0)
             no_reward_file.append({"task": trial.get("task_name"), "trial": trial.get("trial_name")})
             continue
+        error_type = exc.get("exception_type", "no reward")
+        errors_by_type[error_type] = errors_by_type.get(error_type, 0) + 1
         errors.append(
             {
                 "task": trial.get("task_name"),
                 "trial": trial.get("trial_name"),
-                "error": f"{exc.get('exception_type', 'no reward')}: {(exc.get('exception_message') or '')[:500]}",
+                "error": f"{error_type}: {(exc.get('exception_message') or '')[:500]}",
             }
         )
     has_reward = "reward" in metrics
@@ -440,6 +443,7 @@ def summarize_job(job_dir: Path, missing_reward_is_zero: bool = False) -> Dict[s
         "n_trials": len(rewards) + len(errors),
         "n_scored": len(rewards),
         "evaluation_errors": errors,
+        "errors_by_type": dict(sorted(errors_by_type.items())),
     }
     if no_reward_file:
         summary["no_reward_file"] = no_reward_file
