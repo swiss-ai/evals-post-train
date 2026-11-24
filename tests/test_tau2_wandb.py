@@ -6,7 +6,7 @@ from pathlib import Path
 
 from scripts.custom.tau2_summary import summarize_results
 from scripts.results.tau2_wandb_utils import create_model_evaluation_from_tau2_run
-from scripts.results.trace_upload import compress_trace, trace_artifact_name, upload_trace
+from scripts.results.update_wandb_tau2 import compress_trace, trace_artifact_name, upload_trace
 
 EMPTY = "AssistantMessage must have either content or tool_calls. Got AssistantMessage"
 

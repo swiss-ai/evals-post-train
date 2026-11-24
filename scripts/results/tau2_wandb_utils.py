@@ -6,7 +6,7 @@ tasks, the model's own failed tasks counted as failed (empty replies, context ov
 another model's or the infrastructure's reason left out and counted in n_unscored. Like bfcl_wandb_utils this only
 adapts the summary into the ModelEvaluation/Task/Metric structures; the upload itself is
 wandb_alignment_utils.upload_multi_model_results. No samples go in the table: the full file is attached as a trace
-artifact (trace_upload.py).
+artifact (update_wandb_tau2.py).
 """
 
 import json
