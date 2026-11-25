@@ -12,6 +12,9 @@ pytablewriter
 rouge-score>=0.0.4
 # [ja]: mecab-python3 + ipadic, for WMT24++ Japanese BLEU (ja-mecab tokenizer, harness wmt24pp_chrf)
 sacrebleu[ja]>=2.0
+# HarmBench's judge tokenizer (cais/HarmBench-Llama-2-13b-cls, a SentencePiece tokenizer.model): without it
+# transformers 5 reads the file as tiktoken and harmbench fails at import ("Error parsing line")
+sentencepiece>=0.2.0
 scikit-learn>=0.24.1
 sqlitedict
 zstandard
