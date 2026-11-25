@@ -32,19 +32,17 @@ usage() {
 	echo " BS: Batch size."
 	echo " REVISION: Only used in huggingface models. If set, this revision of the model will be evaluated."
 	echo " SIZE: Legacy/informational approximate model size in billions."
-	echo " MAX_LENGTH: Optional backend context limit (vLLM max_model_len; Megatron seq_length)."
+	echo " MAX_LENGTH: Optional context limit (the served window on the openai backend; Megatron seq_length)."
 	echo " MAX_NEW_TOKENS: Generation budget of thinking/reasoning-effort runs; replaces every task's own max_gen_toks (default when thinking: 32768; on the openai backend with MAX_LENGTH set, MAX_LENGTH, which the harness clamps per request to the window minus the prompt)."
-	echo " VLLM_TP_SIZE / VLLM_DP_SIZE: Explicit vLLM topology. Defaults to TP=4/DP=1, or TP=1/DP=4 when a model name unambiguously indicates <30B."
-	echo " VLLM_MEMORY_FRACTION: vLLM/SGLang GPU memory fraction (default: 0.8)."
 	echo " MEGATRON_MICRO_BATCH_SIZE: Megatron micro-batch override; otherwise uses numeric BS or 1 when BS=auto."
 	echo " BOS: 'true' prepends the BOS token, 'false' leaves it to the tokenizer; default 'auto' = true for models whose tokenizer never adds the BOS token they need (Gemma 4, scripts/lm_eval_harness/bos_default.py)."
-	echo " TRUST_REMOTE_CODE: 'true' loads the tokenizer (hf/vllm: also the model) with trust_remote_code=True; hf, vllm and openai backends."
+	echo " TRUST_REMOTE_CODE: 'true' loads the tokenizer with trust_remote_code=True; openai backend only."
 	echo " LOGS_ROOT: Where the evaluation wandb&harness logs go (default: <repo>/logs/lm_eval)."
 	echo " TASKS: Required. Tasks to run with lm eval harness: a task list file (one name per line, # comments) or comma-separated names."
 	echo " TABLE_METRICS: task/metric pairs for the W&B summary table: a file (one pair per line, # group headers) or space-separated pairs (default: TASKS)."
 	echo " WANDB_ENTITY: WandB entity name for uploading results (default: apertus)."
 	echo " WANDB_PROJECT: WandB project name for uploading results (default: swissai-evals-test)."
-	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: vllm). - options are: hf, vllm, sglang, megatron_lm, openai"
+	echo " LM_EVAL_BACKEND: Backend to use for lm-eval (default: openai). - options are: openai, megatron_lm"
     echo " CKPT_ITER: Megatron checkpoint iteration (integer). Required when LM_EVAL_BACKEND=megatron_lm. CKPT_ITERATION is accepted as an alias."
     echo " MEGATRON_EXTRA_ARGS: Extra MCore CLI args for the megatron_lm backend, e.g. '--distributed-timeout-minutes 120' for long generation phases."
     echo " OpenAI-compatible API backend (LM_EVAL_BACKEND=openai; no model is loaded in the job):"
@@ -66,14 +64,14 @@ usage() {
     echo " EVAL_RUN_CONFIG: Normalized result provenance file used for safe resume (required; set by launcher)."
     echo " EVAL_VERIFY_ENV_IMPORTS: 'true' to repeat the preparation job's deep Python import checks inside the evaluation job (default: false)."
     echo " EVAL_CHUNKS_FILE: Resumable array chunk manifest (set automatically by launcher)."
-    echo " Thinking / reasoning metrics (hf, vllm, sglang and openai backends; megatron_lm is unsupported):"
+    echo " Thinking / reasoning metrics (openai backend; megatron_lm is unsupported):"
     echo " ENABLE_THINKING: 'true'/'false' chat-template argument deciding whether the model reasons (default: unset, the template's own default)."
     echo " AUTODETECT_THINK_TOKENS: 'true' to read the reasoning open/close tokens from the chat template (default: false)."
     echo " THINK_END_TOKEN: Force the reasoning close token, e.g. '</think>'. A known close token arms the strip AND the metrics."
     echo " THINK_START_TOKEN: Force the reasoning open token, e.g. '<think>'. Needed for thinking_format_has_open."
     echo " TRACK_THINKING_METRICS: 'true'/'false' to force the thinking metrics on/off (default: on iff a close token is known)."
     echo " LOG_LENGTH_METRICS: 'true' to aggregate response_length_*/thinking_length_* (thinking_format_* is always aggregated)."
-    echo " REASONING_EFFORT: chat-template argument reasoning_effort (e.g. low/medium/high, read by gpt-oss's template); hf, vllm, sglang and openai."
+    echo " REASONING_EFFORT: chat-template argument reasoning_effort (e.g. low/medium/high, read by gpt-oss's template); openai backend."
     echo " THINK_TEMPERATURE, THINK_TOP_P, THINK_TOP_K, THINK_MIN_P, THINK_REPETITION_PENALTY: sampling of thinking runs (defaults in configs/sampling_defaults.json: 0.6 / 0.95, the others unset; 'none' leaves one out)."
     echo " CHAT_FORMAT: 'apertus2' for the Apertus 2 native format (openai backend, harness model apertus2-completions; needs TOKENIZER and MAX_LENGTH). Default: template."
     echo " PREFILL_MODE: apertus2 answer prefills, 'after_think' (default) or 'empty_think'."
@@ -110,7 +108,7 @@ TASKS=${TASKS:-}
 TABLE_METRICS=${TABLE_METRICS:-$TASKS}
 WANDB_ENTITY=${WANDB_ENTITY:-apertus}
 WANDB_PROJECT=${WANDB_PROJECT:-swissai-evals-test}
-LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
+LM_EVAL_BACKEND=${LM_EVAL_BACKEND:-openai}
 APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-true}
 # by-type: generative tasks with the chat template, log-likelihood ones without
 # (two lm-eval passes, merged; see scripts/lm_eval_harness/task_output_types.py).
@@ -267,7 +265,7 @@ MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
 NUM_FEWSHOT=${NUM_FEWSHOT:-""}
 
 # --- Thinking / reasoning metrics ---
-# Capture explicitness before defaulting: hf, vllm and sglang forward enable_thinking only when
+# Capture explicitness before defaulting: enable_thinking is forwarded only when
 # set (unset lets the template default apply). ':+' treats an exported-but-empty value as unset.
 if [[ -n "${ENABLE_THINKING:+x}" ]]; then ENABLE_THINKING_EXPLICIT=1; else ENABLE_THINKING_EXPLICIT=0; fi
 ENABLE_THINKING=${ENABLE_THINKING:-false}
@@ -327,8 +325,7 @@ if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]] && (( ! MAX_NEW_
     MAX_NEW_TOKENS=32768
     # On the openai backend every generation request is clamped to the window minus its prompt
     # (clamp_gen_toks; apertus2 clamps itself), so the budget is the whole window: a model served
-    # with more than 32768 is not cut there. Other backends never clamp, and a budget equal to the
-    # window would leave no room for the prompt.
+    # with more than 32768 is not cut there.
     if [[ "$LM_EVAL_BACKEND" == "openai" && -n "$MAX_LENGTH" ]]; then
         MAX_NEW_TOKENS=$MAX_LENGTH
     fi
@@ -344,7 +341,7 @@ _reject_comma THINK_START_TOKEN "$THINK_START_TOKEN"
 _reject_comma API_BASE_URL "$API_BASE_URL"
 _reject_comma API_MODEL_NAME "$API_MODEL_NAME"
 
-# Reasoning model_args shared by hf, vllm and sglang. Only non-defaults are emitted (an unset flag
+# Reasoning model_args. Only non-defaults are emitted (an unset flag
 # keeps the harness default).
 THINK_ARGS=""
 [[ -n "$THINK_END_TOKEN" ]] && THINK_ARGS="${THINK_ARGS},think_end_token=${THINK_END_TOKEN}"
@@ -352,7 +349,7 @@ THINK_ARGS=""
 [[ "$AUTODETECT_THINK_TOKENS" == "True" ]] && THINK_ARGS="${THINK_ARGS},autodetect_think_tokens=True"
 [[ -n "$TRACK_THINKING_METRICS" ]] && THINK_ARGS="${THINK_ARGS},track_thinking_metrics=${TRACK_THINKING_METRICS}"
 
-# Extra chat-template arguments (hf, vllm and sglang), as a second --model_args token: the harness
+# Extra chat-template arguments, as a second --model_args token: the harness
 # refuses a first token containing '{' (it must then be all JSON) but splits each further token
 # with shlex (POSIX, dropping unescaped quotes) and reads its value with ast.literal_eval, so the
 # quotes are escaped. Needs the `--model_args 'a' 'b'` form: argparse gives `--model_args='a'`
@@ -361,9 +358,8 @@ CHAT_TEMPLATE_ARGS=""
 if [[ -n "$REASONING_EFFORT" ]]; then
     [[ "$REASONING_EFFORT" =~ ^[A-Za-z0-9_-]+$ ]] \
         || die "REASONING_EFFORT must be a level like low, medium or high (got '$REASONING_EFFORT')."
-    [[ "$LM_EVAL_BACKEND" == "vllm" || "$LM_EVAL_BACKEND" == "hf" || "$LM_EVAL_BACKEND" == "sglang" \
-       || "$LM_EVAL_BACKEND" == "openai" ]] \
-        || die "REASONING_EFFORT is only supported with the hf, vllm, sglang and openai backends (got $LM_EVAL_BACKEND)."
+    [[ "$LM_EVAL_BACKEND" == "openai" ]] \
+        || die "REASONING_EFFORT is only supported with the openai backend (got $LM_EVAL_BACKEND)."
     CHAT_TEMPLATE_ARGS=" 'chat_template_args={\\\"reasoning_effort\\\":\\\"${REASONING_EFFORT}\\\"}'"
 fi
 
@@ -449,56 +445,6 @@ case "${BOS_BY_CLIENT:-auto}" in
     *) echo "BOS_BY_CLIENT must be auto, true or false (got '$BOS_BY_CLIENT')" >&2; exit 1 ;;
 esac
 
-
-# Preserve the historically compatible TP=4/DP=1 default. For an unambiguous
-# sub-30B model name, prefer four independent replicas for throughput. Explicit
-# VLLM_TP_SIZE/VLLM_DP_SIZE values always win; either side may be omitted and is
-# derived from the four allocated GPUs.
-MP=$GPUS_PER_NODE
-DP=1
-DETECTED_MODEL_SIZE_B=""
-if [[ "$LM_EVAL_BACKEND" == "vllm" ]]; then
-    VLLM_TP_SIZE=${VLLM_TP_SIZE:-""}
-    VLLM_DP_SIZE=${VLLM_DP_SIZE:-""}
-    VLLM_AUTO_PARALLELISM=${VLLM_AUTO_PARALLELISM:-true}
-    VLLM_AUTO_PARALLELISM=$(_norm_bool VLLM_AUTO_PARALLELISM "$VLLM_AUTO_PARALLELISM")
-
-    if [[ -n "$VLLM_TP_SIZE" || -n "$VLLM_DP_SIZE" ]]; then
-        [[ -z "$VLLM_TP_SIZE" || "$VLLM_TP_SIZE" =~ ^[1-9][0-9]*$ ]] \
-            || die "VLLM_TP_SIZE must be a positive integer (got '$VLLM_TP_SIZE')."
-        [[ -z "$VLLM_DP_SIZE" || "$VLLM_DP_SIZE" =~ ^[1-9][0-9]*$ ]] \
-            || die "VLLM_DP_SIZE must be a positive integer (got '$VLLM_DP_SIZE')."
-        if [[ -z "$VLLM_TP_SIZE" ]]; then
-            (( GPUS_PER_NODE % VLLM_DP_SIZE == 0 )) \
-                || die "VLLM_DP_SIZE=$VLLM_DP_SIZE does not divide $GPUS_PER_NODE GPUs."
-            VLLM_TP_SIZE=$(( GPUS_PER_NODE / VLLM_DP_SIZE ))
-        elif [[ -z "$VLLM_DP_SIZE" ]]; then
-            (( GPUS_PER_NODE % VLLM_TP_SIZE == 0 )) \
-                || die "VLLM_TP_SIZE=$VLLM_TP_SIZE does not divide $GPUS_PER_NODE GPUs."
-            VLLM_DP_SIZE=$(( GPUS_PER_NODE / VLLM_TP_SIZE ))
-        fi
-        (( VLLM_TP_SIZE * VLLM_DP_SIZE == GPUS_PER_NODE )) \
-            || die "VLLM_TP_SIZE * VLLM_DP_SIZE must equal $GPUS_PER_NODE GPUs."
-        MP=$VLLM_TP_SIZE
-        DP=$VLLM_DP_SIZE
-        echo "Using explicit vLLM topology: TP=$MP DP=$DP"
-    elif [[ "$VLLM_AUTO_PARALLELISM" == "True" ]]; then
-        DETECTED_MODEL_SIZE_B=$(python3 -m scripts.lm_eval_harness.infer_model_size "$MODEL" 2>/dev/null || true)
-        if [[ -n "$DETECTED_MODEL_SIZE_B" ]] \
-            && awk -v size="$DETECTED_MODEL_SIZE_B" 'BEGIN { exit !(size < 30) }'; then
-            MP=1
-            DP=$GPUS_PER_NODE
-            echo "Detected ${DETECTED_MODEL_SIZE_B}B model from path; using faster vLLM topology TP=$MP DP=$DP"
-        else
-            echo "No unambiguous <30B model size detected; using compatible vLLM topology TP=$MP DP=$DP"
-        fi
-    else
-        echo "vLLM topology auto-detection disabled; using TP=$MP DP=$DP"
-    fi
-else
-    echo "Using backend topology TP=$MP DP=$DP"
-fi
-
 # Prepare logs root.
 RUN_ROOT=$LOGS_ROOT/$WANDB_ENTITY/$WANDB_PROJECT/$NAME
 HARNESS_DIR=$RUN_ROOT/harness
@@ -513,27 +459,7 @@ export HF_ALLOW_CODE_EVAL=1
 HF_CHECKPOINT_PATH=$MODEL
 COMMON_MODEL_ARGS="dtype=bfloat16"
 
-# Add vLLM specific arguments.
-export OMP_NUM_THREADS=$(( 8 * $GPUS_PER_NODE ))
-export VLLM_WORKER_MULTIPROC_METHOD=spawn
-export VLLM_DISABLE_COMPILE_CACHE=1
-export VLLM_USE_FLASHINFER_SAMPLER=0
-
-#export VLLM_TORCH_COMPILE=0
-#export NCCL_P2P_DISABLE=1
-
-# export NCCL_IB_DISABLE=1
-# export NCCL_NET="Socket"
-# export NCCL_DEBUG=WARN
-# Keep headroom for node-to-node variation while exposing more KV-cache space.
-VLLM_MEMORY_FRACTION=${VLLM_MEMORY_FRACTION:-0.8}
-awk -v fraction="$VLLM_MEMORY_FRACTION" \
-    'BEGIN { exit !(fraction > 0 && fraction <= 1) }' \
-    || die "VLLM_MEMORY_FRACTION must be in (0, 1] (got '$VLLM_MEMORY_FRACTION')."
-# export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-# export VLLM_DISABLE_CUSTOM_ALL_REDUCE=1
-
-# The harness only implements the reasoning producers for hf/vllm/sglang; fail loudly otherwise.
+# The harness only implements the reasoning producers for the openai backend; fail loudly otherwise.
 if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     if [[ -n "$THINK_ARGS" ]] || (( ENABLE_THINKING_EXPLICIT )) || [[ "$LOG_LENGTH_METRICS" == "True" ]]; then
         die "Thinking/reasoning metrics are unsupported with LM_EVAL_BACKEND=$LM_EVAL_BACKEND."
@@ -547,14 +473,7 @@ if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]]; then
     THINKING_DEFAULT_MODEL_ARG=",max_gen_toks=$MAX_NEW_TOKENS"
 fi
 
-if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION,language_model_only=True,data_parallel_size=$DP,tensor_parallel_size=$MP,gpu_memory_utilization=$VLLM_MEMORY_FRACTION${THINK_ARGS}${THINKING_DEFAULT_MODEL_ARG},disable_flashinfer_allreduce_fusion=True"
-    # Forward enable_thinking only when explicitly set; unset lets the template default apply.
-    (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
-elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer_path=$TOKENIZER$MAYBE_REVISION,dp_size=$DP,tp_size=$MP,mem_fraction_static=$VLLM_MEMORY_FRACTION,dtype=auto${THINK_ARGS}${THINKING_DEFAULT_MODEL_ARG}"
-    (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
-elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
+if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     MEGATRON_MICRO_BATCH_SIZE=${MEGATRON_MICRO_BATCH_SIZE:-""}
     if [[ -z "$MEGATRON_MICRO_BATCH_SIZE" ]]; then
         if [[ "$BS" =~ ^[1-9][0-9]*$ ]]; then
@@ -582,11 +501,6 @@ elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     else
         die "CKPT_ITER must be an integer or 'latest' when LM_EVAL_BACKEND=megatron_lm (got '$CKPT_ITER')."
     fi
-elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,pretrained=$HF_CHECKPOINT_PATH,tokenizer=$TOKENIZER$MAYBE_REVISION"
-    # Forward enable_thinking only when explicitly set; unset lets the template default apply.
-    (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS${THINK_ARGS}"
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     [[ -n "$API_BASE_URL" ]] || die "API_BASE_URL must be set when LM_EVAL_BACKEND=openai (e.g. http://<host>:8000/v1)."
     API_MODEL_NAME=${API_MODEL_NAME:-$MODEL}
@@ -657,13 +571,12 @@ else
     die "Unsupported LM_EVAL_BACKEND: $LM_EVAL_BACKEND"
 fi
 
-# Opt-in, for models whose tokenizer is custom code (e.g. Kimi-K2): every backend that
-# loads a HF tokenizer here takes the same model_args key. sglang and megatron_lm have
-# their own loaders and are refused rather than silently ignoring it.
+# Opt-in, for models whose tokenizer is custom code (e.g. Kimi-K2). megatron_lm has its own
+# loader and is refused rather than silently ignoring it.
 if [[ "$TRUST_REMOTE_CODE" == "true" ]]; then
     case "$LM_EVAL_BACKEND" in
-        hf|vllm|openai) COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,trust_remote_code=True" ;;
-        *) die "TRUST_REMOTE_CODE is only supported with the hf, vllm and openai backends (got $LM_EVAL_BACKEND)." ;;
+        openai) COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,trust_remote_code=True" ;;
+        *) die "TRUST_REMOTE_CODE is only supported with the openai backend (got $LM_EVAL_BACKEND)." ;;
     esac
 fi
 
@@ -778,17 +691,10 @@ fi
 # adapter's native argument name and omit it entirely when no value was set.
 if [[ -n "$BACKEND_MAX_LENGTH" ]]; then
     case "$LM_EVAL_BACKEND" in
-        vllm)
-            COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$BACKEND_MAX_LENGTH"
-            [[ -n "$CONTEXT_LEN" ]] && export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
-            ;;
-        sglang)
-            COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$BACKEND_MAX_LENGTH"
-            ;;
         megatron_lm)
             COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,seq_length=$BACKEND_MAX_LENGTH"
             ;;
-        hf|openai)
+        openai)
             # apertus2-completions clamps each request's budget to the server's context,
             # which ruler's detected length does not change.
             if [[ "$CHAT_FORMAT" == "apertus2" ]]; then
@@ -797,8 +703,8 @@ if [[ -n "$BACKEND_MAX_LENGTH" ]]; then
                 COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_length=$BACKEND_MAX_LENGTH"
                 # The template path never counts tokens: a prompt longer than the context
                 # minus the budget gets the server's 400. clamp_gen_toks lowers that
-                # request's budget to what is left (the openai models only).
-                [[ "$LM_EVAL_BACKEND" == "openai" ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,clamp_gen_toks=True"
+                # request's budget to what is left.
+                COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,clamp_gen_toks=True"
                 # The clamp counts the prompt with a client tokenizer; without one it clamps
                 # nothing (every request keeps the full budget, e.g. 32768 against a 16384
                 # window = 400). local-completions has one already; chat-completions needs it
@@ -979,18 +885,8 @@ make_cmd() {
         eval_args="$eval_args --config $repeat_file"
     fi
     [[ $3 == true ]] && eval_args="$eval_args --apply_chat_template --fewshot_as_multiturn"
-    if [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-        CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS $eval_args"
-    elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
-        CMD="python -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS $eval_args"
-    elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
+    if [[ $LM_EVAL_BACKEND == "openai" ]]; then
         CMD="python -m lm_eval --model $API_LM_EVAL_MODEL --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS $eval_args"
-    elif [[ $LM_EVAL_BACKEND == "hf" ]]; then
-        # Not the `accelerate` console script: the base env is a --system-site-packages venv
-        # without its own copy, so that resolves to the container's, whose shebang (and so
-        # every worker) runs the system Python, missing the env's packages. The module form
-        # runs under the env's Python, which the workers inherit.
-        CMD="python -m accelerate.commands.launch --num_processes=4  -m lm_eval --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS $eval_args"
     elif [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
         CMD="torchrun --nproc-per-node=4 -m lm_eval --model megatron_lm --model_args='$COMMON_MODEL_ARGS' $eval_args"
     fi
@@ -1002,8 +898,7 @@ make_cmd() {
 # of env.toml does not start.
 BASE_CONTAINER_ENV=${EVAL_PREBUILT_CONTAINER_CONFIG:-./containers/env.toml}
 case "$LM_EVAL_BACKEND" in
-    vllm|megatron_lm) CONTAINER_ENV=./containers/env_vllm.toml ;;
-    sglang) CONTAINER_ENV=./containers/env_sglang.toml ;;
+    megatron_lm) CONTAINER_ENV=./containers/env_vllm.toml ;;
     *) CONTAINER_ENV=$BASE_CONTAINER_ENV ;;
 esac
 
@@ -1103,29 +998,6 @@ if [[ $LM_EVAL_BACKEND == "megatron_lm" ]]; then
     export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
     $TIMED_CMD
     "
-elif [[ $LM_EVAL_BACKEND == "vllm" ]]; then
-  # vLLM runs as one process which manages all GPUs.
-  srun -n 1 --mpi=pmix -ul --environment=./containers/env_vllm.toml bash -lc "
-    set -euo pipefail
-    unset SSL_CERT_FILE
-    export HF_DATASETS_TRUST_REMOTE_CODE=1
-    $CACHE_EXPORTS
-
-    $LOAD_ENV_CMD
-    # Make torch CUDA libs discoverable for vllm._C import
-    export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
-    $TIMED_CMD
-    "
-elif [[ $LM_EVAL_BACKEND == "sglang" ]]; then
-  srun -n 1 --mpi=pmix -ul --environment=./containers/env_sglang.toml bash -lc "
-    set -euo pipefail
-    unset SSL_CERT_FILE
-    export HF_DATASETS_TRUST_REMOTE_CODE=1
-    $CACHE_EXPORTS
-
-    $LOAD_ENV_CMD
-    $TIMED_CMD
-    "
 elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
   # No model is loaded in-job; the harness only makes HTTP calls against API_BASE_URL.
   srun -n 1 --mpi=pmix -ul --environment=$BASE_CONTAINER_ENV --export=ALL,HF_TOKEN,HF_HOME,WANDB_API_KEY,OPENAI_API_KEY bash -lc "
@@ -1137,21 +1009,6 @@ elif [[ $LM_EVAL_BACKEND == "openai" ]]; then
     export LD_LIBRARY_PATH=\$(tr ':' '\n' <<< \"\${LD_LIBRARY_PATH:-}\" | { grep -vx '.*/torch/lib' || true; } | paste -sd: -)
 
     $LOAD_ENV_CMD
-
-    $TIMED_CMD
-    "
-else
-  # hf (via accelerate)
-  srun -n 1 --mpi=pmix -ul --environment=$BASE_CONTAINER_ENV --export=ALL,HF_TOKEN,HF_HOME,WANDB_API_KEY bash -lc "
-    set -euo pipefail
-    unset SSL_CERT_FILE
-    export HF_DATASETS_TRUST_REMOTE_CODE=1
-    $CACHE_EXPORTS
-
-    $LOAD_ENV_CMD
-
-    # Make torch CUDA libs discoverable for vllm._C import - is just ignored for Huggingface
-    export LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:\${LD_LIBRARY_PATH:-}
 
     $TIMED_CMD
     "

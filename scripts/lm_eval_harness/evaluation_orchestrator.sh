@@ -37,10 +37,9 @@ _eval_prepend_modern_python_path() {
 _eval_prepend_modern_python_path
 
 _eval_container_for_backend() {
-    case "${LM_EVAL_BACKEND:-vllm}" in
-        vllm|megatron_lm) echo "./containers/env_vllm.toml" ;;
-        sglang) echo "./containers/env_sglang.toml" ;;
-        hf|openai) echo "./containers/env.toml" ;;
+    case "${LM_EVAL_BACKEND:-openai}" in
+        megatron_lm) echo "./containers/env_vllm.toml" ;;
+        openai) echo "./containers/env.toml" ;;
         *) echo "Unsupported LM_EVAL_BACKEND: ${LM_EVAL_BACKEND:-}" >&2; return 1 ;;
     esac
 }
@@ -102,7 +101,7 @@ _eval_resolved_bos_by_client() {
         echo false
         return
     fi
-    if [[ "$requested" != "true" ]] && ! [[ "${LM_EVAL_BACKEND:-vllm}" == "openai" && "${CHAT_FORMAT:-}" != "apertus2" \
+    if [[ "$requested" != "true" ]] && ! [[ "${LM_EVAL_BACKEND:-openai}" == "openai" && "${CHAT_FORMAT:-}" != "apertus2" \
             && "${API_CHAT_ENDPOINT:-false}" != "true" ]]; then
         echo false
     elif [[ "${APPLY_CHAT_TEMPLATE:-true}" == "by-type" ]]; then
@@ -114,13 +113,10 @@ _eval_resolved_bos_by_client() {
 
 _eval_create_run_config() {
     local model="$1" repo="$2" state_dir="$3"
-    # vllm used to pin an unset enable_thinking to False; it now leaves the template default.
-    # Record that distinctly so an unset vllm run never resumes results rendered under False.
     local enable_thinking="${ENABLE_THINKING:-}"
-    [[ -z "$enable_thinking" && "${LM_EVAL_BACKEND:-vllm}" == "vllm" ]] && enable_thinking="template-default"
     local -a fields=(
         --field "model=$model"
-        --field "backend=${LM_EVAL_BACKEND:-vllm}"
+        --field "backend=${LM_EVAL_BACKEND:-openai}"
         --field "checkpoint_iteration=${CKPT_ITER:-latest}"
         --field "revision=${REVISION:-}"
         --field "tokenizer=${TOKENIZER:-}"
@@ -146,8 +142,6 @@ _eval_create_run_config() {
         --field "think_repetition_penalty=${THINK_REPETITION_PENALTY:-}"
         --field "nothink_temperature=${NOTHINK_TEMPERATURE:-}"
         --field "nothink_top_p=${NOTHINK_TOP_P:-}"
-        --field "vllm_tp_size=${VLLM_TP_SIZE:-}"
-        --field "vllm_dp_size=${VLLM_DP_SIZE:-}"
         --field "megatron_micro_batch_size=${MEGATRON_MICRO_BATCH_SIZE:-}"
         --field "api_base_url=${API_BASE_URL:-}"
         --field "api_model_name=${API_MODEL_NAME:-}"
@@ -426,8 +420,8 @@ _eval_prepare_environment() {
     EVAL_CONTAINER_CONFIG=$(realpath "$EVAL_CONTAINER_CONFIG")
     export EVAL_CONTAINER_CONFIG EVAL_REPO_ROOT="$PWD"
     # The openai backend loads no model, so it gets the same locked packages as the prebuilt
-    # image; in-job backends take torch and their server from the container.
-    if [[ "${LM_EVAL_BACKEND:-vllm}" == "openai" ]]; then
+    # image; megatron_lm takes torch and its server from the container.
+    if [[ "${LM_EVAL_BACKEND:-openai}" == "openai" ]]; then
         export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/lm-eval-runtime.lock"
     else
         export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/lm-eval-runtime.txt"

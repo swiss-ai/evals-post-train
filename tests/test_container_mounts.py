@@ -7,7 +7,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CONTAINER_CONFIGS = (
     "env.toml",
     "env_vllm.toml",
-    "env_sglang.toml",
 )
 
 

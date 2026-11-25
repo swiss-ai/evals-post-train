@@ -61,6 +61,6 @@ Edit the `requirements/*.txt`, run `scripts/common/lock_requirements.sh` (needs 
 | File | Installed as |
 |---|---|
 | `inspect-runtime`, `evalscope-runtime`, `harbor-runtime`, `harbor-adapters` | the `.lock` |
-| `lm-eval-runtime` | the `.lock` in the prebuilt image (`openai` backend); the `.txt` by in-job backends, whose containers provide torch |
+| `lm-eval-runtime` | the `.lock` in the prebuilt image (`openai` backend); the `.txt` by the `megatron_lm` backend, whose container provides torch |
 | `lm-eval-harness.txt` | no lock: the harness commit, installed `--no-deps` (its dependencies go in `lm-eval-runtime.txt`) |
 | `apertus2.txt` | no lock: the `apertus-common` commit, installed `--no-deps` for `--chat-format apertus2` runs: into the harness overlay of built environments, and into the venv of the prebuilt image; it is also the vLLM plugin of `docs/thinking.md`; its dependencies are in `lm-eval-runtime.lock` |

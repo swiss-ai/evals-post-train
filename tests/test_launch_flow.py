@@ -73,6 +73,12 @@ def _launch(*arguments: str, **env: str) -> subprocess.CompletedProcess:
     )
 
 
+# The launcher defaults to the openai backend, which needs an endpoint and a served name.
+OPENAI_ARGS = (
+    "--backend", "openai", "--api-base-url", "http://localhost:8000", "--api-model-name", "test-model",
+)
+
+
 def _harness_pin() -> str:
     pins = (REPO_ROOT / "requirements/lm-eval-harness.txt").read_text().split()
     return pins[pins.index("swiss-ai/lm-evaluation-harness") + 1]
@@ -189,12 +195,11 @@ class LaunchFlowTests(unittest.TestCase):
             )
             return subprocess.run(["bash", "-c", script], text=True, capture_output=True)
 
-        for backend in ("hf", "vllm", "openai"):
-            self.assertIn("ARGS=model=m,trust_remote_code=True", run(backend, "true").stdout)
-            self.assertIn("ARGS=model=m\n", run(backend, "false").stdout)
-        refused = run("sglang", "true")
+        self.assertIn("ARGS=model=m,trust_remote_code=True", run("openai", "true").stdout)
+        self.assertIn("ARGS=model=m\n", run("openai", "false").stdout)
+        refused = run("megatron_lm", "true")
         self.assertNotEqual(refused.returncode, 0)
-        self.assertIn("only supported with the hf, vllm and openai backends", refused.stdout)
+        self.assertIn("only supported with the openai backend", refused.stdout)
 
     def test_bos_is_resolved_for_each_command_by_whether_it_applies_the_chat_template(self) -> None:
         sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
@@ -263,7 +268,7 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertEqual(by_client("auto", "true"), ("true", ""))
         self.assertEqual(by_client("auto", "false"), ("false", ""))
         self.assertEqual(by_client("auto", "true", model="local-chat-completions"), ("false", ""))
-        self.assertEqual(by_client("auto", "true", backend="vllm", model=""), ("false", ""))
+        self.assertEqual(by_client("auto", "true", backend="megatron_lm", model=""), ("false", ""))
 
     def test_orchestrator_records_bos_by_client_as_applied(self) -> None:
         orchestrator = (REPO_ROOT / "scripts/lm_eval_harness/evaluation_orchestrator.sh").read_text()
@@ -283,7 +288,7 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertEqual(recorded(**base, APPLY_CHAT_TEMPLATE="true", BOS_BY_CLIENT="false"), "false")
         self.assertEqual(recorded(**base, APPLY_CHAT_TEMPLATE="true", API_CHAT_ENDPOINT="true"), "false")
         self.assertEqual(recorded(**base, APPLY_CHAT_TEMPLATE="true", CHAT_FORMAT="apertus2"), "false")
-        self.assertEqual(recorded(LM_EVAL_BACKEND="vllm", APPLY_CHAT_TEMPLATE="true"), "false")
+        self.assertEqual(recorded(LM_EVAL_BACKEND="megatron_lm", APPLY_CHAT_TEMPLATE="true"), "false")
 
     def test_bos_probe_runs_on_the_completions_endpoint_with_its_flags(self) -> None:
         sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
@@ -309,7 +314,7 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertIn("--chat-template", chat)
         self.assertIn("--bos-by-client", chat)
         self.assertEqual(probe_line("false", check="false"), "")
-        self.assertEqual(probe_line("false", backend="vllm"), "")
+        self.assertEqual(probe_line("false", backend="megatron_lm"), "")
         self.assertEqual(probe_line("false", model="local-chat-completions"), "")
 
 
@@ -327,7 +332,7 @@ class LaunchFlowTests(unittest.TestCase):
         for policy in ("resume", "fail-fast"):
             with self.subTest(policy=policy):
                 completed, manifest = _prebuilt_dry_run(
-                    "single", "--task", "hellaswag", "--model", "test/model",
+                    "single", "--task", "hellaswag", "--model", "test/model", *OPENAI_ARGS,
                     "--failure-policy", policy,
                 )
                 output = completed.stdout + completed.stderr
@@ -388,7 +393,7 @@ class LaunchFlowTests(unittest.TestCase):
 
     def test_prebuilt_environment_overlays_another_harness_commit(self) -> None:
         commit = "32b8b593890ec9a983c9aadf81a6a08d840beb63"
-        args = ("single", "--task", "hellaswag", "--model", "test/model", "--harness-branch")
+        args = ("single", "--task", "hellaswag", "--model", "test/model", *OPENAI_ARGS, "--harness-branch")
         with tempfile.TemporaryDirectory() as cache:
             overlay = Path(cache, "prebuilt-harness/swiss-ai/lm-evaluation-harness", commit)
             completed, manifest = _prebuilt_dry_run(*args, commit.upper(), EVAL_ENV_CACHE_ROOT=cache)
@@ -410,7 +415,7 @@ class LaunchFlowTests(unittest.TestCase):
         commit = "c2efb6bd" + "0" * 32
         with tempfile.TemporaryDirectory() as cache:
             completed, manifest = _prebuilt_dry_run(
-                "single", "--task", "hellaswag", "--model", "test/model",
+                "single", "--task", "hellaswag", "--model", "test/model", *OPENAI_ARGS,
                 "--harness-repo", "someone/lm-evaluation-harness", "--harness-branch", commit,
                 EVAL_ENV_CACHE_ROOT=cache,
             )
@@ -426,7 +431,7 @@ class LaunchFlowTests(unittest.TestCase):
         ):
             with self.subTest(repo=repo):
                 completed, _ = _prebuilt_dry_run(
-                    "single", "--task", "hellaswag", "--model", "test/model", "--harness-repo", repo,
+                    "single", "--task", "hellaswag", "--model", "test/model", *OPENAI_ARGS, "--harness-repo", repo,
                 )
                 self.assertNotEqual(completed.returncode, 0)
                 self.assertIn(error, completed.stderr)
@@ -434,7 +439,7 @@ class LaunchFlowTests(unittest.TestCase):
     def test_max_length_reaches_the_run_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
-                "single", "--task", "uncheatable_eval", "--model", "test/model",
+                "single", "--task", "uncheatable_eval", "--model", "test/model", *OPENAI_ARGS,
                 "--max-length", "65536", "--logs-root", tmp,
             )
             output = completed.stdout + completed.stderr
@@ -445,7 +450,7 @@ class LaunchFlowTests(unittest.TestCase):
     def test_max_length_must_be_a_positive_integer(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
-                "single", "--task", "uncheatable_eval", "--model", "test/model",
+                "single", "--task", "uncheatable_eval", "--model", "test/model", *OPENAI_ARGS,
                 "--max-length", "32k", "--logs-root", tmp,
             )
         self.assertNotEqual(completed.returncode, 0)
@@ -468,7 +473,7 @@ class LaunchFlowTests(unittest.TestCase):
     def test_api_retry_and_concurrency_flags_need_the_openai_backend(self) -> None:
         for flag in ("--api-max-retries", "--api-num-concurrent"):
             with tempfile.TemporaryDirectory() as tmp:
-                completed = _launch("single", "--task", "hellaswag", "--model", "test/model", flag, "5", "--logs-root", tmp)
+                completed = _launch("single", "--task", "hellaswag", "--model", "test/model", "--backend", "megatron_lm", flag, "5", "--logs-root", tmp)
             self.assertNotEqual(completed.returncode, 0, flag)
             self.assertIn(f"{flag} only applies with --backend openai", completed.stderr + completed.stdout)
 
@@ -485,7 +490,7 @@ class LaunchFlowTests(unittest.TestCase):
     def test_reasoning_effort_is_a_named_part_of_the_run_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
-                "single", "--task", "aime25", "--model", "openai/gpt-oss-120b",
+                "single", "--task", "aime25", "--model", "openai/gpt-oss-120b", *OPENAI_ARGS,
                 "--reasoning-effort", "high", "--logs-root", tmp,
             )
             output = completed.stdout + completed.stderr
@@ -501,7 +506,7 @@ class LaunchFlowTests(unittest.TestCase):
         # every earlier result look foreign and rerun it.
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
-                "single", "--task", "aime25", "--model", "test/model", "--logs-root", tmp,
+                "single", "--task", "aime25", "--model", "test/model", *OPENAI_ARGS, "--logs-root", tmp,
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)
             config = _run_config(tmp)
@@ -585,7 +590,7 @@ class LaunchFlowTests(unittest.TestCase):
                 "--api-endpoint must be 'completions' or 'chat-completions'",
             ),
             "not openai": (
-                ["--model", "test/model", "--api-endpoint", "chat-completions"],
+                ["--model", "test/model", "--backend", "megatron_lm", "--api-endpoint", "chat-completions"],
                 "--api-endpoint only applies with --backend openai",
             ),
             "chat without template": (
@@ -688,7 +693,7 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertEqual(budget(), "262144")
         self.assertEqual(budget(MAX_LENGTH="131072"), "131072")
         self.assertEqual(budget(MAX_LENGTH=""), "32768")  # no window given
-        self.assertEqual(budget(LM_EVAL_BACKEND="vllm"), "32768")  # no clamp there
+        self.assertEqual(budget(LM_EVAL_BACKEND="megatron_lm"), "32768")  # no clamp there
         self.assertEqual(budget(ENABLE_THINKING="False", REASONING_EFFORT="low"), "262144")
         # a caller's value wins and the block is not entered
         self.assertEqual(budget(MAX_NEW_TOKENS_EXPLICIT="1", MAX_NEW_TOKENS="8192"), "8192")
@@ -726,7 +731,7 @@ class LaunchFlowTests(unittest.TestCase):
     def test_launch_summary_shows_partition_and_qos(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
-                "single", "--task", "hellaswag", "--model", "test/model",
+                "single", "--task", "hellaswag", "--model", "test/model", *OPENAI_ARGS,
                 "--qos", "highprio", "--partition", "highprio", "--logs-root", tmp,
             )
         output = completed.stdout + completed.stderr
@@ -740,25 +745,6 @@ class LaunchFlowTests(unittest.TestCase):
             self.assertNotIn("--partition=normal", text, script)
         orchestrator = (REPO_ROOT / "scripts/lm_eval_harness/evaluation_orchestrator.sh").read_text()
         self.assertIn('launch_args+=(--partition "$SBATCH_PARTITION")', orchestrator)
-
-    def test_reasoning_effort_is_accepted_on_sglang(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            completed = _launch(
-                "single", "--task", "aime25", "--model", "openai/gpt-oss-120b",
-                "--backend", "sglang", "--reasoning-effort", "high", "--logs-root", tmp,
-            )
-            output = completed.stdout + completed.stderr
-            self.assertEqual(completed.returncode, 0, output)
-            config = _run_config(tmp)
-        self.assertEqual(config["configuration"]["reasoning_effort"], "high")
-
-    def test_evaluate_passes_think_args_to_sglang(self) -> None:
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
-        sglang_args = next(
-            line for line in sbatch.splitlines()
-            if "tokenizer_path=$TOKENIZER" in line and "COMMON_MODEL_ARGS=" in line
-        )
-        self.assertIn("${THINK_ARGS}", sglang_args)
 
     def test_evaluate_passes_reasoning_effort_as_its_own_model_args_token(self) -> None:
         # The harness refuses a first --model_args token containing '{', and argparse gives
@@ -774,11 +760,10 @@ class LaunchFlowTests(unittest.TestCase):
         lexer.whitespace, lexer.whitespace_split, lexer.commenters = ",", True, ""
         key, value = next(iter(lexer)).split("=", 1)
         self.assertEqual((key, ast.literal_eval(value)), ("chat_template_args", {"reasoning_effort": "high"}))
-        for launcher in ("python -m lm_eval", "python -m accelerate.commands.launch --num_processes=4  -m lm_eval"):
-            self.assertIn(
-                f"{launcher} --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ",
-                SBATCH,
-            )
+        self.assertIn(
+            "python -m lm_eval --model $API_LM_EVAL_MODEL --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ",
+            SBATCH,
+        )
 
     def test_chat_template_by_type_is_recorded_in_the_run_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -861,7 +846,7 @@ class LaunchFlowTests(unittest.TestCase):
         apertus2 = [*api, "--chat-format", "apertus2", "--tokenizer", "/ckpt", "--max-length", "65536"]
         single = ["single", "--task", "gsm8k"]
         cases = {
-            "not openai": (["--model", "m", "--chat-format", "apertus2", "--tokenizer", "/ckpt",
+            "not openai": (["--model", "m", "--backend", "megatron_lm", "--chat-format", "apertus2", "--tokenizer", "/ckpt",
                             "--max-length", "65536"], "needs --backend openai"),
             "no tokenizer": ([*api, "--chat-format", "apertus2", "--max-length", "65536"],
                              "needs --backend openai, --tokenizer"),
@@ -905,7 +890,7 @@ class LaunchFlowTests(unittest.TestCase):
         prebuilt = _chat_format(EVAL_ENV_KIND="prebuilt")
         self.assertEqual(prebuilt.returncode, 0, prebuilt.stderr)
         refusals = {
-            "not openai": ({"LM_EVAL_BACKEND": "vllm"}, "renders every task as chat"),
+            "not openai": ({"LM_EVAL_BACKEND": "megatron_lm"}, "renders every task as chat"),
             "chat endpoint": ({"API_CHAT_ENDPOINT": "true"}, "renders every task as chat"),
             "template off": ({"APPLY_CHAT_TEMPLATE": "false"}, "renders every task as chat"),
             "no context": ({"MAX_LENGTH": ""}, "needs MAX_LENGTH"),

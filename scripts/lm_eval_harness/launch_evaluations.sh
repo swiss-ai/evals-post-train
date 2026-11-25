@@ -29,10 +29,9 @@
 #                          (multiple_choice/loglikelihood output_type) without it: two lm-eval
 #                          passes per job, merged into one result (scripts/lm_eval_harness/task_output_types.py)
 #   --tokenizer <tok>    - Custom tokenizer (default: same as model)
-#   --trust-remote-code  - Load the tokenizer (and, for hf/vllm, the model) with
-#                          trust_remote_code=True: for models whose tokenizer is custom
-#                          code in the repo (e.g. Kimi-K2's tokenization_kimi.py).
-#                          hf, vllm and openai backends.
+#   --trust-remote-code  - Load the tokenizer with trust_remote_code=True: for models whose
+#                          tokenizer is custom code in the repo (e.g. Kimi-K2's
+#                          tokenization_kimi.py). openai backend only.
 #   --bos                - Prepend BOS token (default: Gemma 4, and without a chat template
 #                          every tokenizer that defines a BOS token; see bos_default.py)
 #   --no-bos             - Never prepend it beyond what the tokenizer does (turns that default off)
@@ -51,11 +50,11 @@
 #   --num-fewshot N      - Override num_fewshot for all tasks (default: use task YAML defaults)
 #                          Note: tasks with num_fewshot=0 in YAML are never overridden.
 #                          OLMo3 uses 5-shot for most MC tasks; pass --num-fewshot 5 to match.
-#   --max-length N       - Backend context limit in tokens (exports MAX_LENGTH: vLLM/SGLang
-#                          max_model_len, Megatron seq_length, hf/openai max_length).
+#   --max-length N       - Context limit in tokens (exports MAX_LENGTH: openai max_length,
+#                          Megatron seq_length).
 #                          Default: the backend's own. loglikelihood_rolling tasks (e.g.
 #                          uncheatable_eval) cut documents into windows of this size.
-#   --backend <backend>  - lm-eval backend: hf, vllm, sglang, megatron_lm, openai (default: from sbatch script)
+#   --backend <backend>  - lm-eval backend: openai (default), megatron_lm
 #   --api-base-url <url> - OpenAI-compatible endpoint for the 'openai' backend (required with it,
 #                          unless API_BASE_URL is exported). Bare host, /v1 root, or full endpoint URL.
 #   --api-model-name <n> - 'model' field sent in API requests (default: the --model value)
@@ -102,7 +101,7 @@
 #   --judge-requests-per-minute N - Per-judge-model endpoint-wide request limit
 #   --keep-judge         - Do not auto-cancel judge model after evaluation finishes
 #
-# Thinking / reasoning metrics (hf, vllm, sglang and openai backends; on openai the chat template
+# Thinking / reasoning metrics (openai backend: the chat template
 # is rendered client-side and the reasoning stripped from the API response, and there
 # --enable-thinking on its own only switches the template):
 #   --thinking           - Umbrella flag: make the model reason AND record the thinking metrics.
@@ -122,8 +121,8 @@
 #   --log-length-metrics - Aggregate response_length_* / thinking_length_* into results and W&B.
 #                          thinking_format_* is aggregated regardless.
 #   --reasoning-effort <level> - Chat-template argument reasoning_effort (e.g. low, medium, high)
-#                          for models whose template reads it (gpt-oss). hf, vllm, sglang and
-#                          openai backends; forces the chat template on. Letters, digits, '_' and '-'.
+#                          for models whose template reads it (gpt-oss). openai
+#                          backend only; forces the chat template on. Letters, digits, '_' and '-'.
 #                          Other templates ignore it. For gpt-oss, combine with --thinking and
 #                          --think-start-token '<|channel|>analysis<|message|>'
 #                          --think-end-token '<|channel|>final<|message|>' (not auto-detected).
@@ -395,7 +394,7 @@ fi
 
 # Resolve the backend as run_lm_eval.sbatch will, so an ambient LM_EVAL_BACKEND fails here,
 # not after scheduling.
-EFFECTIVE_BACKEND="${BACKEND_FLAG:-${LM_EVAL_BACKEND:-}}"
+EFFECTIVE_BACKEND="${BACKEND_FLAG:-${LM_EVAL_BACKEND:-openai}}"
 
 # Only the harness's API models send every attempt with its own seed.
 if [[ -n "${EVAL_REPEAT_CONFIG:-}$REPEATS_FLAG$REPEAT_METRIC_FLAG" && "$EFFECTIVE_BACKEND" != "openai" ]]; then
@@ -492,7 +491,7 @@ if [[ "$THINKING_UMBRELLA" == "true" || "$ENABLE_THINKING_OVERRIDE" == "true" \
     THINKING_METRICS_ASKED="true"
 fi
 
-# Length/reasoning producers exist only for hf/vllm/sglang.
+# Length/reasoning producers exist only on the openai backend.
 if [[ "$THINKING_TOUCHED" == "true" && "$EFFECTIVE_BACKEND" == "megatron_lm" ]]; then
     echo "Error: thinking and length metrics are not supported with the $EFFECTIVE_BACKEND backend"
     exit 1
@@ -517,17 +516,15 @@ if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
     fi
 fi
 
-# reasoning_effort is a chat-template argument: only backends that render the template
-# with extra arguments (hf, vllm, sglang in-job; openai client-side; the default is vllm)
-# can pass it on.
+# reasoning_effort is a chat-template argument: only the openai backend (client-side
+# rendering) can pass it on.
 if [[ -n "$REASONING_EFFORT" ]]; then
     if [[ ! "$REASONING_EFFORT" =~ ^[A-Za-z0-9_-]+$ ]]; then
         echo "Error: --reasoning-effort expects a level like low, medium or high (got '$REASONING_EFFORT')"
         exit 1
     fi
-    if [[ -n "$EFFECTIVE_BACKEND" && "$EFFECTIVE_BACKEND" != "vllm" && "$EFFECTIVE_BACKEND" != "hf" \
-          && "$EFFECTIVE_BACKEND" != "sglang" && "$EFFECTIVE_BACKEND" != "openai" ]]; then
-        echo "Error: --reasoning-effort is not supported with the $EFFECTIVE_BACKEND backend (hf, vllm, sglang and openai only)"
+    if [[ "$EFFECTIVE_BACKEND" != "openai" ]]; then
+        echo "Error: --reasoning-effort is not supported with the $EFFECTIVE_BACKEND backend (openai only)"
         exit 1
     fi
     if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" ]]; then
@@ -694,7 +691,7 @@ if [[ -n "$REPEATS_FLAG" && "$REPEATS_FLAG" -gt 1 ]]; then
     fi
 fi
 
-# Export only what was set: unset ENABLE_THINKING keeps the hf template default; unset
+# Export only what was set: unset ENABLE_THINKING keeps the template default; unset
 # TRACK_THINKING_METRICS lets the harness derive it.
 [[ -n "$ENABLE_THINKING_OVERRIDE"       ]] && export ENABLE_THINKING="$ENABLE_THINKING_OVERRIDE"
 [[ -n "$THINK_END_TOKEN"                ]] && export THINK_END_TOKEN

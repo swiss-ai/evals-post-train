@@ -16,7 +16,7 @@ EVAL_ENV_CACHE_ROOT=${EVAL_ENV_CACHE_ROOT:-${SCRATCH:-/tmp}/eval-envs}
 EVAL_RUNTIME_REQUIREMENTS=${EVAL_RUNTIME_REQUIREMENTS:-${EVAL_REPO_ROOT:-$PWD}/requirements/lm-eval-runtime.txt}
 # requirements/apertus2.txt for CHAT_FORMAT=apertus2 runs only (their own overlay).
 EVAL_APERTUS2_REQUIREMENTS=${EVAL_APERTUS2_REQUIREMENTS:-}
-EVAL_BACKEND=${LM_EVAL_BACKEND:-vllm}
+EVAL_BACKEND=${LM_EVAL_BACKEND:-openai}
 HARNESS_URL="https://github.com/${EVAL_HARNESS_REPO}.git"
 BASE_VENV_ARGS=(--system-site-packages)
 # The lock is complete, as in the prebuilt image: its venv leaves out the container's packages

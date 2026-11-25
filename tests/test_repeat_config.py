@@ -66,15 +66,15 @@ class RepeatPolicyTests(unittest.TestCase):
             self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
             thinking = _launch(*base, "--repeats", "4", "--enable-thinking", "--logs-root", tmp)
             self.assertEqual(thinking.returncode, 0, thinking.stdout + thinking.stderr)
-            local = _launch("single", "--task", "gsm8k_cot", "--model", "test/model", "--repeats", "4",
-                            "--temperature", "0.6", "--logs-root", tmp)
+            local = _launch("single", "--task", "gsm8k_cot", "--model", "test/model", "--backend", "megatron_lm",
+                            "--repeats", "4", "--temperature", "0.6", "--logs-root", tmp)
             self.assertIn("need --backend openai", local.stdout + local.stderr)
 
     def test_launcher_refuses_repeat_config_for_local_backends(self):
         with tempfile.TemporaryDirectory() as tmp:
             policy = Path(tmp) / "policy.json"
             policy.write_text(json.dumps({"repeat_scoring": {"enabled": True}}))
-            run = _launch("single", "--task", "gsm8k_cot", "--model", "test/model",
+            run = _launch("single", "--task", "gsm8k_cot", "--model", "test/model", "--backend", "megatron_lm",
                           "--repeat-config", str(policy), "--logs-root", tmp)
             self.assertNotEqual(run.returncode, 0)
             self.assertIn("need --backend openai", run.stdout + run.stderr)
