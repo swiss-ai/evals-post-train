@@ -316,26 +316,6 @@ _reject_comma THINK_START_TOKEN "$THINK_START_TOKEN"
 _reject_comma API_BASE_URL "$API_BASE_URL"
 _reject_comma API_MODEL_NAME "$API_MODEL_NAME"
 
-# Reasoning model_args. Only non-defaults are emitted (an unset flag
-# keeps the harness default).
-THINK_ARGS=""
-[[ -n "$THINK_END_TOKEN" ]] && THINK_ARGS="${THINK_ARGS},think_end_token=${THINK_END_TOKEN}"
-[[ -n "$THINK_START_TOKEN" ]] && THINK_ARGS="${THINK_ARGS},think_start_token=${THINK_START_TOKEN}"
-[[ "$AUTODETECT_THINK_TOKENS" == "True" ]] && THINK_ARGS="${THINK_ARGS},autodetect_think_tokens=True"
-[[ -n "$TRACK_THINKING_METRICS" ]] && THINK_ARGS="${THINK_ARGS},track_thinking_metrics=${TRACK_THINKING_METRICS}"
-
-# Extra chat-template arguments, as a second --model_args token: the harness
-# refuses a first token containing '{' (it must then be all JSON) but splits each further token
-# with shlex (POSIX, dropping unescaped quotes) and reads its value with ast.literal_eval, so the
-# quotes are escaped. Needs the `--model_args 'a' 'b'` form: argparse gives `--model_args='a'`
-# exactly one value.
-CHAT_TEMPLATE_ARGS=""
-if [[ -n "$REASONING_EFFORT" ]]; then
-    [[ "$REASONING_EFFORT" =~ ^[A-Za-z0-9_-]+$ ]] \
-        || die "REASONING_EFFORT must be a level like low, medium or high (got '$REASONING_EFFORT')."
-    CHAT_TEMPLATE_ARGS=" 'chat_template_args={\\\"reasoning_effort\\\":\\\"${REASONING_EFFORT}\\\"}'"
-fi
-
 if [ -f "$TASKS" ]; then
     echo "Reading task list from file: $TASKS"
     # Filter out comments and blank lines, then join with commas
@@ -413,84 +393,18 @@ export HF_ALLOW_CODE_EVAL=1
 # export PERSPECTIVE_API_KEY="" # Uncomment if you want to use perspective API, needed for realtoxicityprompts task
 
 # Finally, run the actual evaluations.
-THINKING_DEFAULT_MODEL_ARG=""
-if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]]; then
-    # Backend default for any request without a max_gen_toks; the --gen_kwargs
-    # override below is what replaces the task-local budgets.
-    THINKING_DEFAULT_MODEL_ARG=",max_gen_toks=$MAX_NEW_TOKENS"
-fi
+# The harness model and its --model_args come from scripts/lm_eval_harness/model_args.py, which reads these
+# settings from the environment (its INPUTS) and prints shell assignments. Captured first, so a failure
+# stops the job: `eval "$(...)"` would hide the exit code.
+export MODEL API_BASE_URL API_MODEL_NAME API_CHAT_ENDPOINT API_NUM_CONCURRENT API_MAX_RETRIES API_REQUEST_TIMEOUT API_REQUESTS_PER_MINUTE CHAT_FORMAT APPLY_CHAT_TEMPLATE TOKENIZER PREFILL_MODE ANSWER_FRAME REASONING_EFFORT ENABLE_THINKING ENABLE_THINKING_EXPLICIT THINK_START_TOKEN THINK_END_TOKEN AUTODETECT_THINK_TOKENS TRACK_THINKING_METRICS MAX_NEW_TOKENS TRUST_REMOTE_CODE MAX_LENGTH TASKS
+MODEL_ARGS_OUT=$(python3 -m scripts.lm_eval_harness.model_args) || die "Could not build the model arguments (see above)."
+eval "$MODEL_ARGS_OUT"
 
-[[ -n "$API_BASE_URL" ]] || die "API_BASE_URL must be set (e.g. http://<host>:8000/v1)."
-API_MODEL_NAME=${API_MODEL_NAME:-$MODEL}
-# Always the completions endpoint: it serves BOTH generative and loglikelihood/MC
-# requests, so mixed suites work (chat/completions raises NotImplementedError on
-# loglikelihood). With the chat template on, the harness renders the model's template
-# client-side via the HF tokenizer. For purely generative suites the server-side
-# template path can be forced with API_CHAT_ENDPOINT=true.
-API_CHAT_ENDPOINT=${API_CHAT_ENDPOINT:-false}
-if [[ "$CHAT_FORMAT" == "apertus2" ]]; then
-    API_LM_EVAL_MODEL="apertus2-completions"
-    API_ENDPOINT_SUFFIX="completions"
-elif [[ "$API_CHAT_ENDPOINT" == "true" ]]; then
-    [[ $APPLY_CHAT_TEMPLATE = true ]] || die "API_CHAT_ENDPOINT=true requires the chat template (chat/completions takes messages)."
-    API_LM_EVAL_MODEL="local-chat-completions"
-    API_ENDPOINT_SUFFIX="chat/completions"
-else
-    API_LM_EVAL_MODEL="local-completions"
-    API_ENDPOINT_SUFFIX="completions"
-fi
-# Accept a bare host, a /v1 root, or an already-full endpoint URL.
-if [[ "$API_BASE_URL" != */chat/completions && "$API_BASE_URL" != */completions ]]; then
-    API_BASE_URL="${API_BASE_URL%/}"
-    [[ "$API_BASE_URL" == */v1 ]] || API_BASE_URL="$API_BASE_URL/v1"
-    API_BASE_URL="$API_BASE_URL/$API_ENDPOINT_SUFFIX"
-fi
-# Rebuilt from scratch: no model is loaded in-job, so dtype etc. do not apply.
-COMMON_MODEL_ARGS="model=$API_MODEL_NAME,base_url=$API_BASE_URL,num_concurrent=$API_NUM_CONCURRENT,max_retries=$API_MAX_RETRIES,timeout=$API_REQUEST_TIMEOUT"
-if [[ -n "$API_REQUESTS_PER_MINUTE" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,requests_per_minute=$API_REQUESTS_PER_MINUTE"
-fi
-if [[ $API_LM_EVAL_MODEL == "apertus2-completions" ]]; then
-    # The model reads the effort itself (no chat template); the context goes in as
-    # max_model_len (below).
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer=$TOKENIZER,prefill=$PREFILL_MODE,reasoning_effort=$REASONING_EFFORT${THINKING_DEFAULT_MODEL_ARG}"
-    # Only when asked: default runs keep their model arguments.
-    [[ "${ANSWER_FRAME:-reply}" == "claim" ]] && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,answer_frame=claim"
-    CHAT_TEMPLATE_ARGS=""
-elif [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then
-    # tokenizer_backend/tokenizer is local bookkeeping only (max context length, decoding,
-    # token counts) -- lm_eval still needs it for loglikelihood scoring. tokenized_requests
-    # is the separate knob that controls what goes over the wire: with it left at the
-    # default (True), lm_eval ships pre-tokenized integer IDs in the prompt field. The CSCS
-    # gateway's /v1/completions only parses a plain string there, so it must be forced False
-    # regardless of the tokenizer setting.
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER,tokenized_requests=False"
-    # Rendered client-side with the HF tokenizer, so template arguments apply here; forward
-    # enable_thinking only when set (unset keeps the template default).
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS${THINKING_DEFAULT_MODEL_ARG}${THINK_ARGS}"
-    (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
-else
-    # chat/completions leaves the template to the server: template arguments
-    # (enable_thinking, reasoning_effort) travel with each request as chat_template_kwargs,
-    # and the server's reasoning parser returns the reasoning in its own field, which the
-    # harness puts back between the think tokens (when given) so it is stripped and measured.
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenized_requests=False${THINKING_DEFAULT_MODEL_ARG}${THINK_ARGS}"
-    (( ENABLE_THINKING_EXPLICIT )) && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,enable_thinking=${ENABLE_THINKING}"
-fi
 # API models take an integer batch size; throughput comes from num_concurrent instead.
 if [[ "$BS" == auto* ]]; then
     BS=1
     echo "batch size 'auto' unsupported, using BS=$BS (concurrency: API_NUM_CONCURRENT=$API_NUM_CONCURRENT)"
 fi
-echo "$API_LM_EVAL_MODEL against $API_BASE_URL (model=$API_MODEL_NAME)"
-[[ -z "$API_REQUESTS_PER_MINUTE" ]] \
-    || echo "rate limit: $API_REQUESTS_PER_MINUTE requests/minute"
-
-# Opt-in, for models whose tokenizer is custom code (e.g. Kimi-K2).
-if [[ "$TRUST_REMOTE_CODE" == "true" ]]; then
-    COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,trust_remote_code=True"
-fi
-
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
 mkdir -p "$HARNESS_EVAL_DIR"
 # Keep the job's output from here on with the results (stdout and stderr stay separate streams
@@ -571,53 +485,9 @@ if [[ "$LOG_LENGTH_METRICS" == "True" ]]; then
 	COMMON_EVAL_ARGS+=(--log_length_metrics)
 fi
 
-# Detect long context length only when 'ruler' is among tasks. RULER needs a
-# little engine headroom beyond the requested sequence length.
-CONTEXT_LEN=""
-CONTEXT_LIMIT="$MAX_LENGTH"
-if echo "$TASKS" | grep -q "ruler"; then
-    if echo "$TASKS" | grep -qE "/[0-9]+"; then
-        CONTEXT_LEN=$(echo "$TASKS" | grep -oE '/[0-9]+' | head -n1 | tr -d '/')
-    fi
-    # Fallback: support underscore or dash pattern like ruler_8192 or ruler-8192
-    if [[ -z "$CONTEXT_LEN" ]]; then
-        if echo "$TASKS" | grep -qE "ruler[_-][0-9]+"; then
-            CONTEXT_LEN=$(echo "$TASKS" | grep -oE 'ruler[_-][0-9]+' | head -n1 | grep -oE '[0-9]+')
-        fi
-    fi
-    if [[ -n "$CONTEXT_LEN" ]]; then
-        # Only add metadata and model arg if CONTEXT_LEN is numeric
-        if [[ "$CONTEXT_LEN" =~ ^[0-9]+$ ]]; then
-			COMMON_EVAL_ARGS+=( --metadata \'{\"max_seq_lengths\":[${CONTEXT_LEN}]}\' )
-
-            CONTEXT_LIMIT=$(( CONTEXT_LEN + 600 ))
-            echo "Detected ruler context length: $CONTEXT_LEN (context limit=$CONTEXT_LIMIT and lm-eval metadata)"
-        else
-            echo "Warning: Ruler detected but no numeric context length found; skipping metadata and automatic context limit."
-        fi
-    fi
-fi
-
-# MAX_LENGTH is a context limit, not a generation override. Omit it entirely when no value was set.
-if [[ -n "$CONTEXT_LIMIT" ]]; then
-    # apertus2-completions clamps each request's budget to the server's context,
-    # which ruler's detected length does not change.
-    if [[ "$CHAT_FORMAT" == "apertus2" ]]; then
-        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$MAX_LENGTH"
-    else
-        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_length=$CONTEXT_LIMIT"
-        # The template path never counts tokens: a prompt longer than the context
-        # minus the budget gets the server's 400. clamp_gen_toks lowers that
-        # request's budget to what is left.
-        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,clamp_gen_toks=True"
-        # The clamp counts the prompt with a client tokenizer; without one it clamps
-        # nothing (every request keeps the full budget, e.g. 32768 against a 16384
-        # window = 400). local-completions has one already; chat-completions needs it
-        # only for counting (tokenized_requests=False: the server renders the template).
-        [[ "${API_LM_EVAL_MODEL:-}" == "local-chat-completions" ]] \
-            && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER"
-    fi
-    echo "Using context limit: $CONTEXT_LIMIT"
+# A RULER task list names its context length (CONTEXT_LEN, from model_args.py): lm-eval gets it as metadata.
+if [[ -n "$CONTEXT_LEN" ]]; then
+    COMMON_EVAL_ARGS+=( --metadata \'{\"max_seq_lengths\":[${CONTEXT_LEN}]}\' )
 fi
 
 echo "Using lm-evaluation-harness: $EVAL_RESOLVED_HARNESS_REPO@$EVAL_RESOLVED_HARNESS_COMMIT"

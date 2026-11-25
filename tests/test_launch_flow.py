@@ -1,7 +1,5 @@
-import ast
 import json
 import os
-import shlex
 import subprocess
 import tempfile
 import unittest
@@ -119,27 +117,6 @@ def _gen_kwargs(**env: str) -> str:
     return done.stderr
 
 
-def _openai_model(**env: str) -> subprocess.CompletedProcess:
-    """run_lm_eval.sbatch's endpoint model arguments and context mapping, run on their own; the
-    last stdout line is the harness model and its --model_args."""
-    branch = SBATCH[SBATCH.index('[[ -n "$API_BASE_URL" ]] || die'):
-                    SBATCH.index('# Opt-in, for models whose tokenizer is custom code')]
-    mapping = SBATCH[SBATCH.index('if [[ -n "$CONTEXT_LIMIT" ]]; then'):
-                     SBATCH.index('echo "Using lm-evaluation-harness:')]
-    script = ("set -e\n" + _function("die") + _function("_norm_bool") + branch
-              + mapping + 'printf "\\n%s %s%s" "$API_LM_EVAL_MODEL" "$COMMON_MODEL_ARGS" "$CHAT_TEMPLATE_ARGS"\n')
-    base = {
-        "PATH": os.environ["PATH"], "CHAT_FORMAT": "template",
-        "APPLY_CHAT_TEMPLATE": "true", "API_BASE_URL": "http://host:8000", "API_MODEL_NAME": "m",
-        "API_NUM_CONCURRENT": "8", "API_MAX_RETRIES": "3", "API_REQUEST_TIMEOUT": "3600",
-        "TOKENIZER": "/ckpt", "BS": "1", "BOS": "false", "THINK_ARGS": "", "ENABLE_THINKING": "False",
-        "ENABLE_THINKING_EXPLICIT": "0", "THINKING_DEFAULT_MODEL_ARG": ",max_gen_toks=32768",
-        "MAX_LENGTH": "65536", "CONTEXT_LIMIT": "65536", "PREFILL_MODE": "after_think",
-        "REASONING_EFFORT": "medium", "CHAT_TEMPLATE_ARGS": " 'chat_template_args={...}'",
-    }
-    return subprocess.run(["bash", "-c", script], env=base | env, capture_output=True, text=True)
-
-
 class LaunchFlowTests(unittest.TestCase):
     def test_mode_is_required_and_only_single_and_custom_exist(self) -> None:
         for arguments, message in ((["--model", "test/model"], "a mode is required"),
@@ -181,19 +158,6 @@ class LaunchFlowTests(unittest.TestCase):
             "--trust-remote-code",
         )
         self.assertNotIn("Unknown option", output)
-
-    def test_trust_remote_code_reaches_the_model_args(self) -> None:
-        # Runs run_lm_eval.sbatch's own block, so the test follows the script.
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
-        start = sbatch.index("# Opt-in, for models whose tokenizer is custom code")
-        block = sbatch[start: sbatch.index("HARNESS_EVAL_DIR=", start)]
-
-        def run(flag: str) -> subprocess.CompletedProcess:
-            script = f'TRUST_REMOTE_CODE={flag}; COMMON_MODEL_ARGS="model=m"\n{block}\necho "ARGS=$COMMON_MODEL_ARGS"\n'
-            return subprocess.run(["bash", "-c", script], text=True, capture_output=True)
-
-        self.assertIn("ARGS=model=m,trust_remote_code=True", run("true").stdout)
-        self.assertIn("ARGS=model=m\n", run("false").stdout)
 
     def test_bos_is_resolved_for_each_command_by_whether_it_applies_the_chat_template(self) -> None:
         sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
@@ -581,16 +545,6 @@ class LaunchFlowTests(unittest.TestCase):
                 self.assertNotEqual(completed.returncode, 0)
                 self.assertIn(message, completed.stdout + completed.stderr)
 
-    def test_evaluate_passes_thinking_to_openai_chat_completions(self) -> None:
-        # The server renders the template there; the harness sends the template args as
-        # chat_template_kwargs and puts the server's reasoning field back between the tokens.
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
-        completions = sbatch[sbatch.index('if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then'):]
-        chat = completions[completions.index("\nelse\n"): completions.index("\nfi\n")]
-        self.assertIn("${THINKING_DEFAULT_MODEL_ARG}${THINK_ARGS}", chat)
-        self.assertIn(',enable_thinking=${ENABLE_THINKING}"', chat)
-        self.assertNotIn("need the completions endpoint", sbatch)
-
     def test_openai_takes_thinking_and_its_metrics(self) -> None:
         # The harness strips and measures the reasoning on API models (lm-evaluation-harness #111).
         api = ["--api-base-url", "http://localhost:8000",
@@ -624,17 +578,6 @@ class LaunchFlowTests(unittest.TestCase):
             )
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("no reasoning close token", completed.stdout + completed.stderr)
-
-    def test_evaluate_passes_think_args_to_openai_and_raises_the_effort_budget(self) -> None:
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
-        completions = sbatch[sbatch.index('if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then'):]
-        completions = completions[: completions.index("\nelse\n")]
-        self.assertIn("${THINKING_DEFAULT_MODEL_ARG}${THINK_ARGS}", completions)
-        self.assertIn('if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]]; then', sbatch)
-        self.assertIn(
-            'if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then',
-            sbatch,
-        )
 
     def test_thinking_budget_replaces_task_local_max_gen_toks(self) -> None:
         # The --gen_kwargs value overrides every task's YAML max_gen_toks (mmlu_pro 2048,
@@ -686,17 +629,6 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("drop --no-chat-template", completed.stdout + completed.stderr)
 
-    def test_evaluate_passes_template_args_to_openai_completions(self) -> None:
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
-        self.assertIn(
-            "python -m lm_eval --model $API_LM_EVAL_MODEL --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ",
-            sbatch,
-        )
-        completions = sbatch[sbatch.index('if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then'):]
-        completions = completions[: completions.index("\nelse\n")]
-        self.assertIn(',enable_thinking=${ENABLE_THINKING}"', completions)
-        self.assertIn("${THINKING_DEFAULT_MODEL_ARG}", completions)
-
     def test_launch_summary_shows_partition_and_qos(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
@@ -714,25 +646,6 @@ class LaunchFlowTests(unittest.TestCase):
             self.assertNotIn("--partition=normal", text, script)
         orchestrator = (REPO_ROOT / "scripts/lm_eval_harness/evaluation_orchestrator.sh").read_text()
         self.assertIn('launch_args+=(--partition "$SBATCH_PARTITION")', orchestrator)
-
-    def test_evaluate_passes_reasoning_effort_as_its_own_model_args_token(self) -> None:
-        # The harness refuses a first --model_args token containing '{', and argparse gives
-        # `--model_args='...'` exactly one value: the dict must be a second, space-separated token.
-        # The harness splits it with shlex (POSIX) and reads the value with ast.literal_eval
-        # (lm_eval/_cli/utils.py key_val_to_dict), so its quotes must survive shlex.
-        assignment = next(line.strip() for line in SBATCH.splitlines()
-                          if line.strip().startswith('CHAT_TEMPLATE_ARGS=" '))
-        script = assignment + '\neval "set -- \'a=1\'$CHAT_TEMPLATE_ARGS"\nprintf "%s" "$2"\n'
-        token = subprocess.run(["bash", "-c", script], env={"PATH": os.environ["PATH"], "REASONING_EFFORT": "high"},
-                               capture_output=True, text=True, check=True).stdout
-        lexer = shlex.shlex(token, posix=True)
-        lexer.whitespace, lexer.whitespace_split, lexer.commenters = ",", True, ""
-        key, value = next(iter(lexer)).split("=", 1)
-        self.assertEqual((key, ast.literal_eval(value)), ("chat_template_args", {"reasoning_effort": "high"}))
-        self.assertIn(
-            "python -m lm_eval --model $API_LM_EVAL_MODEL --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ",
-            SBATCH,
-        )
 
     def test_chat_template_by_type_is_recorded_in_the_run_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -873,42 +786,6 @@ class LaunchFlowTests(unittest.TestCase):
                 completed = _chat_format(**env)
                 self.assertNotEqual(completed.returncode, 0)
                 self.assertIn(message, completed.stderr)
-
-    def test_evaluate_selects_apertus2_completions(self) -> None:
-        def model(**env: str) -> str:
-            return _openai_model(**env).stdout.splitlines()[-1]
-
-        apertus2 = _openai_model(CHAT_FORMAT="apertus2")
-        self.assertEqual(apertus2.returncode, 0, apertus2.stderr)
-        self.assertEqual(
-            apertus2.stdout.splitlines()[-1],
-            "apertus2-completions model=m,base_url=http://host:8000/v1/completions,num_concurrent=8,"
-            "max_retries=3,timeout=3600,tokenizer=/ckpt,prefill=after_think,reasoning_effort=medium,"
-            "max_gen_toks=32768,max_model_len=65536",
-        )
-        # --answer-frame claim reaches the model; the default leaves the arguments as they were.
-        self.assertIn(",max_gen_toks=32768,answer_frame=claim,max_model_len=65536",
-                      model(CHAT_FORMAT="apertus2", ANSWER_FRAME="claim"))
-        self.assertNotIn("answer_frame", model(CHAT_FORMAT="apertus2"))
-        # ruler's detected length bounds the template path's context, not the server's.
-        self.assertTrue(model(CHAT_FORMAT="apertus2", CONTEXT_LIMIT="8792").endswith(",max_model_len=65536"))
-        # The template path keeps its own model, context argument and chat_template_args token.
-        template = model()
-        self.assertTrue(template.startswith("local-completions "))
-        self.assertTrue(template.endswith(",max_length=65536,clamp_gen_toks=True 'chat_template_args={...}'"))
-
-    def test_chat_completions_clamp_has_a_tokenizer_to_count_with(self) -> None:
-        # clamp_gen_toks counts the prompt with the client tokenizer; chat-completions used to
-        # have none, so nothing was clamped and a 32768 thinking budget got a 400 on a 16k window.
-        def model(**env: str) -> str:
-            return _openai_model(**env).stdout.splitlines()[-1]
-
-        chat = model(API_CHAT_ENDPOINT="true")
-        self.assertTrue(chat.startswith("local-chat-completions "))
-        self.assertIn(",max_length=65536,clamp_gen_toks=True,tokenizer_backend=huggingface,tokenizer=/ckpt", chat)
-        # The server still renders the template; with no window there is no clamp and no tokenizer.
-        self.assertIn(",tokenized_requests=False,", chat)
-        self.assertNotIn("tokenizer_backend", model(API_CHAT_ENDPOINT="true", CONTEXT_LIMIT=""))
 
     def test_apertus2_samples_like_a_thinking_run(self) -> None:
         self.assertEqual(
