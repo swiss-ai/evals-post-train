@@ -15,7 +15,7 @@ python -m scripts.common.suites flags apertus2/chonk_sft --setup apertus-1.5-70b
 
 | Part | Fields |
 |---|---|
-| `groups` (optional list) | the group names in display order (`chonk_sft`: Math, IF, Knowledge, Tool Use, SWE, Medical, MT Flores +, MT Bouquet, as in the evals-svc `apertus2-chonk_sft` view) |
+| `groups` (optional list) | the group names in display order (`chonk_sft`: Math, IF, Knowledge, Tool Use, SWE, Terminal, Medical, MT Flores +, MT Bouquet, as in the evals-svc `apertus2-chonk_sft` view) |
 | `benchmarks` (list, table order) | `label` (the table row), optional `group` (one of `groups`; the safety rows and RealGuardrails have none), `task`, `framework`, `repeats {n, via}`, `metric {label, key}`, optional `sampling`, optional `task_args` (inspect only), optional `flags` |
 | `setups` (by name) | `max_length` (the model's maximal window), `sampling` (default profile), `flags` (by framework: thinking, chat format, tokenizer) |
 
