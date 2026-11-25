@@ -56,8 +56,9 @@ class ModelTunnelTest(unittest.TestCase):
         return ModelTunnel(self.cfg, sandbox.exec, sandbox.upload, sandbox.endpoint, logging.getLogger("t"))
 
     def binaries(self, **kwargs) -> None:
+        # The sandbox here is amd64; on an amd64 node that is also the node's binary, so the fake client goes second.
+        self.cfg.binary("amd64").write_text("pod binary")
         fake_chisel(self.cfg.binary(NODE_ARCH), self.record, **kwargs)
-        (self.dir / f"chisel_{model_tunnel.CHISEL_VERSION}_linux_amd64").write_text("pod binary")
 
     def test_open_starts_both_ends_and_checks_health(self) -> None:
         self.binaries()
