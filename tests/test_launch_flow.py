@@ -148,72 +148,6 @@ class LaunchFlowTests(unittest.TestCase):
         )
         self.assertNotIn("Unknown option", output)
 
-    def test_bos_is_resolved_for_each_command_by_whether_it_applies_the_chat_template(self) -> None:
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
-        block = sbatch[sbatch.index("# bos per pass begin"): sbatch.index("# bos per pass end")]
-
-        def pass_bos(requested: str, template: str, config: dict[str, object]) -> str:
-            with tempfile.TemporaryDirectory() as tmp:
-                (Path(tmp) / "tokenizer_config.json").write_text(json.dumps(config))
-                script = (
-                    f"set -euo pipefail\nBOS_REQUESTED={requested}; TOKENIZER={tmp}\n{block}\n"
-                    f'resolve_pass_bos {template}\necho "[$PASS_BOS]"\n'
-                )
-                out = subprocess.run(["bash", "-c", script], cwd=REPO_ROOT, text=True, capture_output=True)
-            return out.stdout.strip().splitlines()[-1]
-
-        not_added = {"bos_token": "<s>", "add_bos_token": False}  # e.g. the Apertus 2 instruct tokenizer
-        added = {"bos_token": "<s>", "add_bos_token": True}  # a tokenizer that adds it itself
-        # BOS=auto: the config rule applies to a command without the chat template only
-        self.assertEqual(pass_bos("auto", "false", not_added), "[true]")
-        self.assertEqual(pass_bos("auto", "true", not_added), "[false]")
-        self.assertEqual(pass_bos("auto", "false", added), "[false]")
-        self.assertEqual(pass_bos("auto", "true", added), "[false]")
-        # --bos / --no-bos decide every command
-        for template in ("true", "false"):
-            self.assertEqual(pass_bos("true", template, added), "[true]")
-            self.assertEqual(pass_bos("false", template, not_added), "[false]")
-
-    def test_a_failing_bos_helper_is_reported_and_does_not_kill_the_job(self) -> None:
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
-        block = sbatch[sbatch.index("# bos per pass begin"): sbatch.index("# bos per pass end")]
-        with tempfile.TemporaryDirectory() as tmp:
-            stub = Path(tmp) / "python3"  # the node's python3 too old for the helper
-            stub.write_text("#!/bin/sh\necho 'SyntaxError: future feature annotations is not defined' >&2\nexit 1\n")
-            stub.chmod(0o755)
-            script = (
-                f"set -euo pipefail\nPATH={tmp}:$PATH; BOS_REQUESTED=auto; TOKENIZER=t\n{block}\n"
-                'resolve_pass_bos false\necho "[$PASS_BOS]"\n'
-            )
-            out = subprocess.run(["bash", "-c", script], text=True, capture_output=True)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("[false]", out.stdout)
-        self.assertIn("BOS=auto could not be resolved", out.stderr)
-        self.assertIn("SyntaxError", out.stderr)
-
-    def test_bos_by_client_applies_to_commands_with_a_chat_template(self) -> None:
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
-        block = sbatch[sbatch.index("# bos per pass begin"): sbatch.index("# bos per pass end")]
-
-        def by_client(requested: str, template: str, model: str = "local-completions") -> tuple[str, str]:
-            script = (
-                f"set -euo pipefail\nBOS_BY_CLIENT={requested}\nAPI_LM_EVAL_MODEL={model}\n"
-                f'{block}\nresolve_pass_bos_by_client {template}\necho "$PASS_BOS_BY_CLIENT"\n'
-            )
-            out = subprocess.run(["bash", "-c", script], text=True, capture_output=True).stdout.strip().splitlines()
-            return out[-1], "\n".join(out[:-1])
-
-        self.assertEqual(by_client("true", "true"), ("true", ""))
-        self.assertEqual(by_client("false", "true"), ("false", ""))
-        self.assertEqual(by_client("false", "false"), ("false", ""))
-        ignored, note = by_client("true", "false")
-        self.assertEqual(ignored, "false")
-        self.assertIn("ignored for this one (no chat template)", note)
-        # unset (auto): on for template commands where it can apply, silent without a template or elsewhere
-        self.assertEqual(by_client("auto", "true"), ("true", ""))
-        self.assertEqual(by_client("auto", "false"), ("false", ""))
-        self.assertEqual(by_client("auto", "true", model="local-chat-completions"), ("false", ""))
-
     def test_orchestrator_records_bos_by_client_as_applied(self) -> None:
         orchestrator = (REPO_ROOT / "scripts/lm_eval_harness/evaluation_orchestrator.sh").read_text()
         func = orchestrator[
@@ -231,33 +165,6 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertEqual(recorded(APPLY_CHAT_TEMPLATE="true", BOS_BY_CLIENT="false"), "false")
         self.assertEqual(recorded(APPLY_CHAT_TEMPLATE="true", API_CHAT_ENDPOINT="true"), "false")
         self.assertEqual(recorded(APPLY_CHAT_TEMPLATE="true", CHAT_FORMAT="apertus2"), "false")
-
-    def test_bos_probe_runs_on_the_completions_endpoint_with_its_flags(self) -> None:
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
-        block = sbatch[sbatch.index("# bos per pass begin"): sbatch.index("# bos per pass end")]
-
-        def probe_line(
-            template: str, model: str = "local-completions", check: str = "", by_client: str = "false"
-        ) -> str:
-            script = (
-                f"set -euo pipefail\nAPI_LM_EVAL_MODEL={model}; BOS_CHECK={check}; PASS_BOS=true; BOS_REQUESTED=auto\n"
-                f"PASS_BOS_BY_CLIENT={by_client}\n"
-                "API_BASE_URL=http://x/v1/completions; API_MODEL_NAME=m; TOKENIZER=t; TIMED_CMD=start\n"
-                f"{block}\nappend_bos_probe {template}\necho \"$TIMED_CMD\"\n"
-            )
-            out = subprocess.run(["bash", "-c", script], text=True, capture_output=True).stdout
-            return out if "bos_probe" in out else ""
-
-        raw = probe_line("false")
-        self.assertIn("--bos 'true'", raw)
-        self.assertNotIn("--chat-template", raw)
-        self.assertNotIn("--bos-by-client", raw)
-        chat = probe_line("true", by_client="true")
-        self.assertIn("--chat-template", chat)
-        self.assertIn("--bos-by-client", chat)
-        self.assertEqual(probe_line("false", check="false"), "")
-        self.assertEqual(probe_line("false", model="local-chat-completions"), "")
-
 
     def test_debug_is_forwarded_to_deferred_judge_launch(self) -> None:
         orchestrator = (REPO_ROOT / "scripts/lm_eval_harness/evaluation_orchestrator.sh").read_text()

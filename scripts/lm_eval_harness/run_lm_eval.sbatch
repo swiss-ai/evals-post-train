@@ -430,76 +430,28 @@ if [[ "$COMMON_MODEL_ARGS" == *\'* ]]; then
     die "Model args must not contain a single quote: $COMMON_MODEL_ARGS"
 fi
 
-# bos per pass begin
-# resolve_pass_bos <chat template: true|false>: the BOS setting of one lm-eval command, in PASS_BOS. BOS=auto: on for
-# models whose tokenizer never adds the BOS token they need (Gemma 4) and, without a chat template, for a tokenizer
-# that defines a BOS token but is configured not to add it (add_bos_token: false); one that adds it itself is left
-# alone (see bos_default.py). --bos / --no-bos give true / false for every command.
-resolve_pass_bos() {
-    PASS_BOS=$BOS_REQUESTED
-    if [[ "$PASS_BOS" == "auto" ]]; then
-        local no_template=""
-        [[ $1 == true ]] || no_template="--no-chat-template"
-        # Not silent: the node's bare python3 can be too old for the helper (Clariden: 3.6), and "false" would then
-        # look like a decision.
-        if ! PASS_BOS=$(python3 -m scripts.lm_eval_harness.bos_default "$TOKENIZER" $no_template); then
-            echo "WARNING: BOS=auto could not be resolved (bos_default.py failed above), using false" >&2
-            PASS_BOS=false
-        fi
-        [[ "$PASS_BOS" == "true" ]] \
-            && echo "BOS=auto: prepending the BOS token for $TOKENIZER (a tokenizer that adds it itself is left alone); BOS=false / --no-bos turns this off"
-    fi
-    return 0  # the && list above fails when the rule says false, which set -e must not take for a failed call
-}
+# The BOS settings of each lm-eval command (BOS=auto is resolved per command, whether the chat template applies
+# decides the rule) come from scripts/lm_eval_harness/bos_pass.py: PASS_MODEL_ARGS to append to --model_args,
+# PASS_PROBE (the BOS probe's command line, "" for none) and PASS_NOTES. The probe asks the server what it received
+# and stops before the first task if that is not what was meant.
+export BOS_REQUESTED API_LM_EVAL_MODEL BOS_CHECK
 
-# resolve_pass_bos_by_client <chat template: true|false>: bos_by_client for one lm-eval command, in PASS_BOS_BY_CLIENT.
-# It applies to commands with a chat template: a rendered template is a complete prompt, so the server must add nothing
-# to it. Raw text is what the tokenizer's own BOS is for: the server keeps adding it there. Unset (auto) it is on where
-# it can apply (openai backend on /v1/completions); --no-bos-by-client (false) turns it off; --bos-by-client (true) is
-# refused later where it cannot apply, and says so for a command without a template.
-resolve_pass_bos_by_client() {
-    PASS_BOS_BY_CLIENT=false
-    local requested="${BOS_BY_CLIENT:-auto}"
-    if [[ "$requested" == "false" ]]; then
-        return 0
-    fi
-    if [[ $1 == true ]]; then
-        if [[ "$requested" == "true" || "${API_LM_EVAL_MODEL:-}" == "local-completions" ]]; then
-            PASS_BOS_BY_CLIENT=true
-        fi
-    elif [[ "$requested" == "true" ]]; then
-        echo "--bos-by-client applies to commands with a chat template: ignored for this one (no chat template)"
-    fi
-    return 0
-}
-
-# append_bos_probe <chat template: true|false>: the BOS probe of the command make_cmd just built, in TIMED_CMD.
-# The BOS comes from the tokenizers (and the chat template), and the server tokenizes with its own copy: the probe asks
-# it what it received, and stops before the first task if that is not what was meant.
+# append_bos_probe: the BOS probe of the command make_cmd just built, in TIMED_CMD.
 append_bos_probe() {
-    [[ "$API_LM_EVAL_MODEL" == "local-completions" && "${BOS_CHECK:-true}" != "false" ]] || return 0
-    local flags=""
-    [[ $1 == true ]] && flags="$flags --chat-template"
-    [[ "$PASS_BOS_BY_CLIENT" == "true" ]] && flags="$flags --bos-by-client"
-    TIMED_CMD="$TIMED_CMD
-cd $PWD && python -m scripts.lm_eval_harness.bos_probe --url '$API_BASE_URL' --model '$API_MODEL_NAME' --tokenizer '$TOKENIZER' --bos '$PASS_BOS' --bos-requested '$BOS_REQUESTED'$flags"
+    [[ -z "$PASS_PROBE" ]] || TIMED_CMD="$TIMED_CMD
+$PASS_PROBE"
     return 0
 }
-# bos per pass end
 
 # make_cmd <tasks> <output dir> <chat template: true|false>: one lm-eval pass, in CMD.
 make_cmd() {
     local eval_args="${COMMON_EVAL_ARGS[*]} --tasks $1 --output_path $2"
-    resolve_pass_bos "$3"
-    resolve_pass_bos_by_client "$3"
-    local COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS"
-    # The server adds no special tokens: the BOS the model gets is the one the client wrote.
-    [[ "$PASS_BOS_BY_CLIENT" == "true" && "${API_LM_EVAL_MODEL:-}" == "local-completions" ]] \
-        && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,bos_by_client=True"
-    if [[ $PASS_BOS == true && "$API_LM_EVAL_MODEL" == local-completions ]]; then
-        echo "Adding BOS token."
-        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,add_bos_token=True"
-    fi
+    local pass_out
+    pass_out=$(python3 -m scripts.lm_eval_harness.bos_pass --chat-template "$3") \
+        || die "Could not resolve the BOS settings of this command (see above)."
+    eval "$pass_out"
+    [[ -z "$PASS_NOTES" ]] || printf '%s\n' "$PASS_NOTES"
+    local COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS$PASS_MODEL_ARGS"
     local repeat_setup="" repeat_file
     if [[ -n "${EVAL_REPEAT_CONFIG:-}" ]]; then
         printf -v repeat_file '%q' "$2/repeat_config.json"
@@ -524,9 +476,6 @@ if [[ "$CHAT_FORMAT" == "apertus2" ]]; then
     # log-likelihood (it reads the harness's task index, so it runs in the container).
     TIMED_CMD="$TIMED_CMD
 cd $PWD && python -m scripts.lm_eval_harness.task_output_types --tasks '$TASKS' --require-generative"
-fi
-if [[ "${BOS_BY_CLIENT:-auto}" == "true" && "$API_LM_EVAL_MODEL" != "local-completions" ]]; then
-    die "BOS_BY_CLIENT=true (--bos-by-client) needs /v1/completions (no --api-endpoint chat-completions, no --chat-format apertus2: those do not send text for the server to tokenize)."
 fi
 if [[ $APPLY_CHAT_TEMPLATE != by-type ]]; then
     make_cmd "$TASKS" "$HARNESS_EVAL_DIR" "$APPLY_CHAT_TEMPLATE"

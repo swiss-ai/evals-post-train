@@ -221,6 +221,10 @@ def build(env):
     notes = []
     settings = resolve(env, notes)
     built = model_args.build(settings)
+    if settings["BOS_BY_CLIENT"] == "true" and built["API_LM_EVAL_MODEL"] != model_args.COMPLETIONS:
+        raise ValueError("BOS_BY_CLIENT=true (--bos-by-client) needs /v1/completions (no --api-endpoint "
+                         "chat-completions, no --chat-format apertus2: those do not send text for the server to "
+                         "tokenize).")
     notes += model_args.notes(settings, built)  # in the order the job printed them: endpoint and context, then sampling
     outputs = dict(settings)
     outputs.update(built)

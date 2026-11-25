@@ -7,7 +7,7 @@ import sys
 import unittest
 from pathlib import Path
 
-from scripts.lm_eval_harness import job_settings
+from scripts.lm_eval_harness import bos_pass, job_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SBATCH = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
@@ -559,7 +559,7 @@ class OldPythonTests(unittest.TestCase):
     """The job's own `python3` outside the container can be 3.6 (bos_default.py says so)."""
 
     def test_the_modules_use_python_3_6_syntax(self):
-        for module in (job_settings, job_settings.model_args):
+        for module in (job_settings, job_settings.model_args, bos_pass):
             ast.parse(Path(module.__file__).read_text(), feature_version=(3, 6))
 
     def test_only_a_run_that_samples_needs_the_newer_sampling_module(self):
