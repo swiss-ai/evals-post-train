@@ -15,7 +15,8 @@ python -m scripts.common.suites flags apertus2/chonk_sft --setup apertus-1.5-70b
 
 | Part | Fields |
 |---|---|
-| `benchmarks` (list, table order) | `label` (the table row), `task`, `framework`, `repeats {n, via}`, `metric {label, key}`, optional `sampling`, optional `task_args` (inspect only), optional `flags` |
+| `groups` (optional list) | the group names in display order (`chonk_sft`: Math, IF, Knowledge, Tool Use, SWE, Medical, MT Flores +, MT Bouquet, as in the evals-svc `apertus2-chonk_sft` view) |
+| `benchmarks` (list, table order) | `label` (the table row), optional `group` (one of `groups`; the safety rows and RealGuardrails have none), `task`, `framework`, `repeats {n, via}`, `metric {label, key}`, optional `sampling`, optional `task_args` (inspect only), optional `flags` |
 | `setups` (by name) | `max_length` (the model's maximal window), `sampling` (default profile), `flags` (by framework: thinking, chat format, tokenizer) |
 
 - `repeats.via` is `flag` when the task has no repeats of its own and the launcher gets `--repeats n` (lm_eval) or `-- --epochs n` (inspect), or `task` when its yaml already repeats `n` times (AIME 8, the self-consistency tasks 4). The flag would apply the repeats twice, so nothing is passed.

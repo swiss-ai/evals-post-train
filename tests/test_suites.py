@@ -365,6 +365,20 @@ class SuiteTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "--reasoning-effort"):
             suites.validate(suite)
 
+    def test_groups_are_validated_and_shown_in_plan(self):
+        suite = suites.load(SUITE)
+        self.assertEqual(suite["groups"][:3], ["Math", "IF", "Knowledge"])
+        by_label = {r["label"]: r["group"] for r in suites.plan(suite, THINK)}
+        self.assertEqual(by_label["AIME 24"], "Math")
+        self.assertEqual(by_label["HarmBench"], "")  # a benchmark may have no group
+        suite["benchmarks"][0]["group"] = "Nonsense"
+        with self.assertRaisesRegex(ValueError, "group 'Nonsense'"):
+            suites.validate(suite)
+        suite = suites.load(SUITE)
+        suite["groups"].append("Math")
+        with self.assertRaisesRegex(ValueError, "groups"):
+            suites.validate(suite)
+
     def test_cli(self):
         for argv in (["list"], ["show", SUITE], ["plan", SUITE, "--setup", THINK],
                      ["flags", SUITE, "--setup", THINK, "--task", "aime25_think"]):

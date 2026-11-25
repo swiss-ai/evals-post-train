@@ -2,7 +2,8 @@
 
 configs/suites/<name>.json holds two things:
 
-  benchmarks  rows in table order: label, task, framework, repeats {n, via}, metric {label, key},
+  groups      optional ordered list of group names (e.g. Math, IF, Knowledge) the results view sections by
+  benchmarks  rows in table order: label, optionally group (one of groups), task, framework, repeats {n, via}, metric {label, key},
               optionally sampling (a profile name that overrides the setup's) and task_args
               (inspect only: -T arguments of the task, e.g. {"cot": "true"}) and flags (launcher
               flags of this row under every setup, e.g. a sandbox or judge roles)
@@ -163,6 +164,9 @@ def validate(suite):
             raise ValueError(f"suite is missing {key!r}")
     if not isinstance(suite["benchmarks"], list) or not suite["benchmarks"]:
         raise ValueError("benchmarks: must be a non-empty list")
+    groups = suite.get("groups", [])
+    if not isinstance(groups, list) or not all(isinstance(g, str) for g in groups) or len(set(groups)) != len(groups):
+        raise ValueError("groups: must be a list of unique strings")
     tasks, labels = set(), set()
     for i, bench in enumerate(suite["benchmarks"]):
         where = f"benchmarks[{i}]"
@@ -187,6 +191,8 @@ def validate(suite):
             raise ValueError(f"{where}: metric.label is required")
         if label.startswith("mean@") and label != f"mean@{bench['repeats']['n']}":
             raise ValueError(f"{where}: metric.label {label!r} does not match repeats.n {bench['repeats']['n']}")
+        if "group" in bench and bench["group"] not in groups:
+            raise ValueError(f"{where}: group {bench['group']!r} is not in the suite's groups {groups}")
         if "sampling" in bench:
             _profile(f"{where} sampling", bench["sampling"], profiles)
         if "task_args" in bench:
@@ -384,7 +390,7 @@ def sampling_for(suite, setup_name, task):
 
 def plan(suite, setup_name):
     """One row per benchmark: what a run under this setup is and what it reports."""
-    return [{"label": b["label"], "task": b["task"], "framework": b["framework"],
+    return [{"label": b["label"], "group": b.get("group", ""), "task": b["task"], "framework": b["framework"],
              "flags": flags_for(suite, setup_name, b["task"]),
              "sampling": sampling_for(suite, setup_name, b["task"]), "metric": b["metric"]["label"],
              "key": b["metric"]["key"]} for b in suite["benchmarks"]]
@@ -442,9 +448,9 @@ def main(argv=None):
                     print(f"  launch: {launch['nodes']} node(s), {launch['time']}, {launch['model_path']}")
         elif args.command == "plan":
             suite = load(args.suite)
-            print(_table([[r["label"], r["task"], shlex.join(r["flags"]), r["sampling"], r["metric"],
+            print(_table([[r["label"], r["group"], r["task"], shlex.join(r["flags"]), r["sampling"], r["metric"],
                            r["key"] or "(unchecked)"] for r in plan(suite, args.setup)],
-                         ["label", "task", "flags", "sampling", "reports", "results key"]))
+                         ["label", "group", "task", "flags", "sampling", "reports", "results key"]))
         elif args.command == "run":
             suite = load(args.suite)
             models = {}
