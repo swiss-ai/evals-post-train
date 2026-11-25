@@ -106,7 +106,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         choices=("allowlist", "public"),
         default="allowlist",
         help="--sandbox opensandbox: the agent loop's sandboxes reach only package indexes "
-        "(allowlist, the default; scripts/common/swe_bench_egress.py) or the whole internet "
+        "(allowlist, the default; configs/agent_allowlists.json) or the whole internet "
         "(public). Scoring keeps its network. Other sandboxes are always public.",
     )
     p.add_argument("--limit", type=float, default=None)
@@ -149,7 +149,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 def agent_allowed_hosts(args: argparse.Namespace) -> Optional[tuple]:
     """What the agent loop's sandboxes may reach with --sandbox opensandbox (None: everything):
-    package indexes (scripts/common/swe_bench_egress.py) and, as Harbor adds it, the model
+    package indexes (the swe_bench list of configs/agent_allowlists.json) and, as Harbor adds it, the model
     endpoint's host, for an agent that runs inside the sandbox and calls the model from there
     (EvalScope's external runners; they also install themselves from other hosts, so they need
     --agent-network public). The default strategies call the model from this process."""
@@ -157,10 +157,11 @@ def agent_allowed_hosts(args: argparse.Namespace) -> Optional[tuple]:
         return None
     from urllib.parse import urlsplit
 
-    from scripts.common.swe_bench_egress import AGENT_ALLOWED_HOSTS
+    from scripts.common.agent_egress import allowed_hosts
 
+    hosts = allowed_hosts("swe_bench")  # both agentic benchmarks of this runner are SWE-bench
     host = urlsplit(args.api_base_url).hostname if args.api_base_url else None
-    return AGENT_ALLOWED_HOSTS + ((host,) if host and host not in AGENT_ALLOWED_HOSTS else ())
+    return hosts + ((host,) if host and host not in hosts else ())
 
 
 def parse_pairs(pairs: List[str], flag: str, as_json: bool) -> Dict[str, Any]:

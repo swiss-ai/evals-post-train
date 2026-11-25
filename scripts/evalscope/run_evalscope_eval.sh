@@ -54,7 +54,7 @@
 #                               only package indexes (allowlist, the default), not GitHub and the
 #                               other hosts that have each task's fix, as SWE-bench's leaderboard
 #                               checklist asks; public is open internet. Scoring keeps its network
-#                               (scripts/common/swe_bench_egress.py).
+#                               (configs/agent_allowlists.json).
 #   --limit <n>                 A random subset of n samples per benchmark (EvalScope's seed 42: the
 #                               same subset on every run); a fraction < 1 is a share of the dataset.
 #   --shuffle                   Shuffle the whole dataset, also without --limit (a limit always shuffles).

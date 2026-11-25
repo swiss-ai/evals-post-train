@@ -22,8 +22,8 @@ What the Docker manager does and how it maps here (as in scripts/common/k8s_sand
   with the same ToolResult status/output/error shapes ms-enclave's ShellExecutor returns. A
   command whose stream ended without a result is an error, never exit code 0.
 - The network policy: public, except an agent's sandbox when install() was given
-  agent_allowed_hosts (SWE-bench: scripts/common/swe_bench_egress.py): deny by default plus an
-  allow rule per host, enforced by the egress sidecar. The agent's sandboxes are told apart by
+  agent_allowed_hosts (configs/agent_allowlists.json, loaded by scripts/common/agent_egress.py):
+  deny by default plus an allow rule per host, enforced by the egress sidecar. The agent's sandboxes are told apart by
   an environment variable EvalScope's agent environment adds (AGENT_ROLE_ENV, removed again
   before the sandbox is created); scoring sandboxes keep their network.
 - delete_sandbox: kills the sandbox. A runner that dies leaves its sandboxes until their timeout
