@@ -344,8 +344,6 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
             if framework == "lm_eval":
                 if api_base_url:
                     common += ["--api-model-name", api_model_name or served]
-                    if "--backend" not in flags:
-                        common += ["--backend", "openai"]
                 scheduling = (["--qos", qos] if qos else []) + (["--partition", partition] if partition else [])
                 argv = [*LM_EVAL[:3], *common[:2], *common[2:], *scheduling, *flags]
             elif framework == "inspect":

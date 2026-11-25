@@ -7,7 +7,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CONTAINER_CONFIGS = (
     "env.toml",
     "env_vllm.toml",
-    "env_sglang.toml",
 )
 
 
@@ -74,7 +73,7 @@ class ContainerMountTests(unittest.TestCase):
         self.assertIn('python -m venv "${BASE_VENV_ARGS[@]}"', build_script)
         self.assertIn("isolated venv", build_script[:build_script.index("OVERLAY_KEY=")])
         evaluate_script = (scripts / "run_lm_eval.sbatch").read_text(encoding="utf-8")
-        openai_branch = evaluate_script[evaluate_script.rindex('elif [[ $LM_EVAL_BACKEND == "openai" ]]'):]
+        openai_branch = evaluate_script[evaluate_script.rindex("# No model is loaded in-job"):]
         self.assertLess(openai_branch.index("grep -vx '.*/torch/lib'"), openai_branch.index("$LOAD_ENV_CMD"))
 
 

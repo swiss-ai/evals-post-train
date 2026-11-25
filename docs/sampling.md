@@ -68,6 +68,6 @@ Not covered: the GDPval runner (`scripts/aaii/run_gdpval.sh`) fixes its own `max
 
 ## Other settings
 
-`MAX_NEW_TOKENS` (32768 for thinking and reasoning-effort runs; the window on the `openai` backend, where each request is clamped to the window minus its prompt), `API_NUM_CONCURRENT` and
-`API_MAX_RETRIES` of the lm-eval `openai` backend stay environment variables
+`MAX_NEW_TOKENS` (32768 for thinking and reasoning-effort runs; the window, where each request is clamped to the window minus its prompt), `API_NUM_CONCURRENT` and
+`API_MAX_RETRIES` of lm-eval stay environment variables
 ([details](lm-eval-harness.md)). Repeated sampling (mean@k, pass@k) is a separate policy.

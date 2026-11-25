@@ -146,7 +146,6 @@ class EvalStateTests(unittest.TestCase):
                 "EVAL_MAX_RETRIES": "1",
                 "EVAL_FORCE_TASKS": "",
                 "SBATCH_SCRIPT": "scripts/lm_eval_harness/run_lm_eval.sbatch",
-                "LM_EVAL_BACKEND": "vllm",
                 # The environment-preparation path, even inside the prebuilt image.
                 "EVAL_PREBUILT_ENV": "0",
             }
@@ -199,7 +198,6 @@ class EvalStateTests(unittest.TestCase):
                 "EVAL_CHUNK_SIZE": "2",
                 "EVAL_FORCE_TASKS": "",
                 "SBATCH_SCRIPT": "scripts/lm_eval_harness/run_lm_eval.sbatch",
-                "LM_EVAL_BACKEND": "vllm",
                 "EVAL_PREBUILT_ENV": "0",
                 "JUDGE_MODE": "none",
             }

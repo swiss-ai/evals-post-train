@@ -21,8 +21,8 @@ lock() {
         --custom-compile-command scripts/common/lock_requirements.sh "$@"
 }
 
-# lm-eval-runtime.txt also feeds in-job backends, which take torch from their own images and so install
-# the .txt (build_eval_env.sh). This lock is for the openai backend: no model is loaded, so CPU torch.
+# lm-eval-runtime.txt is installed as is only by the Megatron checkpoint converter, which takes torch from
+# its container. This lock is for the evaluation job: no model is loaded, so CPU torch.
 lock lm-eval-runtime 3.11 --generate-hashes --torch-backend cpu "$@"
 lock inspect-runtime 3.11 --generate-hashes "$@"
 lock evalscope-runtime 3.11 --generate-hashes "$@"

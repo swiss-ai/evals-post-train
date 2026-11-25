@@ -1,4 +1,4 @@
-# Prebuilt evaluation image for the OpenAI-compatible backend: every Python
+# Prebuilt evaluation image: every Python
 # package a run needs, and the pinned lm-evaluation-harness, so nothing is
 # installed at run time. The image sets EVAL_PREBUILT_ENV=1, which makes the
 # launcher skip the environment-preparation job and run_lm_eval.sbatch /

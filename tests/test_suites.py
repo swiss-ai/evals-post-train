@@ -86,7 +86,7 @@ class SuiteTests(unittest.TestCase):
     def test_setup_sets_window_and_format(self):
         suite = suites.load("apertus2/chonk_sft")
         flags = suites.flags_for(suite, "chonk-lc-16k-v0.2-sft", "ifbench_think")
-        self.assertEqual(flags[:4], ["--backend", "openai", "--chat-format", "apertus2"])
+        self.assertEqual(flags[:2], ["--chat-format", "apertus2"])
         self.assertIn("apertus2", suite["setups"]["chonk-lc-16k-v0.2-sft"]["serving"])
         self.assertEqual(flags[flags.index("--max-length") + 1], "32768")
 
@@ -242,9 +242,9 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(inspect_row[:3], ["sbatch", "--qos=highprio", "--partition=highprio"])
         self.assertEqual(lm_eval_row[:3], ["bash", "scripts/lm_eval_harness/launch_evaluations.sh", "single"])
         self.assertEqual(lm_eval_row[lm_eval_row.index("--task") + 1], "gpqa_diamond_think")
-        self.assertEqual(lm_eval_row.count("--backend"), 1)  # the Chonk setup already names it
+        self.assertNotIn("--backend", lm_eval_row)
         qwen_lm_eval = next(r["argv"] for r in rows if r["setup"] == "qwen3-32b-thinking" and r["framework"] == "lm_eval")
-        self.assertEqual(qwen_lm_eval[qwen_lm_eval.index("--backend") + 1], "openai")
+        self.assertNotIn("--backend", qwen_lm_eval)
         self.assertEqual(qwen_lm_eval[qwen_lm_eval.index("--api-model-name") + 1], "qwen")
 
     def test_tau2_rows_are_one_sbatch_per_domain_with_the_agents_thinking_flags(self):

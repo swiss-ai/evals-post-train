@@ -51,6 +51,30 @@ class RunArgsTest(unittest.TestCase):
             with mock.patch.dict(os.environ, {key: "k"}, clear=True):
                 run.parse_args(model)
 
+    def test_model_tunnel_is_for_in_sandbox_agents_on_opensandbox(self):
+        base = ["--benchmark", "swe_bench", "--model", "m", "--api-base-url", "http://10.0.0.5:8080/v1", "--work-dir", "w",
+                "--chisel-dir", "/c"]
+        with mock.patch.dict(os.environ, {"OPENSANDBOX_API_KEY": "k"}):
+            for bad in (["--sandbox", "opensandbox", "--model-tunnel"],  # terminus-2 calls the model from the node
+                        ["--sandbox", "k8s", "--model-tunnel", "--agent", "openhands"]):
+                with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                    run.parse_args(base + bad)
+            with mock.patch.dict(os.environ, {}, clear=False), self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                run.parse_args([a for a in base if a not in ("--chisel-dir", "/c")] +
+                               ["--sandbox", "opensandbox", "--model-tunnel", "--agent", "openhands"])
+            args = run.parse_args(base + ["--sandbox", "opensandbox", "--model-tunnel", "--agent", "openhands"])
+            env = run.harbor_env(args)
+            self.assertEqual(env["HARBOR_MODEL_TUNNEL_TARGET"], "10.0.0.5:8080")
+            self.assertEqual(env["OPENAI_BASE_URL"], "http://127.0.0.1:8000/v1")
+            self.assertIn("api_base=http://127.0.0.1:8000/v1", run.agent_kwargs(args))
+            # the user's own api_base wins; terminus-2 without the flag is unchanged
+            own = run.parse_args(base + ["--sandbox", "opensandbox", "--model-tunnel", "--agent", "openhands",
+                                         "--agent-kwarg", "api_base=http://x/v1"])
+            self.assertEqual([k for k in run.agent_kwargs(own) if k.startswith("api_base")], ["api_base=http://x/v1"])
+            plain = run.parse_args(base[:-2] + ["--sandbox", "opensandbox"])
+            self.assertNotIn("HARBOR_MODEL_TUNNEL_TARGET", run.harbor_env(plain))
+            self.assertEqual(run.harbor_env(plain)["OPENAI_BASE_URL"], "http://10.0.0.5:8080/v1")
+
     def test_every_dataset_is_pinned(self):
         for name, spec in run.BENCHMARKS.items():
             if "dataset" in spec:
