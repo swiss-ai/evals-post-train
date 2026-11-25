@@ -38,12 +38,12 @@ Use each framework's own launcher with `--api-base-url "$EVAL_API_BASE_URL"` and
 
 | Framework | Command |
 |---|---|
-| lm-eval-harness | `bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k --model <name> --backend openai --api-base-url "$EVAL_API_BASE_URL" --api-model-name <name> --tokenizer <HF name or path> --failure-policy fail-fast` |
+| lm-eval-harness | `bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k --model <name> --api-base-url "$EVAL_API_BASE_URL" --api-model-name <name> --tokenizer <HF name or path> --failure-policy fail-fast` |
 | Inspect AI | `scripts/inspect_ai/run_inspect_eval.sh --task gsm8k --model <name> --api-base-url "$EVAL_API_BASE_URL"` |
 | EvalScope | `scripts/evalscope/run_evalscope_eval.sh --benchmark swe_bench --sandbox <k8s or opensandbox> --model <name> --api-base-url "$EVAL_API_BASE_URL"` |
 | Harbor | `scripts/harbor/run_harbor_eval.sh --benchmark swe_bench --sandbox <k8s or opensandbox> --model <name> --api-base-url "$EVAL_API_BASE_URL"` |
 
-- **lm-eval submits Slurm jobs of its own**, and a job on another node could not reach the server on `127.0.0.1`. So every command finds `sbatch` and `srun` stand-ins first on `PATH` (`scripts/direct_serving/inline_slurm/`), which run the batch script or command in place, in the job's allocation. They can't emulate job arrays, so give lm-eval `--failure-policy fail-fast`. They are a bridge for every command; an inline executor in lm-eval's launcher would replace them. With `--backend openai` the tokenizer must be a Hugging Face name or a path, not the served name.
+- **lm-eval submits Slurm jobs of its own**, and a job on another node could not reach the server on `127.0.0.1`. So every command finds `sbatch` and `srun` stand-ins first on `PATH` (`scripts/direct_serving/inline_slurm/`), which run the batch script or command in place, in the job's allocation. They can't emulate job arrays, so give lm-eval `--failure-policy fail-fast`. They are a bridge for every command; an inline executor in lm-eval's launcher would replace them. The tokenizer must be a Hugging Face name or a path, not the served name.
 - **Harbor and EvalScope's SWE-bench** run their task containers in a sandbox, which the compute node must be able to reach (Kubernetes access, or an OpenSandbox key in the environment or `scripts/secrets.env`, as for any run). The job does not provide one.
 - **Keys:** the runners want a key for `--api-base-url` and the server in the job has none, so the job sets `TARGET_API_KEY` (the runners' variable for that endpoint's key) to `local` unless it is already set. `CSCS_SERVING_API` is not needed to serve or evaluate; it remains the key of a judge model on the CSCS serving API, read from the environment or `scripts/secrets.env`.
 - **Apertus 2 over chat requests** needs the `apertus-common` plugin in the server ([setup](thinking.md#apertus-2-on-v1chatcompletions-temporary)).

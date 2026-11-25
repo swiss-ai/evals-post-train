@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # Launcher inputs a caller's shell may export; the dry runs start without them.
 _LAUNCH_INPUTS = {
     "TOKENIZER", "MAX_LENGTH", "BOS", "CHAT_FORMAT", "PREFILL_MODE", "ANSWER_FRAME", "EVAL_PREBUILT_ENV",
-    "LM_EVAL_BACKEND", "LM_EVAL_HARNESS_BRANCH", "LM_EVAL_HARNESS_REPO", "EVAL_ENV_CACHE_ROOT", "API_CHAT_ENDPOINT", "ENABLE_THINKING",
+    "LM_EVAL_HARNESS_BRANCH", "LM_EVAL_HARNESS_REPO", "EVAL_ENV_CACHE_ROOT", "API_CHAT_ENDPOINT", "ENABLE_THINKING",
 }
 ENV = {key: value for key, value in os.environ.items() if key not in _LAUNCH_INPUTS}
 
@@ -73,6 +73,12 @@ def _launch(*arguments: str, **env: str) -> subprocess.CompletedProcess:
     )
 
 
+# The launcher needs an endpoint and a served name.
+OPENAI_ARGS = (
+    "--api-base-url", "http://localhost:8000", "--api-model-name", "test-model",
+)
+
+
 def _harness_pin() -> str:
     pins = (REPO_ROOT / "requirements/lm-eval-harness.txt").read_text().split()
     return pins[pins.index("swiss-ai/lm-evaluation-harness") + 1]
@@ -93,11 +99,11 @@ def _function(name: str) -> str:
 
 
 def _chat_format(**env: str) -> subprocess.CompletedProcess:
-    """run_lm_eval.sbatch's CHAT_FORMAT checks for an apertus2 openai run, run on their own."""
+    """run_lm_eval.sbatch's CHAT_FORMAT checks for an apertus2 run, run on their own."""
     start = SBATCH.index("CHAT_FORMAT=${CHAT_FORMAT:-template}")
     script = "set -e\n" + _function("die") + SBATCH[start: SBATCH.index("esac\n", start) + 5]
     base = {
-        "PATH": os.environ["PATH"], "CHAT_FORMAT": "apertus2", "LM_EVAL_BACKEND": "openai",
+        "PATH": os.environ["PATH"], "CHAT_FORMAT": "apertus2",
         "APPLY_CHAT_TEMPLATE": "true", "MAX_LENGTH": "65536", "ENABLE_THINKING_EXPLICIT": "0",
         "AUTODETECT_THINK_TOKENS": "False", "TOKENIZER": "/ckpt",
     }
@@ -114,21 +120,21 @@ def _gen_kwargs(**env: str) -> str:
 
 
 def _openai_model(**env: str) -> subprocess.CompletedProcess:
-    """run_lm_eval.sbatch's openai backend branch and context mapping, run on their own; the
+    """run_lm_eval.sbatch's endpoint model arguments and context mapping, run on their own; the
     last stdout line is the harness model and its --model_args."""
-    branch = SBATCH[SBATCH.index('elif [[ $LM_EVAL_BACKEND == "openai" ]]; then'):
-                    SBATCH.index('else\n    die "Unsupported LM_EVAL_BACKEND')]
-    mapping = SBATCH[SBATCH.index('if [[ -n "$BACKEND_MAX_LENGTH" ]]; then'):
+    branch = SBATCH[SBATCH.index('[[ -n "$API_BASE_URL" ]] || die'):
+                    SBATCH.index('# Opt-in, for models whose tokenizer is custom code')]
+    mapping = SBATCH[SBATCH.index('if [[ -n "$CONTEXT_LIMIT" ]]; then'):
                      SBATCH.index('echo "Using lm-evaluation-harness:')]
-    script = ("set -e\n" + _function("die") + _function("_norm_bool") + "if false; then :\n" + branch + "fi\n"
+    script = ("set -e\n" + _function("die") + _function("_norm_bool") + branch
               + mapping + 'printf "\\n%s %s%s" "$API_LM_EVAL_MODEL" "$COMMON_MODEL_ARGS" "$CHAT_TEMPLATE_ARGS"\n')
     base = {
-        "PATH": os.environ["PATH"], "LM_EVAL_BACKEND": "openai", "CHAT_FORMAT": "template",
+        "PATH": os.environ["PATH"], "CHAT_FORMAT": "template",
         "APPLY_CHAT_TEMPLATE": "true", "API_BASE_URL": "http://host:8000", "API_MODEL_NAME": "m",
         "API_NUM_CONCURRENT": "8", "API_MAX_RETRIES": "3", "API_REQUEST_TIMEOUT": "3600",
         "TOKENIZER": "/ckpt", "BS": "1", "BOS": "false", "THINK_ARGS": "", "ENABLE_THINKING": "False",
         "ENABLE_THINKING_EXPLICIT": "0", "THINKING_DEFAULT_MODEL_ARG": ",max_gen_toks=32768",
-        "MAX_LENGTH": "65536", "BACKEND_MAX_LENGTH": "65536", "PREFILL_MODE": "after_think",
+        "MAX_LENGTH": "65536", "CONTEXT_LIMIT": "65536", "PREFILL_MODE": "after_think",
         "REASONING_EFFORT": "medium", "CHAT_TEMPLATE_ARGS": " 'chat_template_args={...}'",
     }
     return subprocess.run(["bash", "-c", script], env=base | env, capture_output=True, text=True)
@@ -142,31 +148,32 @@ class LaunchFlowTests(unittest.TestCase):
             self.assertNotEqual(completed.returncode, 0)
             self.assertIn(message, completed.stdout + completed.stderr)
 
-    def test_openai_backend_selects_cpu_only_sbatch_wrapper(self) -> None:
+    def test_lm_eval_runs_in_a_cpu_only_job(self) -> None:
         output = _dry_run(
             "single",
             "--task",
             "hellaswag",
-            "--backend",
-            "openai",
             "--api-base-url",
             "http://localhost:8000",
             "--api-model-name",
             "test-model",
         )
-        self.assertIn("scripts/lm_eval_harness/run_lm_eval_api.sbatch test-model test-model", output)
-        self.assertNotIn("scripts/lm_eval_harness/run_lm_eval.sbatch test-model test-model", output)
-        wrapper = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval_api.sbatch").read_text()
-        self.assertNotIn("#SBATCH --gres", wrapper)
-        self.assertNotIn("#SBATCH --exclusive", wrapper)
+        self.assertIn("scripts/lm_eval_harness/run_lm_eval.sbatch test-model test-model", output)
+        self.assertNotIn("#SBATCH --gres", SBATCH)
+        self.assertNotIn("#SBATCH --exclusive", SBATCH)
+
+    def test_the_backend_flags_are_gone(self) -> None:
+        for flag in (("--backend", "openai"), ("--megatron-iter", "4000000"), ("--script", "models.sh")):
+            with self.subTest(flag=flag[0]), tempfile.TemporaryDirectory() as tmp:
+                completed = _launch("single", "--task", "hellaswag", *OPENAI_ARGS, *flag, "--logs-root", tmp)
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn("Unknown option", completed.stdout + completed.stderr)
 
     def test_trust_remote_code_flag_is_accepted(self) -> None:
         output = _dry_run(
             "single",
             "--task",
             "hellaswag",
-            "--backend",
-            "openai",
             "--api-base-url",
             "http://localhost:8000",
             "--api-model-name",
@@ -181,20 +188,12 @@ class LaunchFlowTests(unittest.TestCase):
         start = sbatch.index("# Opt-in, for models whose tokenizer is custom code")
         block = sbatch[start: sbatch.index("HARNESS_EVAL_DIR=", start)]
 
-        def run(backend: str, flag: str) -> subprocess.CompletedProcess:
-            script = (
-                'die() { echo "DIE: $*"; exit 1; }\n'
-                f'LM_EVAL_BACKEND={backend}; TRUST_REMOTE_CODE={flag}; COMMON_MODEL_ARGS="model=m"\n'
-                f'{block}\necho "ARGS=$COMMON_MODEL_ARGS"\n'
-            )
+        def run(flag: str) -> subprocess.CompletedProcess:
+            script = f'TRUST_REMOTE_CODE={flag}; COMMON_MODEL_ARGS="model=m"\n{block}\necho "ARGS=$COMMON_MODEL_ARGS"\n'
             return subprocess.run(["bash", "-c", script], text=True, capture_output=True)
 
-        for backend in ("hf", "vllm", "openai"):
-            self.assertIn("ARGS=model=m,trust_remote_code=True", run(backend, "true").stdout)
-            self.assertIn("ARGS=model=m\n", run(backend, "false").stdout)
-        refused = run("sglang", "true")
-        self.assertNotEqual(refused.returncode, 0)
-        self.assertIn("only supported with the hf, vllm and openai backends", refused.stdout)
+        self.assertIn("ARGS=model=m,trust_remote_code=True", run("true").stdout)
+        self.assertIn("ARGS=model=m\n", run("false").stdout)
 
     def test_bos_is_resolved_for_each_command_by_whether_it_applies_the_chat_template(self) -> None:
         sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
@@ -243,11 +242,9 @@ class LaunchFlowTests(unittest.TestCase):
         sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
         block = sbatch[sbatch.index("# bos per pass begin"): sbatch.index("# bos per pass end")]
 
-        def by_client(
-            requested: str, template: str, backend: str = "openai", model: str = "local-completions"
-        ) -> tuple[str, str]:
+        def by_client(requested: str, template: str, model: str = "local-completions") -> tuple[str, str]:
             script = (
-                f"set -euo pipefail\nBOS_BY_CLIENT={requested}\nLM_EVAL_BACKEND={backend}\nAPI_LM_EVAL_MODEL={model}\n"
+                f"set -euo pipefail\nBOS_BY_CLIENT={requested}\nAPI_LM_EVAL_MODEL={model}\n"
                 f'{block}\nresolve_pass_bos_by_client {template}\necho "$PASS_BOS_BY_CLIENT"\n'
             )
             out = subprocess.run(["bash", "-c", script], text=True, capture_output=True).stdout.strip().splitlines()
@@ -263,7 +260,6 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertEqual(by_client("auto", "true"), ("true", ""))
         self.assertEqual(by_client("auto", "false"), ("false", ""))
         self.assertEqual(by_client("auto", "true", model="local-chat-completions"), ("false", ""))
-        self.assertEqual(by_client("auto", "true", backend="vllm", model=""), ("false", ""))
 
     def test_orchestrator_records_bos_by_client_as_applied(self) -> None:
         orchestrator = (REPO_ROOT / "scripts/lm_eval_harness/evaluation_orchestrator.sh").read_text()
@@ -276,24 +272,22 @@ class LaunchFlowTests(unittest.TestCase):
             script = f"set -euo pipefail\n{exports}{func}\n_eval_resolved_bos_by_client\n"
             return subprocess.run(["bash", "-c", script], text=True, capture_output=True).stdout.strip()
 
-        base = {"LM_EVAL_BACKEND": "openai"}
-        self.assertEqual(recorded(**base, APPLY_CHAT_TEMPLATE="true"), "true")
-        self.assertEqual(recorded(**base, APPLY_CHAT_TEMPLATE="false"), "false")
-        self.assertEqual(recorded(**base, APPLY_CHAT_TEMPLATE="by-type"), "chat=true,raw=false")
-        self.assertEqual(recorded(**base, APPLY_CHAT_TEMPLATE="true", BOS_BY_CLIENT="false"), "false")
-        self.assertEqual(recorded(**base, APPLY_CHAT_TEMPLATE="true", API_CHAT_ENDPOINT="true"), "false")
-        self.assertEqual(recorded(**base, APPLY_CHAT_TEMPLATE="true", CHAT_FORMAT="apertus2"), "false")
-        self.assertEqual(recorded(LM_EVAL_BACKEND="vllm", APPLY_CHAT_TEMPLATE="true"), "false")
+        self.assertEqual(recorded(APPLY_CHAT_TEMPLATE="true"), "true")
+        self.assertEqual(recorded(APPLY_CHAT_TEMPLATE="false"), "false")
+        self.assertEqual(recorded(APPLY_CHAT_TEMPLATE="by-type"), "chat=true,raw=false")
+        self.assertEqual(recorded(APPLY_CHAT_TEMPLATE="true", BOS_BY_CLIENT="false"), "false")
+        self.assertEqual(recorded(APPLY_CHAT_TEMPLATE="true", API_CHAT_ENDPOINT="true"), "false")
+        self.assertEqual(recorded(APPLY_CHAT_TEMPLATE="true", CHAT_FORMAT="apertus2"), "false")
 
     def test_bos_probe_runs_on_the_completions_endpoint_with_its_flags(self) -> None:
         sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
         block = sbatch[sbatch.index("# bos per pass begin"): sbatch.index("# bos per pass end")]
 
         def probe_line(
-            template: str, backend: str = "openai", model: str = "local-completions", check: str = "", by_client: str = "false"
+            template: str, model: str = "local-completions", check: str = "", by_client: str = "false"
         ) -> str:
             script = (
-                f"set -euo pipefail\nLM_EVAL_BACKEND={backend}; API_LM_EVAL_MODEL={model}; BOS_CHECK={check}; PASS_BOS=true; BOS_REQUESTED=auto\n"
+                f"set -euo pipefail\nAPI_LM_EVAL_MODEL={model}; BOS_CHECK={check}; PASS_BOS=true; BOS_REQUESTED=auto\n"
                 f"PASS_BOS_BY_CLIENT={by_client}\n"
                 "API_BASE_URL=http://x/v1/completions; API_MODEL_NAME=m; TOKENIZER=t; TIMED_CMD=start\n"
                 f"{block}\nappend_bos_probe {template}\necho \"$TIMED_CMD\"\n"
@@ -309,7 +303,6 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertIn("--chat-template", chat)
         self.assertIn("--bos-by-client", chat)
         self.assertEqual(probe_line("false", check="false"), "")
-        self.assertEqual(probe_line("false", backend="vllm"), "")
         self.assertEqual(probe_line("false", model="local-chat-completions"), "")
 
 
@@ -327,7 +320,7 @@ class LaunchFlowTests(unittest.TestCase):
         for policy in ("resume", "fail-fast"):
             with self.subTest(policy=policy):
                 completed, manifest = _prebuilt_dry_run(
-                    "single", "--task", "hellaswag", "--model", "test/model",
+                    "single", "--task", "hellaswag", "--model", "test/model", *OPENAI_ARGS,
                     "--failure-policy", policy,
                 )
                 output = completed.stdout + completed.stderr
@@ -355,7 +348,7 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertNotIn("EVAL_APERTUS_COMMON_WHEELS", (REPO_ROOT / "scripts/lm_eval_harness/evaluation_orchestrator.sh").read_text())
 
     def test_prebuilt_container_config_names_the_edf_of_the_jobs(self) -> None:
-        api = ["single", "--task", "gsm8k", "--backend", "openai", "--api-base-url", "http://localhost:8000",
+        api = ["single", "--task", "gsm8k", "--api-base-url", "http://localhost:8000",
                "--api-model-name", "test-model"]
         completed, _ = _prebuilt_dry_run(*api, EVAL_PREBUILT_CONTAINER_CONFIG="/nonexistent/prebuilt.toml")
         self.assertNotEqual(completed.returncode, 0)
@@ -388,7 +381,7 @@ class LaunchFlowTests(unittest.TestCase):
 
     def test_prebuilt_environment_overlays_another_harness_commit(self) -> None:
         commit = "32b8b593890ec9a983c9aadf81a6a08d840beb63"
-        args = ("single", "--task", "hellaswag", "--model", "test/model", "--harness-branch")
+        args = ("single", "--task", "hellaswag", "--model", "test/model", *OPENAI_ARGS, "--harness-branch")
         with tempfile.TemporaryDirectory() as cache:
             overlay = Path(cache, "prebuilt-harness/swiss-ai/lm-evaluation-harness", commit)
             completed, manifest = _prebuilt_dry_run(*args, commit.upper(), EVAL_ENV_CACHE_ROOT=cache)
@@ -410,7 +403,7 @@ class LaunchFlowTests(unittest.TestCase):
         commit = "c2efb6bd" + "0" * 32
         with tempfile.TemporaryDirectory() as cache:
             completed, manifest = _prebuilt_dry_run(
-                "single", "--task", "hellaswag", "--model", "test/model",
+                "single", "--task", "hellaswag", "--model", "test/model", *OPENAI_ARGS,
                 "--harness-repo", "someone/lm-evaluation-harness", "--harness-branch", commit,
                 EVAL_ENV_CACHE_ROOT=cache,
             )
@@ -426,7 +419,7 @@ class LaunchFlowTests(unittest.TestCase):
         ):
             with self.subTest(repo=repo):
                 completed, _ = _prebuilt_dry_run(
-                    "single", "--task", "hellaswag", "--model", "test/model", "--harness-repo", repo,
+                    "single", "--task", "hellaswag", "--model", "test/model", *OPENAI_ARGS, "--harness-repo", repo,
                 )
                 self.assertNotEqual(completed.returncode, 0)
                 self.assertIn(error, completed.stderr)
@@ -434,7 +427,7 @@ class LaunchFlowTests(unittest.TestCase):
     def test_max_length_reaches_the_run_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
-                "single", "--task", "uncheatable_eval", "--model", "test/model",
+                "single", "--task", "uncheatable_eval", "--model", "test/model", *OPENAI_ARGS,
                 "--max-length", "65536", "--logs-root", tmp,
             )
             output = completed.stdout + completed.stderr
@@ -445,7 +438,7 @@ class LaunchFlowTests(unittest.TestCase):
     def test_max_length_must_be_a_positive_integer(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
-                "single", "--task", "uncheatable_eval", "--model", "test/model",
+                "single", "--task", "uncheatable_eval", "--model", "test/model", *OPENAI_ARGS,
                 "--max-length", "32k", "--logs-root", tmp,
             )
         self.assertNotEqual(completed.returncode, 0)
@@ -453,30 +446,23 @@ class LaunchFlowTests(unittest.TestCase):
 
     def test_api_retry_and_concurrency_flags_reach_the_openai_run(self) -> None:
         output = _dry_run(
-            "single", "--task", "hellaswag", "--backend", "openai", "--api-base-url", "http://localhost:8000",
+            "single", "--task", "hellaswag", "--api-base-url", "http://localhost:8000",
             "--api-model-name", "test-model", "--api-max-retries", "20", "--api-num-concurrent", "4",
         )
         self.assertIn("API max retries: 20, concurrent requests: 4", output)
 
     def test_api_retry_and_concurrency_default_to_the_sbatchs_own(self) -> None:
         output = _dry_run(
-            "single", "--task", "hellaswag", "--backend", "openai", "--api-base-url", "http://localhost:8000",
+            "single", "--task", "hellaswag", "--api-base-url", "http://localhost:8000",
             "--api-model-name", "test-model",
         )
         self.assertIn("API max retries: 3 (default), concurrent requests: 8 (default)", output)
-
-    def test_api_retry_and_concurrency_flags_need_the_openai_backend(self) -> None:
-        for flag in ("--api-max-retries", "--api-num-concurrent"):
-            with tempfile.TemporaryDirectory() as tmp:
-                completed = _launch("single", "--task", "hellaswag", "--model", "test/model", flag, "5", "--logs-root", tmp)
-            self.assertNotEqual(completed.returncode, 0, flag)
-            self.assertIn(f"{flag} only applies with --backend openai", completed.stderr + completed.stdout)
 
     def test_api_retry_and_concurrency_must_be_positive_integers(self) -> None:
         for flag, value in (("--api-max-retries", "many"), ("--api-num-concurrent", "0")):
             with tempfile.TemporaryDirectory() as tmp:
                 completed = _launch(
-                    "single", "--task", "hellaswag", "--backend", "openai", "--api-base-url", "http://localhost:8000",
+                    "single", "--task", "hellaswag", "--api-base-url", "http://localhost:8000",
                     "--api-model-name", "test-model", flag, value, "--logs-root", tmp,
                 )
             self.assertNotEqual(completed.returncode, 0, flag)
@@ -485,7 +471,7 @@ class LaunchFlowTests(unittest.TestCase):
     def test_reasoning_effort_is_a_named_part_of_the_run_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
-                "single", "--task", "aime25", "--model", "openai/gpt-oss-120b",
+                "single", "--task", "aime25", "--model", "openai/gpt-oss-120b", *OPENAI_ARGS,
                 "--reasoning-effort", "high", "--logs-root", tmp,
             )
             output = completed.stdout + completed.stderr
@@ -501,7 +487,7 @@ class LaunchFlowTests(unittest.TestCase):
         # every earlier result look foreign and rerun it.
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
-                "single", "--task", "aime25", "--model", "test/model", "--logs-root", tmp,
+                "single", "--task", "aime25", "--model", "test/model", *OPENAI_ARGS, "--logs-root", tmp,
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)
             config = _run_config(tmp)
@@ -509,10 +495,6 @@ class LaunchFlowTests(unittest.TestCase):
 
     def test_reasoning_effort_is_refused_where_it_cannot_reach_the_template(self) -> None:
         cases = {
-            "megatron backend": (
-                ["--backend", "megatron_lm", "--reasoning-effort", "high"],
-                "not supported with the megatron_lm backend",
-            ),
             "no chat template": (
                 ["--no-chat-template", "--reasoning-effort", "high"],
                 "drop --no-chat-template",
@@ -530,7 +512,7 @@ class LaunchFlowTests(unittest.TestCase):
 
     def test_openai_takes_the_chat_template_switches(self) -> None:
         # The harness renders the template client-side (local-completions), so they reach it.
-        api = ["--backend", "openai", "--api-base-url", "http://localhost:8000",
+        api = ["--api-base-url", "http://localhost:8000",
                "--api-model-name", "test-model"]
         cases = {
             "effort": (["--reasoning-effort", "high"], {"reasoning_effort": "high"}),
@@ -553,7 +535,7 @@ class LaunchFlowTests(unittest.TestCase):
                     self.assertEqual(config[key], value, key)
 
     def test_openai_api_endpoint_is_chosen_and_recorded(self) -> None:
-        api = ["--backend", "openai", "--api-base-url", "http://localhost:8000",
+        api = ["--api-base-url", "http://localhost:8000",
                "--api-model-name", "test-model"]
         cases = {
             "default": ([], "false", "API endpoint: completions"),
@@ -577,16 +559,12 @@ class LaunchFlowTests(unittest.TestCase):
                 self.assertEqual(config["api_chat_endpoint"], recorded)
 
     def test_openai_api_endpoint_refusals(self) -> None:
-        api = ["--backend", "openai", "--api-base-url", "http://localhost:8000",
+        api = ["--api-base-url", "http://localhost:8000",
                "--api-model-name", "test-model"]
         cases = {
             "unknown value": (
                 [*api, "--api-endpoint", "responses"],
                 "--api-endpoint must be 'completions' or 'chat-completions'",
-            ),
-            "not openai": (
-                ["--model", "test/model", "--api-endpoint", "chat-completions"],
-                "--api-endpoint only applies with --backend openai",
             ),
             "chat without template": (
                 [*api, "--api-endpoint", "chat-completions", "--no-chat-template"],
@@ -608,14 +586,14 @@ class LaunchFlowTests(unittest.TestCase):
         # chat_template_kwargs and puts the server's reasoning field back between the tokens.
         sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
         completions = sbatch[sbatch.index('if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then'):]
-        chat = completions[completions.index("    else"): completions.index("    fi")]
+        chat = completions[completions.index("\nelse\n"): completions.index("\nfi\n")]
         self.assertIn("${THINKING_DEFAULT_MODEL_ARG}${THINK_ARGS}", chat)
         self.assertIn(',enable_thinking=${ENABLE_THINKING}"', chat)
         self.assertNotIn("need the completions endpoint", sbatch)
 
     def test_openai_takes_thinking_and_its_metrics(self) -> None:
         # The harness strips and measures the reasoning on API models (lm-evaluation-harness #111).
-        api = ["--backend", "openai", "--api-base-url", "http://localhost:8000",
+        api = ["--api-base-url", "http://localhost:8000",
                "--api-model-name", "test-model"]
         cases = {
             "umbrella with tokens": ["--thinking", "--think-start-token", "<think>",
@@ -641,8 +619,7 @@ class LaunchFlowTests(unittest.TestCase):
     def test_openai_thinking_metrics_still_need_a_close_token(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
-                "single", "--task", "aime25", "--backend", "openai",
-                "--api-base-url", "http://localhost:8000", "--api-model-name", "test-model",
+                "single", "--task", "aime25", "--api-base-url", "http://localhost:8000", "--api-model-name", "test-model",
                 "--enable-thinking", "--track-thinking-metrics", "true", "--logs-root", tmp,
             )
         self.assertNotEqual(completed.returncode, 0)
@@ -651,9 +628,8 @@ class LaunchFlowTests(unittest.TestCase):
     def test_evaluate_passes_think_args_to_openai_and_raises_the_effort_budget(self) -> None:
         sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
         completions = sbatch[sbatch.index('if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then'):]
-        completions = completions[: completions.index("    else")]
+        completions = completions[: completions.index("\nelse\n")]
         self.assertIn("${THINKING_DEFAULT_MODEL_ARG}${THINK_ARGS}", completions)
-        self.assertNotIn("unsupported with LM_EVAL_BACKEND=openai", sbatch)
         self.assertIn('if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]]; then', sbatch)
         self.assertIn(
             'if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then',
@@ -673,14 +649,14 @@ class LaunchFlowTests(unittest.TestCase):
 
     def test_thinking_budget_is_the_window_where_requests_are_clamped(self) -> None:
         # openai: clamp_gen_toks (or apertus2's own clamp) lowers every request to window - prompt, so
-        # the budget is the window; other backends never clamp and keep 32768.
+        # the budget is the window; without one it keeps 32768.
         block = SBATCH[SBATCH.index('if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then'):]
         block = block[: block.index("\nfi\n") + 4]
 
         def budget(**env: str) -> str:
             script = "set -e\n" + block + 'printf "%s" "$MAX_NEW_TOKENS"\n'
             base = {"PATH": os.environ["PATH"], "ENABLE_THINKING": "True", "REASONING_EFFORT": "",
-                    "MAX_NEW_TOKENS_EXPLICIT": "0", "MAX_NEW_TOKENS": "2048", "LM_EVAL_BACKEND": "openai",
+                    "MAX_NEW_TOKENS_EXPLICIT": "0", "MAX_NEW_TOKENS": "2048",
                     "MAX_LENGTH": "262144"}
             done = subprocess.run(["bash", "-c", script], env=base | env, capture_output=True, text=True, check=True)
             return done.stdout.splitlines()[-1] if done.stdout.strip() else ""
@@ -688,7 +664,6 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertEqual(budget(), "262144")
         self.assertEqual(budget(MAX_LENGTH="131072"), "131072")
         self.assertEqual(budget(MAX_LENGTH=""), "32768")  # no window given
-        self.assertEqual(budget(LM_EVAL_BACKEND="vllm"), "32768")  # no clamp there
         self.assertEqual(budget(ENABLE_THINKING="False", REASONING_EFFORT="low"), "262144")
         # a caller's value wins and the block is not entered
         self.assertEqual(budget(MAX_NEW_TOKENS_EXPLICIT="1", MAX_NEW_TOKENS="8192"), "8192")
@@ -705,8 +680,7 @@ class LaunchFlowTests(unittest.TestCase):
     def test_openai_template_switches_need_the_chat_template(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
-                "single", "--task", "aime25", "--backend", "openai",
-                "--api-base-url", "http://localhost:8000", "--api-model-name", "test-model",
+                "single", "--task", "aime25", "--api-base-url", "http://localhost:8000", "--api-model-name", "test-model",
                 "--no-chat-template", "--enable-thinking", "--logs-root", tmp,
             )
         self.assertNotEqual(completed.returncode, 0)
@@ -719,14 +693,14 @@ class LaunchFlowTests(unittest.TestCase):
             sbatch,
         )
         completions = sbatch[sbatch.index('if [[ $API_LM_EVAL_MODEL == "local-completions" ]]; then'):]
-        completions = completions[: completions.index("    else")]
+        completions = completions[: completions.index("\nelse\n")]
         self.assertIn(',enable_thinking=${ENABLE_THINKING}"', completions)
         self.assertIn("${THINKING_DEFAULT_MODEL_ARG}", completions)
 
     def test_launch_summary_shows_partition_and_qos(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
-                "single", "--task", "hellaswag", "--model", "test/model",
+                "single", "--task", "hellaswag", "--model", "test/model", *OPENAI_ARGS,
                 "--qos", "highprio", "--partition", "highprio", "--logs-root", tmp,
             )
         output = completed.stdout + completed.stderr
@@ -740,25 +714,6 @@ class LaunchFlowTests(unittest.TestCase):
             self.assertNotIn("--partition=normal", text, script)
         orchestrator = (REPO_ROOT / "scripts/lm_eval_harness/evaluation_orchestrator.sh").read_text()
         self.assertIn('launch_args+=(--partition "$SBATCH_PARTITION")', orchestrator)
-
-    def test_reasoning_effort_is_accepted_on_sglang(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            completed = _launch(
-                "single", "--task", "aime25", "--model", "openai/gpt-oss-120b",
-                "--backend", "sglang", "--reasoning-effort", "high", "--logs-root", tmp,
-            )
-            output = completed.stdout + completed.stderr
-            self.assertEqual(completed.returncode, 0, output)
-            config = _run_config(tmp)
-        self.assertEqual(config["configuration"]["reasoning_effort"], "high")
-
-    def test_evaluate_passes_think_args_to_sglang(self) -> None:
-        sbatch = (REPO_ROOT / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
-        sglang_args = next(
-            line for line in sbatch.splitlines()
-            if "tokenizer_path=$TOKENIZER" in line and "COMMON_MODEL_ARGS=" in line
-        )
-        self.assertIn("${THINK_ARGS}", sglang_args)
 
     def test_evaluate_passes_reasoning_effort_as_its_own_model_args_token(self) -> None:
         # The harness refuses a first --model_args token containing '{', and argparse gives
@@ -774,17 +729,15 @@ class LaunchFlowTests(unittest.TestCase):
         lexer.whitespace, lexer.whitespace_split, lexer.commenters = ",", True, ""
         key, value = next(iter(lexer)).split("=", 1)
         self.assertEqual((key, ast.literal_eval(value)), ("chat_template_args", {"reasoning_effort": "high"}))
-        for launcher in ("python -m lm_eval", "python -m accelerate.commands.launch --num_processes=4  -m lm_eval"):
-            self.assertIn(
-                f"{launcher} --model $LM_EVAL_BACKEND --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ",
-                SBATCH,
-            )
+        self.assertIn(
+            "python -m lm_eval --model $API_LM_EVAL_MODEL --model_args '$COMMON_MODEL_ARGS'$CHAT_TEMPLATE_ARGS ",
+            SBATCH,
+        )
 
     def test_chat_template_by_type_is_recorded_in_the_run_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
-                "single", "--task", "gsm8k,arc_easy", "--backend", "openai",
-                "--api-base-url", "http://localhost:8000", "--api-model-name", "test-model",
+                "single", "--task", "gsm8k,arc_easy", "--api-base-url", "http://localhost:8000", "--api-model-name", "test-model",
                 "--chat-template-by-type", "--reasoning-effort", "high", "--logs-root", tmp,
             )
             output = completed.stdout + completed.stderr
@@ -811,7 +764,7 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertNotIn("--tasks", common)
 
     def test_apertus2_is_a_recorded_thinking_run(self) -> None:
-        apertus2 = ["--backend", "openai", "--api-base-url", "http://localhost:8000",
+        apertus2 = ["--api-base-url", "http://localhost:8000",
                     "--api-model-name", "test-model", "--chat-format", "apertus2",
                     "--tokenizer", "/ckpt/tokenizer", "--max-length", "65536"]
         with tempfile.TemporaryDirectory() as tmp:
@@ -856,15 +809,13 @@ class LaunchFlowTests(unittest.TestCase):
             self.assertNotIn("apertus2", completed.stdout)
 
     def test_apertus2_refusals(self) -> None:
-        api = ["--backend", "openai", "--api-base-url", "http://localhost:8000",
+        api = ["--api-base-url", "http://localhost:8000",
                "--api-model-name", "test-model"]
         apertus2 = [*api, "--chat-format", "apertus2", "--tokenizer", "/ckpt", "--max-length", "65536"]
         single = ["single", "--task", "gsm8k"]
         cases = {
-            "not openai": (["--model", "m", "--chat-format", "apertus2", "--tokenizer", "/ckpt",
-                            "--max-length", "65536"], "needs --backend openai"),
             "no tokenizer": ([*api, "--chat-format", "apertus2", "--max-length", "65536"],
-                             "needs --backend openai, --tokenizer"),
+                             "needs --tokenizer"),
             "no max length": ([*api, "--chat-format", "apertus2", "--tokenizer", "/ckpt"],
                               "--max-length <the server's --max-model-len>"),
             "template off": ([*apertus2, "--no-chat-template"], "renders every task as chat"),
@@ -905,7 +856,6 @@ class LaunchFlowTests(unittest.TestCase):
         prebuilt = _chat_format(EVAL_ENV_KIND="prebuilt")
         self.assertEqual(prebuilt.returncode, 0, prebuilt.stderr)
         refusals = {
-            "not openai": ({"LM_EVAL_BACKEND": "vllm"}, "renders every task as chat"),
             "chat endpoint": ({"API_CHAT_ENDPOINT": "true"}, "renders every task as chat"),
             "template off": ({"APPLY_CHAT_TEMPLATE": "false"}, "renders every task as chat"),
             "no context": ({"MAX_LENGTH": ""}, "needs MAX_LENGTH"),
@@ -941,7 +891,7 @@ class LaunchFlowTests(unittest.TestCase):
                       model(CHAT_FORMAT="apertus2", ANSWER_FRAME="claim"))
         self.assertNotIn("answer_frame", model(CHAT_FORMAT="apertus2"))
         # ruler's detected length bounds the template path's context, not the server's.
-        self.assertTrue(model(CHAT_FORMAT="apertus2", BACKEND_MAX_LENGTH="8792").endswith(",max_model_len=65536"))
+        self.assertTrue(model(CHAT_FORMAT="apertus2", CONTEXT_LIMIT="8792").endswith(",max_model_len=65536"))
         # The template path keeps its own model, context argument and chat_template_args token.
         template = model()
         self.assertTrue(template.startswith("local-completions "))
@@ -958,7 +908,7 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertIn(",max_length=65536,clamp_gen_toks=True,tokenizer_backend=huggingface,tokenizer=/ckpt", chat)
         # The server still renders the template; with no window there is no clamp and no tokenizer.
         self.assertIn(",tokenized_requests=False,", chat)
-        self.assertNotIn("tokenizer_backend", model(API_CHAT_ENDPOINT="true", BACKEND_MAX_LENGTH=""))
+        self.assertNotIn("tokenizer_backend", model(API_CHAT_ENDPOINT="true", CONTEXT_LIMIT=""))
 
     def test_apertus2_samples_like_a_thinking_run(self) -> None:
         self.assertEqual(
@@ -974,7 +924,7 @@ class LaunchFlowTests(unittest.TestCase):
         )
 
     def test_sampling_flags_reach_the_job_and_the_run_config(self) -> None:
-        apertus2 = ["--backend", "openai", "--api-base-url", "http://localhost:8000",
+        apertus2 = ["--api-base-url", "http://localhost:8000",
                     "--api-model-name", "test-model", "--chat-format", "apertus2",
                     "--tokenizer", "/ckpt/tokenizer", "--max-length", "65536"]
 
@@ -1006,7 +956,7 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertIn("greedy decoding", self.last_output)
 
     def test_sampling_flags_on_a_run_that_does_not_think(self) -> None:
-        api = ["--backend", "openai", "--api-base-url", "http://localhost:8000", "--api-model-name", "test-model"]
+        api = ["--api-base-url", "http://localhost:8000", "--api-model-name", "test-model"]
         with tempfile.TemporaryDirectory() as tmp:
             refused = _launch("single", "--task", "gsm8k", *api, "--top-p", "0.9", "--logs-root", tmp)
             self.assertNotEqual(refused.returncode, 0)

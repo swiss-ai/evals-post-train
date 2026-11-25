@@ -71,9 +71,8 @@ mkdir -p "$STAGING_DIR"
 echo "$MEGATRON_ITERATION" > "$STAGING_DIR/latest_checkpointed_iteration.txt"
 ln -sfn "$MEGATRON_LOAD_DIR" "$STAGING_DIR/$ITER_DIRNAME"
 
-# Reuse the same cached-venv builder the megatron_lm eval backend uses (it installs
-# megatron-core into a venv keyed by container + requirements hash) so this doesn't
-# need its own environment-caching logic.
+# Reuse the eval environment builder (with megatron-core installed into a venv keyed by
+# container + requirements hash) so this doesn't need its own environment-caching logic.
 EVAL_ENV_CACHE_ROOT="${EVAL_ENV_CACHE_ROOT:-${SCRATCH:-/tmp}/eval-envs}"
 EVAL_ENV_MANIFEST="$EVAL_ENV_CACHE_ROOT/convert-environment.${SLURM_JOB_ID:-$$}.sh"
 mkdir -p "$(dirname "$EVAL_ENV_MANIFEST")"
@@ -89,7 +88,7 @@ srun -n 1 --mpi=pmix -ul --environment=./containers/env_vllm.toml --export=ALL b
     export EVAL_CONTAINER_CONFIG='$PWD/containers/env_vllm.toml'
     export EVAL_REPO_ROOT='$PWD'
     export EVAL_RUNTIME_REQUIREMENTS='$PWD/requirements/lm-eval-runtime.txt'
-    export LM_EVAL_BACKEND=megatron_lm
+    export EVAL_INSTALL_MEGATRON_CORE=1
     bash '$PWD/scripts/lm_eval_harness/build_eval_env.sh'
     source '$EVAL_ENV_MANIFEST'
     source \"\$EVAL_BASE_ENV/bin/activate\"

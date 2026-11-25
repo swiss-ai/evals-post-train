@@ -1,7 +1,7 @@
-# Stable evaluation dependencies. Backend runtimes (torch, vLLM, SGLang) come
-# from the selected container and are exposed through --system-site-packages.
-# Installed as is by build_eval_env.sh, and as lm-eval-runtime.lock by the prebuilt
-# image: after a change, run scripts/common/lock_requirements.sh.
+# Stable evaluation dependencies, locked as lm-eval-runtime.lock (the built environment and the
+# prebuilt image): after a change, run scripts/common/lock_requirements.sh. Installed as is
+# only by the Megatron checkpoint converter (scripts/megatron_convert), whose container
+# provides torch through --system-site-packages.
 datasets==4.0.0
 hf-transfer>=0.1.9
 numpy

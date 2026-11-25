@@ -15,8 +15,7 @@ Evaluation infrastructure for LLMs on CSCS Alps (Clariden), with results in W&B.
 
 | Framework | Model | Runner runs on | Task containers |
 |---|---|---|---|
-| lm-eval-harness | loaded in the job: `--backend vllm` (default), `sglang`, `hf`, `megatron_lm` | Clariden GPU job, in a CSCS container (`containers/env*.toml`) | — |
-| lm-eval-harness | `--backend openai`: an OpenAI-compatible endpoint¹ (`completions` or `chat-completions`) | Clariden CPU job (`run_lm_eval_api.sbatch`) | — |
+| lm-eval-harness | an OpenAI-compatible endpoint¹ (`completions` or `chat-completions`) | Clariden CPU job (`run_lm_eval.sbatch`) | — |
 | Inspect AI | an OpenAI-compatible endpoint¹ (`--api-base-url`), or an Inspect provider (`--model anthropic/...`) | local machine, or Clariden CPU job in a CSCS container (`run_inspect_eval.sbatch`) | local Docker, `--sandbox local` without Docker, or Kata microVMs through OpenSandbox (`--sandbox opensandbox`) |
 | Harbor | an OpenAI-compatible endpoint¹; `--gold`: no model | local machine, Clariden CPU job (`run_harbor_eval.sbatch`), or a Kubernetes pod | local Docker, Kubernetes pods (`--sandbox k8s`; Breithorn from Clariden), or Kata microVMs through OpenSandbox (`--sandbox opensandbox`) |
 | EvalScope | an OpenAI-compatible endpoint¹ (tool calling for the default agent); `--gold`: no model | local machine, Clariden CPU job (`run_evalscope_eval.sbatch`), or a Kubernetes pod | local Docker, Kubernetes pods (`--sandbox k8s`; Breithorn from Clariden), or Kata microVMs through OpenSandbox (`--sandbox opensandbox`) |
@@ -25,7 +24,7 @@ Evaluation infrastructure for LLMs on CSCS Alps (Clariden), with results in W&B.
 
 A model of your own can also be served and evaluated by one Slurm job, on several nodes if it needs them, with no gateway between: [the direct route](#serving-the-model-in-the-eval-job-direct-route).
 
-Every runner except the in-job lm-eval backends can also run from the prebuilt image (`containers/Dockerfile.eval`, [details](docs/lm-eval-harness.md#prebuilt-evaluation-image-no-installs-at-run-time)), which installs nothing at run time.
+Every runner can also run from the prebuilt image (`containers/Dockerfile.eval`, [details](docs/lm-eval-harness.md#prebuilt-evaluation-image-no-installs-at-run-time)), which installs nothing at run time.
 
 ### Chat template
 
@@ -54,14 +53,14 @@ A model already behind an OpenAI-compatible endpoint, here the CSCS serving API 
 
 ```bash
 bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3.6-35B-A3B --limit 5 --no-wandb \
-  --backend openai --api-base-url https://api.swissai.svc.cscs.ch/v1 --api-model-name RCP-AIaaS/Qwen/Qwen3.6-35B-A3B
+  --api-base-url https://api.swissai.svc.cscs.ch/v1 --api-model-name RCP-AIaaS/Qwen/Qwen3.6-35B-A3B
 ```
 
 **lm-evaluation-harness, Apertus 2 native format**: a served Apertus 2 checkpoint through the CSCS serving API, 5 samples. `--tokenizer` is a local directory with the verified Apertus 2 instruct tokenizer that `apertus-common` names: [`tokenizers/Apertus_2_instruct`](https://github.com/swiss-ai/apertus-omni-tokenizer/tree/b801ff1b00d933d10bba90b0c22307157299faa7/tokenizers/Apertus_2_instruct) in `swiss-ai/apertus-omni-tokenizer` (evals-svc's Chonk/Megachonk evaluation tokenizer lacks the control tokens and is rejected), `--max-length` is the server's `--max-model-len`. Installs the pinned `apertus-common` commit ([details](docs/lm-eval-harness.md#apertus-2-native-format)).
 
 ```bash
 bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k --limit 5 --no-wandb \
-  --backend openai --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --api-model-name SwissAI-Research/swiss-ai/chonk-lc-16k-v0.1-ep1-iter_0019374 \
   --chat-format apertus2 --tokenizer <tokenizer dir> --max-length 32768
 ```
@@ -104,7 +103,7 @@ scripts/direct_serving/job.sh \
   --model /capstor/store/cscs/swissai/infra01/hf_models/models/Qwen/Qwen3-32B --served-model-name qwen3-32b \
   --nodes 1 --time 01:00:00 --environment containers/env_vllm_0.30.0.toml \
   --framework-args "--tensor-parallel-size 4 --max-model-len 32768 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser hermes" \
-  --eval 'bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model qwen3-32b --backend openai --api-base-url "$EVAL_API_BASE_URL" --api-model-name qwen3-32b --tokenizer Qwen/Qwen3-32B --limit 3 --no-wandb --failure-policy fail-fast' \
+  --eval 'bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model qwen3-32b --api-base-url "$EVAL_API_BASE_URL" --api-model-name qwen3-32b --tokenizer Qwen/Qwen3-32B --limit 3 --no-wandb --failure-policy fail-fast' \
   --submit
 ```
 
@@ -143,7 +142,7 @@ scripts/direct_serving/job.sh \
   --nodes 1 --time 01:00:00 --environment containers/env_vllm_0.30.0.toml \
   --framework-args "--tensor-parallel-size 4 --max-model-len 32768 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser hermes" \
   --eval 'scripts/inspect_ai/run_inspect_eval.sh --task gsm8k --model qwen3-32b --api-base-url "$EVAL_API_BASE_URL" --limit 3 --no-wandb --no-enable-thinking' \
-  --eval 'bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k --model qwen3-32b --backend openai --api-base-url "$EVAL_API_BASE_URL" --api-model-name qwen3-32b --tokenizer Qwen/Qwen3-32B --limit 3 --no-wandb --failure-policy fail-fast' \
+  --eval 'bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k --model qwen3-32b --api-base-url "$EVAL_API_BASE_URL" --api-model-name qwen3-32b --tokenizer Qwen/Qwen3-32B --limit 3 --no-wandb --failure-policy fail-fast' \
   --submit
 ```
 
@@ -173,7 +172,7 @@ Every runner reads it (`scripts/common/secrets.sh`). A variable already set in t
 | Variable | Read by | Required for |
 |---|---|---|
 | `HF_TOKEN` | lm-eval jobs, `run_inspect_eval.sbatch` | Gated/rate-limited Hugging Face datasets and models (most task suites). |
-| `CSCS_SERVING_API` | all four frameworks, the AA scripts | LLM-as-a-judge evals (e.g. AlpacaEval) and any `--api-base-url`/`openai` backend run against CSCS serving. Key can be obtained [here](https://serving.swissai.cscs.ch). Not needed to serve and evaluate in the direct route, only for a judge on the CSCS serving API. |
+| `CSCS_SERVING_API` | all four frameworks, the AA scripts | LLM-as-a-judge evals (e.g. AlpacaEval) and any `--api-base-url` run against CSCS serving. Key can be obtained [here](https://serving.swissai.cscs.ch). Not needed to serve and evaluate in the direct route, only for a judge on the CSCS serving API. |
 | `OPENAI_API_KEY` | lm-eval jobs, `run_inspect_eval.sbatch` | The optional `gpt` suite (falls back to `CSCS_SERVING_API` in lm-eval jobs), and Inspect `openai/...` model roles. |
 | `WANDB_API_KEY` | all four frameworks | Uploading results to Weights & Biases. |
 | `CRITPT_API_KEY` | `run_inspect_eval.sh` | Optional: grading for CritPt (`scripts/aaii/aa_critpt.py`); ask critpt@artificialanalysis.ai for access. Without it, the submissions are written to a local file. |
@@ -193,7 +192,7 @@ Adding a benchmark or a framework, fixing a bug, running the tests, changing a d
 ```
 evals-post-train/
 ├── scripts/
-│   ├── lm_eval_harness/   # launch_evaluations.sh: the lm-eval launcher, chunked resumable Slurm jobs (the model loaded in the job, or an endpoint); judges
+│   ├── lm_eval_harness/   # launch_evaluations.sh: the lm-eval launcher, chunked resumable Slurm jobs (an endpoint); judges
 │   ├── direct_serving/    # job.py: one Slurm job that serves a model and runs evals against it; inline_slurm/: sbatch and srun that run in place
 │   ├── inspect_ai/        # run_inspect_eval.sh/.sbatch, sandbox_patches/, opensandbox_sandbox.py (the opensandbox sandbox provider)
 │   ├── harbor/            # run_harbor_eval.sh/.sbatch, run.py (benchmarks), k8s/docker/opensandbox environments, task_patches.py

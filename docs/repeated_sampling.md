@@ -1,9 +1,9 @@
 # Repeated evaluation
 
-Use `--repeat-config path.json` with the lm-eval launcher and `--backend openai`.
+Use `--repeat-config path.json` with the lm-eval launcher.
 Repeat scoring supports API models only (the harness's `local-completions`,
 `local-chat-completions` and `apertus2-completions`), which send every attempt
-with its own seed; the launcher refuses other backends. The JSON accepts
+with its own seed. The JSON accepts
 only `repeats`, `repeat_scoring` and `task_overrides`, using the harness schema.
 The harness owns generation repeats and scoring; the pipeline adds no repeat loop.
 
@@ -11,7 +11,7 @@ The harness owns generation repeats and scoring; the pipeline adds no repeat loo
 bash scripts/lm_eval_harness/launch_evaluations.sh custom \
   --task-file tasks.txt \
   --repeat-config repeat_scoring.json \
-  --backend openai --api-model-name my-model \
+  --api-model-name my-model \
   --api-base-url http://localhost:8000/v1 \
   --chat-format apertus2 --tokenizer /path/to/tokenizer
 ```
