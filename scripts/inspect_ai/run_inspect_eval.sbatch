@@ -14,8 +14,7 @@
 #
 # The benchmarks run_inspect_eval.sh targets evaluate an already-running served endpoint
 # (CSCS serving, `vllm serve`, ...) or a hosted API model -- no model is loaded in this job, so
-# it requests CPU-only resources, unlike run_lm_eval.sbatch's GPU allocation for the
-# lm-eval-harness backends. If a future benchmark needs Inspect to load a model in-job (its own
+# it requests CPU-only resources, as run_lm_eval.sbatch does. If a future benchmark needs Inspect to load a model in-job (its own
 # hf/vllm provider), bump --cpus-per-task/--mem and add a --gres=gpu request above.
 #
 # Usage:

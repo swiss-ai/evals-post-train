@@ -283,7 +283,7 @@ printf '%s\n' "ENABLE_THINKING=$ENABLE_THINKING (explicit=$ENABLE_THINKING_EXPLI
 	"THINK_END_TOKEN=$THINK_END_TOKEN" "TRACK_THINKING_METRICS=$TRACK_THINKING_METRICS" \
 	"LOG_LENGTH_METRICS=$LOG_LENGTH_METRICS" "REASONING_EFFORT=$REASONING_EFFORT" ""
 
-# BOS=auto is resolved for each lm-eval command (resolve_pass_bos, before make_cmd): the rule depends on whether the
+# BOS=auto is resolved for each lm-eval command (bos_pass.py, called by make_cmd): the rule depends on whether the
 # chat template is applied, and by-type decides that per kind of task.
 BOS_REQUESTED=$BOS
 # BOS_BY_CLIENT: unset/auto = on for commands with a chat template on /v1/completions
