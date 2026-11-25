@@ -272,6 +272,19 @@ def summarize(version: str, registry: str, score_dir: Path) -> dict[str, Any]:
     return summary
 
 
+def generation_args(registry: str, categories: list[str], temperature: float, num_threads: int, num_tasks: int) -> SimpleNamespace:
+    """The arguments of bfcl-eval's generation. include_input_log keeps, in each entry's inference_log, the fully formatted
+    input of every model call (history and tool definitions), so the saved result is the whole trace: bfcl-eval leaves it
+    off because it makes the result files about ten times larger (estimated from the input tokens of one multi-turn
+    file: 11 MB without it, 120 to 170 MB with it)."""
+    return SimpleNamespace(
+        model=[registry], test_category=categories, temperature=temperature, include_input_log=True,
+        exclude_state_log=False, num_gpus=1, num_threads=num_threads, gpu_memory_utilization=0.9,
+        backend="sglang", skip_server_setup=True, local_model_path=None, result_dir=None, allow_overwrite=False,
+        run_ids=bool(num_tasks), enable_lora=False, max_lora_rank=None, lora_modules=None,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     started = time.time()
@@ -294,12 +307,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.num_tasks:
         first_entries(categories, args.num_tasks, workdir)
 
-    generate(SimpleNamespace(
-        model=[registry], test_category=categories, temperature=temperature, include_input_log=False,
-        exclude_state_log=False, num_gpus=1, num_threads=args.num_threads, gpu_memory_utilization=0.9,
-        backend="sglang", skip_server_setup=True, local_model_path=None, result_dir=None, allow_overwrite=False,
-        run_ids=bool(args.num_tasks), enable_lora=False, max_lora_rank=None, lora_modules=None,
-    ))
+    generate(generation_args(registry, categories, temperature, args.num_threads, args.num_tasks))
     evaluate([registry], categories, None, None, partial_eval=bool(args.num_tasks))
 
     summary = summarize(args.version, registry, workdir / "score")

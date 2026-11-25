@@ -211,5 +211,17 @@ class InferenceErrorsTest(unittest.TestCase):
             self.assertEqual(bfcl.inference_errors(root, "another-model"), {"n_entries": 0, "n_errors": 0, "by_cause": {"context_overflow": 0, "other": 0}})
 
 
+class GenerationArgsTests(unittest.TestCase):
+    def test_the_input_of_every_call_is_kept_in_the_trace(self):
+        args = bfcl.generation_args("custom-m-FC", ["multi_turn_base"], 0.6, 8, 0)
+        self.assertTrue(args.include_input_log)
+        self.assertFalse(args.exclude_state_log)
+        self.assertEqual((args.model, args.test_category, args.temperature, args.num_threads), (["custom-m-FC"], ["multi_turn_base"], 0.6, 8))
+
+    def test_only_a_smoke_run_selects_entry_ids(self):
+        self.assertFalse(bfcl.generation_args("m", [], 0.0, 1, 0).run_ids)
+        self.assertTrue(bfcl.generation_args("m", [], 0.0, 1, 5).run_ids)
+
+
 if __name__ == "__main__":
     unittest.main()
