@@ -50,6 +50,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--api-requests-per-minute N` | Endpoint-wide request limit for the benchmarked model when using `--backend openai` (for example, `30`) |
 | `--api-max-retries N` | `openai` backend: retries per failed request (default 3; a rate-limited endpoint can exhaust 3 and fail the run, so raise it, e.g. 20) |
 | `--api-num-concurrent N` | `openai` backend: concurrent requests (default 8) |
+| `--api-request-timeout S` | `openai` backend: seconds to wait for one request before retrying it (default 3600). A reasoning generation that needs longer is cut and restarted from scratch, and the run fails once the retries are used up, so a model with a very large generation budget needs a larger value |
 | `--chat-format <template\|apertus2>` | `apertus2`: the Apertus 2 native format (see [Apertus 2 native format](#apertus-2-native-format)); default `template` |
 | `--prefill-mode <after_think\|empty_think>` | `apertus2` answer prefills (default `after_think`) |
 | `--answer-frame <reply\|claim>` | `apertus2`: score the reply (default) or the last claim, the frame the Apertus 2 RL math reward grades |
@@ -571,6 +572,7 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `API_NUM_CONCURRENT` | `8` | `openai` backend only: concurrent requests (batch size is pinned to 1; this is the throughput knob) |
 | `API_REQUESTS_PER_MINUTE` | (unset) | `openai` backend only: endpoint-wide request limit; set by `--api-requests-per-minute` |
 | `API_MAX_RETRIES` | `3` | `openai` backend only: retries per failed request; set by `--api-max-retries` |
+| `API_REQUEST_TIMEOUT` | `3600` | `openai` backend only: seconds to wait for one request before retrying it; set by `--api-request-timeout` |
 | `JUDGE_REQUESTS_PER_MINUTE` | (unset) | Endpoint-wide request limit applied separately to every LLM judge model; set by `--judge-requests-per-minute` |
 | `JUDGE_MODEL_PREFIX` | `$USER` | Preferred CSCS host scope prepended to unscoped judge model IDs |
 | `LM_EVAL_JUDGE_MODEL_DISCOVERY` | `1` | Query the judge endpoint's `/models` list and fall back to another matching hosted scope; set to `0` to disable |

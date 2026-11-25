@@ -127,7 +127,7 @@
   ],
   "setups": {
     "apertus-1.5-70b-thinking": {
-      "description": "swiss-ai/Apertus-v1.5-70B reasoning (--thinking with its <|inner_prefix|> / <|inner_suffix|> tokens). Window 262144, as evals-svc serves it. Client concurrency 256 (lm_eval): the default 8 leaves its two replicas idle (evals-svc runs it on 2 nodes, TP4 x DP2): 18 min instead of 28 for full gsm8k x4 at 64, 34 on one node; 512 gave nothing more (the longest generation bounds the run).",
+      "description": "swiss-ai/Apertus-v1.5-70B reasoning (--thinking with its <|inner_prefix|> / <|inner_suffix|> tokens). Window 262144, as evals-svc serves it. Client concurrency 64 (lm_eval): the default 8 leaves its two replicas idle (evals-svc runs it on 2 nodes, TP4 x DP2): 18 min instead of 28 for full gsm8k x4 at 64, 34 on one node; 512 gave nothing more (the longest generation bounds the run). 256 was too many for GPQA: one replica holds about 514000 tokens of KV cache, 256 long reasoning generations do not fit, and the run of 24 Nov lost over 500 requests to the 3600 s timeout and failed after 5 h 13 min. Request timeout 21600 s: the budget is the whole 262144-token window, which one generation can take hours to fill, and a request cut at the default 3600 s restarts from scratch.",
       "max_length": 262144,
       "sampling": "thinking",
       "launch": {
@@ -138,7 +138,7 @@
         "framework_args": ["--chat-template-content-format", "string", "--tensor-parallel-size", "4", "--data-parallel-size", "2", "--data-parallel-size-local", "1", "--data-parallel-backend", "ray", "--gpu-memory-utilization", "0.8", "--max-model-len", "262144", "--reasoning-parser", "apertus", "--default-chat-template-kwargs.enable_thinking", "true", "--compilation-config.pass_config.fuse_allreduce_rms", "false", "--enable-auto-tool-choice", "--tool-call-parser", "apertus"]
       },
       "flags": {
-        "lm_eval": ["--chat-template", "--tokenizer", "/capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/Apertus-v1.5-70B", "--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>", "--api-num-concurrent", "256"],
+        "lm_eval": ["--chat-template", "--tokenizer", "/capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/Apertus-v1.5-70B", "--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>", "--api-num-concurrent", "64", "--api-request-timeout", "21600"],
         "inspect": ["--enable-thinking"],
         "bfcl": [],
         "tau2": ["--enable-thinking"],

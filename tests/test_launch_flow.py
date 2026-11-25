@@ -458,6 +458,20 @@ class LaunchFlowTests(unittest.TestCase):
         )
         self.assertIn("API max retries: 20, concurrent requests: 4", output)
 
+    def test_api_request_timeout_reaches_the_openai_run(self) -> None:
+        output = _dry_run(
+            "single", "--task", "hellaswag", "--backend", "openai", "--api-base-url", "http://localhost:8000",
+            "--api-model-name", "test-model", "--api-request-timeout", "21600",
+        )
+        self.assertIn("API request timeout: 21600 s", output)
+
+    def test_api_request_timeout_defaults_to_the_sbatchs_own(self) -> None:
+        output = _dry_run(
+            "single", "--task", "hellaswag", "--backend", "openai", "--api-base-url", "http://localhost:8000",
+            "--api-model-name", "test-model",
+        )
+        self.assertIn("API request timeout: 3600 (default) s", output)
+
     def test_api_retry_and_concurrency_default_to_the_sbatchs_own(self) -> None:
         output = _dry_run(
             "single", "--task", "hellaswag", "--backend", "openai", "--api-base-url", "http://localhost:8000",
@@ -466,14 +480,14 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertIn("API max retries: 3 (default), concurrent requests: 8 (default)", output)
 
     def test_api_retry_and_concurrency_flags_need_the_openai_backend(self) -> None:
-        for flag in ("--api-max-retries", "--api-num-concurrent"):
+        for flag in ("--api-max-retries", "--api-num-concurrent", "--api-request-timeout"):
             with tempfile.TemporaryDirectory() as tmp:
                 completed = _launch("single", "--task", "hellaswag", "--model", "test/model", flag, "5", "--logs-root", tmp)
             self.assertNotEqual(completed.returncode, 0, flag)
             self.assertIn(f"{flag} only applies with --backend openai", completed.stderr + completed.stdout)
 
     def test_api_retry_and_concurrency_must_be_positive_integers(self) -> None:
-        for flag, value in (("--api-max-retries", "many"), ("--api-num-concurrent", "0")):
+        for flag, value in (("--api-max-retries", "many"), ("--api-num-concurrent", "0"), ("--api-request-timeout", "soon")):
             with tempfile.TemporaryDirectory() as tmp:
                 completed = _launch(
                     "single", "--task", "hellaswag", "--backend", "openai", "--api-base-url", "http://localhost:8000",
