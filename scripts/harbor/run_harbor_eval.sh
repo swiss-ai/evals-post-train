@@ -74,6 +74,12 @@
 #                               and the other hosts that have each task's fix, as SWE-bench's
 #                               leaderboard checklist asks; public is the published tasks' open
 #                               internet (configs/agent_allowlists.json).
+#   --model-tunnel              An agent that runs inside the sandbox (OpenHands, ...) cannot reach the
+#   --chisel-dir <dir>          model on Clariden from Breithorn: open a reverse tunnel from every sandbox to
+#                               --api-base-url (chisel, scripts/harbor/model_tunnel.py; binaries from
+#                               scripts/harbor/fetch_chisel.sh, default dir $CHISEL_DIR). The agent gets
+#                               api_base=http://127.0.0.1:8000/v1. --sandbox opensandbox only; not for
+#                               terminus-2, which calls the model from the node.
 #   --wandb-entity <entity>     W&B entity and project to upload the results to (also WANDB_ENTITY,
 #   --wandb-project <project>   WANDB_PROJECT; default apertus/e-p-t-pool): one
 #                               run named --name, per benchmark its reward (or verifier metrics),
@@ -139,7 +145,8 @@ while (( $# > 0 )); do
         --benchmark|--agent|--agent-kwarg|--agent-network|--limit|--task|--max-concurrency|--attempts|--timeout-multiplier|\
         --temperature|--top-p|--top-k|--min-p|--repetition-penalty|--sampling-profile|--sampling-config)
             RUN_ARGS+=("$1" "$2"); shift 2 ;;
-        --enable-thinking|--no-enable-thinking) RUN_ARGS+=("$1"); shift ;;
+        --enable-thinking|--no-enable-thinking|--model-tunnel) RUN_ARGS+=("$1"); shift ;;
+        --chisel-dir) RUN_ARGS+=("$1" "$2"); shift 2 ;;
         --reasoning-effort) RUN_ARGS+=("$1" "$2"); shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "Unknown argument: $1 (see --help)" ;;

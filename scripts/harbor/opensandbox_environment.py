@@ -25,6 +25,9 @@ replayed in the sandbox (scripts/common/dockerfile_replay.py, as for --sandbox k
 commands get the replayed ENV, WORKDIR and USER. The replay needs network: the sandbox is created
 public and gets the task's policy once the replay is done.
 
+With --model-tunnel (run.py) the agent's sandbox also gets a reverse tunnel to the model server
+(scripts/harbor/model_tunnel.py), for agents that run inside the sandbox.
+
 The server is OPENSANDBOX_DOMAIN with OPENSANDBOX_API_KEY. It decides the container runtime, so
 this must be a Kata endpoint: a gVisor one rejects every network policy with HTTP 400.
 """
@@ -55,6 +58,7 @@ from scripts.common.opensandbox_sandbox import (  # noqa: F401
     replace_egress_policy,
 )
 from scripts.common.dockerfile_replay import DockerfileReplay, ImageConfig
+from scripts.harbor.model_tunnel import ModelTunnel, ModelTunnelConfig
 
 # Clients outside the cluster (a Clariden job, a laptop) reach sandboxes through the server.
 USE_SERVER_PROXY = True
@@ -89,6 +93,7 @@ class KataSandboxEnvironment(OpenSandboxEnvironment):
         self._image = ImageConfig()
         self._image_uid: int | None = None
         self._creation_policy: NetworkPolicy | None = None
+        self._model_tunnel: ModelTunnel | None = None
         super().__init__(*args, **kwargs)
 
     def _load_opensandbox(self) -> dict[str, Any]:
@@ -113,6 +118,9 @@ class KataSandboxEnvironment(OpenSandboxEnvironment):
         )
 
     async def stop(self, delete: bool) -> None:
+        tunnel, self._model_tunnel = self._model_tunnel, None
+        if tunnel is not None:
+            await tunnel.close()
         # Harbor's stop kills the sandbox, and its logs go with it.
         await save_sandbox_logs(self._sandbox)
         await super().stop(delete)
@@ -130,6 +138,22 @@ class KataSandboxEnvironment(OpenSandboxEnvironment):
             self._image_uid = await self._uid(self._image.user)
         if self._creation_policy != self.network_policy:
             await self._apply_network_policy(self.network_policy)
+        config = ModelTunnelConfig.from_env()
+        # Only the agent's environment: a separate verifier's (session id ..__verifier__..) never calls the model.
+        if config is not None and "__verifier__" not in (self.session_id or ""):
+            self._model_tunnel = ModelTunnel(
+                config, self._tunnel_exec, self.upload_file, self._tunnel_endpoint, self.logger, f" [{self.session_id}]"
+            )
+            await self._model_tunnel.open()
+
+    async def _tunnel_exec(self, command: str, env: dict[str, str] | None) -> tuple[int, str]:
+        result = await self.exec(command, cwd="/", env=env, user="root", timeout_sec=60)
+        return result.return_code, (result.stdout or "") + (result.stderr or "")
+
+    async def _tunnel_endpoint(self, port: int) -> tuple[str, dict[str, str]]:
+        endpoint = await self._sandbox.get_endpoint(port)
+        config = self._sandbox.connection_config
+        return f"{config.protocol}://{endpoint.endpoint}", endpoint.build_request_headers(config)
 
     async def _allow_overcommit(self) -> None:
         # The microVM's RAM is the task's memory limit, so Linux's default overcommit heuristic
