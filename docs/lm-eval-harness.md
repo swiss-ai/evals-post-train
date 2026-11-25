@@ -554,7 +554,6 @@ Primary SLURM job script: evaluates a served model.
 | `TOKENIZER` | same as model | Custom tokenizer path |
 | `BOS` | `false` | Prepend BOS token |
 | `BS` | `auto:20` | Batch size |
-| `SIZE` | `1` | Informational/legacy model-size metadata |
 | `MAX_LENGTH` | (model default) | Optional total context limit, passed as `max_length` |
 | `MAX_NEW_TOKENS` | `32768` with thinking or a reasoning effort, or `MAX_LENGTH` when it is set (clamped per request to the window minus the prompt); otherwise unused | Generation budget of thinking/reasoning-effort runs, passed as `--gen_kwargs max_gen_toks=...` so it replaces every task's own `max_gen_toks`. An explicit value sets that budget. |
 | `THINK_TEMPERATURE` / `THINK_TOP_P` | `0.6` / `0.95` (from `configs/sampling_defaults.json`) | Sampling for thinking runs (`do_sample=true` is forced: reasoning degrades under greedy); `none` leaves one out. The launcher flags `--temperature`, `--top-p`, ... set these ([docs/sampling.md](sampling.md)) |

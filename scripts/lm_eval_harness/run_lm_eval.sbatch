@@ -18,10 +18,8 @@ usage() {
 	echo "In addition of these three necessary positional arguments, you can specify the following bash environment variables. Unless explicitly stated, all of these are optional:"
 	echo " TOKENIZER: A huggingface tokenizer path/name. Default: 'model', with an endpoint catalog prefix stripped."
 	echo " BS: Batch size."
-	echo " REVISION: Only used in huggingface models. If set, this revision of the model will be evaluated."
-	echo " SIZE: Legacy/informational approximate model size in billions."
 	echo " MAX_LENGTH: Optional context limit: the served window."
-	echo " MAX_NEW_TOKENS: Generation budget of thinking/reasoning-effort runs; replaces every task's own max_gen_toks (default when thinking: 32768; on the openai backend with MAX_LENGTH set, MAX_LENGTH, which the harness clamps per request to the window minus the prompt)."
+	echo " MAX_NEW_TOKENS: Generation budget of thinking/reasoning-effort runs; replaces every task's own max_gen_toks (default when thinking: 32768; with MAX_LENGTH set, MAX_LENGTH, which the harness clamps per request to the window minus the prompt)."
 	echo " BOS: 'true' prepends the BOS token, 'false' leaves it to the tokenizer; default 'auto' = true for models whose tokenizer never adds the BOS token they need (Gemma 4, scripts/lm_eval_harness/bos_default.py)."
 	echo " TRUST_REMOTE_CODE: 'true' loads the tokenizer with trust_remote_code=True."
 	echo " LOGS_ROOT: Where the evaluation wandb&harness logs go (default: <repo>/logs/lm_eval)."
@@ -79,7 +77,6 @@ fi
 MODEL=$1
 NAME=$2
 BS=${BS:-"auto:20"}
-SIZE=${SIZE:-1}
 BOS=${BOS:-auto}
 TRUST_REMOTE_CODE=${TRUST_REMOTE_CODE:-false}
 LOGS_ROOT=${LOGS_ROOT:-$PWD/logs/lm_eval}
@@ -232,7 +229,7 @@ warn_if_empty WANDB_API_KEY \
 warn_if_empty CSCS_SERVING_API \
   "Optional key missing. LLM-as-a-judge benchmarks via CSCS serving API will fail."
 
-# Optional eval arguments. An unset MAX_LENGTH leaves the backend/model default intact.
+# Optional eval arguments. An unset MAX_LENGTH leaves the model default intact.
 MAX_LENGTH=${MAX_LENGTH:-""}
 if [[ -n "$MAX_LENGTH" && ! "$MAX_LENGTH" =~ ^[1-9][0-9]*$ ]]; then
     die "MAX_LENGTH must be a positive integer when set (got '$MAX_LENGTH')."
@@ -301,7 +298,7 @@ esac
 # 32768 is the largest task-local budget (AIME), so the override below lowers no task.
 if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then
     MAX_NEW_TOKENS=32768
-    # On the openai backend every generation request is clamped to the window minus its prompt
+    # Every generation request is clamped to the window minus its prompt
     # (clamp_gen_toks; apertus2 clamps itself), so the budget is the whole window: a model served
     # with more than 32768 is not cut there.
     if [[ -n "$MAX_LENGTH" ]]; then
@@ -364,13 +361,11 @@ export SPACY_DATA="$CACHE_ROOT/spacy"
 export XDG_CACHE_HOME="$CACHE_ROOT"
 mkdir -p "$HF_DATASETS_CACHE" "$NLTK_DATA" "$TRITON_CACHE_DIR" "$TIKTOKEN_CACHE_DIR" "$PYTHONUSERBASE" "$MPLCONFIGDIR" "$SPACY_DATA"
 
-GPUS_PER_NODE=4
-
 # Print configuration.
 echo "Configuration set:"
 # Values go in printf's arguments, not the format string: a '%' would be read as a conversion.
-printf '%s\n' "MODEL=$MODEL" "NAME=$NAME" "TOKENIZER=$TOKENIZER" "BS=$BS" "REVISION=$REVISION" \
-	"SIZE=$SIZE" "HARNESS_LIMIT=$HARNESS_LIMIT" "LM_EVAL_HARNESS_BRANCH=$LM_EVAL_HARNESS_BRANCH" \
+printf '%s\n' "MODEL=$MODEL" "NAME=$NAME" "TOKENIZER=$TOKENIZER" "BS=$BS" \
+	"HARNESS_LIMIT=$HARNESS_LIMIT" "LM_EVAL_HARNESS_BRANCH=$LM_EVAL_HARNESS_BRANCH" \
 	"BOS=$BOS" "BOS_BY_CLIENT=${BOS_BY_CLIENT:-auto}" "TRUST_REMOTE_CODE=$TRUST_REMOTE_CODE" "TASKS=$TASKS" "MAX_LENGTH=$MAX_LENGTH" "WANDB_ENTITY=$WANDB_ENTITY" \
 	"WANDB_PROJECT=$WANDB_PROJECT" "HF_HOME=$HF_HOME" \
 	"API_CHAT_ENDPOINT=${API_CHAT_ENDPOINT:-false}" "CHAT_FORMAT=$CHAT_FORMAT" ""
@@ -379,20 +374,6 @@ printf '%s\n' "ENABLE_THINKING=$ENABLE_THINKING (explicit=$ENABLE_THINKING_EXPLI
 	"THINK_END_TOKEN=$THINK_END_TOKEN" "TRACK_THINKING_METRICS=$TRACK_THINKING_METRICS" \
 	"LOG_LENGTH_METRICS=$LOG_LENGTH_METRICS" "REASONING_EFFORT=$REASONING_EFFORT" ""
 
-# Generic envs.
-export MASTER_ADDR=$(hostname)
-export MASTER_PORT=25678
-
-export WORLD_SIZE=$GPUS_PER_NODE
-
-# export HF_ALLOW_CODE_EVAL=1
-
-echo "Huggingface checkpoint detected!"
-if [ ! -z ${REVISION+x} ]; then
-    echo "Using revision=$REVISION"
-    MAYBE_REVISION=",revision=$REVISION"
-    MAYBE_DOWNLOAD_REVISION="--revision=$REVISION"
-fi
 if [ -z ${TOKENIZER+x} ]; then
     # Catalog ids from an inference gateway are prefixed
     # (<catalog-namespace>/<org>/<repo>, e.g.
@@ -414,7 +395,7 @@ fi
 # BOS=auto is resolved for each lm-eval command (resolve_pass_bos, before make_cmd): the rule depends on whether the
 # chat template is applied, and by-type decides that per kind of task.
 BOS_REQUESTED=$BOS
-# BOS_BY_CLIENT: unset/auto = on for commands with a chat template on the openai backend on /v1/completions
+# BOS_BY_CLIENT: unset/auto = on for commands with a chat template on /v1/completions
 # (--no-bos-by-client turns it off); true = --bos-by-client, refused where it cannot apply.
 case "${BOS_BY_CLIENT:-auto}" in
     auto|true|false) ;;
@@ -499,11 +480,11 @@ fi
 # API models take an integer batch size; throughput comes from num_concurrent instead.
 if [[ "$BS" == auto* ]]; then
     BS=1
-    echo "openai backend: batch size 'auto' unsupported, using BS=$BS (concurrency: API_NUM_CONCURRENT=$API_NUM_CONCURRENT)"
+    echo "batch size 'auto' unsupported, using BS=$BS (concurrency: API_NUM_CONCURRENT=$API_NUM_CONCURRENT)"
 fi
-echo "openai backend: $API_LM_EVAL_MODEL against $API_BASE_URL (model=$API_MODEL_NAME)"
+echo "$API_LM_EVAL_MODEL against $API_BASE_URL (model=$API_MODEL_NAME)"
 [[ -z "$API_REQUESTS_PER_MINUTE" ]] \
-    || echo "openai backend rate limit: $API_REQUESTS_PER_MINUTE requests/minute"
+    || echo "rate limit: $API_REQUESTS_PER_MINUTE requests/minute"
 
 # Opt-in, for models whose tokenizer is custom code (e.g. Kimi-K2).
 if [[ "$TRUST_REMOTE_CODE" == "true" ]]; then
@@ -593,7 +574,7 @@ fi
 # Detect long context length only when 'ruler' is among tasks. RULER needs a
 # little engine headroom beyond the requested sequence length.
 CONTEXT_LEN=""
-BACKEND_MAX_LENGTH="$MAX_LENGTH"
+CONTEXT_LIMIT="$MAX_LENGTH"
 if echo "$TASKS" | grep -q "ruler"; then
     if echo "$TASKS" | grep -qE "/[0-9]+"; then
         CONTEXT_LEN=$(echo "$TASKS" | grep -oE '/[0-9]+' | head -n1 | tr -d '/')
@@ -609,8 +590,8 @@ if echo "$TASKS" | grep -q "ruler"; then
         if [[ "$CONTEXT_LEN" =~ ^[0-9]+$ ]]; then
 			COMMON_EVAL_ARGS+=( --metadata \'{\"max_seq_lengths\":[${CONTEXT_LEN}]}\' )
 
-            BACKEND_MAX_LENGTH=$(( CONTEXT_LEN + 600 ))
-            echo "Detected ruler context length: $CONTEXT_LEN (backend context limit=$BACKEND_MAX_LENGTH and lm-eval metadata)"
+            CONTEXT_LIMIT=$(( CONTEXT_LEN + 600 ))
+            echo "Detected ruler context length: $CONTEXT_LEN (context limit=$CONTEXT_LIMIT and lm-eval metadata)"
         else
             echo "Warning: Ruler detected but no numeric context length found; skipping metadata and automatic context limit."
         fi
@@ -618,13 +599,13 @@ if echo "$TASKS" | grep -q "ruler"; then
 fi
 
 # MAX_LENGTH is a context limit, not a generation override. Omit it entirely when no value was set.
-if [[ -n "$BACKEND_MAX_LENGTH" ]]; then
+if [[ -n "$CONTEXT_LIMIT" ]]; then
     # apertus2-completions clamps each request's budget to the server's context,
     # which ruler's detected length does not change.
     if [[ "$CHAT_FORMAT" == "apertus2" ]]; then
         COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_model_len=$MAX_LENGTH"
     else
-        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_length=$BACKEND_MAX_LENGTH"
+        COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,max_length=$CONTEXT_LIMIT"
         # The template path never counts tokens: a prompt longer than the context
         # minus the budget gets the server's 400. clamp_gen_toks lowers that
         # request's budget to what is left.
@@ -636,7 +617,7 @@ if [[ -n "$BACKEND_MAX_LENGTH" ]]; then
         [[ "${API_LM_EVAL_MODEL:-}" == "local-chat-completions" ]] \
             && COMMON_MODEL_ARGS="$COMMON_MODEL_ARGS,tokenizer_backend=huggingface,tokenizer=$TOKENIZER"
     fi
-    echo "Using context limit: $BACKEND_MAX_LENGTH"
+    echo "Using context limit: $CONTEXT_LIMIT"
 fi
 
 echo "Using lm-evaluation-harness: $EVAL_RESOLVED_HARNESS_REPO@$EVAL_RESOLVED_HARNESS_COMMIT"

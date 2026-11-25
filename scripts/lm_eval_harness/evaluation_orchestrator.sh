@@ -105,13 +105,13 @@ _eval_resolved_bos_by_client() {
 _eval_create_run_config() {
     local model="$1" repo="$2" state_dir="$3"
     local enable_thinking="${ENABLE_THINKING:-}"
-    # backend, checkpoint_iteration and megatron_micro_batch_size are constants, kept so that results
+    # backend, checkpoint_iteration, revision and megatron_micro_batch_size are constants, kept so that results
     # recorded before the backends were removed still match the run config and resume.
     local -a fields=(
         --field "model=$model"
         --field "backend=openai"
         --field "checkpoint_iteration=latest"
-        --field "revision=${REVISION:-}"
+        --field "revision="
         --field "tokenizer=${TOKENIZER:-}"
         --field "harness_repo=$repo"
         --field "harness_ref=${LM_EVAL_HARNESS_BRANCH:-$(_eval_pinned_harness_commit "$repo")}"
