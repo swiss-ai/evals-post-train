@@ -219,7 +219,7 @@ class SuiteTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"EVAL_ENV_CACHE_ROOT": str(cache)}):
                 path = suites.fetch_tokenizer(spec)
                 self.assertTrue((path / "tokenizer.json").is_file())
-                with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("fetched twice")):
+                with mock.patch.object(subprocess, "run", side_effect=AssertionError("fetched twice")):
                     self.assertEqual(suites.fetch_tokenizer(spec), path)
                 with self.assertRaisesRegex(ValueError, "could not fetch"):
                     suites.fetch_tokenizer({**spec, "revision": "0" * 40})
@@ -322,7 +322,7 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(argv[argv.index("--wandb-project") + 1], suite["name"])
 
     def test_run_prints_by_default_and_checks_its_arguments(self):
-        with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
+        with mock.patch.object(subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
             self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m", "--model", "qwen3-32b-thinking=q", "--helper-url", JUDGE_BASE]), 0)
         self.assertIn("86 launches: 2 models x 43 benchmarks", err.getvalue())
