@@ -30,4 +30,4 @@ if __name__ == "__main__":
                         help="The run's --out-dir (holds summary.json and jobs/).")
     args = parser.parse_args()
 
-    main(entity=args.entity, project=args.project, name=args.name, work_dir=args.work_dir)
+    main(entity=args.entity, project=args.project, name=args.name, work_dir=args.out_dir)

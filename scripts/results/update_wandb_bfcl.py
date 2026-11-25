@@ -28,4 +28,4 @@ if __name__ == "__main__":
     parser.add_argument("--out-dir", type=Path, required=True, help="The run's --out-dir (holds summary.json).")
     args = parser.parse_args()
 
-    main(entity=args.entity, project=args.project, name=args.name, work_dir=args.work_dir)
+    main(entity=args.entity, project=args.project, name=args.name, work_dir=args.out_dir)

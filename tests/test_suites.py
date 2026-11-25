@@ -293,6 +293,19 @@ class SuiteTests(unittest.TestCase):
             seen.add(expected)
         self.assertIn(f"logs/bfcl/{suite['name']}/chonk/bfcl_v4", seen)
 
+    def test_every_runner_takes_the_flags_the_suite_passes_it(self):
+        # suites.RUNNERS is the one place the runners differ; the scripts must agree with it.
+        repo = Path(__file__).resolve().parents[1]
+        for framework, runner in suites.RUNNERS.items():
+            text = (repo / runner.script).with_suffix(".sh").read_text()  # the .sbatch files forward to the .sh
+            wanted = {"--model", "--api-base-url", "--limit", runner.task_flag}
+            wanted |= {runner.out_flag} if runner.out_flag else set()
+            wanted |= {"--wandb-project", "--no-wandb"} if runner.wandb else set()
+            wanted |= {"--sampling-profile"} if runner.sampling_profile else set()
+            wanted |= {"--api-model-name"} if runner.api_model_name else set()
+            for flag in sorted(wanted):
+                self.assertRegex(text, rf"(?m)^\s*(?:--[a-z-]+\|)*{flag}[|)]", f"{framework} does not parse {flag}")
+
     def test_bfcl_rows_run_the_custom_runner(self):
         suite = suites.load(SUITE)
         rows = {r["label"]: r["argv"] for r in suites.commands(

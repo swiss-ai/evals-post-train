@@ -288,7 +288,7 @@ def generation_args(registry: str, categories: list[str], temperature: float, nu
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     started = time.time()
-    workdir = args.workdir.resolve()
+    workdir = args.out_dir.resolve()
     workdir.mkdir(parents=True, exist_ok=True)
     # Read when bfcl_eval is imported: where results, scores and the ids file live.
     os.environ["BFCL_PROJECT_ROOT"] = str(workdir)

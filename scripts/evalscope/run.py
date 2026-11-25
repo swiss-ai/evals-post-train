@@ -353,7 +353,7 @@ def build_task_config(args: argparse.Namespace, names: List[str], revisions: Dic
         "dataset_hub": hub,
         "eval_batch_size": args.max_concurrency or min(BENCHMARKS[n].get("max_concurrency", DEFAULT_CONCURRENCY) for n in names),
         "generation_config": generation_config(args),
-        "work_dir": args.work_dir,
+        "work_dir": args.out_dir,
         "no_timestamp": True,
     }
     if needs_sandbox(names):
@@ -516,7 +516,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         raise SystemExit(f"--completions has no base-model prompt for {', '.join(chat_only)}: only live_code_bench")
     if args.sandbox == "k8s" and (no_pool := [n for n in names if BENCHMARKS[n].get("pool")]):
         raise SystemExit(f"{', '.join(no_pool)} score in a sandbox pool, which --sandbox k8s does not have: use docker or opensandbox")
-    os.makedirs(args.work_dir, exist_ok=True)
+    os.makedirs(args.out_dir, exist_ok=True)
 
     if needs_sandbox(names):
         from scripts.evalscope import swe_bench_scoring
@@ -550,7 +550,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("EvalScope task config:", json.dumps(printable, indent=2), flush=True)
 
     stop_progress = threading.Event()
-    threading.Thread(target=log_progress, args=(args.work_dir, time.time(), stop_progress), daemon=True).start()
+    threading.Thread(target=log_progress, args=(args.out_dir, time.time(), stop_progress), daemon=True).start()
     try:
         run_task(cfg)
     finally:
@@ -572,21 +572,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         "dataset_revisions": revisions,
         "subsets": {n: subset_list(n, args) for n in names if subset_list(n, args)},
         "limit": cfg.get("limit"),
-        "reports": collect_reports(args.work_dir),
-        "evaluation_errors": evaluation_errors(args.work_dir),
+        "reports": collect_reports(args.out_dir),
+        "evaluation_errors": evaluation_errors(args.out_dir),
     }
     if "swe_bench_pro" in names:
         summary["swe_bench_pro_os_commit"] = swe_bench_pro_os_commit()
-    with open(os.path.join(args.work_dir, "summary.json"), "w") as f:
+    with open(os.path.join(args.out_dir, "summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
     print(json.dumps(summary, indent=2))
     if not summary["reports"]:
-        print(f"No EvalScope reports found under {args.work_dir}/reports", file=sys.stderr)
+        print(f"No EvalScope reports found under {args.out_dir}/reports", file=sys.stderr)
         return 1
     if summary["evaluation_errors"]:
         total = sum(e["count"] for e in summary["evaluation_errors"].values())
         print(
-            f"{total} sample(s) could not be evaluated (see evaluation_errors in {args.work_dir}/summary.json "
+            f"{total} sample(s) could not be evaluated (see evaluation_errors in {args.out_dir}/summary.json "
             "and their logs): the scores count them as unresolved.",
             file=sys.stderr,
         )
