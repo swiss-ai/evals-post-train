@@ -89,5 +89,35 @@ class TraceUploadTests(unittest.TestCase):
             self.assertIsNone(upload_trace("e", "p", "m", "tau2_airline", source, max_mb=0))
 
 
+class TraceIsOptInTests(unittest.TestCase):
+    def run_main(self, **kwargs):
+        import sys
+        import types
+        from unittest import mock
+
+        from scripts.results import update_wandb_tau2
+
+        scores, trace = mock.Mock(), mock.Mock()
+        fake = types.ModuleType("scripts.results.wandb_alignment_utils")
+        fake.upload_multi_model_results = scores
+        with mock.patch.dict(sys.modules, {"scripts.results.wandb_alignment_utils": fake}), \
+                mock.patch.object(update_wandb_tau2, "upload_trace", trace), \
+                tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp, "results.json")
+            source.write_text(json.dumps(results(sim("0", 1.0), sim("1", 0.0))))
+            update_wandb_tau2.main("e", "p", "m", source, **kwargs)
+        return scores, trace
+
+    def test_the_scores_are_uploaded_and_the_trace_is_not_by_default(self):
+        scores, trace = self.run_main()
+        scores.assert_called_once()
+        trace.assert_not_called()
+
+    def test_traces_true_also_uploads_the_trace(self):
+        scores, trace = self.run_main(traces=True)
+        scores.assert_called_once()
+        trace.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
