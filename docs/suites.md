@@ -1,6 +1,6 @@
 # Suites
 
-A suite writes down a comparison once: its benchmarks, how each is repeated and scored, and the setups a model can run under. It lives in `configs/suites/<name>.json` (Apertus 2 suites in `configs/suites/apertus2/`, named `apertus2/<name>`); `scripts/common/suites.py` reads it and knows no model.
+A suite writes down a comparison once: its benchmarks, how each is repeated and scored, and the setups a model can run under. It lives in `configs/suites/<name>.json` (Apertus 2 suites in `configs/suites/apertus2/`, named `apertus2/<name>`); `scripts/common/suites/` reads it and knows no model.
 
 ```bash
 python -m scripts.common.suites show apertus2/chonk_sft   # title and setups

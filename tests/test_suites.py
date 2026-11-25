@@ -24,7 +24,7 @@ JUDGE_BASE = "http://helper:8080/v1"  # where it is reached (--helper-url), what
 
 def with_inspect_row(suite):
     """A copy of `suite` with one inspect row first: the shipped chonk_sft has none (GPQA Diamond runs in lm-eval now),
-    so the inspect paths of suites.py are exercised with this probe."""
+    so the inspect paths of suites/flags.py are exercised with this probe."""
     suite = copy.deepcopy(suite)
     suite["benchmarks"].insert(0, {"label": "Inspect probe", "task": "gpqa_diamond", "framework": "inspect",
                                    "repeats": {"n": 4, "via": "task"}, "metric": {"label": "mean@4", "key": None}})
@@ -219,7 +219,7 @@ class SuiteTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"EVAL_ENV_CACHE_ROOT": str(cache)}):
                 path = suites.fetch_tokenizer(spec)
                 self.assertTrue((path / "tokenizer.json").is_file())
-                with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("fetched twice")):
+                with mock.patch.object(subprocess, "run", side_effect=AssertionError("fetched twice")):
                     self.assertEqual(suites.fetch_tokenizer(spec), path)
                 with self.assertRaisesRegex(ValueError, "could not fetch"):
                     suites.fetch_tokenizer({**spec, "revision": "0" * 40})
@@ -322,7 +322,7 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(argv[argv.index("--wandb-project") + 1], suite["name"])
 
     def test_run_prints_by_default_and_checks_its_arguments(self):
-        with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
+        with mock.patch.object(subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
             self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m", "--model", "qwen3-32b-thinking=q", "--helper-url", JUDGE_BASE]), 0)
         self.assertIn("86 launches: 2 models x 43 benchmarks", err.getvalue())
