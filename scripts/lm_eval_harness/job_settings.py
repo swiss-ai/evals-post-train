@@ -72,6 +72,43 @@ def default_tokenizer(model):
     return model, "TOKENIZER not set, using TOKENIZER=" + model
 
 
+def check_apertus2(get, max_length, thinking_flags):
+    """What CHAT_FORMAT=apertus2 needs and cannot be combined with; returns its prefill mode and answer frame.
+    The format is the Apertus 2 native one, rendered and parsed client-side by apertus2-completions: a thinking
+    run (effort, budget and sampling are the job's), so the template's thinking switches do not apply."""
+    prefill, frame = get("PREFILL_MODE", "after_think"), get("ANSWER_FRAME", "reply")
+    if not get("TOKENIZER"):
+        raise ValueError("CHAT_FORMAT=apertus2 needs TOKENIZER, the checkpoint's tokenizer.")
+    if get("BOS", "auto") == "true":
+        raise ValueError("CHAT_FORMAT=apertus2 renders the BOS token itself: unset BOS.")
+    if get("API_CHAT_ENDPOINT", "false") == "true" or get("APPLY_CHAT_TEMPLATE", "true") != "true":
+        raise ValueError("CHAT_FORMAT=apertus2 renders every task as chat over /v1/completions "
+                         "(API_CHAT_ENDPOINT=false, APPLY_CHAT_TEMPLATE=true).")
+    if not max_length:
+        raise ValueError("CHAT_FORMAT=apertus2 needs MAX_LENGTH, the server's --max-model-len.")
+    if prefill not in ("after_think", "empty_think"):
+        raise ValueError("PREFILL_MODE must be after_think or empty_think (got '%s')." % prefill)
+    if frame not in ("reply", "claim"):
+        raise ValueError("ANSWER_FRAME must be reply or claim (got '%s')." % frame)
+    if thinking_flags:
+        raise ValueError("CHAT_FORMAT=apertus2 always reasons and separates the reasoning itself: unset "
+                         "ENABLE_THINKING, THINK_END_TOKEN, THINK_START_TOKEN, AUTODETECT_THINK_TOKENS and "
+                         "TRACK_THINKING_METRICS.")
+    return prefill, frame
+
+
+def thinking_budget(thinks, explicit, current, max_length, notes):
+    """The generation budget: thinking emits a trace before the answer, so it is raised unless the caller set it.
+    A model given a reasoning effort (gpt-oss) reasons at every level, so it gets the same budget. Every request
+    is clamped to the window minus its prompt (clamp_gen_toks; apertus2 clamps itself), so the budget is the whole
+    window: a model served with more than 32768 is not cut there."""
+    if not thinks or explicit:
+        return current
+    budget = max_length or THINKING_BUDGET
+    notes.append("ENABLE_THINKING=True or REASONING_EFFORT set: raising default MAX_NEW_TOKENS to " + budget)
+    return budget
+
+
 def resolve(env, notes=None):
     """The environment -> the job's settings, defaulted, normalised and checked ({OUTPUTS...} plus the
     API_* and TASKS settings model_args.build reads). Raises ValueError for a setting that cannot work."""
@@ -100,35 +137,14 @@ def resolve(env, notes=None):
     prefill, frame = get("PREFILL_MODE"), get("ANSWER_FRAME")
     apply_template = get("APPLY_CHAT_TEMPLATE", "true")
     if chat_format == "apertus2":
-        prefill, frame = prefill or "after_think", frame or "reply"
-        if not get("TOKENIZER"):
-            raise ValueError("CHAT_FORMAT=apertus2 needs TOKENIZER, the checkpoint's tokenizer.")
-        if get("BOS", "auto") == "true":
-            raise ValueError("CHAT_FORMAT=apertus2 renders the BOS token itself: unset BOS.")
-        if get("API_CHAT_ENDPOINT", "false") == "true" or apply_template != "true":
-            raise ValueError("CHAT_FORMAT=apertus2 renders every task as chat over /v1/completions "
-                             "(API_CHAT_ENDPOINT=false, APPLY_CHAT_TEMPLATE=true).")
-        if not max_length:
-            raise ValueError("CHAT_FORMAT=apertus2 needs MAX_LENGTH, the server's --max-model-len.")
-        if prefill not in ("after_think", "empty_think"):
-            raise ValueError("PREFILL_MODE must be after_think or empty_think (got '%s')." % prefill)
-        if frame not in ("reply", "claim"):
-            raise ValueError("ANSWER_FRAME must be reply or claim (got '%s')." % frame)
-        if enable_explicit or think_end or think_start or track or autodetect == "True":
-            raise ValueError("CHAT_FORMAT=apertus2 always reasons and separates the reasoning itself: unset "
-                             "ENABLE_THINKING, THINK_END_TOKEN, THINK_START_TOKEN, AUTODETECT_THINK_TOKENS and "
-                             "TRACK_THINKING_METRICS.")
+        thinking_flags = bool(enable_explicit or think_end or think_start or track or autodetect == "True")
+        prefill, frame = check_apertus2(get, max_length, thinking_flags)
         effort = effort or "medium"
     elif chat_format != "template":
         raise ValueError("CHAT_FORMAT must be template or apertus2 (got '%s')." % chat_format)
 
-    # Thinking emits a trace before the answer; raise the budget unless the caller set it. A model given a
-    # reasoning effort (gpt-oss) reasons at every level, so it gets the same budget.
-    if (enable_thinking == "True" or effort) and not max_new_tokens_explicit:
-        # Every generation request is clamped to the window minus its prompt (clamp_gen_toks; apertus2 clamps
-        # itself), so the budget is the whole window: a model served with more than 32768 is not cut there.
-        max_new_tokens = max_length or THINKING_BUDGET
-        notes.append("ENABLE_THINKING=True or REASONING_EFFORT set: raising default MAX_NEW_TOKENS to " + max_new_tokens)
+    max_new_tokens = thinking_budget(enable_thinking == "True" or bool(effort), max_new_tokens_explicit,
+                                     max_new_tokens, max_length, notes)
 
     # lm_eval splits --model_args on commas, so a comma in a value would inject an extra key.
     for name in ("THINK_END_TOKEN", "THINK_START_TOKEN", "API_BASE_URL", "API_MODEL_NAME"):
@@ -234,6 +250,9 @@ def build(env):
 
 
 def main():
+    if sys.argv[1:] == ["--inputs"]:  # the names run_lm_eval.sbatch exports for it: one list, kept here
+        print(" ".join(INPUTS))
+        return 0
     env = dict((name, os.environ[name]) for name in INPUTS if name in os.environ)
     try:
         outputs, _ = build(env)

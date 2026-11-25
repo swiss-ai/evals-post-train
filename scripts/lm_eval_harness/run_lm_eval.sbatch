@@ -243,10 +243,10 @@ if [ -f "$TABLE_METRICS" ]; then
 fi
 
 # The job's settings are resolved and checked, and the harness model and its --model_args built, by
-# scripts/lm_eval_harness/job_settings.py: it reads these settings from the environment (its INPUTS) and
-# prints shell assignments. Captured first, so a refused setting stops the job: `eval "$(...)"` would hide
+# scripts/lm_eval_harness/job_settings.py: it reads these settings from the environment (the names it lists with
+# --inputs, exported here) and prints shell assignments. Captured first, so a refused setting stops the job: `eval "$(...)"` would hide
 # the exit code.
-export MODEL TOKENIZER BOS BOS_BY_CLIENT MAX_LENGTH MAX_NEW_TOKENS ENABLE_THINKING AUTODETECT_THINK_TOKENS THINK_START_TOKEN THINK_END_TOKEN TRACK_THINKING_METRICS LOG_LENGTH_METRICS REASONING_EFFORT CHAT_FORMAT PREFILL_MODE ANSWER_FRAME APPLY_CHAT_TEMPLATE API_BASE_URL API_MODEL_NAME API_CHAT_ENDPOINT API_NUM_CONCURRENT API_MAX_RETRIES API_REQUEST_TIMEOUT API_REQUESTS_PER_MINUTE TRUST_REMOTE_CODE TASKS NOTHINK_TEMPERATURE NOTHINK_TOP_P THINK_TEMPERATURE THINK_TOP_P THINK_TOP_K THINK_MIN_P THINK_REPETITION_PENALTY
+export $(python3 -m scripts.lm_eval_harness.job_settings --inputs)
 SETTINGS_OUT=$(python3 -m scripts.lm_eval_harness.job_settings) || die "Could not resolve the job's settings (see above)."
 eval "$SETTINGS_OUT"
 

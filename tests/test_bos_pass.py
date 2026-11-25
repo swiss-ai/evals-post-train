@@ -118,9 +118,10 @@ class CommandLineTests(unittest.TestCase):
 
 class JobContractTests(unittest.TestCase):
     def test_the_job_exports_what_the_module_reads(self):
-        exported = set()
+        # exported for job_settings (the names it lists) or by the line above make_cmd
+        exported = set(job_settings.INPUTS)
         for line in SBATCH.splitlines():
-            if line.startswith("export "):
+            if line.startswith("export ") and "$(" not in line:
                 exported.update(line.split()[1:])
         self.assertLessEqual(set(bos_pass.INPUTS), exported)
 

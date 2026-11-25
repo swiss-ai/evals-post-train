@@ -604,9 +604,13 @@ class CommandLineTests(unittest.TestCase):
 
 
 class JobContractTests(unittest.TestCase):
-    def test_the_job_exports_exactly_the_inputs_the_module_reads(self):
-        line = next(l for l in SBATCH.splitlines() if l.startswith("export MODEL "))
-        self.assertEqual(set(line.split()[1:]), set(job_settings.INPUTS))
+    def test_the_job_exports_the_inputs_the_module_lists(self):
+        # One list, kept in the module: the job asks for it, so the two cannot drift apart.
+        self.assertIn("export $(python3 -m scripts.lm_eval_harness.job_settings --inputs)", SBATCH)
+        listed = subprocess.run([sys.executable, "-m", "scripts.lm_eval_harness.job_settings", "--inputs"],
+                                cwd=REPO_ROOT, capture_output=True, text=True, check=True).stdout.split()
+        self.assertEqual(listed, list(job_settings.INPUTS))
+        self.assertLess(SBATCH.index("job_settings --inputs"), SBATCH.index('eval "$SETTINGS_OUT"'))
 
     def test_the_job_captures_the_output_before_eval_so_a_failure_stops_it(self):
         # `eval "$(cmd)"` returns eval's status, not cmd's: a refused setting would run on with empty arguments.
