@@ -309,27 +309,33 @@ class Runner:
     """How a suite row becomes one command of a framework's runner.
 
     Every runner takes --model, --api-base-url and --limit, and all but tau2 take --wandb-project/--no-wandb.
-    What differs is data, kept here and nowhere else: the script, how the benchmark is named (task_flag, and
-    what it is called there), where the results go (out_flag: lm_eval's logs already sit under the W&B project)
-    and who picks Slurm's qos and partition."""
+    What differs is data, kept here and nowhere else:
+      script, sbatch  the runner, and whether the row is `sbatch script` (qos and partition as --qos=x before
+                      the script) or `bash script <subcommand>` (a login-node launcher that submits its own
+                      jobs: qos and partition as --qos x at the end);
+      task_flag       how the benchmark is named there, and task_value what it is called;
+      out_flag        where results go (lm_eval's logs already sit under the W&B project: none);
+      wandb           whether it uploads to W&B (tau2 prints its summary instead);
+      sampling_profile, api_model_name   the flags only some runners take."""
 
     def __init__(self, script, task_flag, task_value=lambda task: task, out_flag="--out-dir", wandb=True,
-                 sampling_profile=False, api_model_name=False, launcher=None):
+                 sampling_profile=False, api_model_name=False, sbatch=True, subcommand=()):
         self.script, self.task_flag, self.task_value = script, task_flag, task_value
         self.out_flag, self.wandb = out_flag, wandb
         self.sampling_profile, self.api_model_name = sampling_profile, api_model_name
-        self.launcher = launcher  # a login-node launcher that submits its own jobs; None: sbatch the script
+        self.sbatch, self.subcommand = sbatch, list(subcommand)
 
     def argv(self, scheduling, task, rest):
-        """The command: the script, then the benchmark, then `rest`; qos and partition go where the script wants them."""
-        if self.launcher:
-            return [*self.launcher, self.task_flag, self.task_value(task), *rest, *scheduling["flags"]]
-        return ["sbatch", *scheduling["equals"], self.script, self.task_flag, self.task_value(task), *rest]
+        """The command: the script, then the benchmark, then `rest`."""
+        benchmark = [self.task_flag, self.task_value(task)]
+        if self.sbatch:
+            return ["sbatch", *scheduling["equals"], self.script, *benchmark, *rest]
+        return ["bash", self.script, *self.subcommand, *benchmark, *rest, *scheduling["flags"]]
 
 
 RUNNERS = {
     "lm_eval": Runner("scripts/lm_eval_harness/launch_evaluations.sh", "--task", out_flag=None, api_model_name=True,
-                      launcher=["bash", "scripts/lm_eval_harness/launch_evaluations.sh", "single"]),
+                      sbatch=False, subcommand=["single"]),
     "inspect": Runner("scripts/inspect_ai/run_inspect_eval.sbatch", "--task"),
     "harbor": Runner("scripts/harbor/run_harbor_eval.sbatch", "--benchmark"),
     "evalscope": Runner("scripts/evalscope/run_evalscope_eval.sbatch", "--benchmark"),

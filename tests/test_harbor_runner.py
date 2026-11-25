@@ -52,7 +52,7 @@ class RunArgsTest(unittest.TestCase):
                 run.parse_args(model)
 
     def test_model_tunnel_is_for_in_sandbox_agents_on_opensandbox(self):
-        base = ["--benchmark", "swe_bench", "--model", "m", "--api-base-url", "http://10.0.0.5:8080/v1", "--work-dir", "w",
+        base = ["--benchmark", "swe_bench", "--model", "m", "--api-base-url", "http://10.0.0.5:8080/v1", "--out-dir", "w",
                 "--chisel-dir", "/c"]
         with mock.patch.dict(os.environ, {"OPENSANDBOX_API_KEY": "k"}):
             for bad in (["--sandbox", "opensandbox", "--model-tunnel"],  # terminus-2 calls the model from the node
