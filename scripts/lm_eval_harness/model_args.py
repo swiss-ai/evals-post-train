@@ -1,31 +1,14 @@
 """The harness model and its --model_args for one lm-eval run against an OpenAI-compatible endpoint.
 
-run_lm_eval.sbatch used to build these strings in shell. `build()` is the same logic as a function of
-the run's settings, so it can be called and tested without a Slurm job. The job runs it as
-
-    eval "$(python3 -m scripts.lm_eval_harness.model_args)"
-
-which reads the settings from the environment (the variables run_lm_eval.sbatch documents; INPUTS below
-lists the ones it reads) and prints shell assignments for what the job needs: API_LM_EVAL_MODEL (the
-harness model), COMMON_MODEL_ARGS, CHAT_TEMPLATE_ARGS, the normalised API_BASE_URL / API_MODEL_NAME /
-API_CHAT_ENDPOINT and CONTEXT_LEN (the context length of a RULER task list, for lm-eval's --metadata).
-Notes go to stderr; a setting that cannot work stops the job with its message and exit code 1.
-
-Plain Python 3.6 syntax: the job's own `python3` outside the container can be that old.
+run_lm_eval.sbatch used to build these strings in shell. `build()` is the same logic as a function of the run's
+settings (job_settings.resolve() gives them normalised), so it can be called and tested without a Slurm job:
+the harness model (API_LM_EVAL_MODEL), COMMON_MODEL_ARGS, CHAT_TEMPLATE_ARGS, the normalised API_BASE_URL /
+API_MODEL_NAME / API_CHAT_ENDPOINT and CONTEXT_LEN (the context length of a RULER task list, for lm-eval's
+--metadata). A setting that cannot work raises ValueError.
 """
 
-import os
 import re
-import shlex
-import sys
 
-INPUTS = (
-    "MODEL", "API_BASE_URL", "API_MODEL_NAME", "API_CHAT_ENDPOINT", "API_NUM_CONCURRENT", "API_MAX_RETRIES",
-    "API_REQUEST_TIMEOUT", "API_REQUESTS_PER_MINUTE", "CHAT_FORMAT", "APPLY_CHAT_TEMPLATE", "TOKENIZER",
-    "PREFILL_MODE", "ANSWER_FRAME", "REASONING_EFFORT", "ENABLE_THINKING", "ENABLE_THINKING_EXPLICIT",
-    "THINK_START_TOKEN", "THINK_END_TOKEN", "AUTODETECT_THINK_TOKENS", "TRACK_THINKING_METRICS", "MAX_NEW_TOKENS",
-    "TRUST_REMOTE_CODE", "MAX_LENGTH", "TASKS",
-)
 OUTPUTS = (
     "API_LM_EVAL_MODEL", "COMMON_MODEL_ARGS", "CHAT_TEMPLATE_ARGS", "API_BASE_URL", "API_MODEL_NAME",
     "API_CHAT_ENDPOINT", "CONTEXT_LEN",
@@ -101,11 +84,11 @@ def ruler_context(tasks):
 def build(settings):
     """The run's endpoint settings -> {OUTPUTS...}. `settings` maps the INPUTS names to strings."""
     get = lambda name, default="": settings.get(name) or default
+    effort = get("REASONING_EFFORT")
+    template_args = chat_template_args(effort)  # checked first, as the job always did
     model, url = endpoint(settings)
     api_model = get("API_MODEL_NAME", get("MODEL"))
-    effort = get("REASONING_EFFORT")
     think = thinking_args(settings)
-    template_args = chat_template_args(effort)
     # The backend default for a request without a max_gen_toks; --gen_kwargs is what replaces the task budgets.
     default_budget = ""
     if get("ENABLE_THINKING") == "True" or effort:
@@ -167,26 +150,14 @@ def build(settings):
     }
 
 
-def main():
-    settings = dict((name, os.environ.get(name, "")) for name in INPUTS)
-    try:
-        built = build(settings)
-    except ValueError as error:
-        print(error, file=sys.stderr)
-        return 1
-    print("%s against %s (model=%s)" % (built["API_LM_EVAL_MODEL"], built["API_BASE_URL"], built["API_MODEL_NAME"]),
-          file=sys.stderr)
-    if settings["API_REQUESTS_PER_MINUTE"]:
-        print("rate limit: %s requests/minute" % settings["API_REQUESTS_PER_MINUTE"], file=sys.stderr)
+def notes(settings, built):
+    """The lines the job prints about what it built: the endpoint, a rate limit, the context limit."""
+    lines = ["%s against %s (model=%s)" % (built["API_LM_EVAL_MODEL"], built["API_BASE_URL"], built["API_MODEL_NAME"])]
+    if settings.get("API_REQUESTS_PER_MINUTE"):
+        lines.append("rate limit: %s requests/minute" % settings["API_REQUESTS_PER_MINUTE"])
     if built["CONTEXT_LEN"]:
-        print("Detected ruler context length: %s (context limit=%s and lm-eval metadata)"
-              % (built["CONTEXT_LEN"], built["CONTEXT_LIMIT"]), file=sys.stderr)
+        lines.append("Detected ruler context length: %s (context limit=%s and lm-eval metadata)"
+                     % (built["CONTEXT_LEN"], built["CONTEXT_LIMIT"]))
     if built["CONTEXT_LIMIT"]:
-        print("Using context limit: " + built["CONTEXT_LIMIT"], file=sys.stderr)
-    for name in OUTPUTS:
-        print("%s=%s" % (name, shlex.quote(built[name])))
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+        lines.append("Using context limit: " + built["CONTEXT_LIMIT"])
+    return lines

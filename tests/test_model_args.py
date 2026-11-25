@@ -1,10 +1,8 @@
 """scripts/lm_eval_harness/model_args.py: the harness model and --model_args of a run, as a function."""
 
 import ast
-import os
 import shlex
 import subprocess
-import sys
 import unittest
 from pathlib import Path
 
@@ -258,46 +256,6 @@ class BehaviourTests(unittest.TestCase):
         ):
             with self.subTest(message), self.assertRaisesRegex(ValueError, message):
                 build(**override)
-
-
-class CommandLineTests(unittest.TestCase):
-    def run_cli(self, **override):
-        env = {"PATH": os.environ["PATH"], **BASE, **override}
-        return subprocess.run([sys.executable, "-m", "scripts.lm_eval_harness.model_args"], cwd=REPO_ROOT, env=env,
-                              capture_output=True, text=True)
-
-    def test_prints_assignments_the_shell_can_eval_and_notes_to_stderr(self):
-        done = self.run_cli(REASONING_EFFORT="high", MAX_LENGTH="65536")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        script = 'eval "$1"; printf "%s\\n" "$API_LM_EVAL_MODEL" "$COMMON_MODEL_ARGS" "$CHAT_TEMPLATE_ARGS"'
-        got = subprocess.run(["bash", "-c", script, "bash", done.stdout], capture_output=True, text=True,
-                             check=True).stdout.split("\n")
-        built = build(REASONING_EFFORT="high", MAX_LENGTH="65536")
-        self.assertEqual(got[:3], [built["API_LM_EVAL_MODEL"], built["COMMON_MODEL_ARGS"], built["CHAT_TEMPLATE_ARGS"]])
-        self.assertIn("local-completions against http://host:8000/v1/completions", done.stderr)
-        self.assertIn("Using context limit: 65536", done.stderr)
-
-    def test_a_refused_setting_exits_non_zero_with_its_message(self):
-        done = self.run_cli(API_BASE_URL="")
-        self.assertEqual(done.returncode, 1)
-        self.assertEqual(done.stdout, "")
-        self.assertIn("API_BASE_URL must be set", done.stderr)
-
-    def test_runs_on_the_old_python_the_job_may_have(self):
-        # The job's own python3 outside the container can be 3.6: no newer syntax.
-        ast.parse(Path(model_args.__file__).read_text(), feature_version=(3, 6))
-
-
-class JobContractTests(unittest.TestCase):
-    def test_the_job_exports_exactly_the_inputs_the_module_reads(self):
-        line = next(l for l in SBATCH.splitlines() if l.startswith("export MODEL "))
-        self.assertEqual(tuple(line.split()[1:]), model_args.INPUTS)
-
-    def test_the_job_captures_the_output_before_eval_so_a_failure_stops_it(self):
-        # `eval "$(cmd)"` returns eval's status, not cmd's: a refused setting would run on with empty arguments.
-        self.assertIn('MODEL_ARGS_OUT=$(python3 -m scripts.lm_eval_harness.model_args) || die', SBATCH)
-        self.assertNotIn('eval "$(python3 -m scripts.lm_eval_harness.model_args', SBATCH)
-        self.assertIn('eval "$MODEL_ARGS_OUT"', SBATCH)
 
 
 if __name__ == "__main__":

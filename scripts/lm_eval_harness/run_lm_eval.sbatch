@@ -229,92 +229,7 @@ warn_if_empty WANDB_API_KEY \
 warn_if_empty CSCS_SERVING_API \
   "Optional key missing. LLM-as-a-judge benchmarks via CSCS serving API will fail."
 
-# Optional eval arguments. An unset MAX_LENGTH leaves the model default intact.
-MAX_LENGTH=${MAX_LENGTH:-""}
-if [[ -n "$MAX_LENGTH" && ! "$MAX_LENGTH" =~ ^[1-9][0-9]*$ ]]; then
-    die "MAX_LENGTH must be a positive integer when set (got '$MAX_LENGTH')."
-fi
-# Capture explicitness before defaulting: thinking raises the default, but a caller value wins.
-if [[ -n "${MAX_NEW_TOKENS:+x}" ]]; then MAX_NEW_TOKENS_EXPLICIT=1; else MAX_NEW_TOKENS_EXPLICIT=0; fi
-MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
 NUM_FEWSHOT=${NUM_FEWSHOT:-""}
-
-# --- Thinking / reasoning metrics ---
-# Capture explicitness before defaulting: enable_thinking is forwarded only when
-# set (unset lets the template default apply). ':+' treats an exported-but-empty value as unset.
-if [[ -n "${ENABLE_THINKING:+x}" ]]; then ENABLE_THINKING_EXPLICIT=1; else ENABLE_THINKING_EXPLICIT=0; fi
-ENABLE_THINKING=${ENABLE_THINKING:-false}
-AUTODETECT_THINK_TOKENS=${AUTODETECT_THINK_TOKENS:-false}
-THINK_END_TOKEN=${THINK_END_TOKEN:-""}
-THINK_START_TOKEN=${THINK_START_TOKEN:-""}
-TRACK_THINKING_METRICS=${TRACK_THINKING_METRICS:-""}   # "" | true | false
-LOG_LENGTH_METRICS=${LOG_LENGTH_METRICS:-false}
-REASONING_EFFORT=${REASONING_EFFORT:-""}
-
-# Validate booleans (don't coerce): a typo'd 'ture' read as false would waste a GPU job.
-# Assign directly so a bad value aborts under set -e.
-_norm_bool() {  # <name> <value> -> echoes True/False, dies otherwise
-	local name="$1" val="$2"
-	val="${val#"${val%%[![:space:]]*}"}"   # strip leading whitespace
-	val="${val%"${val##*[![:space:]]}"}"   # strip trailing whitespace
-	case "$val" in
-		true|True|TRUE|1|yes)   echo "True" ;;
-		false|False|FALSE|0|no) echo "False" ;;
-		*) die "$name must be true or false (got '$2')." ;;
-	esac
-}
-ENABLE_THINKING=$(_norm_bool ENABLE_THINKING "$ENABLE_THINKING")
-AUTODETECT_THINK_TOKENS=$(_norm_bool AUTODETECT_THINK_TOKENS "$AUTODETECT_THINK_TOKENS")
-LOG_LENGTH_METRICS=$(_norm_bool LOG_LENGTH_METRICS "$LOG_LENGTH_METRICS")
-[[ -z "$TRACK_THINKING_METRICS" ]] || TRACK_THINKING_METRICS=$(_norm_bool TRACK_THINKING_METRICS "$TRACK_THINKING_METRICS")
-
-# CHAT_FORMAT=apertus2: the Apertus 2 native format, rendered and parsed client-side by
-# apertus2-completions; a thinking run (effort, budget and sampling below).
-CHAT_FORMAT=${CHAT_FORMAT:-template}
-case "$CHAT_FORMAT" in
-    template) ;;
-    apertus2)
-        PREFILL_MODE=${PREFILL_MODE:-after_think}
-        ANSWER_FRAME=${ANSWER_FRAME:-reply}
-        [[ -n "${TOKENIZER:-}" ]] || die "CHAT_FORMAT=apertus2 needs TOKENIZER, the checkpoint's tokenizer."
-        [[ "$BOS" != "true" ]] || die "CHAT_FORMAT=apertus2 renders the BOS token itself: unset BOS."
-        [[ "${API_CHAT_ENDPOINT:-false}" != "true" && $APPLY_CHAT_TEMPLATE = true ]] \
-            || die "CHAT_FORMAT=apertus2 renders every task as chat over /v1/completions (API_CHAT_ENDPOINT=false, APPLY_CHAT_TEMPLATE=true)."
-        [[ -n "$MAX_LENGTH" ]] || die "CHAT_FORMAT=apertus2 needs MAX_LENGTH, the server's --max-model-len."
-        [[ "$PREFILL_MODE" == "after_think" || "$PREFILL_MODE" == "empty_think" ]] \
-            || die "PREFILL_MODE must be after_think or empty_think (got '$PREFILL_MODE')."
-        [[ "$ANSWER_FRAME" == "reply" || "$ANSWER_FRAME" == "claim" ]] \
-            || die "ANSWER_FRAME must be reply or claim (got '$ANSWER_FRAME')."
-        [[ $ENABLE_THINKING_EXPLICIT == 0 && -z "$THINK_END_TOKEN$THINK_START_TOKEN$TRACK_THINKING_METRICS" \
-           && "$AUTODETECT_THINK_TOKENS" == "False" ]] \
-            || die "CHAT_FORMAT=apertus2 always reasons and separates the reasoning itself: unset ENABLE_THINKING, THINK_END_TOKEN, THINK_START_TOKEN, AUTODETECT_THINK_TOKENS and TRACK_THINKING_METRICS."
-        REASONING_EFFORT=${REASONING_EFFORT:-medium}
-        ;;
-    *) die "CHAT_FORMAT must be template or apertus2 (got '$CHAT_FORMAT')." ;;
-esac
-
-# Thinking emits a trace before the answer; raise the budget unless the caller set it. A model
-# given a reasoning effort (gpt-oss) reasons at every level, so it gets the same budget.
-# 32768 is the largest task-local budget (AIME), so the override below lowers no task.
-if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then
-    MAX_NEW_TOKENS=32768
-    # Every generation request is clamped to the window minus its prompt
-    # (clamp_gen_toks; apertus2 clamps itself), so the budget is the whole window: a model served
-    # with more than 32768 is not cut there.
-    if [[ -n "$MAX_LENGTH" ]]; then
-        MAX_NEW_TOKENS=$MAX_LENGTH
-    fi
-    echo "ENABLE_THINKING=True or REASONING_EFFORT set: raising default MAX_NEW_TOKENS to $MAX_NEW_TOKENS"
-fi
-
-# lm_eval splits --model_args on commas, so a comma in a token would inject an extra key.
-_reject_comma() {
-	[[ "$2" != *,* ]] || die "$1 must not contain a comma (got '$2'): it would inject an extra model_args key."
-}
-_reject_comma THINK_END_TOKEN "$THINK_END_TOKEN"
-_reject_comma THINK_START_TOKEN "$THINK_START_TOKEN"
-_reject_comma API_BASE_URL "$API_BASE_URL"
-_reject_comma API_MODEL_NAME "$API_MODEL_NAME"
 
 if [ -f "$TASKS" ]; then
     echo "Reading task list from file: $TASKS"
@@ -325,6 +240,20 @@ fi
 if [ -f "$TABLE_METRICS" ]; then
 	echo "Reading table metrics from file: $TABLE_METRICS"
 	TABLE_METRICS=$(grep -v '^\s*#' "$TABLE_METRICS" | grep -v '^\s*$' | paste -sd' ' -)
+fi
+
+# The job's settings are resolved and checked, and the harness model and its --model_args built, by
+# scripts/lm_eval_harness/job_settings.py: it reads these settings from the environment (its INPUTS) and
+# prints shell assignments. Captured first, so a refused setting stops the job: `eval "$(...)"` would hide
+# the exit code.
+export MODEL TOKENIZER BOS BOS_BY_CLIENT MAX_LENGTH MAX_NEW_TOKENS ENABLE_THINKING AUTODETECT_THINK_TOKENS THINK_START_TOKEN THINK_END_TOKEN TRACK_THINKING_METRICS LOG_LENGTH_METRICS REASONING_EFFORT CHAT_FORMAT PREFILL_MODE ANSWER_FRAME APPLY_CHAT_TEMPLATE API_BASE_URL API_MODEL_NAME API_CHAT_ENDPOINT API_NUM_CONCURRENT API_MAX_RETRIES API_REQUEST_TIMEOUT API_REQUESTS_PER_MINUTE TRUST_REMOTE_CODE TASKS NOTHINK_TEMPERATURE NOTHINK_TOP_P THINK_TEMPERATURE THINK_TOP_P THINK_TOP_K THINK_MIN_P THINK_REPETITION_PENALTY
+SETTINGS_OUT=$(python3 -m scripts.lm_eval_harness.job_settings) || die "Could not resolve the job's settings (see above)."
+eval "$SETTINGS_OUT"
+
+# API models take an integer batch size; throughput comes from num_concurrent instead.
+if [[ "$BS" == auto* ]]; then
+    BS=1
+    echo "batch size 'auto' unsupported, using BS=$BS (concurrency: API_NUM_CONCURRENT=$API_NUM_CONCURRENT)"
 fi
 
 # Redirect all caches to SCRATCH to avoid filling up HOME: HF_HOME and HF_DATASETS_CACHE come from
@@ -354,33 +283,11 @@ printf '%s\n' "ENABLE_THINKING=$ENABLE_THINKING (explicit=$ENABLE_THINKING_EXPLI
 	"THINK_END_TOKEN=$THINK_END_TOKEN" "TRACK_THINKING_METRICS=$TRACK_THINKING_METRICS" \
 	"LOG_LENGTH_METRICS=$LOG_LENGTH_METRICS" "REASONING_EFFORT=$REASONING_EFFORT" ""
 
-if [ -z ${TOKENIZER+x} ]; then
-    # Catalog ids from an inference gateway are prefixed
-    # (<catalog-namespace>/<org>/<repo>, e.g.
-    # CSCS-Inference/swiss-ai/Apertus-v1.5-70B) -- not a valid Hugging Face
-    # repo id (org/repo, exactly one slash), so AutoTokenizer rejects them.
-    # Strip the catalog prefix to recover the real tokenizer repo; a plain
-    # org/repo model id (one slash) is left untouched. Local filesystem paths
-    # (always absolute here) also have multiple slashes but aren't catalog ids --
-    # stripping up to the first one would mangle them (dropping the leading "/"),
-    # so leave those alone regardless of slash count.
-    if [[ "$MODEL" != /* ]] && [ "$(grep -o '/' <<< "$MODEL" | wc -l)" -gt 1 ]; then
-        TOKENIZER="${MODEL#*/}"
-        echo "TOKENIZER not set, using TOKENIZER=$TOKENIZER (catalog prefix stripped from MODEL=$MODEL)"
-    else
-        TOKENIZER=$MODEL
-        echo "TOKENIZER not set, using TOKENIZER=$MODEL"
-    fi
-fi
 # BOS=auto is resolved for each lm-eval command (resolve_pass_bos, before make_cmd): the rule depends on whether the
 # chat template is applied, and by-type decides that per kind of task.
 BOS_REQUESTED=$BOS
 # BOS_BY_CLIENT: unset/auto = on for commands with a chat template on /v1/completions
 # (--no-bos-by-client turns it off); true = --bos-by-client, refused where it cannot apply.
-case "${BOS_BY_CLIENT:-auto}" in
-    auto|true|false) ;;
-    *) echo "BOS_BY_CLIENT must be auto, true or false (got '$BOS_BY_CLIENT')" >&2; exit 1 ;;
-esac
 
 # Prepare logs root.
 RUN_ROOT=$LOGS_ROOT/$WANDB_ENTITY/$WANDB_PROJECT/$NAME
@@ -393,18 +300,6 @@ export HF_ALLOW_CODE_EVAL=1
 # export PERSPECTIVE_API_KEY="" # Uncomment if you want to use perspective API, needed for realtoxicityprompts task
 
 # Finally, run the actual evaluations.
-# The harness model and its --model_args come from scripts/lm_eval_harness/model_args.py, which reads these
-# settings from the environment (its INPUTS) and prints shell assignments. Captured first, so a failure
-# stops the job: `eval "$(...)"` would hide the exit code.
-export MODEL API_BASE_URL API_MODEL_NAME API_CHAT_ENDPOINT API_NUM_CONCURRENT API_MAX_RETRIES API_REQUEST_TIMEOUT API_REQUESTS_PER_MINUTE CHAT_FORMAT APPLY_CHAT_TEMPLATE TOKENIZER PREFILL_MODE ANSWER_FRAME REASONING_EFFORT ENABLE_THINKING ENABLE_THINKING_EXPLICIT THINK_START_TOKEN THINK_END_TOKEN AUTODETECT_THINK_TOKENS TRACK_THINKING_METRICS MAX_NEW_TOKENS TRUST_REMOTE_CODE MAX_LENGTH TASKS
-MODEL_ARGS_OUT=$(python3 -m scripts.lm_eval_harness.model_args) || die "Could not build the model arguments (see above)."
-eval "$MODEL_ARGS_OUT"
-
-# API models take an integer batch size; throughput comes from num_concurrent instead.
-if [[ "$BS" == auto* ]]; then
-    BS=1
-    echo "batch size 'auto' unsupported, using BS=$BS (concurrency: API_NUM_CONCURRENT=$API_NUM_CONCURRENT)"
-fi
 HARNESS_EVAL_DIR=$HARNESS_DIR/eval_$(date +%Y%m%d_%H%M%S)_$SLURM_JOBID
 mkdir -p "$HARNESS_EVAL_DIR"
 # Keep the job's output from here on with the results (stdout and stderr stay separate streams
@@ -412,44 +307,9 @@ mkdir -p "$HARNESS_EVAL_DIR"
 exec > >(tee -a "$HARNESS_EVAL_DIR/run.log") 2> >(tee -a "$HARNESS_EVAL_DIR/run.log" >&2)
 cp "$EVAL_RUN_CONFIG" "$HARNESS_EVAL_DIR/.eval-run-config.json"
 
-# Generation kwargs supplied through the CLI update every task's YAML. Thinking and
-# reasoning-effort runs set max_gen_toks here: task budgets (e.g. mmlu_pro 2048,
-# ifeval 1280) were sized for a direct answer, and the trace counts against them.
-GEN_KWARGS=""
-# Sampling comes from scripts/common/sampling.py: the defaults of configs/sampling_defaults.json,
-# overridden one by one by THINK_TEMPERATURE, THINK_TOP_P, THINK_TOP_K, THINK_MIN_P and
-# THINK_REPETITION_PENALTY ("none" leaves one out; the launcher sets them from --temperature etc.).
-if [[ "$ENABLE_THINKING" == "True" || "$CHAT_FORMAT" == "apertus2" ]]; then
-    SAMPLING_OUT=$(python3 -m scripts.common.sampling --framework lm_eval --env-prefix THINK_ --format shell) \
-        || die "Invalid sampling settings: THINK_* or configs/sampling_defaults.json (see above)."
-    eval "$SAMPLING_OUT"
-    GEN_KWARGS="do_sample=true"
-    [[ -z "$SAMPLING_TEMPERATURE"        ]] || GEN_KWARGS="${GEN_KWARGS},temperature=${SAMPLING_TEMPERATURE}"
-    [[ -z "$SAMPLING_TOP_P"              ]] || GEN_KWARGS="${GEN_KWARGS},top_p=${SAMPLING_TOP_P}"
-    [[ -z "$SAMPLING_TOP_K"              ]] || GEN_KWARGS="${GEN_KWARGS},top_k=${SAMPLING_TOP_K}"
-    [[ -z "$SAMPLING_MIN_P"              ]] || GEN_KWARGS="${GEN_KWARGS},min_p=${SAMPLING_MIN_P}"
-    [[ -z "$SAMPLING_REPETITION_PENALTY" ]] || GEN_KWARGS="${GEN_KWARGS},repetition_penalty=${SAMPLING_REPETITION_PENALTY}"
-    echo "Thinking sampling: do_sample=true temperature=${SAMPLING_TEMPERATURE:-<unset>} top_p=${SAMPLING_TOP_P:-<unset>} top_k=${SAMPLING_TOP_K:-<unset>} min_p=${SAMPLING_MIN_P:-<unset>} repetition_penalty=${SAMPLING_REPETITION_PENALTY:-<unset>} max_gen_toks=$MAX_NEW_TOKENS"
-elif [[ -n "${NOTHINK_TEMPERATURE:-}" ]]; then
-    # Optional no-think sampling (inert unless NOTHINK_TEMPERATURE is set): greedy-vs-sampling ablation.
-    # top_p defaults to 0.95 as before ("none" omits it); THINK_TOP_K/MIN_P/REPETITION_PENALTY apply too.
-    SAMPLING_OUT=$(python3 -m scripts.common.sampling --framework lm_eval --no-default --env-prefix THINK_ \
-        --temperature "$NOTHINK_TEMPERATURE" --top-p "${NOTHINK_TOP_P:-0.95}" --format shell) \
-        || die "Invalid sampling settings: NOTHINK_* / THINK_* (see above)."
-    eval "$SAMPLING_OUT"
-    GEN_KWARGS="do_sample=true"
-    [[ -z "$SAMPLING_TEMPERATURE"        ]] || GEN_KWARGS="${GEN_KWARGS},temperature=${SAMPLING_TEMPERATURE}"
-    [[ -z "$SAMPLING_TOP_P"              ]] || GEN_KWARGS="${GEN_KWARGS},top_p=${SAMPLING_TOP_P}"
-    [[ -z "$SAMPLING_TOP_K"              ]] || GEN_KWARGS="${GEN_KWARGS},top_k=${SAMPLING_TOP_K}"
-    [[ -z "$SAMPLING_MIN_P"              ]] || GEN_KWARGS="${GEN_KWARGS},min_p=${SAMPLING_MIN_P}"
-    [[ -z "$SAMPLING_REPETITION_PENALTY" ]] || GEN_KWARGS="${GEN_KWARGS},repetition_penalty=${SAMPLING_REPETITION_PENALTY}"
-    echo "No-think sampling: do_sample=true temperature=${SAMPLING_TEMPERATURE:-<unset>} top_p=${SAMPLING_TOP_P:-<unset>} top_k=${SAMPLING_TOP_K:-<unset>} min_p=${SAMPLING_MIN_P:-<unset>} repetition_penalty=${SAMPLING_REPETITION_PENALTY:-<unset>}"
-fi
-
-if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]]; then
-    GEN_KWARGS="${GEN_KWARGS:+$GEN_KWARGS,}max_gen_toks=${MAX_NEW_TOKENS}"
-    echo "Thinking/reasoning-effort run: max_gen_toks=$MAX_NEW_TOKENS for every task (replaces task-local budgets)"
-fi
+# What job_settings.py has to say about the run (the raised budget, the tokenizer, the sampling): printed here so
+# it is kept with the results. GEN_KWARGS (its --gen_kwargs) updates every task's YAML.
+[[ -z "$SETTINGS_NOTES" ]] || printf '%s\n' "$SETTINGS_NOTES"
 
 MAX_BATCH_SIZE=${MAX_BATCH_SIZE:-""}
 

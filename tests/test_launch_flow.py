@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts.lm_eval_harness import job_settings
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -96,25 +98,12 @@ def _function(name: str) -> str:
     return SBATCH[start: SBATCH.index("\n}\n", start) + 3]
 
 
-def _chat_format(**env: str) -> subprocess.CompletedProcess:
-    """run_lm_eval.sbatch's CHAT_FORMAT checks for an apertus2 run, run on their own."""
-    start = SBATCH.index("CHAT_FORMAT=${CHAT_FORMAT:-template}")
-    script = "set -e\n" + _function("die") + SBATCH[start: SBATCH.index("esac\n", start) + 5]
-    base = {
-        "PATH": os.environ["PATH"], "CHAT_FORMAT": "apertus2",
-        "APPLY_CHAT_TEMPLATE": "true", "MAX_LENGTH": "65536", "ENABLE_THINKING_EXPLICIT": "0",
-        "AUTODETECT_THINK_TOKENS": "False", "TOKENIZER": "/ckpt",
-    }
-    return subprocess.run(["bash", "-c", script], env=base | env, capture_output=True, text=True)
-
-
 def _gen_kwargs(**env: str) -> str:
-    """run_lm_eval.sbatch's --gen_kwargs for this environment (its GEN_KWARGS block)."""
-    block = SBATCH[SBATCH.index('GEN_KWARGS=""'): SBATCH.index('MAX_BATCH_SIZE=${MAX_BATCH_SIZE:-""}')]
-    script = "set -e\n" + block + '\nprintf "%s" "$GEN_KWARGS" >&2\n'
-    base = {"PATH": os.environ["PATH"], "ENABLE_THINKING": "False", "REASONING_EFFORT": "", "MAX_NEW_TOKENS": "32768"}
-    done = subprocess.run(["bash", "-c", script], env=base | env, capture_output=True, text=True, check=True)
-    return done.stderr
+    """The --gen_kwargs of a run with this environment (scripts/lm_eval_harness/job_settings.py)."""
+    base = {"MODEL": "m", "API_BASE_URL": "http://host:8000", "TOKENIZER": "/ckpt", "MAX_LENGTH": "65536",
+            "MAX_NEW_TOKENS": "32768"}
+    outputs, _ = job_settings.build({**base, **env})
+    return outputs["GEN_KWARGS"]
 
 
 class LaunchFlowTests(unittest.TestCase):
@@ -579,38 +568,6 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("no reasoning close token", completed.stdout + completed.stderr)
 
-    def test_thinking_budget_replaces_task_local_max_gen_toks(self) -> None:
-        # The --gen_kwargs value overrides every task's YAML max_gen_toks (mmlu_pro 2048,
-        # ifeval 1280); 32768 is AIME's own budget, so no task is lowered.
-        self.assertIn("    MAX_NEW_TOKENS=32768\n", SBATCH)
-        self.assertEqual(
-            _gen_kwargs(ENABLE_THINKING="True"),
-            "do_sample=true,temperature=0.6,top_p=0.95,max_gen_toks=32768",
-        )
-        self.assertEqual(_gen_kwargs(REASONING_EFFORT="low", MAX_NEW_TOKENS="8192"), "max_gen_toks=8192")
-        self.assertEqual(_gen_kwargs(), "")
-
-    def test_thinking_budget_is_the_window_where_requests_are_clamped(self) -> None:
-        # openai: clamp_gen_toks (or apertus2's own clamp) lowers every request to window - prompt, so
-        # the budget is the window; without one it keeps 32768.
-        block = SBATCH[SBATCH.index('if [[ "$ENABLE_THINKING" == "True" || -n "$REASONING_EFFORT" ]] && (( ! MAX_NEW_TOKENS_EXPLICIT )); then'):]
-        block = block[: block.index("\nfi\n") + 4]
-
-        def budget(**env: str) -> str:
-            script = "set -e\n" + block + 'printf "%s" "$MAX_NEW_TOKENS"\n'
-            base = {"PATH": os.environ["PATH"], "ENABLE_THINKING": "True", "REASONING_EFFORT": "",
-                    "MAX_NEW_TOKENS_EXPLICIT": "0", "MAX_NEW_TOKENS": "2048",
-                    "MAX_LENGTH": "262144"}
-            done = subprocess.run(["bash", "-c", script], env=base | env, capture_output=True, text=True, check=True)
-            return done.stdout.splitlines()[-1] if done.stdout.strip() else ""
-
-        self.assertEqual(budget(), "262144")
-        self.assertEqual(budget(MAX_LENGTH="131072"), "131072")
-        self.assertEqual(budget(MAX_LENGTH=""), "32768")  # no window given
-        self.assertEqual(budget(ENABLE_THINKING="False", REASONING_EFFORT="low"), "262144")
-        # a caller's value wins and the block is not entered
-        self.assertEqual(budget(MAX_NEW_TOKENS_EXPLICIT="1", MAX_NEW_TOKENS="8192"), "8192")
-
     def test_a_run_name_with_whitespace_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             completed = _launch(
@@ -762,31 +719,6 @@ class LaunchFlowTests(unittest.TestCase):
                                 API_CHAT_ENDPOINT="true")
             self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
 
-    def test_evaluate_checks_apertus2_runs(self) -> None:
-        accepted = _chat_format()
-        self.assertEqual(accepted.returncode, 0, accepted.stderr)
-        # The prebuilt image runs this format too (the image has apertus-common).
-        prebuilt = _chat_format(EVAL_ENV_KIND="prebuilt")
-        self.assertEqual(prebuilt.returncode, 0, prebuilt.stderr)
-        refusals = {
-            "chat endpoint": ({"API_CHAT_ENDPOINT": "true"}, "renders every task as chat"),
-            "template off": ({"APPLY_CHAT_TEMPLATE": "false"}, "renders every task as chat"),
-            "no context": ({"MAX_LENGTH": ""}, "needs MAX_LENGTH"),
-            "no tokenizer": ({"TOKENIZER": ""}, "needs TOKENIZER"),
-            "bos": ({"BOS": "true"}, "unset BOS"),
-            "prefill mode": ({"PREFILL_MODE": "reject"}, "PREFILL_MODE must be"),
-            "answer frame": ({"ANSWER_FRAME": "think"}, "ANSWER_FRAME must be"),
-            "thinking switch": ({"ENABLE_THINKING_EXPLICIT": "1"}, "always reasons"),
-            "think token": ({"THINK_END_TOKEN": "</think>"}, "always reasons"),
-            "autodetect": ({"AUTODETECT_THINK_TOKENS": "True"}, "always reasons"),
-            "thinking metrics": ({"TRACK_THINKING_METRICS": "True"}, "always reasons"),
-        }
-        for name, (env, message) in refusals.items():
-            with self.subTest(name):
-                completed = _chat_format(**env)
-                self.assertNotEqual(completed.returncode, 0)
-                self.assertIn(message, completed.stderr)
-
     def test_apertus2_samples_like_a_thinking_run(self) -> None:
         self.assertEqual(
             _gen_kwargs(CHAT_FORMAT="apertus2", REASONING_EFFORT="medium"),
@@ -859,7 +791,7 @@ class LaunchFlowTests(unittest.TestCase):
         # A bad value must stop the job, not be dropped from the request.
         for env in ({"CHAT_FORMAT": "apertus2", "THINK_TOP_P": "3"}, {"NOTHINK_TEMPERATURE": "-1"}):
             with self.subTest(env):
-                with self.assertRaises(subprocess.CalledProcessError):
+                with self.assertRaisesRegex(ValueError, "Invalid sampling settings"):
                     _gen_kwargs(**env)
 
     def test_apertus2_requirements_pin_full_commits(self) -> None:
