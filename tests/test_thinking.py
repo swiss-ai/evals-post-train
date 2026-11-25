@@ -126,48 +126,6 @@ class InspectThinkingTest(unittest.TestCase):
         self.assertIn("reasoning effort must be one of", done.stderr)
 
 
-TAU2 = (REPO_ROOT / "scripts/aaii/run_tau2_bench.sh").read_text()
-TAU2_BLOCK = TAU2[
-    TAU2.index("# Thinking and reasoning effort of the agent model"):TAU2.index("# The commit a tau2-bench ref names")
-]
-
-
-def _tau2(agent_args='{"api_base": "http://x/v1", "api_key": "k"}', enable="", effort=""):
-    env = {"PATH": os.environ["PATH"], "AGENT_LLM_ARGS": agent_args,
-           "THINKING_ENABLE_FLAG": enable, "THINKING_EFFORT_FLAG": effort}
-    script = "set -e\n" + TAU2_BLOCK + '\nprintf "%s" "$AGENT_LLM_ARGS"\n'
-    return subprocess.run(["bash", "-c", script], cwd=REPO_ROOT, env=env, capture_output=True, text=True)
-
-
-class Tau2ThinkingTest(unittest.TestCase):
-    def test_no_flag_leaves_the_agent_args_alone(self):
-        done = _tau2()
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(json.loads(done.stdout), {"api_base": "http://x/v1", "api_key": "k"})
-
-    def test_merges_over_the_agent_args(self):
-        done = _tau2(
-            '{"api_base": "http://x/v1", "extra_body": {"top_k": 20, "chat_template_kwargs": {"x": 1}}}',
-            enable="--enable-thinking", effort="high",
-        )
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            json.loads(done.stdout),
-            {"api_base": "http://x/v1", "reasoning_effort": "high",
-             "extra_body": {"top_k": 20,
-                            "chat_template_kwargs": {"x": 1, "enable_thinking": True, "reasoning_effort": "high"}}},
-        )
-
-    def test_the_user_simulator_does_not_get_the_settings(self):
-        # USER_LLM_ARGS is copied from the agent's before this block runs.
-        self.assertLess(TAU2.index('USER_LLM_ARGS="$AGENT_LLM_ARGS"'), TAU2.index(TAU2_BLOCK))
-
-    def test_invalid_effort_stops_the_run(self):
-        done = _tau2(effort="extreme")
-        self.assertNotEqual(done.returncode, 0)
-        self.assertIn("reasoning effort must be one of", done.stderr)
-
-
 class HarborThinkingTest(unittest.TestCase):
     def _aks(self, *extra):
         args = harbor_run.parse_args(

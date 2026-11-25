@@ -1,6 +1,6 @@
 # Inspect AI and Artificial Analysis benchmarks
 
-Benchmarks that need their own scorer, a judge or a simulated user: Inspect AI tasks (`inspect_evals` and `scripts/aaii/`), and the standalone Artificial Analysis protocol runners in `scripts/aaii/`.
+Benchmarks that need their own scorer, a judge or a simulated user: Inspect AI tasks (`inspect_evals` and `scripts/aaii/`), and the standalone GDPval-AA runner in `scripts/aaii/`.
 
 ## Inspect AI evals
 
@@ -195,22 +195,13 @@ scripts/inspect_ai/run_inspect_eval.sh --task scripts/aaii/scicode.py --sandbox 
   --limit 2
 ```
 
-## Standalone Artificial Analysis runners: tau2-bench / GDPval-AA v2
+## Standalone Artificial Analysis runner: GDPval-AA v2
 
-Two more Artificial-Analysis-aligned benchmarks, each a standalone script rather than an Inspect AI task: neither goes through `run_inspect_eval.sh` or `inspect_evals`. The `inspect_evals` ports of tau2-bench and GDPval above are independent, narrower implementations, not the same code as these scripts, and don't necessarily match Artificial Analysis's real protocol values. Terminal-Bench with Artificial Analysis's protocol runs through the [Harbor runner](harbor.md): `--benchmark terminal_bench_2_1 --attempts 3`.
+The GDPval-AA v2 runner is a standalone script rather than an Inspect AI task: it does not go through `run_inspect_eval.sh` or `inspect_evals`. The `inspect_evals` port of GDPval above is an independent, narrower implementation, not the same code, and does not necessarily match Artificial Analysis's real protocol values. tau2-bench has its own runner, [custom tau2](custom-tau2.md). Terminal-Bench with Artificial Analysis's protocol runs through the [Harbor runner](harbor.md): `--benchmark terminal_bench_2_1 --attempts 3`.
 
-Each script runs from its own locked venv (`requirements/tau2-runtime.lock`, `requirements/gdpval-runtime.lock`): the prebuilt image's (`containers/Dockerfile.eval`, `EVAL_PREBUILT_ENV=1`), which installs nothing, or elsewhere the lock's cached venv (`scripts/common/locked_venv.sh`, as `run_inspect_eval.sh` does). tau2-bench runs at the commit its lock pins, with its data checked out at that commit; another version means bumping `requirements/tau2-runtime.txt` and relocking. Each script takes `--model`/`--api-base-url` like `run_inspect_eval.sh` (falling back to `CSCS_SERVING_API` for the serving key), bakes in Artificial Analysis's protocol defaults, and writes results to a local scratch dir. See each script's `--help` for all options.
+The script runs from its own locked venv (`requirements/gdpval-runtime.lock`): the prebuilt image's (`containers/Dockerfile.eval`, `EVAL_PREBUILT_ENV=1`), which installs nothing, or elsewhere the lock's cached venv (`scripts/common/locked_venv.sh`, as `run_inspect_eval.sh` does). It takes `--model`/`--api-base-url` like `run_inspect_eval.sh` (falling back to `CSCS_SERVING_API` for the serving key), bakes in Artificial Analysis's protocol defaults, and writes results to a local scratch dir. See its `--help` for all options.
 
 ```bash
-# tau2-bench (v1.0.1, banking_knowledge domain, bm25_grep retrieval, 5 trials, 200 max steps;
-# AA's tau^3-Banking protocol). Needs a "user simulator" model too (default: gpt-5.4-mini, a
-# real OpenAI model, needs your own OPENAI_API_KEY); pass --user-llm openai/<served-id> to
-# route it through the same gateway/key as --model instead. Smoke test with a couple of
-# tasks/one trial:
-scripts/aaii/run_tau2_bench.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
-  --api-base-url https://api.swissai.svc.cscs.ch/v1 \
-  --user-llm openai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --num-tasks 2 --num-trials 1
-
 # GDPval-AA v2 (Stirrup, the full 220-task openai/gdpval gold set, up to 250 turns, E2B sandbox
 # by default, needs E2B_API_KEY; pass --sandbox-backend opensandbox for a Kata microVM per task
 # on OpenSandbox (needs OPENSANDBOX_API_KEY; E2B's public code-interpreter image, pinned, so
