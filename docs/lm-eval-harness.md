@@ -528,6 +528,17 @@ bash scripts/lm_eval_harness/launch_evaluations.sh custom \
 
 Primary SLURM job script: evaluates a served model.
 
+**Where the logic is.** The shell scripts submit and run; what the flags and settings mean lives in small Python modules in `scripts/lm_eval_harness/`, each a function with its own tests (`tests/test_<module>.py`), called once and `eval`ed:
+
+| Module | Called by | Decides |
+|---|---|---|
+| `launch_args.py` | `launch_evaluations.sh` | what the thinking, repeats, chat-format, effort, endpoint and sampling flags mean together; refuses combinations that cannot work; sets and exports what the jobs read |
+| `job_settings.py` | `run_lm_eval.sbatch` | the job's settings from its environment (defaults, booleans, the Apertus 2 rules, the thinking budget, the tokenizer), the `--gen_kwargs` and the sampling; calls `model_args.build` |
+| `model_args.py` | `job_settings.py` | the harness model and its `--model_args` |
+| `bos_pass.py` | `run_lm_eval.sbatch` (`make_cmd`) | each lm-eval command's BOS settings and BOS probe |
+
+Each module prints shell assignments and is run as `OUT=$(python3 -m ...) || die; eval "$OUT"`: the output is captured first because `eval "$(...)"` would hide a refusal's exit code. A test pins that for each call.
+
 **Resources**: a CPU-only job with 16 CPUs, 64GB memory and an 11h59m limit; the model is served elsewhere.
 
 **Positional arguments**: `<model_path> <name>`
