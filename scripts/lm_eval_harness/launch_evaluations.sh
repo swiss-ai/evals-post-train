@@ -10,13 +10,9 @@
 #   custom           - Run a task list (requires --task-file <path>, optional --table-metrics <path>)
 
 #
-# Model selection (pick one):
-#   --model <path>            - Single HF model or local checkpoint path. Required unless
-#                               --script is given, or --backend openai is used with
-#                               --api-model-name (which then also fills --model's slot).
-#   --script <path>           - Run a model-list script (e.g. scripts/lm_eval_harness/runners/example_models.sh)
-#   --megatron-iter <iter>    - For Megatron models, specify the iteration number to evaluate
-#                               (e.g. 8926), defaults to "latest"
+# Model:
+#   --model <name>            - The model's name (names the run and, unless --tokenizer is given,
+#                               its tokenizer). Optional: --api-model-name fills its slot.
 #
 # Options:
 #   --name <name>        - Override the eval run name (default: auto-derived from model path)
@@ -31,16 +27,16 @@
 #   --tokenizer <tok>    - Custom tokenizer (default: same as model)
 #   --trust-remote-code  - Load the tokenizer with trust_remote_code=True: for models whose
 #                          tokenizer is custom code in the repo (e.g. Kimi-K2's
-#                          tokenization_kimi.py). openai backend only.
+#                          tokenization_kimi.py).
 #   --bos                - Prepend BOS token (default: Gemma 4, and without a chat template
 #                          every tokenizer that defines a BOS token; see bos_default.py)
 #   --no-bos             - Never prepend it beyond what the tokenizer does (turns that default off)
-#   --bos-by-client      - On by default for runs with a chat template on the openai backend on /v1/completions: the
+#   --bos-by-client      - On by default for runs with a chat template on /v1/completions: the
 #                          server is told to add no special tokens to the rendered template, so the model gets exactly
 #                          the BOS the template wrote (one: the server's own BOS would make two after a template that
 #                          starts with <s>). Ignored without a chat template. Needs a harness with bos_by_client; the
 #                          BOS probe verifies it on the server. Given explicitly it is refused where it cannot apply
-#                          (chat-completions endpoint, --chat-format apertus2, other backends).
+#                          (chat-completions endpoint, --chat-format apertus2).
 #   --no-bos-by-client   - The server adds its own BOS to the template as before (the previous behaviour)
 #   --repeat-config <json> - Repeat policy: repeats, repeat_scoring, task_overrides.
 #   --repeats N          - Sample every repeat-capable task N times and report mean@N. Overrides the
@@ -50,23 +46,21 @@
 #   --num-fewshot N      - Override num_fewshot for all tasks (default: use task YAML defaults)
 #                          Note: tasks with num_fewshot=0 in YAML are never overridden.
 #                          OLMo3 uses 5-shot for most MC tasks; pass --num-fewshot 5 to match.
-#   --max-length N       - Context limit in tokens (exports MAX_LENGTH: openai max_length,
-#                          Megatron seq_length).
-#                          Default: the backend's own. loglikelihood_rolling tasks (e.g.
+#   --max-length N       - Context limit in tokens (exports MAX_LENGTH: the served window).
+#                          Default: the model's own. loglikelihood_rolling tasks (e.g.
 #                          uncheatable_eval) cut documents into windows of this size.
-#   --backend <backend>  - lm-eval backend: openai (default), megatron_lm
-#   --api-base-url <url> - OpenAI-compatible endpoint for the 'openai' backend (required with it,
-#                          unless API_BASE_URL is exported). Bare host, /v1 root, or full endpoint URL.
+#   --api-base-url <url> - OpenAI-compatible endpoint to evaluate (required, unless API_BASE_URL
+#                          is exported). Bare host, /v1 root, or full endpoint URL.
 #   --api-model-name <n> - 'model' field sent in API requests (default: the --model value)
 #   --api-requests-per-minute N - Endpoint-wide request limit for the benchmarked API model
-#   --api-max-retries N  - 'openai' backend: retries per failed request (default 3; a rate-limited
+#   --api-max-retries N  - retries per failed request (default 3; a rate-limited
 #                          endpoint can exhaust 3 and fail the run)
-#   --api-num-concurrent N - 'openai' backend: concurrent requests (default 8)
-#   --api-endpoint <e>   - 'completions' (default) or 'chat-completions' for the 'openai' backend.
+#   --api-num-concurrent N - concurrent requests (default 8)
+#   --api-endpoint <e>   - 'completions' (default) or 'chat-completions'.
 #                          chat-completions lets the server render the chat template (generative
 #                          tasks only; required by tasks that send `tools` in the request).
 #   --chat-format <f>    - 'template' (default) or 'apertus2' (Apertus 2 native format, a thinking
-#                          run; needs --backend openai, --tokenizer, --max-length; see the docs)
+#                          run; needs --tokenizer, --max-length; see the docs)
 #   --prefill-mode <m>   - apertus2 answer prefills: 'after_think' (default) or 'empty_think'
 #   --answer-frame <f>   - apertus2: score the 'reply' (default) or the 'claim', the frame the
 #                          Apertus 2 RL math reward grades (needs a harness with answer_frame)
@@ -101,7 +95,7 @@
 #   --judge-requests-per-minute N - Per-judge-model endpoint-wide request limit
 #   --keep-judge         - Do not auto-cancel judge model after evaluation finishes
 #
-# Thinking / reasoning metrics (openai backend: the chat template
+# Thinking / reasoning metrics (the chat template
 # is rendered client-side and the reasoning stripped from the API response, and there
 # --enable-thinking on its own only switches the template):
 #   --thinking           - Umbrella flag: make the model reason AND record the thinking metrics.
@@ -121,8 +115,7 @@
 #   --log-length-metrics - Aggregate response_length_* / thinking_length_* into results and W&B.
 #                          thinking_format_* is aggregated regardless.
 #   --reasoning-effort <level> - Chat-template argument reasoning_effort (e.g. low, medium, high)
-#                          for models whose template reads it (gpt-oss). openai
-#                          backend only; forces the chat template on. Letters, digits, '_' and '-'.
+#                          for models whose template reads it (gpt-oss). Forces the chat template on. Letters, digits, '_' and '-'.
 #                          Other templates ignore it. For gpt-oss, combine with --thinking and
 #                          --think-start-token '<|channel|>analysis<|message|>'
 #                          --think-end-token '<|channel|>final<|message|>' (not auto-detected).
@@ -136,9 +129,6 @@
 #
 #   # Base model, explicit no chat template
 #   bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file tasks.txt --table-metrics tasks_main_table.txt --model Qwen/Qwen2.5-7B --no-chat-template
-#
-#   # Run a multi-model script
-#   bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --script scripts/lm_eval_harness/runners/example_models.sh
 #
 #   # Run a single task
 #   bash scripts/lm_eval_harness/launch_evaluations.sh single --task hellaswag --model meta-llama/Llama-3.1-8B-Instruct
@@ -166,13 +156,11 @@ EVAL_MAX_RETRIES=1
 EVAL_FAILURE_POLICY="resume"
 MODEL_PATH=""
 MODEL_NAME=""
-SCRIPT_PATH=""
 CHAT_TEMPLATE_OVERRIDE=""  # "", "true", "false", "by-type"
 CUSTOM_TOKENIZER=""
 BOS_FLAG=""
 BOS_BY_CLIENT_FLAG=""
 TRUST_REMOTE_CODE_FLAG=""
-BACKEND_FLAG=""
 API_BASE_URL_FLAG=""
 API_MODEL_NAME_FLAG=""
 API_REQUESTS_PER_MINUTE_FLAG=""
@@ -188,7 +176,6 @@ FEWSHOT_FLAG=""
 HARNESS_LIMIT="${HARNESS_LIMIT:-}"
 # Same for an ambient MAX_LENGTH; --max-length overrides it.
 MAX_LENGTH="${MAX_LENGTH:-}"
-MEGATRON_ITER=""
 SINGLE_TASK=""
 HARNESS_BRANCH=""
 HARNESS_REPO=""
@@ -225,7 +212,6 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --model)        MODEL_PATH="$2";              shift 2 ;;
         --name)         MODEL_NAME="$2";              shift 2 ;;
-        --script)       SCRIPT_PATH="$2";             shift 2 ;;
         --chunk-size)   EVAL_CHUNK_SIZE="$2";         shift 2 ;;
         --max-parallel) EVAL_MAX_PARALLEL="$2";       shift 2 ;;
         --max-retries)  EVAL_MAX_RETRIES="$2";        shift 2 ;;
@@ -241,7 +227,6 @@ while [[ $# -gt 0 ]]; do
         --bos-by-client) BOS_BY_CLIENT_FLAG="true";   shift ;;
         --no-bos-by-client) BOS_BY_CLIENT_FLAG="false"; shift ;;
         --trust-remote-code) TRUST_REMOTE_CODE_FLAG="true"; shift ;;
-        --backend)      BACKEND_FLAG="$2";            shift 2 ;;
         --api-base-url) API_BASE_URL_FLAG="$2";       shift 2 ;;
         --api-model-name) API_MODEL_NAME_FLAG="$2";   shift 2 ;;
         --api-requests-per-minute) API_REQUESTS_PER_MINUTE_FLAG="$2"; shift 2 ;;
@@ -251,7 +236,6 @@ while [[ $# -gt 0 ]]; do
         --chat-format)  CHAT_FORMAT_FLAG="$2";        shift 2 ;;
         --prefill-mode) PREFILL_MODE_FLAG="$2";       shift 2 ;;
         --answer-frame) ANSWER_FRAME_FLAG="$2";       shift 2 ;;
-        --megatron-iter) MEGATRON_ITER="$2";            shift 2 ;;
         --limit) HARNESS_LIMIT="$2";            shift 2 ;;
         --max-length) MAX_LENGTH="$2";          shift 2 ;;
         --harness-branch) HARNESS_BRANCH="$2";        shift 2 ;;
@@ -347,17 +331,6 @@ if [[ "$EVAL_FAILURE_POLICY" != "resume" && "$EVAL_FAILURE_POLICY" != "fail-fast
     exit 1
 fi
 
-if [[ -n "$MEGATRON_ITER" ]] && [[ "$MEGATRON_ITER" != "latest" ]] && [[ ! "$MEGATRON_ITER" =~ ^[0-9]+$ ]]; then
-    echo "Error: --megatron-iter must be an integer or 'latest' (got '$MEGATRON_ITER')"
-    exit 1
-fi
-
-# Can't specify both --model and --script
-if [[ -n "$MODEL_PATH" && -n "$SCRIPT_PATH" ]]; then
-    echo "Error: --model and --script are mutually exclusive"
-    exit 1
-fi
-
 # --- Resolve thinking / reasoning configuration ---
 # Must run before dispatch so the forced chat template reaches all model-selection modes.
 if [[ -n "$TRACK_THINKING_METRICS" && "$TRACK_THINKING_METRICS" != "true" && "$TRACK_THINKING_METRICS" != "false" ]]; then
@@ -381,7 +354,7 @@ if [[ "$THINKING_UMBRELLA" == "true" ]]; then
 fi
 
 # Two distinct questions (conflating them rejected every "off" switch):
-#   THINKING_TOUCHED       - any thinking/length flag was passed; drives the megatron guard.
+#   THINKING_TOUCHED       - any thinking/length flag was passed; drives the summary line.
 #   THINKING_METRICS_ASKED - the user asked to RECORD metrics; needs a close token + chat template.
 # --log-length-metrics alone is neither: response_length_* is recorded for any generative response.
 THINKING_TOUCHED="false"
@@ -392,15 +365,6 @@ if [[ "$THINKING_UMBRELLA" == "true" || -n "$ENABLE_THINKING_OVERRIDE" \
     THINKING_TOUCHED="true"
 fi
 
-# Resolve the backend as run_lm_eval.sbatch will, so an ambient LM_EVAL_BACKEND fails here,
-# not after scheduling.
-EFFECTIVE_BACKEND="${BACKEND_FLAG:-${LM_EVAL_BACKEND:-openai}}"
-
-# Only the harness's API models send every attempt with its own seed.
-if [[ -n "${EVAL_REPEAT_CONFIG:-}$REPEATS_FLAG$REPEAT_METRIC_FLAG" && "$EFFECTIVE_BACKEND" != "openai" ]]; then
-    echo "Error: --repeat-config, --repeats and --repeat-metric need --backend openai (repeat scoring supports API models only)"
-    exit 1
-fi
 
 # --repeats / --repeat-metric: layered over --repeat-config (flags win) into one policy file.
 _pass_at=""
@@ -439,8 +403,8 @@ case "${CHAT_FORMAT_FLAG:-template}" in
         unset CHAT_FORMAT PREFILL_MODE ANSWER_FRAME
         ;;
     apertus2)
-        if [[ "$EFFECTIVE_BACKEND" != "openai" || -z "${CUSTOM_TOKENIZER:-${TOKENIZER:-}}" || -z "$MAX_LENGTH" ]]; then
-            echo "Error: --chat-format apertus2 needs --backend openai, --tokenizer <the checkpoint's tokenizer> and --max-length <the server's --max-model-len>"
+        if [[ -z "${CUSTOM_TOKENIZER:-${TOKENIZER:-}}" || -z "$MAX_LENGTH" ]]; then
+            echo "Error: --chat-format apertus2 needs --tokenizer <the checkpoint's tokenizer> and --max-length <the server's --max-model-len>"
             exit 1
         fi
         if [[ "$BOS_FLAG" == "true" || "${BOS:-}" == "true" ]]; then
@@ -491,40 +455,25 @@ if [[ "$THINKING_UMBRELLA" == "true" || "$ENABLE_THINKING_OVERRIDE" == "true" \
     THINKING_METRICS_ASKED="true"
 fi
 
-# Length/reasoning producers exist only on the openai backend.
-if [[ "$THINKING_TOUCHED" == "true" && "$EFFECTIVE_BACKEND" == "megatron_lm" ]]; then
-    echo "Error: thinking and length metrics are not supported with the $EFFECTIVE_BACKEND backend"
-    exit 1
+# The harness renders the chat template client-side, so the switches reach the model.
+# --enable-thinking on its own only switches the template; with --thinking or a think token
+# the reasoning is stripped and measured.
+if [[ "$THINKING_UMBRELLA" != "true" && -z "$THINK_END_TOKEN" && -z "$THINK_START_TOKEN" \
+      && "$AUTODETECT_THINK_TOKENS" != "true" && -z "$TRACK_THINKING_METRICS" ]]; then
+    THINKING_METRICS_ASKED="false"
 fi
-# The openai backend renders the chat template client-side, so its switches reach the model;
-# but nothing splits the reasoning off an API response, so there is nothing to measure.
-if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
-    # --enable-thinking on its own only switches the template here (as since it came to this
-    # backend); with --thinking or a think token the reasoning is stripped and measured, as on
-    # the other backends.
-    if [[ "$THINKING_UMBRELLA" != "true" && -z "$THINK_END_TOKEN" && -z "$THINK_START_TOKEN" \
-          && "$AUTODETECT_THINK_TOKENS" != "true" && -z "$TRACK_THINKING_METRICS" ]]; then
-        THINKING_METRICS_ASKED="false"
+if [[ -n "$ENABLE_THINKING_OVERRIDE" ]]; then
+    if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" ]]; then
+        echo "Error: --enable-thinking/--no-enable-thinking are chat-template arguments; drop --no-chat-template"
+        exit 1
     fi
-    if [[ -n "$ENABLE_THINKING_OVERRIDE" ]]; then
-        if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" ]]; then
-            echo "Error: --enable-thinking/--no-enable-thinking are chat-template arguments; drop --no-chat-template"
-            exit 1
-        fi
-        # by-type keeps the template on the generative tasks, the only ones these affect.
-        [[ "$CHAT_TEMPLATE_OVERRIDE" == "by-type" ]] || CHAT_TEMPLATE_OVERRIDE="true"
-    fi
+    # by-type keeps the template on the generative tasks, the only ones these affect.
+    [[ "$CHAT_TEMPLATE_OVERRIDE" == "by-type" ]] || CHAT_TEMPLATE_OVERRIDE="true"
 fi
-
-# reasoning_effort is a chat-template argument: only the openai backend (client-side
-# rendering) can pass it on.
+# reasoning_effort is a chat-template argument, rendered client-side with the model's template.
 if [[ -n "$REASONING_EFFORT" ]]; then
     if [[ ! "$REASONING_EFFORT" =~ ^[A-Za-z0-9_-]+$ ]]; then
         echo "Error: --reasoning-effort expects a level like low, medium or high (got '$REASONING_EFFORT')"
-        exit 1
-    fi
-    if [[ "$EFFECTIVE_BACKEND" != "openai" ]]; then
-        echo "Error: --reasoning-effort is not supported with the $EFFECTIVE_BACKEND backend (openai only)"
         exit 1
     fi
     if [[ "$CHAT_TEMPLATE_OVERRIDE" == "false" ]]; then
@@ -534,42 +483,26 @@ if [[ -n "$REASONING_EFFORT" ]]; then
     [[ "$CHAT_TEMPLATE_OVERRIDE" == "by-type" ]] || CHAT_TEMPLATE_OVERRIDE="true"
 fi
 
-# The openai backend needs an endpoint; fail here, not after scheduling.
-if [[ "$EFFECTIVE_BACKEND" == "openai" && -z "${API_BASE_URL_FLAG:-${API_BASE_URL:-}}" ]]; then
-    echo "Error: --backend openai requires --api-base-url <url> (or an exported API_BASE_URL)"
+# An endpoint is needed; fail here, not after scheduling.
+if [[ -z "${API_BASE_URL_FLAG:-${API_BASE_URL:-}}" ]]; then
+    echo "Error: --api-base-url <url> is required (or an exported API_BASE_URL)"
     exit 1
 fi
 # --model defaults API_MODEL_NAME (run_lm_eval.sbatch) to its own, possibly catalog-prefixed
 # value, which the gateway may not recognize -- require the caller to say explicitly what
 # the server should see rather than relying on that default.
-if [[ "$EFFECTIVE_BACKEND" == "openai" && -z "${API_MODEL_NAME_FLAG:-${API_MODEL_NAME:-}}" ]]; then
-    echo "Error: --backend openai requires --api-model-name <name> (or an exported API_MODEL_NAME)"
-    exit 1
-fi
-if [[ -n "$API_BASE_URL_FLAG" || -n "$API_MODEL_NAME_FLAG" ]] && [[ "$EFFECTIVE_BACKEND" != "openai" ]]; then
-    echo "Error: --api-base-url/--api-model-name only apply with --backend openai"
-    exit 1
-fi
-if [[ -n "$API_REQUESTS_PER_MINUTE_FLAG" && "$EFFECTIVE_BACKEND" != "openai" ]]; then
-    echo "Error: --api-requests-per-minute only applies with --backend openai"
+if [[ -z "${API_MODEL_NAME_FLAG:-${API_MODEL_NAME:-}}" ]]; then
+    echo "Error: --api-model-name <name> is required (or an exported API_MODEL_NAME)"
     exit 1
 fi
 for _flag_pair in "--api-max-retries:$API_MAX_RETRIES_FLAG" "--api-num-concurrent:$API_NUM_CONCURRENT_FLAG"; do
     _flag_name="${_flag_pair%%:*}"; _flag_value="${_flag_pair#*:}"
-    if [[ -n "$_flag_value" && "$EFFECTIVE_BACKEND" != "openai" ]]; then
-        echo "Error: $_flag_name only applies with --backend openai"
-        exit 1
-    fi
     if [[ -n "$_flag_value" && ! "$_flag_value" =~ ^[1-9][0-9]*$ ]]; then
         echo "Error: $_flag_name must be a positive integer (got '$_flag_value')"
         exit 1
     fi
 done
 if [[ -n "$API_ENDPOINT_FLAG" ]]; then
-    if [[ "$EFFECTIVE_BACKEND" != "openai" ]]; then
-        echo "Error: --api-endpoint only applies with --backend openai"
-        exit 1
-    fi
     case "$API_ENDPOINT_FLAG" in
         completions)      export API_CHAT_ENDPOINT=false ;;
         chat-completions) export API_CHAT_ENDPOINT=true ;;
@@ -591,12 +524,6 @@ API_NUM_CONCURRENT="${API_NUM_CONCURRENT_FLAG:-${API_NUM_CONCURRENT:-}}"
 JUDGE_REQUESTS_PER_MINUTE="${JUDGE_REQUESTS_PER_MINUTE_FLAG:-${JUDGE_REQUESTS_PER_MINUTE:-}}"
 JUDGE_MODEL_PREFIX="${JUDGE_MODEL_PREFIX:-${USER:-}}"
 
-# Non-openai backends load a checkpoint in-job, so identify it with either --model for a
-# single checkpoint or --script for a model list.
-if [[ "$EFFECTIVE_BACKEND" != "openai" && -z "$MODEL_PATH" && -z "$SCRIPT_PATH" ]]; then
-    echo "Error: --model or --script is required (unless --backend openai is used with --api-model-name)"
-    exit 1
-fi
 [[ -n "$API_BASE_URL_FLAG"   ]] && export API_BASE_URL="$API_BASE_URL_FLAG"
 [[ -n "$API_MODEL_NAME_FLAG" ]] && export API_MODEL_NAME="$API_MODEL_NAME_FLAG"
 [[ -n "$API_REQUESTS_PER_MINUTE" ]] && export API_REQUESTS_PER_MINUTE
@@ -605,11 +532,10 @@ fi
 [[ -n "$JUDGE_REQUESTS_PER_MINUTE" ]] && export JUDGE_REQUESTS_PER_MINUTE
 [[ -n "$JUDGE_MODEL_PREFIX" ]] && export JUDGE_MODEL_PREFIX
 
-# The openai backend loads no local checkpoint, so --api-model-name (flag or ambient
-# API_MODEL_NAME, same fallback the requiredness check above used) alone identifies the
-# model. Default --model from it so single-model dispatch (MODE 1 below) still triggers
-# when the caller only passed --api-model-name.
-if [[ -z "$MODEL_PATH" && -z "$SCRIPT_PATH" && "$EFFECTIVE_BACKEND" == "openai" ]]; then
+# No checkpoint is loaded, so --api-model-name (flag or ambient API_MODEL_NAME, same fallback
+# the requiredness check above used) alone identifies the model. Default --model from it so
+# the run can be named when the caller only passed --api-model-name.
+if [[ -z "$MODEL_PATH" ]]; then
     MODEL_PATH="${API_MODEL_NAME_FLAG:-$API_MODEL_NAME}"
 fi
 
@@ -718,17 +644,7 @@ export LOGS_ROOT=${LOGS_ROOT:-$PWD/logs/lm_eval}
 export EVAL_CHUNK_SIZE EVAL_MAX_PARALLEL EVAL_MAX_RETRIES EVAL_FAILURE_POLICY
 export EVAL_FORCE_TASKS="$FORCE_TASKS" EVAL_MERGE_ONLY EVAL_DRY_RUN KEEP_JUDGE
 export JUDGE_MODE JUDGE_EXTRA_ARGS
-if [[ -z "${SBATCH_SCRIPT:-}" ]]; then
-    if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
-        SBATCH_SCRIPT=scripts/lm_eval_harness/run_lm_eval_api.sbatch
-    else
-        SBATCH_SCRIPT=scripts/lm_eval_harness/run_lm_eval.sbatch
-    fi
-fi
-export SBATCH_SCRIPT
-# Global checkpoint iteration override for Megatron checkpoints.
-# Consumed by the runner and forwarded to run_lm_eval.sbatch as CKPT_ITER.
-[[ -n "$MEGATRON_ITER" ]] && export CKPT_ITERATION="$MEGATRON_ITER"
+export SBATCH_SCRIPT="${SBATCH_SCRIPT:-scripts/lm_eval_harness/run_lm_eval.sbatch}"
 
 # --- Configure task suite ---
 case "$EVAL_MODE" in
@@ -800,18 +716,16 @@ if [[ "$THINKING_TOUCHED" == "true" ]]; then
     [[ -n "$THINK_START_TOKEN" || -n "$THINK_END_TOKEN" ]] && echo "  Think tokens: start='${THINK_START_TOKEN:-<none>}' end='${THINK_END_TOKEN:-<none>}'"
 fi
 [[ -n "$REASONING_EFFORT" ]] && echo "  Reasoning effort: $REASONING_EFFORT"
-if [[ "$EFFECTIVE_BACKEND" == "openai" ]]; then
-    echo "  API:    ${API_BASE_URL} (model=${API_MODEL_NAME:-<from --model>})"
-    echo "  API RPM: ${API_REQUESTS_PER_MINUTE:-unlimited}"
-    echo "  API max retries: ${API_MAX_RETRIES:-3 (default)}, concurrent requests: ${API_NUM_CONCURRENT:-8 (default)}"
-    if [[ "${API_CHAT_ENDPOINT:-false}" == "true" ]]; then
-        echo "  API endpoint: chat-completions"
-    else
-        echo "  API endpoint: completions"
-    fi
-    [[ "${CHAT_FORMAT:-}" == "apertus2" ]] && echo "  Chat format: apertus2 (prefill=$PREFILL_MODE)"
-    [[ "${ANSWER_FRAME:-reply}" == "claim" ]] && echo "  Answer frame: claim (scored as by the Apertus 2 RL math reward)"
+echo "  API:    ${API_BASE_URL} (model=${API_MODEL_NAME:-<from --model>})"
+echo "  API RPM: ${API_REQUESTS_PER_MINUTE:-unlimited}"
+echo "  API max retries: ${API_MAX_RETRIES:-3 (default)}, concurrent requests: ${API_NUM_CONCURRENT:-8 (default)}"
+if [[ "${API_CHAT_ENDPOINT:-false}" == "true" ]]; then
+    echo "  API endpoint: chat-completions"
+else
+    echo "  API endpoint: completions"
 fi
+[[ "${CHAT_FORMAT:-}" == "apertus2" ]] && echo "  Chat format: apertus2 (prefill=$PREFILL_MODE)"
+[[ "${ANSWER_FRAME:-reply}" == "claim" ]] && echo "  Answer frame: claim (scored as by the Apertus 2 RL math reward)"
 echo "  Slurm:  partition=${SBATCH_PARTITION:-normal} qos=${SBATCH_QOS:-<default>}${SBATCH_RESERVATION:+ reservation=$SBATCH_RESERVATION}"
 echo "  Judge RPM: ${JUDGE_REQUESTS_PER_MINUTE:-unlimited}"
 echo "  Judge model prefix: ${JUDGE_MODEL_PREFIX:-<none>}"
@@ -870,70 +784,39 @@ fi
 source scripts/common/preflight.sh
 preflight_done
 
-# --- Dispatch based on model selection mode ---
+# --- Submit ---
 EVAL_JOB_IDS=()
 
-if [[ -n "$MODEL_PATH" ]]; then
-    # ===== MODE 1: Single model =====
-    if [[ -z "$MODEL_NAME" ]]; then
-        MODEL_NAME=$(auto_derive_name "$MODEL_PATH")
-        if [[ "$THINKING_UMBRELLA" == "true" || "$ENABLE_THINKING_OVERRIDE" == "true" ]]; then
-            MODEL_NAME="${MODEL_NAME}-think"
-        fi
-        [[ "${CHAT_FORMAT:-}" == "apertus2" ]] && MODEL_NAME="${MODEL_NAME}-apertus2-${PREFILL_MODE}"
-        [[ "${ANSWER_FRAME:-reply}" == "claim" ]] && MODEL_NAME="${MODEL_NAME}-claim"
-        [[ -n "$REASONING_EFFORT" ]] && MODEL_NAME="${MODEL_NAME}-effort-${REASONING_EFFORT}"
+if [[ -z "$MODEL_NAME" ]]; then
+    MODEL_NAME=$(auto_derive_name "$MODEL_PATH")
+    if [[ "$THINKING_UMBRELLA" == "true" || "$ENABLE_THINKING_OVERRIDE" == "true" ]]; then
+        MODEL_NAME="${MODEL_NAME}-think"
     fi
-
-    export APPLY_CHAT_TEMPLATE="${CHAT_TEMPLATE_OVERRIDE:-true}"
-
-    [[ -n "$CUSTOM_TOKENIZER" ]] && export TOKENIZER="$CUSTOM_TOKENIZER"
-    [[ -n "$BOS_FLAG" ]] && export BOS="$BOS_FLAG"
-    [[ -n "$BOS_BY_CLIENT_FLAG" ]] && export BOS_BY_CLIENT="$BOS_BY_CLIENT_FLAG"
-    [[ -n "$BACKEND_FLAG" ]] && export LM_EVAL_BACKEND="$BACKEND_FLAG"
-
-    echo "  Model:  $MODEL_PATH"
-    echo "  Name:   $MODEL_NAME"
-    echo "  Checkpoint Iter: ${MEGATRON_ITER:-N/A} (only applies to local Megatron checkpoints)"
-    echo "  Chat:   $APPLY_CHAT_TEMPLATE"
-    [[ -n "$CUSTOM_TOKENIZER" ]] && echo "  Tok:    $CUSTOM_TOKENIZER"
-    [[ -n "$BOS_FLAG" ]] && echo "  BOS:    $BOS_FLAG"
-    [[ -n "$FEWSHOT_FLAG" ]] && echo "  Fewshot: $FEWSHOT_FLAG"
-    [[ -n "$MAX_LENGTH" ]] && echo "  Max length: $MAX_LENGTH"
-    [[ -n "$HARNESS_BRANCH" ]] && echo "  Harness branch: $HARNESS_BRANCH"
-    echo "  W&B:    $WANDB_ENTITY/$WANDB_PROJECT"
-    echo "======================================"
-
-    # A single model does not need the associative-array runner (and remains
-    # usable with the older Bash shipped by macOS for local --debug checks).
-    source scripts/lm_eval_harness/evaluation_orchestrator.sh
-    export CKPT_ITER="${CKPT_ITERATION:-latest}"
-    submit_evaluation "$MODEL_PATH" "$MODEL_NAME"
-    EVAL_JOB_IDS+=("$ORCHESTRATION_FINAL_JOB_ID")
-
-else
-    # ===== MODE 2: Run a model-list script =====
-    # SCRIPT_PATH is guaranteed non-empty here: the requiredness check above ensures
-    # --model or --script is always set (or --model is defaulted from --api-model-name),
-    # and --model/--script are mutually exclusive.
-    if [[ ! -f "$SCRIPT_PATH" ]]; then
-        echo "Error: Script not found: $SCRIPT_PATH"
-        exit 1
-    fi
-
-    [[ -n "$CHAT_TEMPLATE_OVERRIDE" ]] && export APPLY_CHAT_TEMPLATE="$CHAT_TEMPLATE_OVERRIDE"
-    [[ -n "$CUSTOM_TOKENIZER" ]] && export TOKENIZER="$CUSTOM_TOKENIZER"
-    [[ -n "$BOS_FLAG" ]] && export BOS="$BOS_FLAG"
-    [[ -n "$BOS_BY_CLIENT_FLAG" ]] && export BOS_BY_CLIENT="$BOS_BY_CLIENT_FLAG"
-    [[ -n "$BACKEND_FLAG" ]] && export LM_EVAL_BACKEND="$BACKEND_FLAG"
-
-    echo "  Script: $SCRIPT_PATH"
-    [[ -n "$HARNESS_BRANCH" ]] && echo "  Harness branch: $HARNESS_BRANCH"
-    echo "  W&B:    $WANDB_ENTITY/$WANDB_PROJECT"
-    echo "======================================"
-
-    bash "$SCRIPT_PATH"
+    [[ "${CHAT_FORMAT:-}" == "apertus2" ]] && MODEL_NAME="${MODEL_NAME}-apertus2-${PREFILL_MODE}"
+    [[ "${ANSWER_FRAME:-reply}" == "claim" ]] && MODEL_NAME="${MODEL_NAME}-claim"
+    [[ -n "$REASONING_EFFORT" ]] && MODEL_NAME="${MODEL_NAME}-effort-${REASONING_EFFORT}"
 fi
+
+export APPLY_CHAT_TEMPLATE="${CHAT_TEMPLATE_OVERRIDE:-true}"
+
+[[ -n "$CUSTOM_TOKENIZER" ]] && export TOKENIZER="$CUSTOM_TOKENIZER"
+[[ -n "$BOS_FLAG" ]] && export BOS="$BOS_FLAG"
+[[ -n "$BOS_BY_CLIENT_FLAG" ]] && export BOS_BY_CLIENT="$BOS_BY_CLIENT_FLAG"
+
+echo "  Model:  $MODEL_PATH"
+echo "  Name:   $MODEL_NAME"
+echo "  Chat:   $APPLY_CHAT_TEMPLATE"
+[[ -n "$CUSTOM_TOKENIZER" ]] && echo "  Tok:    $CUSTOM_TOKENIZER"
+[[ -n "$BOS_FLAG" ]] && echo "  BOS:    $BOS_FLAG"
+[[ -n "$FEWSHOT_FLAG" ]] && echo "  Fewshot: $FEWSHOT_FLAG"
+[[ -n "$MAX_LENGTH" ]] && echo "  Max length: $MAX_LENGTH"
+[[ -n "$HARNESS_BRANCH" ]] && echo "  Harness branch: $HARNESS_BRANCH"
+echo "  W&B:    $WANDB_ENTITY/$WANDB_PROJECT"
+echo "======================================"
+
+source scripts/lm_eval_harness/evaluation_orchestrator.sh
+submit_evaluation "$MODEL_PATH" "$MODEL_NAME"
+EVAL_JOB_IDS+=("$ORCHESTRATION_FINAL_JOB_ID")
 
 # --- Judge cleanup job ---
 # After all eval jobs are submitted, schedule a cleanup job that cancels judge

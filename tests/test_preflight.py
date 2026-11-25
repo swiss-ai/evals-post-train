@@ -15,7 +15,7 @@ RUNNERS = {
     "scripts/inspect_ai/run_inspect_eval.sh": ["--task", "gsm8k", "--model", "m", *ENDPOINT],
     "scripts/harbor/run_harbor_eval.sh": ["--model", "m", *ENDPOINT],
     "scripts/evalscope/run_evalscope_eval.sh": ["--benchmark", "live_code_bench", "--model", "m", *ENDPOINT],
-    "scripts/lm_eval_harness/launch_evaluations.sh": ["single", "--task", "gsm8k", "--model", "m", "--backend", "openai", "--api-model-name", "m", *ENDPOINT],
+    "scripts/lm_eval_harness/launch_evaluations.sh": ["single", "--task", "gsm8k", "--model", "m", "--api-model-name", "m", *ENDPOINT],
 }
 
 
@@ -124,8 +124,7 @@ class PreflightTest(unittest.TestCase):
         task_file.write_text("gsm8k_platinum_think\ngpqa_diamond_think\n")
         self.addCleanup(task_file.unlink)
         result = subprocess.run(
-            ["bash", str(self.root / self.LM_EVAL), "custom", "--task-file", str(task_file), "--model", "m", "--backend", "openai",
-             "--api-model-name", "m", *ENDPOINT, "--no-wandb"],
+            ["bash", str(self.root / self.LM_EVAL), "custom", "--task-file", str(task_file), "--model", "m", "--api-model-name", "m", *ENDPOINT, "--no-wandb"],
             cwd=self.root, capture_output=True, text=True, timeout=120,
             env={"PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", "HOME": str(self.root), "EVAL_PREFLIGHT": "1"},
         )

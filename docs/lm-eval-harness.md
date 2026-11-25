@@ -4,11 +4,11 @@ Launching lm-evaluation-harness evaluations on Clariden: the launcher, resumable
 
 ## The Launch Script
 
-`scripts/lm_eval_harness/launch_evaluations.sh` is the primary entry point. It supports three model selection modes and two task modes (`single`, `custom`).
+`scripts/lm_eval_harness/launch_evaluations.sh` is the primary entry point. It has two task modes (`single`, `custom`).
 
-### Backend
+### The model
 
-The launcher evaluates against an OpenAI-compatible endpoint (`--backend openai`, the default), so every command below also needs `--api-base-url <url>` and `--api-model-name <served name>` (shown in full in the endpoint examples); [direct serving](direct-serving.md) starts a server for your own model in the same job. `--backend megatron_lm` instead loads a Megatron-LM checkpoint in the job ([Megatron checkpoints](#megatron-checkpoints)). The `hf`, `vllm` and `sglang` backends that loaded the model in the job were removed.
+The launcher evaluates a model served by an OpenAI-compatible endpoint: the CSCS serving API, a `vllm serve` you started, or one started for the run by [direct serving](direct-serving.md). Every command below therefore also needs `--api-base-url <url>` and `--api-model-name <served name>` (shown in full in the endpoint examples). No model is loaded in the job, so it is a CPU-only job. A Megatron-LM checkpoint is converted to a Hugging Face one and served ([Megatron checkpoints](#megatron-checkpoints)).
 
 ### Modes
 
@@ -21,21 +21,14 @@ The launcher takes a required first positional argument, `<mode>`:
 
 Pass a task list with `custom --task-file <list> --table-metrics <list>_main_table.txt` (the examples below call such a list `tasks.txt`). The launcher defaults `WANDB_PROJECT` to `e-p-t-pool` (not `run_lm_eval.sbatch`'s own `swissai-evals-test` default; see [SBATCH Scripts](#sbatch-scripts)); export `WANDB_PROJECT` yourself for test/smoke runs to avoid logging into the production project.
 
-### Model Selection Modes
+### Run name and model
 
-**Mode 1: Single model** (recommended for quick evaluations)
 ```bash
-bash scripts/lm_eval_harness/launch_evaluations.sh <mode> --model <hf_path_or_local_path> [options]
+bash scripts/lm_eval_harness/launch_evaluations.sh <mode> --api-base-url <url> --api-model-name <served name> [--model <name>] [options]
 ```
-The run name is derived automatically. The chat template is applied to every task by default: always for post-trained models, never for base (pre-trained) models, which need `--no-chat-template`. `--chat-template-by-type` sorts the tasks instead: generative ones with the template, log-likelihood ones without.
+`--model` names the run and, without `--tokenizer`, the tokenizer (default: `--api-model-name`). The run name is derived automatically. The chat template is applied to every task by default: always for post-trained models, never for base (pre-trained) models, which need `--no-chat-template`. `--chat-template-by-type` sorts the tasks instead: generative ones with the template, log-likelihood ones without.
 
 > A multiple-choice task through the chat template is scored by how likely the model is to *start its reply* with each answer, not as a raw continuation of the prompt. That is comparable across the tasks of one run and across post-trained models, not with raw-continuation numbers (base models, `--no-chat-template` or `--chat-template-by-type` runs). `--chat-template-by-type` keeps multiple choice on the raw-continuation number for a post-trained model.
-
-**Mode 2: Model-list script** (for batch evaluation of predefined model sets)
-```bash
-bash scripts/lm_eval_harness/launch_evaluations.sh <mode> --script scripts/lm_eval_harness/runners/example_models.sh
-```
-Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `hf_base_runner.sh`.
 
 ### Options / Key Hyperparameters
 
@@ -48,12 +41,11 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--chat-template-by-type` | Generative tasks with the chat template, log-likelihood ones (`output_type` `multiple_choice`, `loglikelihood`, `loglikelihood_rolling`) without it. `task_output_types.py` sorts them in the evaluation container from the harness's task index: a group or tag follows its members, a mixed group or an unknown name keeps the template. Two lm-eval passes per job (one when only one kind is present), merged into one result; the run config records `apply_chat_template=by-type`. Thinking and effort flags keep it, since they only affect the generative tasks. Not with `--chat-format apertus2` or `--api-endpoint chat-completions` |
 | `--tokenizer <path>` | Custom tokenizer (default: same as model) |
 | `--num-fewshot N` | Override num_fewshot globally. Tasks with explicit `num_fewshot: 0` in their YAML are never overridden. OLMo3 paper uses 5-shot for most MC tasks. |
-| `--backend <openai\|megatron_lm>` | Inference backend (default: `openai`, which evaluates against an already-running OpenAI-compatible endpoint; to serve your own model first, see [direct serving](direct-serving.md)). `megatron_lm` loads a Megatron-LM checkpoint in the job. |
-| `--api-base-url <url>` | Endpoint for the `openai` backend (required with it). Accepts a bare host (`http://host:8000`), a `/v1` root, or a full `/v1/(chat/)completions` URL. |
-| `--api-model-name <name>` | `model` field sent in API requests (default: the `--model` value) |
-| `--api-requests-per-minute N` | Endpoint-wide request limit for the benchmarked model when using `--backend openai` (for example, `30`) |
-| `--api-max-retries N` | `openai` backend: retries per failed request (default 3; a rate-limited endpoint can exhaust 3 and fail the run, so raise it, e.g. 20) |
-| `--api-num-concurrent N` | `openai` backend: concurrent requests (default 8) |
+| `--api-base-url <url>` | The endpoint to evaluate (required). Accepts a bare host (`http://host:8000`), a `/v1` root, or a full `/v1/(chat/)completions` URL. |
+| `--api-model-name <name>` | `model` field sent in API requests (required, unless `API_MODEL_NAME` is exported) |
+| `--api-requests-per-minute N` | Endpoint-wide request limit for the benchmarked model (for example, `30`) |
+| `--api-max-retries N` | Retries per failed request (default 3; a rate-limited endpoint can exhaust 3 and fail the run, so raise it, e.g. 20) |
+| `--api-num-concurrent N` | Concurrent requests (default 8) |
 | `--chat-format <template\|apertus2>` | `apertus2`: the Apertus 2 native format (see [Apertus 2 native format](#apertus-2-native-format)); default `template` |
 | `--prefill-mode <after_think\|empty_think>` | `apertus2` answer prefills (default `after_think`) |
 | `--answer-frame <reply\|claim>` | `apertus2`: score the reply (default) or the last claim, the frame the Apertus 2 RL math reward grades |
@@ -69,9 +61,8 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--account <name>` | Override the Slurm account used by submitted jobs |
 | `--merge-only` | Skip evaluation and aggregate the already completed task outputs |
 | `--debug` | Resolve and print the orchestration plan without submitting jobs |
-| `--max-length N` | Backend context limit in tokens, exported as `MAX_LENGTH` (openai `max_length`, Megatron `seq_length`). Default: the backend's own. `loglikelihood_rolling` tasks such as `uncheatable_eval` cut each document into windows of this size, so set it to the model's context to score documents whole. |
+| `--max-length N` | Context limit in tokens, exported as `MAX_LENGTH`: the served window. Default: the model's own. `loglikelihood_rolling` tasks such as `uncheatable_eval` cut each document into windows of this size, so set it to the model's context to score documents whole. |
 | `--limit N` | Evaluate a random subset of N samples per task (forwarded to lm-eval-harness, which picks the subset with seed 42: the same one on every run; default: no limit). Useful for sanity checks and for subsampling long runs. |
-| `--megatron-iter <iter>` | For Megatron-LM checkpoints, the iteration to evaluate (e.g. `8926`); defaults to `latest`. Exported as `CKPT_ITERATION`. |
 | `--harness-branch B` | Resolve lm-evaluation-harness from a branch, tag, or full commit SHA in the task-selected repository (default: the commit in `requirements/lm-eval-harness.txt`); the resolved commit is shared by every chunk |
 | `--reservation <name>` | Submit evaluation jobs and any automatically launched judge under this SLURM reservation. |
 | `--qos <name>` | Submit every job, including any automatically launched judge, under this SLURM QOS (e.g. `highprio`). Exported as `SBATCH_QOS`. |
@@ -87,7 +78,7 @@ Runs a script that defines a `MODEL_CHECKPOINTS` associative array and sources `
 | `--autodetect-think-tokens` | Read the reasoning open/close tokens from the model's chat template. Only templates that declare them as `inner_token = '…'` / `outer_token = '…'` (Apertus-style) are recognised; for other models pass the tokens explicitly. |
 | `--track-thinking-metrics <true\|false>` / `--no-track-thinking-metrics` | Force the thinking metrics on or off (default: on iff a close token is known). |
 | `--log-length-metrics` | Aggregate `response_length_*` / `thinking_length_*` into results and W&B. `thinking_format_*` is aggregated regardless. |
-| `--reasoning-effort <level>` | Chat-template argument `reasoning_effort` (e.g. `low`/`medium`/`high`) for models whose template reads it, such as gpt-oss. openai backend only. See [Reasoning effort](#reasoning-effort). |
+| `--reasoning-effort <level>` | Chat-template argument `reasoning_effort` (e.g. `low`/`medium`/`high`) for models whose template reads it, such as gpt-oss. See [Reasoning effort](#reasoning-effort). |
 
 > [!TIP]
 > Inference hyperparameters such as batch size (`BS`) and `MAX_NEW_TOKENS` are not launcher flags (`MAX_LENGTH` is: `--max-length`); set them as environment variables consumed by `run_lm_eval.sbatch` (see [SBATCH Scripts](#sbatch-scripts)). `SIZE` is retained as informational/legacy metadata. vLLM keeps the compatible TP=4/DP=1 topology unless the model name unambiguously identifies a model below 30B, in which case it uses TP=1/DP=4; explicit topology variables always win.
@@ -151,27 +142,23 @@ bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file tasks.txt 
 
 # Eight tasks per chunk and four concurrent chunks
 bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file tasks.txt \
-  --model Qwen/Qwen2.5-72B-Instruct --backend openai --api-base-url http://nid001234:8000 --api-model-name Qwen2.5-72B-Instruct \
+  --model Qwen/Qwen2.5-72B-Instruct --api-base-url http://nid001234:8000 --api-model-name Qwen2.5-72B-Instruct \
   --chunk-size 8 --max-parallel 4
-
-# Run all models from a batch script on the safety suite
-bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file tasks.txt \
-  --script scripts/lm_eval_harness/runners/example_models.sh --chunk-size 4
 
 # Against an OpenAI-compatible endpoint (vLLM serve, CSCS serving, ...); the model is never loaded in the job
 bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k_cot --model Qwen/Qwen3-8B \
-  --backend openai --api-base-url http://nid001234:8000 --api-model-name Qwen3-8B
+  --api-base-url http://nid001234:8000 --api-model-name Qwen3-8B
 
 # A small model on a single task, useful for testing newly implemented tasks
 bash scripts/lm_eval_harness/launch_evaluations.sh single --task multijail --model meta-llama/Llama-3.2-3B \
-  --backend openai --api-base-url http://nid001234:8000 --api-model-name Llama-3.2-3B
+  --api-base-url http://nid001234:8000 --api-model-name Llama-3.2-3B
 ```
 
 `--bos` explicitly prepends a BOS token. Normally leave it unset: by default (`BOS=auto`) it is on for Gemma 4, whose tokenizer never adds the BOS token it needs, and, in runs without a chat template, for a tokenizer whose `tokenizer_config.json` defines a `bos_token` but sets `add_bos_token: false`, such as the Apertus 2 instruct tokenizer (no post-processor). Without it, log-likelihood tasks read the prompt without its start token and score lower, silently (`scripts/lm_eval_harness/bos_default.py`: a local directory is read, a Hugging Face repo's config fetched with `HF_TOKEN` when set). A tokenizer that adds the BOS itself (`add_bos_token: true`: Llama 3, Mistral, the Chonk eval tokenizer) is left alone: forcing `--bos` there makes a log-likelihood prompt reach the server with two (the harness writes the BOS it decoded from its own ids, and the server adds another). A tokenizer without a BOS token (Qwen) is untouched. `--no-bos` turns the default off. Chat-template detection does not infer this option. The rule is resolved for each lm-eval command, because it depends on whether that command applies the chat template: a `--chat-template-by-type` run has two commands, generative tasks with the template and log-likelihood tasks without it, and each gets its own BOS setting (and its own probe).
 
-`--bos-by-client` is on by default for runs with a chat template on the openai backend on `/v1/completions` (needs a harness with `bos_by_client`; `--no-bos-by-client` restores the previous behaviour). The harness renders the template to text and the server's tokenizer then adds its own BOS next to the template's: two after a template that starts with `<s>` (Apertus, Llama 3, Gemma 3, Mistral). A rendered template is a complete prompt, so the option tells the server to add no special tokens (`add_special_tokens: false`) and the model gets exactly the BOS the template wrote, once. Without a chat template it is ignored: raw text is what the tokenizer's own BOS is for, and the server keeps adding it. Given explicitly it is refused where it cannot apply (the chat-completions endpoint, `--chat-format apertus2`, other backends); by default it is simply off there. Switching it on changed the prompt, and so the numbers, of every earlier run whose template starts with a BOS that the server also added (Apertus 1.5, Llama 3, Gemma 3, Mistral): compare runs from before and after with that in mind.
+`--bos-by-client` is on by default for runs with a chat template on `/v1/completions` (needs a harness with `bos_by_client`; `--no-bos-by-client` restores the previous behaviour). The harness renders the template to text and the server's tokenizer then adds its own BOS next to the template's: two after a template that starts with `<s>` (Apertus, Llama 3, Gemma 3, Mistral). A rendered template is a complete prompt, so the option tells the server to add no special tokens (`add_special_tokens: false`) and the model gets exactly the BOS the template wrote, once. Without a chat template it is ignored: raw text is what the tokenizer's own BOS is for, and the server keeps adding it. Given explicitly it is refused where it cannot apply (the chat-completions endpoint, `--chat-format apertus2`, other backends); by default it is simply off there. Switching it on changed the prompt, and so the numbers, of every earlier run whose template starts with a BOS that the server also added (Apertus 1.5, Llama 3, Gemma 3, Mistral): compare runs from before and after with that in mind.
 
-Before each lm-eval command of an openai-backend run on `/v1/completions`, `scripts/lm_eval_harness/bos_probe.py` sends the prompts the harness would send (a log-likelihood and a generation prompt, built by the harness's own model class, with the chat template rendered when the run applies it) and reads back the prompt tokens the server reports (echo with logprobs). It checks how many BOS tokens lead each prompt, as the server tokenized it, and prints what it received to the run's console output:
+Before each lm-eval command of a run on `/v1/completions`, `scripts/lm_eval_harness/bos_probe.py` sends the prompts the harness would send (a log-likelihood and a generation prompt, built by the harness's own model class, with the chat template rendered when the run applies it) and reads back the prompt tokens the server reports (echo with logprobs). It checks how many BOS tokens lead each prompt, as the server tokenized it, and prints what it received to the run's console output:
 
 | Server received | BOS expected? | Result |
 |---|---|---|
@@ -184,14 +171,7 @@ A BOS is expected when the tokenizer adds one itself, when `--bos` is set, or wh
 
 ### Megatron checkpoints
 
-There are two ways to evaluate a Megatron-LM checkpoint. Natively with the `megatron_lm` backend, no conversion (`--megatron-iter` defaults to `latest`):
-
-```bash
-bash scripts/lm_eval_harness/launch_evaluations.sh custom --task-file tasks.txt --model /capstor/store/../apertus-.../checkpoints/ \
-  --backend megatron_lm --name Megatron-Test-260216 --megatron-iter 4000000
-```
-
-Or converted to HF first with [`scripts/megatron_convert/convert_megatron_checkpoint.sbatch`](../scripts/megatron_convert/convert_megatron_checkpoint.sbatch), then served and evaluated through the `openai` backend like any HF model (recommended: supports the thinking metrics). The converter takes an `iter_<digits>` directory and an output directory, is reusable for any framework, and skips the conversion if the output already has a `config.json` (`FORCE_CONVERT=true` redoes it). `HF_TOKENIZER` sets the tokenizer baked into the result. The jobs need `--reservation` (or `SBATCH_RESERVATION=<name>`) on Clariden's shared partition.
+A Megatron-LM checkpoint is converted to a Hugging Face one first, then served and evaluated like any HF model (the thinking metrics included), with [`scripts/megatron_convert/convert_megatron_checkpoint.sbatch`](../scripts/megatron_convert/convert_megatron_checkpoint.sbatch). The converter takes an `iter_<digits>` directory and an output directory, is reusable for any framework, and skips the conversion if the output already has a `config.json` (`FORCE_CONVERT=true` redoes it). `HF_TOKENIZER` sets the tokenizer baked into the result. The jobs need `--reservation` (or `SBATCH_RESERVATION=<name>`) on Clariden's shared partition.
 
 ```bash
 sbatch scripts/megatron_convert/convert_megatron_checkpoint.sbatch \
@@ -199,7 +179,7 @@ sbatch scripts/megatron_convert/convert_megatron_checkpoint.sbatch \
   /capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/Apertus-v1p5-8B-pretraining-iter430000
 
 # once it has finished
-bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k --backend openai \
+bash scripts/lm_eval_harness/launch_evaluations.sh single --task gsm8k \
   --api-base-url "$EVAL_API_BASE_URL" --api-model-name Apertus-v1p5-8B-pretraining \
   --model /capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/Apertus-v1p5-8B-pretraining-iter430000 \
   --name Apertus-v1p5-8B-pretraining
@@ -371,8 +351,7 @@ bash scripts/lm_eval_harness/launch_evaluations.sh single --task aime25 --model 
   --think-start-token '<|channel|>analysis<|message|>' --think-end-token '<|channel|>final<|message|>'
 ```
 
-It goes to the harness as `chat_template_args={"reasoning_effort":"<level>"}` (openai backend; the launcher
-refuses megatron_lm), forces the chat template on, is part of the run
+It goes to the harness as `chat_template_args={"reasoning_effort":"<level>"}` (rendered client-side), forces the chat template on, is part of the run
 configuration (results of another level are never resumed into this one), and adds
 `-effort-<level>` to an auto-derived run name. A template that doesn't read `reasoning_effort`
 ignores it silently, so check the rendered prompt in the job log. It does not turn reasoning on or
@@ -413,14 +392,9 @@ Two caveats:
 - **Prefer `_chars` when comparing across backends.** `_tokens` provenance differs per backend
   (vLLM counts the stop-string and EOS tokens; a re-encoded thinking span can land 1–2 tokens over).
 
-### Backend support
+### How the reasoning is handled
 
-| Backend              | Support         | `enable_thinking`                                                                |
-|----------------------|-----------------|----------------------------------------------------------------------------------|
-| `megatron_lm`        | **unsupported** | requesting thinking metrics is a hard error                                      |
-| `openai`             | full (`local-completions`) | rendered client-side; forwarded **only when explicitly set**. `--enable-thinking` on its own only switches the template; `--thinking` or a think token also strips and measures the reasoning |
-
-On `openai` the harness renders the chat template itself before sending the prompt to
+The harness renders the chat template itself before sending the prompt to
 `/v1/completions`, so the template switches reach the model. With `--thinking` or a think token it
 also holds the task's stop sequences back while the model reasons (they often occur inside the
 reasoning), strips the reasoning before scoring and records the thinking metrics.
@@ -520,7 +494,7 @@ with [`apertus-common`](https://github.com/swiss-ai/apertus-common) and sends te
 ```bash
 bash scripts/lm_eval_harness/launch_evaluations.sh custom \
   --task-file tasks.txt \
-  --backend openai --api-base-url <url> --api-model-name <served name> \
+  --api-base-url <url> --api-model-name <served name> \
   --chat-format apertus2 --tokenizer <checkpoint dir> --max-length 65536
 ```
 
@@ -552,9 +526,9 @@ bash scripts/lm_eval_harness/launch_evaluations.sh custom \
 
 ### `scripts/lm_eval_harness/run_lm_eval.sbatch`
 
-Primary SLURM job script for HuggingFace-compatible model evaluation.
+Primary SLURM job script: evaluates a served model.
 
-**Resources**: the `megatron_lm` backend uses `run_lm_eval.sbatch` with 1 node, 4 GPUs, 200 CPUs, 460GB memory, and an 11h59m limit. The `openai` backend is selected automatically through the CPU-only `run_lm_eval_api.sbatch` wrapper with 16 CPUs and 64GB memory.
+**Resources**: a CPU-only job with 16 CPUs, 64GB memory and an 11h59m limit; the model is served elsewhere.
 
 **Positional arguments**: `<model_path> <name>`
 
@@ -564,27 +538,25 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 |----------|---------|-------------|
 | `TASKS` | (unset) | **Required.** Task list file or comma-separated task names |
 | `TABLE_METRICS` | same as `TASKS` | Metrics for W&B summary table |
-| `LM_EVAL_BACKEND` | `openai` | Backend: `openai` (OpenAI-compatible API) or `megatron_lm` |
-| `API_BASE_URL` | (unset) | `openai` backend only, **required**: the OpenAI-compatible endpoint. Bare host / `/v1` root / full endpoint URL all accepted. |
-| `API_MODEL_NAME` | same as model | `openai` backend only: the `model` field sent in requests, when the server registers the model under a different id |
-| `API_NUM_CONCURRENT` | `8` | `openai` backend only: concurrent requests (batch size is pinned to 1; this is the throughput knob) |
-| `API_REQUESTS_PER_MINUTE` | (unset) | `openai` backend only: endpoint-wide request limit; set by `--api-requests-per-minute` |
-| `API_MAX_RETRIES` | `3` | `openai` backend only: retries per failed request; set by `--api-max-retries` |
+| `API_BASE_URL` | (unset) | **Required**: the OpenAI-compatible endpoint. Bare host / `/v1` root / full endpoint URL all accepted. |
+| `API_MODEL_NAME` | same as model | The `model` field sent in requests, when the server registers the model under a different id |
+| `API_NUM_CONCURRENT` | `8` | Concurrent requests (batch size is pinned to 1; this is the throughput knob) |
+| `API_REQUESTS_PER_MINUTE` | (unset) | Endpoint-wide request limit; set by `--api-requests-per-minute` |
+| `API_MAX_RETRIES` | `3` | Retries per failed request; set by `--api-max-retries` |
 | `JUDGE_REQUESTS_PER_MINUTE` | (unset) | Endpoint-wide request limit applied separately to every LLM judge model; set by `--judge-requests-per-minute` |
 | `JUDGE_MODEL_PREFIX` | `$USER` | Preferred CSCS host scope prepended to unscoped judge model IDs |
 | `LM_EVAL_JUDGE_MODEL_DISCOVERY` | `1` | Query the judge endpoint's `/models` list and fall back to another matching hosted scope; set to `0` to disable |
 | `LM_EVAL_JUDGE_MODEL_DISCOVERY_TIMEOUT` | `10` | Timeout in seconds for hosted judge-model discovery |
 | `LM_EVAL_RATE_LIMIT_STATE_DIR` | per-launch controller directory | Shared request-slot state used to coordinate threads, processes, and Slurm nodes; point independent launches at the same directory to share budgets |
-| `OPENAI_API_KEY` | `scripts/secrets.env`, then `CSCS_SERVING_API` | OpenAI GPT judge or `openai` backend bearer token |
+| `OPENAI_API_KEY` | `scripts/secrets.env`, then `CSCS_SERVING_API` | OpenAI GPT judge or the endpoint's bearer token |
 | `LM_EVAL_HARNESS_BRANCH` | commit in `requirements/lm-eval-harness.txt` | Branch, tag, or commit installed from the task-selected harness repository (not allowed with `EVAL_PREBUILT_ENV=1`) |
 | `APPLY_CHAT_TEMPLATE` | `true` | Apply the chat template to every task of the run (post-trained models); `false` for base models; `by-type`: generative tasks only |
 | `TOKENIZER` | same as model | Custom tokenizer path |
 | `BOS` | `false` | Prepend BOS token |
 | `BS` | `auto:20` | Batch size |
-| `SIZE` | `1` | Informational/legacy model-size metadata; topology inference uses the model name/path instead |
-| `MAX_LENGTH` | (backend/model default) | Optional total context limit, passed as the backend-native setting (`seq_length` for Megatron, `max_length` for the `openai` backend) |
-| `MAX_NEW_TOKENS` | `32768` with thinking or a reasoning effort, or `MAX_LENGTH` on the `openai` backend when it is set (clamped per request to the window minus the prompt); otherwise unused | Generation budget of thinking/reasoning-effort runs, passed as `--gen_kwargs max_gen_toks=...` so it replaces every task's own `max_gen_toks`. An explicit value sets that budget. |
-| `MEGATRON_MICRO_BATCH_SIZE` | numeric `BS`, otherwise `1` | Megatron micro-batch override. A numeric `BS` is forwarded automatically; `BS=auto:*` cannot be inferred by the adapter and falls back to 1. |
+| `SIZE` | `1` | Informational/legacy model-size metadata |
+| `MAX_LENGTH` | (model default) | Optional total context limit, passed as `max_length` |
+| `MAX_NEW_TOKENS` | `32768` with thinking or a reasoning effort, or `MAX_LENGTH` when it is set (clamped per request to the window minus the prompt); otherwise unused | Generation budget of thinking/reasoning-effort runs, passed as `--gen_kwargs max_gen_toks=...` so it replaces every task's own `max_gen_toks`. An explicit value sets that budget. |
 | `THINK_TEMPERATURE` / `THINK_TOP_P` | `0.6` / `0.95` (from `configs/sampling_defaults.json`) | Sampling for thinking runs (`do_sample=true` is forced: reasoning degrades under greedy); `none` leaves one out. The launcher flags `--temperature`, `--top-p`, ... set these ([docs/sampling.md](sampling.md)) |
 | `THINK_REPETITION_PENALTY` | (unset) | Optional knob against degenerate looping in thinking runs (e.g. `1.05`) |
 | `THINK_TOP_K` / `THINK_MIN_P` | (unset) | Optional sampling of thinking runs, sent only when set |
@@ -600,39 +572,18 @@ Primary SLURM job script for HuggingFace-compatible model evaluation.
 | `LOGS_ROOT` | `<repo>/logs/lm_eval` | Root directory for evaluation logs |
 | `WANDB_ENTITY` | `apertus` | W&B entity |
 | `WANDB_PROJECT` | `swissai-evals-test` | W&B project. This is `run_lm_eval.sbatch`'s own default when invoked directly; `launch_evaluations.sh` sets its own default of `e-p-t-pool` before the sbatch script ever runs (see [The Launch Script](#the-launch-script)), so export `WANDB_PROJECT` explicitly to keep test/smoke runs out of the production project. |
-| `ENABLE_THINKING` | *(unset)* | Chat-template argument: whether the model reasons. Emitted for the `openai` backend **only when set explicitly**; unset leaves the template's default. |
+| `ENABLE_THINKING` | *(unset)* | Chat-template argument: whether the model reasons. Emitted **only when set explicitly**; unset leaves the template's default. |
 | `AUTODETECT_THINK_TOKENS` | `false` | Read the reasoning open/close tokens from the chat template |
 | `THINK_START_TOKEN` | (unset) | Force the reasoning open token, e.g. `<think>` |
 | `THINK_END_TOKEN` | (unset) | Force the reasoning close token, e.g. `</think>`. Arms the strip and the metrics. |
 | `TRACK_THINKING_METRICS` | (unset → derive) | `true`/`false` to force the thinking metrics on/off |
 | `LOG_LENGTH_METRICS` | `false` | Add `--log_length_metrics` (aggregates `response_length_*` / `thinking_length_*`) |
 
-The script auto-detects RULER long-context tasks, adds 600 tokens of engine headroom, and passes the resulting limit using the selected backend's native argument.
-
-Requesting any thinking metric with `LM_EVAL_BACKEND=megatron_lm` aborts the job: the harness has no
-reasoning-token support for that backend, so it would otherwise record nothing silently. See
-[Thinking / Reasoning Metrics](#thinking--reasoning-metrics).
+The script auto-detects RULER long-context tasks, adds 600 tokens of headroom, and passes the resulting limit as `max_length`.
 
 ---
 
-## Multi-Model Scripts
-
-A model-list script defines a `MODEL_CHECKPOINTS` associative array and sources `hf_base_runner.sh`; copy `scripts/lm_eval_harness/runners/example_models.sh` and list your models:
-
-```bash
-declare -A MODEL_CHECKPOINTS=(
-    ["Llama-3.1-8B-Instruct"]="meta-llama/Llama-3.1-8B-Instruct"
-    ["OLMo-2-1124-7B-Instruct"]="allenai/OLMo-2-1124-7B-Instruct"
-)
-export APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-true}
-source scripts/lm_eval_harness/runners/hf_base_runner.sh "models"
-```
-
-Base models take the launcher's `--no-chat-template` (Apertus base checkpoints also `--tokenizer alehc/swissai-tokenizer`, which adds the BOS itself: no `--bos`).
-
-`hf_base_runner.sh` handles the model loop and delegates resumable chunk orchestration to `scripts/lm_eval_harness/evaluation_orchestrator.sh`. It respects `EVAL_CHUNK_SIZE`, `EVAL_MAX_PARALLEL`, `EVAL_MAX_RETRIES`, `SBATCH_SCRIPT`, and `WANDB_*`.
-
-### Model Families
+## Model Families
 
 Models that have been run here include:
 
@@ -651,14 +602,14 @@ The pipeline runs inside containers managed by enroot/pyxis on SLURM:
 | Config | Base Image | Use Case |
 |--------|-----------|----------|
 | `env.toml` | CSCS NGC PyTorch 25.12 image | lm-eval `openai` backend |
-| `env_vllm.toml` | CSCS vLLM 0.22.1 runtime image | Megatron-LM evals |
+| `env_vllm.toml` | CSCS vLLM 0.22.1 runtime image | the Megatron checkpoint converter |
 | `env_vllm_0.30.0.toml` | model-launch's vLLM 0.30.0 image (arm64) | the direct-serving launcher's default serving image |
 
 Hugging Face caches are on scratch for every runner (lm-eval, Inspect, the aggregation job, EvalScope, Harbor), set in one place, `scripts/common/cache_dirs.sh`: datasets in `$SCRATCH/.cache/huggingface/datasets` (`HF_DATASETS_CACHE`), hub and models in `$SCRATCH/huggingface` (`HF_HOME`, which a caller may set). A dataset is therefore downloaded once for all of them, and a job in the prebuilt image needs only the scratch mount. The same file puts `XDG_CACHE_HOME` (`$SCRATCH/.cache`) and `XDG_DATA_HOME` (`$SCRATCH/.local/share`) on scratch: Inspect writes its trace log and dataset downloads there, and in the prebuilt image `$HOME` is on the container's `fuse-overlayfs` root, where Inspect jobs hung forever ([#158](https://github.com/swiss-ai/evals-post-train/issues/158)). The pinned artifacts (environments, tokenizers) are separate, under `$EVAL_ENV_CACHE_ROOT` below.
 
 Evaluation dependencies use a shared two-tier cache under `${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}`:
 
-1. A base virtual environment is keyed by backend, Python/container configuration, and its requirements: `requirements/lm-eval-runtime.lock` for the `openai` backend, `requirements/lm-eval-runtime.txt` for `megatron_lm`, which takes `torch` and its runtime from the container.
+1. A base virtual environment is keyed by Python/container configuration and its requirements (`requirements/lm-eval-runtime.lock`).
 2. A lightweight harness overlay is keyed by the base environment, harness repository, and resolved commit SHA.
 
 `prepare_eval_env.sbatch` first verifies that the cache and per-run manifest directories are visible from both the host job and the selected container. It then builds missing tiers on a CPU node. Each base and overlay fingerprint has its own `flock`: simultaneous launches with the same fingerprint wait for the first builder, re-check the completed environment, and reuse it; unrelated fingerprints can build concurrently. Packages are published only after import validation, and manifests are replaced atomically. The builder also creates one uncompressed tar archive per immutable harness overlay. At evaluation startup, each chunk reads that archive from the shared filesystem, extracts it under `$SLURM_TMPDIR` (or container-local `/tmp`), and prepends the local copy to `PYTHONPATH`. If staging fails, the job logs a warning and falls back to the shared overlay. This avoids thousands of small-file operations against `/iopsstor`, including Python imports and the harness's task discovery fallback.
@@ -693,8 +644,8 @@ unless a lock changed. To change a version, edit the matching
 `requirements/*.txt`, run `scripts/common/lock_requirements.sh` and commit both;
 CI fails if they don't match. A harness bump can need new dependencies that the
 locks don't see, because the harness is installed `--no-deps`: review
-`requirements/lm-eval-runtime.txt` when bumping it. `megatron_lm` is the one
-exception to the locks: it takes `torch` and its runtime from the container, so
+`requirements/lm-eval-runtime.txt` when bumping it. The Megatron checkpoint
+converter is the one exception to the locks: it takes `torch` from its container, so
 it installs `requirements/lm-eval-runtime.txt`.
 
 The image sets `EVAL_PREBUILT_ENV=1`. With it, the launcher submits no
@@ -723,22 +674,12 @@ docker build -f containers/Dockerfile.eval -t evals-post-train-eval .
 
 ## Notes
 
-- **OpenAI-compatible API backend (`--backend openai`)**: evaluates against an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) instead of loading the model inside the job. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). With the chat template on, the harness renders the model's template client-side via the HF tokenizer, so the tokenizer must be resolvable (use `--tokenizer` when the served model name is not a pullable HF repo). `--api-endpoint chat-completions` (or `API_CHAT_ENDPOINT=true`) switches to `/v1/chat/completions` (server-side template; generative tasks ONLY, so not with `--no-chat-template`/`--chat-template-by-type`; required by tasks that send the functions in the request's `tools` field). The run records it as `api_chat_endpoint`. Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Use `--api-requests-per-minute 30` when the endpoint is rate limited; all chunks in the launch coordinate that budget. The launcher submits this backend through the CPU-only `run_lm_eval_api.sbatch` wrapper.
-- **Megatron-LM**: To run Megatron-LM models natively, clone the [NVIDIA Megatron-LM repository](https://github.com/NVIDIA/Megatron-LM) into the evals-post-train directory (or change the location via the launch script).
+- **Endpoint**: the job evaluates an already-running endpoint (e.g. `vllm serve`, the CSCS serving platform) and never loads the model. It uses lm-eval's `local-completions` against `/v1/completions`, which serves **both** generative and loglikelihood/MC tasks (mixed suites work) *provided* the server returns prompt logprobs with echo (vLLM does; most commercial APIs do not). With the chat template on, the harness renders the model's template client-side via the HF tokenizer, so the tokenizer must be resolvable (use `--tokenizer` when the served model name is not a pullable HF repo). `--api-endpoint chat-completions` (or `API_CHAT_ENDPOINT=true`) switches to `/v1/chat/completions` (server-side template; generative tasks ONLY, so not with `--no-chat-template`/`--chat-template-by-type`; required by tasks that send the functions in the request's `tools` field). The run records it as `api_chat_endpoint`. Auth uses `OPENAI_API_KEY` (defaults to the CSCS serving key). Use `--api-requests-per-minute 30` when the endpoint is rate limited; all chunks in the launch coordinate that budget.
 - **Time limits**: The default 11h59m SLURM limit applies to each chunk. Adjust `--chunk-size` to keep individual jobs below it and `--max-parallel` to control concurrent nodes.
 
 ---
 
 ## Extending the Pipeline
-
-### Adding a New Inference Backend
-
-The sbatch scripts support the `openai` and `megatron_lm` backends. To add a new one:
-
-1. Add a new `elif` block in `run_lm_eval.sbatch` at the `LM_EVAL_BACKEND` dispatch section
-2. Set appropriate `COMMON_MODEL_ARGS` for the new backend
-3. Add backend-independent Python dependencies to `requirements/lm-eval-runtime.txt` (then run `scripts/common/lock_requirements.sh`); provide backend runtimes through the corresponding container configuration
-4. Include the new backend/container identity in `scripts/lm_eval_harness/build_eval_env.sh` fingerprinting if it needs distinct cached environments
 
 ### Adding a New Task
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Slurm orchestration for resumable task chunks. The file is sourced by
-# scripts/lm_eval_harness/runners/hf_base_runner.sh and executed by evaluation_controller.sbatch.
+# scripts/lm_eval_harness/launch_evaluations.sh and executed by evaluation_controller.sbatch.
 
 _eval_repo_root() {
     cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd
@@ -35,14 +35,6 @@ _eval_prepend_modern_python_path() {
     done
 }
 _eval_prepend_modern_python_path
-
-_eval_container_for_backend() {
-    case "${LM_EVAL_BACKEND:-openai}" in
-        megatron_lm) echo "./containers/env_vllm.toml" ;;
-        openai) echo "./containers/env.toml" ;;
-        *) echo "Unsupported LM_EVAL_BACKEND: ${LM_EVAL_BACKEND:-}" >&2; return 1 ;;
-    esac
-}
 
 _eval_prestart_dependency() {
     # Jobs the first eval wave must wait on: the environment-preparation job. It is
@@ -101,8 +93,7 @@ _eval_resolved_bos_by_client() {
         echo false
         return
     fi
-    if [[ "$requested" != "true" ]] && ! [[ "${LM_EVAL_BACKEND:-openai}" == "openai" && "${CHAT_FORMAT:-}" != "apertus2" \
-            && "${API_CHAT_ENDPOINT:-false}" != "true" ]]; then
+    if [[ "$requested" != "true" ]] && ! [[ "${CHAT_FORMAT:-}" != "apertus2" && "${API_CHAT_ENDPOINT:-false}" != "true" ]]; then
         echo false
     elif [[ "${APPLY_CHAT_TEMPLATE:-true}" == "by-type" ]]; then
         echo "chat=true,raw=false"
@@ -114,10 +105,12 @@ _eval_resolved_bos_by_client() {
 _eval_create_run_config() {
     local model="$1" repo="$2" state_dir="$3"
     local enable_thinking="${ENABLE_THINKING:-}"
+    # backend, checkpoint_iteration and megatron_micro_batch_size are constants, kept so that results
+    # recorded before the backends were removed still match the run config and resume.
     local -a fields=(
         --field "model=$model"
-        --field "backend=${LM_EVAL_BACKEND:-openai}"
-        --field "checkpoint_iteration=${CKPT_ITER:-latest}"
+        --field "backend=openai"
+        --field "checkpoint_iteration=latest"
         --field "revision=${REVISION:-}"
         --field "tokenizer=${TOKENIZER:-}"
         --field "harness_repo=$repo"
@@ -142,7 +135,7 @@ _eval_create_run_config() {
         --field "think_repetition_penalty=${THINK_REPETITION_PENALTY:-}"
         --field "nothink_temperature=${NOTHINK_TEMPERATURE:-}"
         --field "nothink_top_p=${NOTHINK_TOP_P:-}"
-        --field "megatron_micro_batch_size=${MEGATRON_MICRO_BATCH_SIZE:-}"
+        --field "megatron_micro_batch_size="
         --field "api_base_url=${API_BASE_URL:-}"
         --field "api_model_name=${API_MODEL_NAME:-}"
         --field "api_chat_endpoint=${API_CHAT_ENDPOINT:-false}"
@@ -416,16 +409,10 @@ _eval_prepare_environment() {
         return
     fi
     export EVAL_HARNESS_REF="${LM_EVAL_HARNESS_BRANCH:-$(_eval_pinned_harness_commit "$repo")}"
-    EVAL_CONTAINER_CONFIG=$(_eval_container_for_backend)
-    EVAL_CONTAINER_CONFIG=$(realpath "$EVAL_CONTAINER_CONFIG")
+    EVAL_CONTAINER_CONFIG=$(realpath ./containers/env.toml)
     export EVAL_CONTAINER_CONFIG EVAL_REPO_ROOT="$PWD"
-    # The openai backend loads no model, so it gets the same locked packages as the prebuilt
-    # image; megatron_lm takes torch and its server from the container.
-    if [[ "${LM_EVAL_BACKEND:-openai}" == "openai" ]]; then
-        export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/lm-eval-runtime.lock"
-    else
-        export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/lm-eval-runtime.txt"
-    fi
+    # No model is loaded, so the job gets the same locked packages as the prebuilt image.
+    export EVAL_RUNTIME_REQUIREMENTS="$PWD/requirements/lm-eval-runtime.lock"
     [[ "${CHAT_FORMAT:-template}" == "apertus2" ]] \
         && export EVAL_APERTUS2_REQUIREMENTS="$PWD/requirements/apertus2.txt"
 

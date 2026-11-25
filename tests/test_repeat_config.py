@@ -48,8 +48,7 @@ class RepeatPolicyTests(unittest.TestCase):
             with_flags(None, 4, [8])
 
     def test_launcher_checks_repeat_flags(self):
-        base = ("single", "--task", "gsm8k_cot", "--model", "test/model", "--backend", "openai",
-                "--api-base-url", "http://localhost:8000", "--api-model-name", "m")
+        base = ("single", "--task", "gsm8k_cot", "--model", "test/model", "--api-base-url", "http://localhost:8000", "--api-model-name", "m")
         with tempfile.TemporaryDirectory() as tmp:
             for flags, message in [
                 (["--repeats", "4"], "identical samples"),
@@ -66,24 +65,12 @@ class RepeatPolicyTests(unittest.TestCase):
             self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
             thinking = _launch(*base, "--repeats", "4", "--enable-thinking", "--logs-root", tmp)
             self.assertEqual(thinking.returncode, 0, thinking.stdout + thinking.stderr)
-            local = _launch("single", "--task", "gsm8k_cot", "--model", "test/model", "--backend", "megatron_lm",
-                            "--repeats", "4", "--temperature", "0.6", "--logs-root", tmp)
-            self.assertIn("need --backend openai", local.stdout + local.stderr)
-
-    def test_launcher_refuses_repeat_config_for_local_backends(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            policy = Path(tmp) / "policy.json"
-            policy.write_text(json.dumps({"repeat_scoring": {"enabled": True}}))
-            run = _launch("single", "--task", "gsm8k_cot", "--model", "test/model", "--backend", "megatron_lm",
-                          "--repeat-config", str(policy), "--logs-root", tmp)
-            self.assertNotEqual(run.returncode, 0)
-            self.assertIn("need --backend openai", run.stdout + run.stderr)
 
     def test_job_runs_repeat_config_from_the_repository(self):
         sbatch = (Path(__file__).resolve().parents[1] / "scripts/lm_eval_harness/run_lm_eval.sbatch").read_text()
         make_cmd = sbatch[sbatch.index("make_cmd() {"):]
         make_cmd = make_cmd[:make_cmd.index("\n}\n") + 3]
-        script = (make_cmd + "COMMON_EVAL_ARGS=(); LM_EVAL_BACKEND=openai API_LM_EVAL_MODEL=x\n"
+        script = (make_cmd + "COMMON_EVAL_ARGS=(); API_LM_EVAL_MODEL=x\n"
                   "EVAL_REPEAT_CONFIG=/p.json EVAL_REPEAT_TASKS=/t.txt\n"
                   'cd /tmp && make_cmd gsm8k /out true && printf "%s" "$CMD"')
         run = subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=True)
@@ -147,7 +134,7 @@ class RepeatPolicyTests(unittest.TestCase):
                 policy.write_text(json.dumps({"repeats": repeats, "repeat_scoring": {"enabled": True}}))
                 logs = root / str(repeats)
                 run = _launch("single", "--task", "gsm8k_cot", "--model", "test/model",
-                              "--backend", "openai", "--api-base-url", "http://localhost:8000",
+                              "--api-base-url", "http://localhost:8000",
                               "--api-model-name", "test-model",
                               "--repeat-config", str(policy), "--logs-root", str(logs))
                 self.assertEqual(run.returncode, 0, run.stderr)
