@@ -37,6 +37,14 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from urllib.parse import urlsplit
+
+from scripts.harbor.model_tunnel import (
+    CHISEL_DIR_ENV,
+    DEFAULT_POD_PORT,
+    POD_PORT_ENV,
+    TARGET_ENV,
+)
 from scripts.harbor.task_patches import agent_egress_patch, patch_aider_polyglot
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -148,7 +156,26 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "the default; configs/agent_allowlists.json) or the whole internet (public, as the "
         "published tasks have it). Other benchmarks keep their own policies.",
     )
+    p.add_argument(
+        "--model-tunnel",
+        action="store_true",
+        help="For an agent that runs inside the sandbox (OpenHands, ...): open a reverse tunnel from "
+        "every sandbox to the model server at --api-base-url (scripts/harbor/model_tunnel.py), because "
+        "Breithorn's sandboxes cannot reach Clariden. The agent gets api_base=http://127.0.0.1:"
+        f"{DEFAULT_POD_PORT}/v1. Needs --sandbox opensandbox and the chisel binaries in --chisel-dir. "
+        "Not for terminus-2, which calls the model from the node.",
+    )
+    p.add_argument(
+        "--chisel-dir",
+        default=os.environ.get("CHISEL_DIR"),
+        help="Directory with chisel_<version>_linux_{amd64,arm64} (scripts/harbor/fetch_chisel.sh); default $CHISEL_DIR.",
+    )
     args = p.parse_args(argv)
+    if args.model_tunnel:
+        if args.sandbox != "opensandbox" or args.gold or args.agent == "terminus-2":
+            p.error("--model-tunnel is for a model run with an agent that runs inside the sandbox (not terminus-2), with --sandbox opensandbox")
+        if not args.chisel_dir:
+            p.error("--model-tunnel needs --chisel-dir (or $CHISEL_DIR): scripts/harbor/fetch_chisel.sh puts chisel there")
     if args.limit is not None:
         if args.limit <= 0 or (args.limit >= 1 and args.limit != int(args.limit)):
             p.error("--limit is a number of tasks (1 or more, whole) or a fraction below 1")
@@ -264,6 +291,18 @@ def task_patches(args: argparse.Namespace, name: str) -> List[Callable[[Path], N
     return patches
 
 
+def tunnel_base_url() -> str:
+    return f"http://127.0.0.1:{DEFAULT_POD_PORT}/v1"
+
+
+def tunnel_agent_kwargs(args: argparse.Namespace, kwargs: List[str]) -> List[str]:
+    """With --model-tunnel the agent in the sandbox calls the model at the tunnel's end, unless the
+    user's own --agent-kwarg names an api_base."""
+    if args.model_tunnel and not any(kv.startswith("api_base=") for kv in kwargs):
+        return kwargs + [f"api_base={tunnel_base_url()}"]
+    return kwargs
+
+
 def agent_kwargs(args: argparse.Namespace) -> List[str]:
     """The --ak entries: the user's own, plus the model's sampling and thinking settings.
 
@@ -295,7 +334,7 @@ def agent_kwargs(args: argparse.Namespace) -> List[str]:
                     "the sampling and thinking flags apply to a model run with the terminus-2 agent; "
                     "for another agent pass --agent-kwarg yourself"
                 )
-            return list(args.agent_kwarg)
+            return tunnel_agent_kwargs(args, list(args.agent_kwarg))
         values = sampling.resolve(
             "harbor",
             config=sampling.read_config(args.sampling_config),
@@ -370,12 +409,17 @@ def harbor_env(args: argparse.Namespace) -> Dict[str, str]:
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(REPO_ROOT), env.get("PYTHONPATH")]))
     if not args.gold:
         # litellm's openai provider (terminus-2, mini-swe-agent, ...): openai/<model> at this endpoint.
-        env["OPENAI_BASE_URL"] = env["OPENAI_API_BASE"] = args.api_base_url
+        env["OPENAI_BASE_URL"] = env["OPENAI_API_BASE"] = tunnel_base_url() if args.model_tunnel else args.api_base_url
         env["OPENAI_API_KEY"] = os.environ.get("EVAL_MODEL_API_KEY", "")
     if args.sandbox == "docker" and platform.machine() in ("arm64", "aarch64"):
         # The task images are linux/amd64; Docker on an arm64 host would build for arm64 and
         # find no matching base image.
         env.setdefault("DOCKER_DEFAULT_PLATFORM", "linux/amd64")
+    if args.model_tunnel:
+        # The node-side client dials the model server; the environments read these (model_tunnel.py).
+        env[TARGET_ENV] = urlsplit(args.api_base_url).netloc
+        env[CHISEL_DIR_ENV] = str(Path(args.chisel_dir).resolve())
+        env[POD_PORT_ENV] = str(DEFAULT_POD_PORT)
     if args.sandbox == "opensandbox":
         env.setdefault("OPENSANDBOX_DOMAIN", OPENSANDBOX_KATA_DOMAIN)
         # Unique to this run: the cleanup after it must not touch another run's sandboxes. A
@@ -489,6 +533,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "sandbox_endpoint": env["OPENSANDBOX_DOMAIN"] if args.sandbox == "opensandbox" else None,
         "limit": args.limit,
         "attempts": args.attempts,
+        "model_tunnel": args.model_tunnel,
         "benchmarks": results,
     }
     # SIGTERM (e.g. a Slurm time limit): stop harbor, but keep the scores of the trials that
