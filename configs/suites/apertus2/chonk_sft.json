@@ -44,7 +44,7 @@
      "flags": ["--agent", "terminus-2", "--sandbox", "opensandbox", "--max-concurrency", "80", "--attempts", "4"]},
     {"label": "SWE-bench Verified", "task": "swe_bench", "framework": "harbor",
      "repeats": {"n": 4, "via": "task"}, "metric": {"label": "pass@1, pass@4, mean@4", "key": null},
-     "flags": ["--agent", "terminus-2", "--sandbox", "opensandbox", "--max-concurrency", "80", "--attempts", "4"]},
+     "flags": ["--agent", "terminus-2", "--sandbox", "opensandbox", "--max-concurrency", "80", "--attempts", "4", "--agent-network", "allowlist"]},
     {"label": "Multi-SWE-bench", "task": "multi_swe_bench", "framework": "harbor",
      "repeats": {"n": 4, "via": "task"}, "metric": {"label": "pass@1, pass@4, mean@4", "key": null},
      "flags": ["--agent", "terminus-2", "--sandbox", "opensandbox", "--max-concurrency", "80", "--attempts", "4"]},

@@ -46,6 +46,16 @@ class SuiteTests(unittest.TestCase):
                           "--api-num-concurrent", "256", "--max-length", "262144", "--repeats", "4"])
         self.assertNotIn("--repeats", suites.flags_for(suite, THINK, "minerva_math500_think"))
 
+    def test_swe_bench_agent_network_is_pinned_to_the_allowlist(self):
+        # The default of the runner, written down: the agent reaches package indexes only, not the
+        # code hosts that have the fix. The flag exists for SWE-bench Verified and Pro only.
+        rows = {b["task"]: b for b in suites.load(SUITE)["benchmarks"] if b["framework"] == "harbor"}
+        flags = rows["swe_bench"]["flags"]
+        self.assertEqual(flags[flags.index("--agent-network") + 1], "allowlist")
+        for task, row in rows.items():
+            if task != "swe_bench":
+                self.assertNotIn("--agent-network", row["flags"], task)
+
     def test_harbor_agent_is_told_the_window_of_its_setup(self):
         # max_input_tokens is the window terminus-2 is told (it summarises before it fills). It is
         # independent of max_length (lm_eval's generation window) and of the served --max-model-len.
