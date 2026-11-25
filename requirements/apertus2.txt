@@ -5,4 +5,4 @@
 # /v1/chat/completions (docs/thinking.md).
 # Its dependencies come with lm-eval-runtime.lock (jsonschema, pydantic and tokenizers are listed in
 # lm-eval-runtime.txt for that), so a bump here can need a change there.
-apertus-common @ git+https://github.com/swiss-ai/apertus-common.git@fa5f4568515bf237885472bbfa6dff98682e135b
+apertus-common @ git+https://github.com/swiss-ai/apertus-common.git@ebb38ae9a1d0a5b1f361853c4585be8abe81c488
