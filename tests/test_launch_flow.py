@@ -124,7 +124,7 @@ def _openai_model(**env: str) -> subprocess.CompletedProcess:
     last stdout line is the harness model and its --model_args."""
     branch = SBATCH[SBATCH.index('[[ -n "$API_BASE_URL" ]] || die'):
                     SBATCH.index('# Opt-in, for models whose tokenizer is custom code')]
-    mapping = SBATCH[SBATCH.index('if [[ -n "$BACKEND_MAX_LENGTH" ]]; then'):
+    mapping = SBATCH[SBATCH.index('if [[ -n "$CONTEXT_LIMIT" ]]; then'):
                      SBATCH.index('echo "Using lm-evaluation-harness:')]
     script = ("set -e\n" + _function("die") + _function("_norm_bool") + branch
               + mapping + 'printf "\\n%s %s%s" "$API_LM_EVAL_MODEL" "$COMMON_MODEL_ARGS" "$CHAT_TEMPLATE_ARGS"\n')
@@ -134,7 +134,7 @@ def _openai_model(**env: str) -> subprocess.CompletedProcess:
         "API_NUM_CONCURRENT": "8", "API_MAX_RETRIES": "3", "API_REQUEST_TIMEOUT": "3600",
         "TOKENIZER": "/ckpt", "BS": "1", "BOS": "false", "THINK_ARGS": "", "ENABLE_THINKING": "False",
         "ENABLE_THINKING_EXPLICIT": "0", "THINKING_DEFAULT_MODEL_ARG": ",max_gen_toks=32768",
-        "MAX_LENGTH": "65536", "BACKEND_MAX_LENGTH": "65536", "PREFILL_MODE": "after_think",
+        "MAX_LENGTH": "65536", "CONTEXT_LIMIT": "65536", "PREFILL_MODE": "after_think",
         "REASONING_EFFORT": "medium", "CHAT_TEMPLATE_ARGS": " 'chat_template_args={...}'",
     }
     return subprocess.run(["bash", "-c", script], env=base | env, capture_output=True, text=True)
@@ -891,7 +891,7 @@ class LaunchFlowTests(unittest.TestCase):
                       model(CHAT_FORMAT="apertus2", ANSWER_FRAME="claim"))
         self.assertNotIn("answer_frame", model(CHAT_FORMAT="apertus2"))
         # ruler's detected length bounds the template path's context, not the server's.
-        self.assertTrue(model(CHAT_FORMAT="apertus2", BACKEND_MAX_LENGTH="8792").endswith(",max_model_len=65536"))
+        self.assertTrue(model(CHAT_FORMAT="apertus2", CONTEXT_LIMIT="8792").endswith(",max_model_len=65536"))
         # The template path keeps its own model, context argument and chat_template_args token.
         template = model()
         self.assertTrue(template.startswith("local-completions "))
@@ -908,7 +908,7 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertIn(",max_length=65536,clamp_gen_toks=True,tokenizer_backend=huggingface,tokenizer=/ckpt", chat)
         # The server still renders the template; with no window there is no clamp and no tokenizer.
         self.assertIn(",tokenized_requests=False,", chat)
-        self.assertNotIn("tokenizer_backend", model(API_CHAT_ENDPOINT="true", BACKEND_MAX_LENGTH=""))
+        self.assertNotIn("tokenizer_backend", model(API_CHAT_ENDPOINT="true", CONTEXT_LIMIT=""))
 
     def test_apertus2_samples_like_a_thinking_run(self) -> None:
         self.assertEqual(
