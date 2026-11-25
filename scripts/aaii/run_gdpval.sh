@@ -29,10 +29,10 @@
 #   --api-base-url <url>        OpenAI-compatible endpoint serving --model. Reads the key from
 #                               TARGET_API_KEY (default: CSCS_SERVING_API; both also from
 #                               scripts/secrets.env, as in run_inspect_eval.sh).
-#   --num-tasks <n>              Restrict to the first n tasks (default: 220, AA's full set;
+#   --limit <n>              Restrict to the first n tasks (default: 220, AA's full set;
 #                               smoke-test with a small number). Ignored when --task-ids is given.
 #   --task-ids <id1 id2 ...>    Exactly these space-separated openai/gdpval task_ids, instead of
-#                               --num-tasks.
+#                               --limit.
 #   --max-turns <n>              Max agent turns per task (default: 250, AA's protocol).
 #   --max-concurrency <n>        Parallel tasks (default: 4).
 #   --sandbox-backend <name>    "e2b" (default here -- AA's real protocol; isolated, real
@@ -50,7 +50,7 @@
 #                               launchers, scripts/common/thinking.py): the client's reasoning_effort plus the
 #                               chat-template kwargs in the request's extra_body. Unset: the model's server-side
 #                               default. The judges never get them.
-#   --workdir <path>            Scratch dir for generated deliverables (default: a temp dir
+#   --out-dir <path>            Scratch dir for generated deliverables (default: a temp dir
 #                               under /tmp).
 #   --no-grade                  Skip pairwise grading even if judge credentials are set --
 #                               deliverables are still generated.
@@ -73,7 +73,7 @@
 #
 # Example (smoke test, free local sandbox, no grading credentials):
 #   scripts/aaii/run_gdpval.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
-#     --api-base-url https://api.swissai.svc.cscs.ch/v1 --sandbox-backend local --num-tasks 1
+#     --api-base-url https://api.swissai.svc.cscs.ch/v1 --sandbox-backend local --limit 1
 
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
@@ -101,14 +101,14 @@ while (( $# > 0 )); do
     case "$1" in
         --model) MODEL=$2; shift 2 ;;
         --api-base-url) API_BASE_URL=$2; shift 2 ;;
-        --num-tasks) NUM_TASKS=$2; shift 2 ;;
+        --limit) NUM_TASKS=$2; shift 2 ;;
         --task-ids) TASK_IDS=$2; shift 2 ;;
         --max-turns) MAX_TURNS=$2; shift 2 ;;
         --max-concurrency) MAX_CONCURRENCY=$2; shift 2 ;;
         --sandbox-backend) SANDBOX_BACKEND=$2; shift 2 ;;
         --e2b-template) E2B_TEMPLATE=$2; shift 2 ;;
         --opensandbox-image) OPENSANDBOX_IMAGE=$2; shift 2 ;;
-        --workdir) WORKDIR=$2; shift 2 ;;
+        --out-dir) WORKDIR=$2; shift 2 ;;
         --no-grade) NO_GRADE=1; shift ;;
         --enable-thinking|--no-enable-thinking) THINKING_ARGS+=("$1"); shift ;;
         --reasoning-effort) THINKING_ARGS+=("$1" "$2"); shift 2 ;;

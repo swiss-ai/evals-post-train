@@ -250,8 +250,8 @@ class SuiteTests(unittest.TestCase):
             argv = rows["chonk-lc-16k-v0.2-sft", f"tau2-bench {domain}"]
             self.assertEqual(argv, ["sbatch", "--qos=highprio", "--partition=highprio", "scripts/custom/run_tau2_bench.sbatch",
                                     "--domain", domain, "--model", "chonk", "--api-base-url", "http://x/v1",
-                                    "--num-tasks", "2", "--sampling-profile", suites.sampling_for(suite, "chonk-lc-16k-v0.2-sft", domain),
-                                    "--workdir", f"logs/tau2/{suite['name']}/chonk/{domain}",
+                                    "--limit", "2", "--sampling-profile", suites.sampling_for(suite, "chonk-lc-16k-v0.2-sft", domain),
+                                    "--out-dir", f"logs/tau2/{suite['name']}/chonk/{domain}",
                                     "--reasoning-effort", "high", "--user-llm", JUDGE_LLM, "--user-api-base-url", JUDGE_BASE, "--user-llm-args", USER_LLM_ARGS]
                              + (["--retrieval-config", "bm25"] if domain == "banking_knowledge" else [])
                              + (["--judge-llm", JUDGE_LLM, "--judge-api-base-url", JUDGE_BASE, "--judge-llm-args", USER_LLM_ARGS] if domain in ("airline", "retail") else []))
@@ -274,7 +274,7 @@ class SuiteTests(unittest.TestCase):
 
     def test_sbatch_rows_write_to_their_own_log_dir(self):
         suite = suites.load(SUITE)
-        flag = {"inspect": "--logs-dir", "evalscope": "--work-dir", "harbor": "--work-dir", "bfcl": "--workdir", "tau2": "--workdir"}
+        flag = {"inspect": "--out-dir", "evalscope": "--out-dir", "harbor": "--out-dir", "bfcl": "--out-dir", "tau2": "--out-dir"}
         seen = set()
         for row in suites.commands(suite, {"chonk-lc-16k-v0.2-sft": "chonk"}, helper_url=JUDGE_BASE):
             argv = row["argv"]
@@ -303,11 +303,10 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(argv[argv.index("--version") + 1], version)
             self.assertEqual(argv[argv.index("--model") + 1], "chonk")
             self.assertEqual(argv[argv.index("--api-base-url") + 1], "http://x/v1")
-            self.assertEqual(argv[argv.index("--num-tasks") + 1], "2")
+            self.assertEqual(argv[argv.index("--limit") + 1], "2")
             self.assertEqual(argv[argv.index("--sampling-profile") + 1], "thinking")
             self.assertEqual(argv[argv.index("--reasoning-effort") + 1], "high")
             self.assertEqual(argv[argv.index("--wandb-project") + 1], suite["name"])
-            self.assertNotIn("--limit", argv)
 
     def test_run_prints_by_default_and_checks_its_arguments(self):
         with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \

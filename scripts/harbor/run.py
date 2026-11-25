@@ -131,7 +131,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--api-base-url", help="OpenAI-compatible endpoint (/v1 root).")
     p.add_argument("--gold", action="store_true", help="Harbor's oracle agent instead of a model.")
     p.add_argument("--agent", default="terminus-2", help="Harbor agent (default: terminus-2).")
-    p.add_argument("--work-dir", required=True)
+    p.add_argument("--out-dir", required=True)
     p.add_argument("--sandbox", choices=tuple(ENVIRONMENTS), required=True)
     p.add_argument("--limit", type=float, help="A random subset of n tasks per benchmark (seeded, 42); a fraction below 1 is a share of the tasks.")
     p.add_argument("--task", action="append", default=[], help="Task name (glob) to include; repeatable.")

@@ -169,7 +169,7 @@ scripts/inspect_ai/run_inspect_eval.sh --task tau2_retail --model Qwen/Qwen3-8B 
   --api-base-url http://nid001234:8000 --wandb-project swissai-evals-test
 ```
 
-When uploading, the script waits for `inspect eval`/`eval-set` to finish, diffs `--logs-dir` against its contents from before the run to find the `.eval` log(s) this run produced, and uploads them with:
+When uploading, the script waits for `inspect eval`/`eval-set` to finish, diffs `--out-dir` against its contents from before the run to find the `.eval` log(s) this run produced, and uploads them with:
 
 ```bash
 python -m scripts.results.update_wandb_inspect --entity <entity> --project <project> \
@@ -210,5 +210,5 @@ The script runs from its own locked venv (`requirements/gdpval-runtime.lock`): t
 # least one of GDPVAL_JUDGE_{OPENAI,GOOGLE,ANTHROPIC}_API_KEY set; ungraded deliverables are
 # still written. Smoke test, free sandbox, no grading:
 scripts/aaii/run_gdpval.sh --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
-  --api-base-url https://api.swissai.svc.cscs.ch/v1 --sandbox-backend local --num-tasks 1
+  --api-base-url https://api.swissai.svc.cscs.ch/v1 --sandbox-backend local --limit 1
 ```

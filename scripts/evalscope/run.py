@@ -98,7 +98,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--model", default=None, help="Served model name (not with --gold).")
     p.add_argument("--api-base-url", default=None, help="OpenAI-compatible /v1 root (not with --gold).")
     p.add_argument("--gold", action="store_true", help="Score the reference patches instead of running a model.")
-    p.add_argument("--work-dir", required=True)
+    p.add_argument("--out-dir", required=True)
     p.add_argument("--sandbox", choices=("docker", "k8s", "opensandbox"), default="docker")
     p.add_argument("--sandbox-config", default="{}", help="JSON merged into every sandbox's config.")
     p.add_argument(
