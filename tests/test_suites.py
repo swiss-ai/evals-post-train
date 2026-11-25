@@ -24,7 +24,7 @@ JUDGE_BASE = "http://helper:8080/v1"  # where it is reached (--helper-url), what
 
 def with_inspect_row(suite):
     """A copy of `suite` with one inspect row first: the shipped chonk_sft has none (GPQA Diamond runs in lm-eval now),
-    so the inspect paths of suites.py are exercised with this probe."""
+    so the inspect paths of suites/flags.py are exercised with this probe."""
     suite = copy.deepcopy(suite)
     suite["benchmarks"].insert(0, {"label": "Inspect probe", "task": "gpqa_diamond", "framework": "inspect",
                                    "repeats": {"n": 4, "via": "task"}, "metric": {"label": "mean@4", "key": None}})
