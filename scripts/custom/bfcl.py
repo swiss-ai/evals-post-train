@@ -8,7 +8,7 @@ only knows the models of its own registry) with the package's OpenAI chat-comple
 mode. The two patches below keep that handler from dropping the sampling and thinking settings and from replaying
 null fields to vLLM; everything else is the package's.
 
-    python -m scripts.custom.bfcl --version v3 --model NAME --api-base-url URL --workdir DIR
+    python -m scripts.custom.bfcl --version v3 --model NAME --api-base-url URL --out-dir DIR
 
 BFCL_PROJECT_ROOT is the workdir: results go to <workdir>/result, scores to <workdir>/score.
 """
@@ -52,11 +52,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--version", required=True, choices=sorted(CATEGORIES))
     p.add_argument("--model", required=True, help="The served model name.")
     p.add_argument("--api-base-url", help="OpenAI-compatible endpoint (its /v1 root); else OPENAI_BASE_URL.")
-    p.add_argument("--workdir", required=True, type=Path)
+    p.add_argument("--out-dir", required=True, type=Path)
     p.add_argument("--llm-args", default="{}", help="JSON of sampling and thinking settings (litellm style).")
     p.add_argument("--request-timeout", type=float, default=3600, help="Seconds per request (the SDK's own is 600).")
     p.add_argument("--num-threads", type=int, default=32)
-    p.add_argument("--num-tasks", type=int, help="Only the first n entries of each category (a smoke test).")
+    p.add_argument("--limit", dest="num_tasks", type=int, help="Only the first n entries of each category (a smoke test).")
     p.add_argument("--test-category", action="append", help="Replace the version's categories (repeatable).")
     return p.parse_args(argv)
 
@@ -288,7 +288,7 @@ def generation_args(registry: str, categories: list[str], temperature: float, nu
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     started = time.time()
-    workdir = args.workdir.resolve()
+    workdir = args.out_dir.resolve()
     workdir.mkdir(parents=True, exist_ok=True)
     # Read when bfcl_eval is imported: where results, scores and the ids file live.
     os.environ["BFCL_PROJECT_ROOT"] = str(workdir)

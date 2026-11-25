@@ -12,7 +12,7 @@
 # downloaded, and --git-ref must name that ref. Elsewhere the ref is checked out into a cache keyed by its
 # commit and `uv sync --frozen --extra knowledge` installs upstream's locked dependencies into the
 # checkout's own .venv (Python 3.12); that needs git, uv and network access the first time a commit is used.
-# Either way tau2 reads its data through a writable view in --workdir and writes its results there.
+# Either way tau2 reads its data through a writable view in --out-dir and writes its results there.
 #
 # Usage:
 #   scripts/custom/run_tau2_bench.sh --domain <domain> --model <model> [--api-base-url <url>] [options]
@@ -60,7 +60,7 @@
 #                               those configs (openai_embeddings*, ...) are available by naming them.
 #   --num-trials <n>           Trials per task (default: 1). The summary prints pass^k for k = 1..n.
 #   --max-steps <n>            Max steps per trial (default: 100, tau2's).
-#   --num-tasks <n>            Only the first n tasks (a smoke test).
+#   --limit <n>            Only the first n tasks (a smoke test).
 #   --seed <n>                 Random seed (default: 300, tau2's).
 #   --max-concurrency <n>      Parallel trials (default: 4).
 #   --temperature V, --top-p V, --top-k V, --min-p V, --repetition-penalty V
@@ -78,14 +78,14 @@
 #   --save-to <name>           tau2's run name, the results subdirectory (default: <domain>-<date and time>, a new
 #                               run each time). Giving the name of an earlier run resumes it (--auto-resume):
 #                               only with the same domain, model and options, else tau2 refuses.
-#   --workdir <path>           Where the run's data view and results go (default: a temp dir under /tmp, which
+#   --out-dir <path>           Where the run's data view and results go (default: a temp dir under /tmp, which
 #                               a job's container loses: give a path on storage you keep).
 #   --cache-dir <path>         Outside the image: where checkouts live (default:
 #                               ${EVAL_ENV_CACHE_ROOT:-$SCRATCH/eval-envs}/tau2-upstream,
 #                               ~/.cache/evals-post-train/eval-envs/tau2-upstream without $SCRATCH).
 #   -- <extra args>             Forwarded verbatim to `tau2 run` (e.g. a domain's own options).
 #
-# Results: <--workdir>/tau2-data/simulations/<--save-to>/results.json (every simulation, reward and
+# Results: <--out-dir>/tau2-data/simulations/<--save-to>/results.json (every simulation, reward and
 # messages); this script prints avg_reward and pass^k computed from it. tau2 gives up on a task after 4 attempts
 # (an infrastructure error, no reward) and leaves it out of its own metrics. The cause is in the task's info
 # (error, error_type, error_traceback): when the model under test is to blame (it replied with neither content nor
@@ -96,7 +96,7 @@
 #
 # Example (retail smoke test against a CSCS-served model):
 #   scripts/custom/run_tau2_bench.sh --domain retail --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
-#     --api-base-url https://api.swissai.svc.cscs.ch/v1 --num-tasks 2
+#     --api-base-url https://api.swissai.svc.cscs.ch/v1 --limit 2
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
@@ -148,7 +148,7 @@ while (( $# > 0 )); do
         --retrieval-config) RETRIEVAL_CONFIG=$2; shift 2 ;;
         --num-trials) NUM_TRIALS=$2; shift 2 ;;
         --max-steps) MAX_STEPS=$2; shift 2 ;;
-        --num-tasks) NUM_TASKS=$2; shift 2 ;;
+        --limit) NUM_TASKS=$2; shift 2 ;;
         --seed) SEED=$2; shift 2 ;;
         --max-concurrency) MAX_CONCURRENCY=$2; shift 2 ;;
         --temperature|--top-p|--top-k|--min-p|--repetition-penalty)
@@ -163,7 +163,7 @@ while (( $# > 0 )); do
         --repo) TAU_REPO=$2; shift 2 ;;
         --save-to) SAVE_TO=$2; shift 2 ;;
         --cache-dir) CACHE_DIR=$2; shift 2 ;;
-        --workdir) WORKDIR=$2; shift 2 ;;
+        --out-dir) WORKDIR=$2; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         --) shift; EXTRA_ARGS+=("$@"); break ;;
         *) die "Unknown argument: $1 (see --help)" ;;
@@ -324,7 +324,7 @@ fi
 WORKDIR=${WORKDIR:-"$(mktemp -d /tmp/tau2-custom.XXXXXX)"}
 VIEW="$WORKDIR/tau2-data"
 mkdir -p "$VIEW"
-VIEW=$(cd "$VIEW" && pwd)  # absolute: tau2 runs from the checkout, so a relative --workdir would point elsewhere
+VIEW=$(cd "$VIEW" && pwd)  # absolute: tau2 runs from the checkout, so a relative --out-dir would point elsewhere
 for entry in "$CHECKOUT"/data/* "$CHECKOUT"/data/.[!.]*; do
     [[ -e "$entry" && "$(basename "$entry")" != simulations ]] && ln -sfn "$entry" "$VIEW/"
 done

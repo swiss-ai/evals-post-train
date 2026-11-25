@@ -350,7 +350,7 @@ class InstallTest(unittest.TestCase):
 class TaskConfigTest(unittest.TestCase):
     def _cfg(self, benchmark, *extra):
         args = run.parse_args(
-            ["--benchmark", benchmark, "--model", "m", "--api-base-url", "http://x/v1", "--work-dir", "/w", *extra]
+            ["--benchmark", benchmark, "--model", "m", "--api-base-url", "http://x/v1", "--out-dir", "/w", *extra]
         )
         names = run.selected_benchmarks(args.benchmark)
         return run.build_task_config(args, names, run.resolved_revisions(names, args.dataset_revision))
@@ -487,13 +487,13 @@ class TaskConfigTest(unittest.TestCase):
             run.resolved_revisions(["swe_bench"], ["swe_bench_pro=abc"])
 
     def test_gold_needs_no_model(self):
-        args = run.parse_args(["--benchmark", "swe_bench", "--work-dir", "/w", "--gold"])
+        args = run.parse_args(["--benchmark", "swe_bench", "--out-dir", "/w", "--gold"])
         cfg = run.build_task_config(args, ["swe_bench"], run.resolved_revisions(["swe_bench"], []))
         self.assertEqual((cfg["model"], cfg["eval_type"]), ("gold", "mock_llm"))
         self.assertNotIn("api_url", cfg)
         self.assertNotIn("api_key", cfg)
         with self.assertRaises(SystemExit), mock.patch("sys.stderr"):
-            run.parse_args(["--benchmark", "swe_bench", "--work-dir", "/w", "--model", "m"])
+            run.parse_args(["--benchmark", "swe_bench", "--out-dir", "/w", "--model", "m"])
 
 
 class ShellWrapperTest(unittest.TestCase):
@@ -532,7 +532,7 @@ class ShellWrapperTest(unittest.TestCase):
             completed, argv = self._run(
                 "--benchmark", "swe_bench_pro",
                 "--model", "org/m", "--api-base-url", "http://host:8000", "--sandbox", "k8s",
-                "--limit", "2", "--extra-param", "eval_timeout=7200", "--work-dir", work,
+                "--limit", "2", "--extra-param", "eval_timeout=7200", "--out-dir", work,
                 env={"TARGET_API_KEY": "k"},
             )
         self.assertEqual(completed.returncode, 0, completed.stderr)
@@ -546,7 +546,7 @@ class ShellWrapperTest(unittest.TestCase):
 
     def test_gold_is_not_uploaded(self):
         with tempfile.TemporaryDirectory() as work:
-            completed, argv = self._run("--benchmark", "swe_bench", "--gold", "--wandb-entity", "e", "--work-dir", work,
+            completed, argv = self._run("--benchmark", "swe_bench", "--gold", "--wandb-entity", "e", "--out-dir", work,
                                         env={"WANDB_API_KEY": "k"})
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("W&B upload: off (--gold", completed.stdout)
@@ -554,7 +554,7 @@ class ShellWrapperTest(unittest.TestCase):
 
     def test_gold(self):
         with tempfile.TemporaryDirectory() as work:
-            completed, argv = self._run("--benchmark", "swe_bench", "--gold", "--work-dir", work)
+            completed, argv = self._run("--benchmark", "swe_bench", "--gold", "--out-dir", work)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("--gold", argv)
         self.assertNotIn("--model", argv)
@@ -570,7 +570,7 @@ if __name__ == "__main__":
 
 class LiveCodeBenchTest(unittest.TestCase):
     def _cfg(self, *extra, benchmark="live_code_bench"):
-        args = run.parse_args(["--benchmark", benchmark, "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", *extra])
+        args = run.parse_args(["--benchmark", benchmark, "--out-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", *extra])
         names = run.selected_benchmarks(benchmark)
         return run.build_task_config(args, names, run.resolved_revisions(names, args.dataset_revision))
 
@@ -602,7 +602,7 @@ class LiveCodeBenchTest(unittest.TestCase):
             run.dataset_hub(["swe_bench", "live_code_bench"])
 
     def test_gold_and_k8s_are_refused(self):
-        base = ["--benchmark", "live_code_bench", "--work-dir", "/w"]
+        base = ["--benchmark", "live_code_bench", "--out-dir", "/w"]
         with mock.patch.object(run, "swe_bench_scoring", create=True), self.assertRaises(SystemExit) as gold:
             run.main([*base, "--gold"])
         self.assertIn("reference solutions", str(gold.exception))
@@ -613,7 +613,7 @@ class LiveCodeBenchTest(unittest.TestCase):
 
 class CompletionsFlagTest(unittest.TestCase):
     def _cfg(self, *extra):
-        args = run.parse_args(["--benchmark", "live_code_bench", "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", *extra])
+        args = run.parse_args(["--benchmark", "live_code_bench", "--out-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", *extra])
         return run.build_task_config(args, ["live_code_bench"], run.resolved_revisions(["live_code_bench"], []))
 
     def test_default_is_the_chat_backend(self):
@@ -634,5 +634,5 @@ class CompletionsFlagTest(unittest.TestCase):
 
     def test_completions_is_refused_for_the_swe_benchmarks(self):
         with self.assertRaises(SystemExit) as refused:
-            run.main(["--benchmark", "swe_bench", "--work-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", "--completions"])
+            run.main(["--benchmark", "swe_bench", "--out-dir", "/w", "--model", "m", "--api-base-url", "http://x/v1", "--completions"])
         self.assertIn("only live_code_bench", str(refused.exception))

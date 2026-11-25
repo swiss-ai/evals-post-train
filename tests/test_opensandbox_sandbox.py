@@ -57,9 +57,9 @@ class RunnerTest(unittest.TestCase):
 
     def test_opensandbox_needs_a_key(self):
         with mock.patch.dict(os.environ, {}, clear=True), self.assertRaises(SystemExit):
-            run.parse_args(["--benchmark", "swe_bench", "--gold", "--work-dir", "w", "--sandbox", "opensandbox"])
+            run.parse_args(["--benchmark", "swe_bench", "--gold", "--out-dir", "w", "--sandbox", "opensandbox"])
         with mock.patch.dict(os.environ, {"OPENSANDBOX_API_KEY": "k"}, clear=True):
-            args = run.parse_args(["--benchmark", "swe_bench", "--gold", "--work-dir", "w", "--sandbox", "opensandbox"])
+            args = run.parse_args(["--benchmark", "swe_bench", "--gold", "--out-dir", "w", "--sandbox", "opensandbox"])
         self.assertEqual(args.sandbox, "opensandbox")
 
     def test_opensandbox_sandboxes_get_8g_unless_given(self):
@@ -306,12 +306,12 @@ class AgentNetworkTest(unittest.TestCase):
         hosts = allowed_hosts("swe_bench")
 
         def args(*extra):
-            return run.parse_args(["--benchmark", "swe_bench", "--work-dir", "w", "--model", "m",
+            return run.parse_args(["--benchmark", "swe_bench", "--out-dir", "w", "--model", "m",
                                    "--api-base-url", "https://api.example.ch/v1", *extra])
 
         self.assertEqual(run.agent_allowed_hosts(args()), hosts + ("api.example.ch",))
         self.assertIsNone(run.agent_allowed_hosts(args("--agent-network", "public")))
-        gold = run.parse_args(["--benchmark", "swe_bench", "--work-dir", "w", "--gold"])
+        gold = run.parse_args(["--benchmark", "swe_bench", "--out-dir", "w", "--gold"])
         self.assertEqual(run.agent_allowed_hosts(gold), hosts)
 
     def test_public_without_an_allowlist(self):

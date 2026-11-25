@@ -131,7 +131,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--api-base-url", help="OpenAI-compatible endpoint (/v1 root).")
     p.add_argument("--gold", action="store_true", help="Harbor's oracle agent instead of a model.")
     p.add_argument("--agent", default="terminus-2", help="Harbor agent (default: terminus-2).")
-    p.add_argument("--work-dir", required=True)
+    p.add_argument("--out-dir", required=True)
     p.add_argument("--sandbox", choices=tuple(ENVIRONMENTS), required=True)
     p.add_argument("--limit", type=float, help="A random subset of n tasks per benchmark (seeded, 42); a fraction below 1 is a share of the tasks.")
     p.add_argument("--task", action="append", default=[], help="Task name (glob) to include; repeatable.")
@@ -371,7 +371,7 @@ def harbor_command(args: argparse.Namespace, name: str, jobs_dir: Path) -> List[
     cmd = [harbor_bin(), "run", "-o", str(jobs_dir), "--job-name", name, "-y", "-q"]
     if "adapter" in spec:
         dataset = download_dataset(*spec["hf_dataset"]) if "hf_dataset" in spec else None
-        cmd += ["-p", str(generate_adapter_tasks(spec["adapter"], Path(args.work_dir), args.limit, args.task, dataset))]
+        cmd += ["-p", str(generate_adapter_tasks(spec["adapter"], Path(args.out_dir), args.limit, args.task, dataset))]
     else:
         patches = task_patches(args, name)
         # A limit without --task is a random subset: of a local copy of the tasks, since Harbor's
@@ -385,7 +385,7 @@ def harbor_command(args: argparse.Namespace, name: str, jobs_dir: Path) -> List[
                 for one in patches:
                     one(tasks)
 
-            cmd += ["-p", str(patched_tasks(spec["dataset"], patch, Path(args.work_dir) / "tasks" / name))]
+            cmd += ["-p", str(patched_tasks(spec["dataset"], patch, Path(args.out_dir) / "tasks" / name))]
         else:
             cmd += ["-d", spec["dataset"]]
         for pattern in args.task:
@@ -518,7 +518,7 @@ def harbor_version() -> Optional[str]:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
-    work_dir = Path(args.work_dir)
+    work_dir = Path(args.out_dir)
     jobs_dir = work_dir / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     env = harbor_env(args)

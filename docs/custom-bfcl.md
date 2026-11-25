@@ -4,7 +4,7 @@
 
 ```bash
 scripts/custom/run_bfcl.sh --version v3 --model <served name> --api-base-url https://api.swissai.svc.cscs.ch/v1 \
-  --workdir logs/bfcl/<name>-v3 --reasoning-effort high
+  --out-dir logs/bfcl/<name>-v3 --reasoning-effort high
 ```
 
 ## What runs
@@ -28,7 +28,7 @@ bfcl-eval sends a temperature of 0.001 and nothing else. The sampling flags (`--
 
 **Traces.** `<workdir>/result/` holds every entry's full trace: the model's output (the multi-turn turns, tool calls and their results) and, in each entry's `inference_log`, the fully formatted input of every model call (the whole history and the tool definitions), because the run passes `include_input_log` to bfcl-eval. That makes the result files much larger than bfcl-eval's default: about ten times by an estimate from the recorded input tokens (one multi-turn file, 200 entries and 2,795 model calls: 11 MB without the input log, roughly 120 to 170 MB with it), so a run needs a few hundred MB. It has not been measured on a real run. None of it is uploaded to W&B.
 
-Rerunning with the same `--workdir` resumes: bfcl-eval skips the entries it already has. `--num-tasks n` runs the first n entries of each category (a smoke test); its scores cover that subset and are not the leaderboard's.
+Rerunning with the same `--out-dir` resumes: bfcl-eval skips the entries it already has. `--limit n` runs the first n entries of each category (a smoke test); its scores cover that subset and are not the leaderboard's.
 
 ## Samples that fail in inference
 

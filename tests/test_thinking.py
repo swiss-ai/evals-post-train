@@ -130,7 +130,7 @@ class HarborThinkingTest(unittest.TestCase):
     def _aks(self, *extra):
         args = harbor_run.parse_args(
             ["--benchmark", "terminal_bench_2", "--model", "org/m", "--api-base-url", "https://x/v1",
-             "--work-dir", "w", "--sandbox", "k8s", *extra]
+             "--out-dir", "w", "--sandbox", "k8s", *extra]
         )
         cmd = harbor_run.harbor_command(args, "terminal_bench_2", Path("w/jobs"))
         return [cmd[i + 1] for i, part in enumerate(cmd) if part == "--ak"]
@@ -166,7 +166,7 @@ class HarborThinkingTest(unittest.TestCase):
         for extra in (["--agent", "mini-swe-agent", "--reasoning-effort", "low"], ["--gold", "--no-enable-thinking"]):
             args = harbor_run.parse_args(
                 ["--benchmark", "terminal_bench_2", "--model", "m", "--api-base-url", "https://x/v1",
-                 "--work-dir", "w", "--sandbox", "k8s", *extra]
+                 "--out-dir", "w", "--sandbox", "k8s", *extra]
             )
             with self.assertRaises(SystemExit):
                 harbor_run.agent_kwargs(args)
@@ -179,7 +179,7 @@ class HarborThinkingTest(unittest.TestCase):
 class EvalScopeThinkingTest(unittest.TestCase):
     def _generation_config(self, *extra):
         args = evalscope_run.parse_args(
-            ["--benchmark", "swe_bench", "--model", "m", "--api-base-url", "http://x/v1", "--work-dir", "/w", *extra]
+            ["--benchmark", "swe_bench", "--model", "m", "--api-base-url", "http://x/v1", "--out-dir", "/w", *extra]
         )
         return evalscope_run.generation_config(args)
 

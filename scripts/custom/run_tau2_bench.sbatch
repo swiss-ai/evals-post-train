@@ -20,9 +20,9 @@
 #   sbatch scripts/custom/run_tau2_bench.sbatch <run_tau2_bench.sh args...>
 # e.g.
 #   sbatch scripts/custom/run_tau2_bench.sbatch --domain retail --model chonk \
-#     --api-base-url https://<server>/v1 --num-tasks 2
+#     --api-base-url https://<server>/v1 --limit 2
 # All arguments are forwarded verbatim; `bash scripts/custom/run_tau2_bench.sh --help` lists them.
-# Without --workdir the results go to logs/tau2/<job id>/ in the checkout (the container's /tmp is lost
+# Without --out-dir the results go to logs/tau2/<job id>/ in the checkout (the container's /tmp is lost
 # with the job): <workdir>/tau2-data/simulations/<run>/results.json.
 #
 # Keys come from the environment, else scripts/secrets.env (scripts/common/secrets.sh):
@@ -56,7 +56,7 @@ srun -n 1 --mpi=pmix -ul --environment="$environment" \
         set -euo pipefail
         cd "$SLURM_SUBMIT_DIR"
         unset SSL_CERT_FILE
-        exec bash scripts/custom/run_tau2_bench.sh --workdir "logs/tau2/$SLURM_JOB_ID" "$@"
+        exec bash scripts/custom/run_tau2_bench.sh --out-dir "logs/tau2/$SLURM_JOB_ID" "$@"
     ' -- "$@"
 
 echo "END TIME: $(date)"
