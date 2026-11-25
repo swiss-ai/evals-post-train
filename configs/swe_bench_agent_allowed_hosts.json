@@ -1,0 +1,5 @@
+{
+  "python": ["pypi.org", "files.pythonhosted.org", "conda.anaconda.org", "repo.anaconda.com"],
+  "system_packages": ["deb.debian.org", "security.debian.org", "archive.ubuntu.com", "security.ubuntu.com"],
+  "javascript": ["registry.npmjs.org", "registry.yarnpkg.com"]
+}

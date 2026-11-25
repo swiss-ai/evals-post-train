@@ -13,22 +13,16 @@ PyPI, NodeBB on npm, ...), whose source contains the fix. The Go module proxy is
 that reason (it serves any GitHub repository at any commit); PyPI and npm are kept because
 agents need them routinely.
 
+The hosts: configs/swe_bench_agent_allowed_hosts.json.
 Harbor: scripts/harbor/task_patches.py (patch_swe_bench_agent_egress). EvalScope:
 scripts/common/opensandbox_sandbox.py (install(agent_allowed_hosts=...)).
 """
 
-AGENT_ALLOWED_HOSTS = (
-    # Python
-    "pypi.org",
-    "files.pythonhosted.org",
-    "conda.anaconda.org",
-    "repo.anaconda.com",
-    # System packages (the SWE-bench images are Debian and Ubuntu based)
-    "deb.debian.org",
-    "security.debian.org",
-    "archive.ubuntu.com",
-    "security.ubuntu.com",
-    # JavaScript (SWE-bench Pro)
-    "registry.npmjs.org",
-    "registry.yarnpkg.com",
-)
+import json
+from pathlib import Path
+
+HOSTS_FILE = Path(__file__).resolve().parents[2] / "configs" / "swe_bench_agent_allowed_hosts.json"
+
+# The hosts of every group in the file: Python, system packages (the SWE-bench images are Debian
+# and Ubuntu based), JavaScript (SWE-bench Pro).
+AGENT_ALLOWED_HOSTS = tuple(host for hosts in json.loads(HOSTS_FILE.read_text()).values() for host in hosts)
