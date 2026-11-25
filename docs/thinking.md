@@ -30,7 +30,7 @@ servers differ in which one they read. The on/off switch is a template kwarg onl
 
 lm-eval renders Apertus 2 itself (`--chat-format apertus2`). The other frameworks send ordinary chat
 requests, so for them the **server** has to render the Apertus 2 format and split the reasoning from
-the reply. That is the vLLM plugin of `apertus-common` (PRs #5 and #7, merged), the same commit
+the reply. That is the vLLM plugin of `apertus-common` (PRs #5, #7 and #9, merged), the same commit
 `requirements/apertus2.txt` pins for lm-eval. Drop this section if the server image ships the plugin.
 
 1. **Serve the model with the plugin.** The `vllm-apertus2-cuda` image does not contain it, so every
@@ -40,7 +40,7 @@ the reply. That is the vLLM plugin of `apertus-common` (PRs #5 and #7, merged), 
 
    ```bash
    sml advanced ... \
-     --pre-launch-cmds "pip install -q --no-deps --force-reinstall --ignore-requires-python 'git+https://github.com/swiss-ai/apertus-common.git@fa5f4568515bf237885472bbfa6dff98682e135b'" \
+     --pre-launch-cmds "pip install -q --no-deps --force-reinstall --ignore-requires-python 'git+https://github.com/swiss-ai/apertus-common.git@ebb38ae9a1d0a5b1f361853c4585be8abe81c488'" \
      --framework-args "--model <checkpoint> ... --tokenizer-mode apertus2 --reasoning-parser apertus2 \
        --enable-auto-tool-choice --tool-call-parser apertus2"
    ```
