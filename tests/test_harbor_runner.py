@@ -201,14 +201,16 @@ class HarborCommandTest(unittest.TestCase):
             Path(cmd[cmd.index("-o") + 1], "swebench-verified").mkdir(parents=True)
 
         for name in ("swe_bench", "swe_bench_pro"):
-            self.assertTrue(run.BENCHMARKS[name]["agent_allowlist"])
+            self.assertEqual(run.BENCHMARKS[name]["agent_allowlist"], "swe_bench")
         with tempfile.TemporaryDirectory() as w:
             args = run.parse_args(["--benchmark", "swe_bench", "--gold", "--work-dir", w, "--sandbox", "docker"])
             self.assertEqual(args.agent_network, "allowlist")
-            self.assertEqual(run.task_patches(args, "swe_bench"), [task_patches.patch_swe_bench_agent_egress])
+            self.assertEqual([p.__name__ for p in run.task_patches(args, "swe_bench")], ["patch_agent_egress"])
             with mock.patch.object(run.subprocess, "run", side_effect=download), \
-                    mock.patch.object(run, "patch_swe_bench_agent_egress") as egress:
+                    mock.patch.object(run, "agent_egress_patch", return_value=mock.Mock(__name__="patch_agent_egress")) as make:
                 cmd = run.harbor_command(args, "swe_bench", Path(w, "jobs"))
+            egress = make.return_value
+            make.assert_called_with("swe_bench")
             egress.assert_called_once_with(Path(w, "tasks", "swe_bench", "swebench-verified"))
             self.assertNotIn("-d", cmd)
             public = run.parse_args(["--benchmark", "swe_bench", "--gold", "--work-dir", w, "--sandbox", "docker",
@@ -316,8 +318,9 @@ class TaskPatchesTest(unittest.TestCase):
     def test_swe_bench_agent_phase_is_restricted_to_package_indexes(self):
         import tomllib
 
-        from scripts.common.swe_bench_egress import AGENT_ALLOWED_HOSTS
+        from scripts.common.agent_egress import allowed_hosts
 
+        hosts = allowed_hosts("swe_bench")
         published = (
             '[metadata]\nauthor_name = "unknown"\n\n[verifier]\ntimeout_sec = 3000\n\n'
             "[agent]\n# Set to same as verifier\ntimeout_sec = 3000\n\n"
@@ -327,10 +330,10 @@ class TaskPatchesTest(unittest.TestCase):
             toml = Path(d, "django__django-11099", "task.toml")
             toml.parent.mkdir()
             toml.write_text(published)
-            task_patches.patch_swe_bench_agent_egress(Path(d))
+            task_patches.agent_egress_patch("swe_bench")(Path(d))
             config = tomllib.loads(toml.read_text())
             self.assertEqual(config["agent"]["network_mode"], "allowlist")
-            self.assertEqual(config["agent"]["allowed_hosts"], list(AGENT_ALLOWED_HOSTS))
+            self.assertEqual(config["agent"]["allowed_hosts"], list(hosts))
             self.assertEqual(config["agent"]["timeout_sec"], 3000)
             # Setup and the verifier keep the published (public) policy.
             self.assertNotIn("network_mode", config["environment"])
@@ -342,10 +345,12 @@ class TaskPatchesTest(unittest.TestCase):
                 self.assertEqual(policy.network_mode, NetworkMode.ALLOWLIST)
             # A task that already sets a policy is not overridden blindly.
             with self.assertRaises(ValueError):
-                task_patches.patch_swe_bench_agent_egress(Path(d))
-        self.assertNotIn("github.com", AGENT_ALLOWED_HOSTS)
-        self.assertNotIn("proxy.golang.org", AGENT_ALLOWED_HOSTS)
-        self.assertFalse(any("*" in host for host in AGENT_ALLOWED_HOSTS))  # k8s NetworkPolicies too
+                task_patches.agent_egress_patch("swe_bench")(Path(d))
+        self.assertNotIn("github.com", hosts)
+        self.assertNotIn("proxy.golang.org", hosts)
+        self.assertFalse(any("*" in host for host in hosts))  # k8s NetworkPolicies too
+        with self.assertRaises(KeyError):
+            allowed_hosts("no_such_list")
 
     def test_aider_polyglot_runs_every_test(self):
         with tempfile.TemporaryDirectory() as d:

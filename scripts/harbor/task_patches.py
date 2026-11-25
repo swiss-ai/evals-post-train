@@ -8,8 +8,9 @@ of running unpatched.
 import json
 import re
 from pathlib import Path
+from typing import Callable
 
-from scripts.common.swe_bench_egress import AGENT_ALLOWED_HOSTS
+from scripts.common.agent_egress import allowed_hosts
 
 
 def _replace(path: Path, old: str, new: str) -> None:
@@ -61,17 +62,21 @@ def patch_aider_polyglot(dataset_dir: Path) -> None:
             _sub_all((task / "tests").rglob("*.java"), r'@Disabled(\("[^"]*"\))?', "")
 
 
-def patch_swe_bench_agent_egress(dataset_dir: Path) -> None:
-    """The agent phase may only reach package indexes (scripts/common/swe_bench_egress.py), not
-    the code hosts that have each task's fix. The published SWE-bench tasks set no network
-    policy, so the agent had open internet; the environment's setup and the verifier keep it.
-    Harbor switches the sandbox's policy around the agent phase (docker, k8s and opensandbox
-    all support that)."""
-    tomls = sorted(dataset_dir.glob("*/task.toml"))
-    if not tomls:
-        raise ValueError(f"no tasks in {dataset_dir}")
-    hosts = ", ".join(json.dumps(host) for host in AGENT_ALLOWED_HOSTS)
-    for toml in tomls:
-        if "network_mode" in toml.read_text():
-            raise ValueError(f"{toml}: already sets a network policy; check it before overriding")
-        _replace(toml, "[agent]\n", f'[agent]\nnetwork_mode = "allowlist"\nallowed_hosts = [{hosts}]\n')
+def agent_egress_patch(allowlist: str) -> Callable[[Path], None]:
+    """The patch that limits the agent phase to the hosts of `allowlist` (configs/agent_allowlists.json).
+
+    The published SWE-bench tasks set no network policy, so the agent had open internet; the
+    environment's setup and the verifier keep it. Harbor switches the sandbox's policy around the
+    agent phase (docker, k8s and opensandbox all support that)."""
+    hosts = ", ".join(json.dumps(host) for host in allowed_hosts(allowlist))
+
+    def patch_agent_egress(dataset_dir: Path) -> None:
+        tomls = sorted(dataset_dir.glob("*/task.toml"))
+        if not tomls:
+            raise ValueError(f"no tasks in {dataset_dir}")
+        for toml in tomls:
+            if "network_mode" in toml.read_text():
+                raise ValueError(f"{toml}: already sets a network policy; check it before overriding")
+            _replace(toml, "[agent]\n", f'[agent]\nnetwork_mode = "allowlist"\nallowed_hosts = [{hosts}]\n')
+
+    return patch_agent_egress

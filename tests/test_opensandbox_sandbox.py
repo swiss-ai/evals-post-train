@@ -301,16 +301,18 @@ class AgentNetworkTest(unittest.TestCase):
         self.assertEqual(self._created({})["network_policy"].default_action, "allow")
 
     def test_the_runner_allows_package_indexes_and_the_model_endpoint(self):
-        from scripts.common.swe_bench_egress import AGENT_ALLOWED_HOSTS
+        from scripts.common.agent_egress import allowed_hosts
+
+        hosts = allowed_hosts("swe_bench")
 
         def args(*extra):
             return run.parse_args(["--benchmark", "swe_bench", "--work-dir", "w", "--model", "m",
                                    "--api-base-url", "https://api.example.ch/v1", *extra])
 
-        self.assertEqual(run.agent_allowed_hosts(args()), AGENT_ALLOWED_HOSTS + ("api.example.ch",))
+        self.assertEqual(run.agent_allowed_hosts(args()), hosts + ("api.example.ch",))
         self.assertIsNone(run.agent_allowed_hosts(args("--agent-network", "public")))
         gold = run.parse_args(["--benchmark", "swe_bench", "--work-dir", "w", "--gold"])
-        self.assertEqual(run.agent_allowed_hosts(gold), AGENT_ALLOWED_HOSTS)
+        self.assertEqual(run.agent_allowed_hosts(gold), hosts)
 
     def test_public_without_an_allowlist(self):
         created = self._created({opensandbox_sandbox.AGENT_ROLE_ENV: "agent"})

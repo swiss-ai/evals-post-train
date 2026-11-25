@@ -37,7 +37,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from scripts.harbor.task_patches import patch_aider_polyglot, patch_swe_bench_agent_egress
+from scripts.harbor.task_patches import agent_egress_patch, patch_aider_polyglot
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HARBOR_VERSION = "0.25.0"
@@ -52,13 +52,18 @@ OPENSANDBOX_KATA_DOMAIN = "opensandbox-kata.breithorn.svc.cscs.ch"  # = opensand
 # Our benchmark names -> the Harbor dataset. Registry datasets are pinned: legacy-registry
 # ones by version, Harbor Hub packages by content digest (what @latest resolved to when pinned).
 BENCHMARKS: Dict[str, Dict[str, Any]] = {
-    # agent_allowlist: the agent phase only reaches package indexes, not the code hosts with the
-    # fix (patch_swe_bench_agent_egress; --agent-network public turns it off).
-    "swe_bench": {"dataset": "swebench-verified@1.0", "about": "SWE-bench Verified, 500 tasks", "agent_allowlist": True},
+    # agent_allowlist: the name of the list in configs/agent_allowlists.json the agent phase is
+    # limited to, package indexes and not the code hosts with the fix (--agent-network public
+    # turns it off).
+    "swe_bench": {
+        "dataset": "swebench-verified@1.0",
+        "about": "SWE-bench Verified, 500 tasks",
+        "agent_allowlist": "swe_bench",
+    },
     "swe_bench_pro": {
         "dataset": "swebenchpro@1.0",
         "about": "SWE-bench Pro v1 (public test split), 731 tasks",
-        "agent_allowlist": True,
+        "agent_allowlist": "swe_bench",
     },
     "multi_swe_bench": {
         "adapter": "multi-swe-bench",
@@ -140,7 +145,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         choices=("allowlist", "public"),
         default="allowlist",
         help="SWE-bench Verified/Pro: the agent phase reaches only package indexes (allowlist, "
-        "the default; scripts/common/swe_bench_egress.py) or the whole internet (public, as the "
+        "the default; configs/agent_allowlists.json) or the whole internet (public, as the "
         "published tasks have it). Other benchmarks keep their own policies.",
     )
     args = p.parse_args(argv)
@@ -255,7 +260,7 @@ def task_patches(args: argparse.Namespace, name: str) -> List[Callable[[Path], N
     spec = BENCHMARKS[name]
     patches = [spec["patch_tasks"]] if "patch_tasks" in spec else []
     if spec.get("agent_allowlist") and args.agent_network == "allowlist":
-        patches.append(patch_swe_bench_agent_egress)
+        patches.append(agent_egress_patch(spec["agent_allowlist"]))
     return patches
 
 

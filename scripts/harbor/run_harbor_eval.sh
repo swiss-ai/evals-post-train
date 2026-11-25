@@ -73,7 +73,7 @@
 #                               reaches only package indexes (allowlist, the default), not GitHub
 #                               and the other hosts that have each task's fix, as SWE-bench's
 #                               leaderboard checklist asks; public is the published tasks' open
-#                               internet (scripts/common/swe_bench_egress.py).
+#                               internet (configs/agent_allowlists.json).
 #   --wandb-entity <entity>     W&B entity and project to upload the results to (also WANDB_ENTITY,
 #   --wandb-project <project>   WANDB_PROJECT; default apertus/e-p-t-pool): one
 #                               run named --name, per benchmark its reward (or verifier metrics),
