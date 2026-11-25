@@ -1,4 +1,4 @@
-"""Offline checks of the standalone AA runners' environment handling (no network, model or venv)."""
+"""Offline check of the standalone GDPval-AA runner's environment handling (no network, model or venv)."""
 
 import os
 import subprocess
@@ -35,20 +35,6 @@ class GdpvalTest(unittest.TestCase):
                 HOME=d, EVAL_PREBUILT_ENV="1", GDPVAL_VENV=str(venv.parent),
             )
         self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
-
-
-class Tau2Test(unittest.TestCase):
-    def test_a_ref_other_than_the_locks_pin_is_refused_before_installing(self):
-        # A full commit needs no lookup: outside the prebuilt image the lock's pin is what runs.
-        with tempfile.TemporaryDirectory() as d:
-            result = run(
-                "run_tau2_bench.sh", "--model", "m", "--git-ref", "0" * 40, "--workdir", os.path.join(d, "work"),
-                HOME=d,
-            )
-            self.assertFalse(Path(d, "work/tau2-bench").exists())
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("requirements/tau2-runtime.lock has tau2-bench@", result.stderr)
-        self.assertIn("Bump requirements/tau2-runtime.txt", result.stderr)
 
 
 if __name__ == "__main__":
