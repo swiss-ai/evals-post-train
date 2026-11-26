@@ -51,6 +51,13 @@ class RunArgsTest(unittest.TestCase):
             with mock.patch.dict(os.environ, {key: "k"}, clear=True):
                 run.parse_args(model)
 
+    def test_agent_env_reaches_harbor_as_ae(self):
+        args = run.parse_args(["--benchmark", "terminal_bench_2", "--model", "m", "--api-base-url", "http://h/v1",
+                               "--out-dir", "w", "--sandbox", "opensandbox", "--agent", "openhands",
+                               "--agent-env", "UV_EXCLUDE_NEWER=2026-01-20T00:00:00Z", "--agent-env", "A=b"])
+        cmd = run.harbor_command(args, "terminal_bench_2", Path("w/jobs"))
+        self.assertEqual([cmd[i + 1] for i, c in enumerate(cmd) if c == "--ae"], ["UV_EXCLUDE_NEWER=2026-01-20T00:00:00Z", "A=b"])
+
     def test_model_tunnel_is_for_in_sandbox_agents_on_opensandbox(self):
         base = ["--benchmark", "swe_bench", "--model", "m", "--api-base-url", "http://10.0.0.5:8080/v1", "--out-dir", "w",
                 "--chisel-dir", "/c"]

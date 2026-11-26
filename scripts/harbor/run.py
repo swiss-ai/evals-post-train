@@ -139,6 +139,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--attempts", type=int, default=1, help="Attempts per task (Harbor's -k).")
     p.add_argument("--timeout-multiplier", type=float, default=1.0)
     p.add_argument("--agent-kwarg", action="append", default=[], help="Harbor --ak key=value; repeatable.")
+    p.add_argument(
+        "--agent-env",
+        action="append",
+        default=[],
+        help="Harbor --ae KEY=VALUE; repeatable. An environment variable for the agent's sandbox, installation "
+        "included (e.g. UV_EXCLUDE_NEWER=2026-01-20T00:00:00Z, to resolve an in-sandbox agent's dependencies "
+        "as of that date).",
+    )
     for flag in ("temperature", "top-p", "top-k", "min-p", "repetition-penalty"):
         p.add_argument("--" + flag, default=None, help="Sampling setting of the model, or 'none' to leave it out.")
     p.add_argument("--sampling-profile", default=None, help="Profile of the sampling config (e.g. greedy).")
@@ -399,6 +407,8 @@ def harbor_command(args: argparse.Namespace, name: str, jobs_dir: Path) -> List[
     cmd += ["-n", str(args.max_concurrency), "-k", str(args.attempts), "--timeout-multiplier", str(args.timeout_multiplier)]
     for kv in agent_kwargs(args):
         cmd += ["--ak", kv]
+    for kv in args.agent_env:
+        cmd += ["--ae", kv]
     cmd += ["--env", ENVIRONMENTS[args.sandbox]]
     return cmd
 
