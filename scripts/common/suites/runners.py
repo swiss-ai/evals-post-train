@@ -57,7 +57,8 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
     (lm_eval's logs already sit under the project). If the suite has a `results_dir`, results go to
     <results_dir>/<framework>/<served name>/<task> (lm_eval: --logs-root <results_dir>/lm_eval) and the sbatch
     runners' Slurm files to <results_dir>/slurm/%x_%j.{out,err}; the caller creates that directory.
-    A flag may carry `{helper_url}`: the endpoint of a helper model launched alongside (tau2's simulated user and judge), which the caller names with helper_url.
+    A flag may carry `{helper_url}`: the endpoint of a helper model launched alongside (tau2's simulated user
+    and judge), which the caller names with helper_url.
     Returns [{"setup", "label", "framework", "argv"}]."""
     scheduling = {"flags": (["--qos", qos] if qos else []) + (["--partition", partition] if partition else []),
                   "equals": ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])}
