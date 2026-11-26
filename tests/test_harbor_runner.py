@@ -51,6 +51,13 @@ class RunArgsTest(unittest.TestCase):
             with mock.patch.dict(os.environ, {key: "k"}, clear=True):
                 run.parse_args(model)
 
+    def test_agent_env_reaches_harbor_as_ae(self):
+        args = run.parse_args(["--benchmark", "terminal_bench_2", "--model", "m", "--api-base-url", "http://h/v1",
+                               "--out-dir", "w", "--sandbox", "opensandbox", "--agent", "openhands",
+                               "--agent-env", "UV_EXCLUDE_NEWER=2026-01-20T00:00:00Z", "--agent-env", "A=b"])
+        cmd = run.harbor_command(args, "terminal_bench_2", Path("w/jobs"))
+        self.assertEqual([cmd[i + 1] for i, c in enumerate(cmd) if c == "--ae"], ["UV_EXCLUDE_NEWER=2026-01-20T00:00:00Z", "A=b"])
+
     def test_model_tunnel_is_for_in_sandbox_agents_on_opensandbox(self):
         base = ["--benchmark", "swe_bench", "--model", "m", "--api-base-url", "http://10.0.0.5:8080/v1", "--out-dir", "w",
                 "--chisel-dir", "/c"]
@@ -71,6 +78,18 @@ class RunArgsTest(unittest.TestCase):
             own = run.parse_args(base + ["--sandbox", "opensandbox", "--model-tunnel", "--agent", "openhands",
                                          "--agent-kwarg", "api_base=http://x/v1"])
             self.assertEqual([k for k in run.agent_kwargs(own) if k.startswith("api_base")], ["api_base=http://x/v1"])
+            # opencode takes the endpoint from OPENAI_BASE_URL and rejects an api_base kwarg
+            oc = run.parse_args(base + ["--sandbox", "opensandbox", "--model-tunnel", "--agent", "opencode"])
+            self.assertEqual([k.split("=")[0] for k in run.agent_kwargs(oc)], ["opencode_config"])
+            cfg = json.loads(run.agent_kwargs(oc)[0].partition("=")[2])["provider"]["local"]
+            self.assertEqual(cfg["options"]["baseURL"], "http://127.0.0.1:8000/v1")
+            self.assertEqual(cfg["npm"], "@ai-sdk/openai-compatible")
+            oc_info = run.parse_args(base + ["--sandbox", "opensandbox", "--model-tunnel", "--agent", "opencode",
+                                             "--agent-kwarg", 'model_info={"max_input_tokens": 32768, "max_output_tokens": 16384}'])
+            self.assertFalse([k for k in run.agent_kwargs(oc_info) if k.startswith("model_info=")])
+            limit = json.loads([k for k in run.agent_kwargs(oc_info) if k.startswith("opencode_config=")][0].partition("=")[2])
+            self.assertEqual(list(limit["provider"]["local"]["models"].values())[0], {"limit": {"context": 32768, "output": 16384}})
+            self.assertEqual(run.harbor_env(oc)["OPENAI_BASE_URL"], "http://127.0.0.1:8000/v1")
             plain = run.parse_args(base[:-2] + ["--sandbox", "opensandbox"])
             self.assertNotIn("HARBOR_MODEL_TUNNEL_TARGET", run.harbor_env(plain))
             self.assertEqual(run.harbor_env(plain)["OPENAI_BASE_URL"], "http://10.0.0.5:8080/v1")
@@ -117,6 +136,27 @@ class HarborCommandTest(unittest.TestCase):
         self.assertEqual(aks, ["temperature=0.2", 'llm_kwargs={"extra_body":{"x":1,"top_p":0.95}}'])
         aks = self._aks("--agent-kwarg", "temperature=0.2", "--temperature", "0.9", "--agent-kwarg", "model_info={}")
         self.assertEqual(aks, ["model_info={}", "temperature=0.9", 'llm_kwargs={"extra_body":{"top_p":0.95}}'])
+
+    def test_openhands_gets_the_same_sampling_and_effort_as_its_own_kwargs(self):
+        base = ["--benchmark", "swe_bench_openhands", "--model", "m", "--api-base-url", "http://10.0.0.5:8080/v1",
+                "--out-dir", "w", "--sandbox", "opensandbox", "--agent", "openhands", "--model-tunnel", "--chisel-dir", "/c",
+                "--agent-kwarg", "version=1.2.0", "--reasoning-effort", "high"]
+        with mock.patch.dict(os.environ, {"OPENSANDBOX_API_KEY": "k"}):
+            # the default profile (temperature 0.6, top_p 0.95), the effort, the tunnel's api_base
+            self.assertEqual(run.agent_kwargs(run.parse_args(base)),
+                             ["version=1.2.0", "temperature=0.6", "top_p=0.95", "reasoning_effort=high",
+                              "api_base=http://127.0.0.1:8000/v1"])
+            # the sampling flags win over the profile, their own kwarg over the profile but not over the flags
+            self.assertEqual(run.agent_kwargs(run.parse_args(base + ["--temperature", "0.2", "--top-p", "none"]))[1:3],
+                             ["temperature=0.2", "reasoning_effort=high"])
+            # what OpenHands cannot carry is refused, not dropped
+            for bad in (["--top-k", "20"], ["--enable-thinking"]):
+                with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                    run.agent_kwargs(run.parse_args(base + bad))
+
+    def test_openhands_benchmarks_are_the_same_datasets_under_their_own_names(self):
+        for name in ("swe_bench", "terminal_bench_2"):
+            self.assertEqual(run.BENCHMARKS[f"{name}_openhands"], run.BENCHMARKS[name])
 
     def test_other_agents_and_gold_runs_take_no_sampling(self):
         args = run.parse_args(

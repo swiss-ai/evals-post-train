@@ -61,8 +61,39 @@ class SuiteTests(unittest.TestCase):
         flags = rows["swe_bench"]["flags"]
         self.assertEqual(flags[flags.index("--agent-network") + 1], "allowlist")
         for task, row in rows.items():
-            if task != "swe_bench":
+            if task not in ("swe_bench", "swe_bench_openhands"):
                 self.assertNotIn("--agent-network", row["flags"], task)
+
+    def test_openhands_rows_differ_from_their_terminus_rows_only_in_the_agent(self):
+        # Comparable by construction: the same sandbox, concurrency, attempts, repeats, metric and network policy;
+        # the agent, its pinned version, the tunnel to the model and the install's dependency date are what differ.
+        rows = {b["task"]: b for b in suites.load(SUITE)["benchmarks"] if b["framework"] == "harbor"}
+        agent_only = {"--agent", "--model-tunnel", "--agent-kwarg", "--agent-env"}
+
+        def common(flags):
+            out, i = [], 0
+            while i < len(flags):
+                if flags[i] in agent_only:
+                    i += 1 if flags[i] == "--model-tunnel" else 2
+                else:
+                    out.append(flags[i])
+                    i += 1
+            return out
+
+        for plain in ("terminal_bench_2", "swe_bench"):
+            row, oh = rows[plain], rows[f"{plain}_openhands"]
+            self.assertEqual(common(oh["flags"]), common(row["flags"]), plain)
+            self.assertEqual((oh["repeats"], oh["metric"]), (row["repeats"], row["metric"]), plain)
+            flags = oh["flags"]
+            self.assertEqual(flags[flags.index("--agent") + 1], "openhands")
+            self.assertIn("--model-tunnel", flags)
+            self.assertRegex(flags[flags.index("--agent-env") + 1], r"^UV_EXCLUDE_NEWER=\d{4}-\d\d-\d\dT00:00:00Z$")
+            self.assertRegex(flags[flags.index("--agent-kwarg") + 1], r"^version=\d+\.\d+\.\d+$")
+        # the setup's own window and effort reach both agents through the same flags
+        for task in ("swe_bench", "swe_bench_openhands"):
+            composed = suites.flags_for(suites.load(SUITE), "chonk-lc-16k-v0.2-sft", task)
+            self.assertIn("--reasoning-effort", composed, task)
+            self.assertIn('model_info={"max_input_tokens": 32768}', composed, task)
 
     def test_harbor_agent_is_told_the_window_of_its_setup(self):
         # max_input_tokens is the window terminus-2 is told (it summarises before it fills). It is
@@ -365,7 +396,7 @@ class SuiteTests(unittest.TestCase):
         with mock.patch.object(subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
             self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m", "--model", "qwen3-32b-thinking=q", "--helper-url", JUDGE_BASE]), 0)
-        self.assertIn("86 launches: 2 models x 43 benchmarks", err.getvalue())
+        self.assertIn("90 launches: 2 models x 45 benchmarks", err.getvalue())
         for bad in (["--model", "m"], ["--model", "nope=m"], ["--model", f"{THINK}=a", "--model", f"{THINK}=b"]):
             self.assertEqual(suites.main(["run", SUITE, *bad]), 1)
 

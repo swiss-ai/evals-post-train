@@ -122,6 +122,10 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
         "missing_reward_is_zero": True,
     },
 }
+# The datasets an agent that runs inside the sandbox (OpenHands) is compared on, under a second name: its
+# summary entry, W&B metrics and work directory then sit next to terminus-2's instead of replacing them.
+for _name in ("swe_bench", "terminal_bench_2"):
+    BENCHMARKS[f"{_name}_openhands"] = dict(BENCHMARKS[_name])
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -139,6 +143,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--attempts", type=int, default=1, help="Attempts per task (Harbor's -k).")
     p.add_argument("--timeout-multiplier", type=float, default=1.0)
     p.add_argument("--agent-kwarg", action="append", default=[], help="Harbor --ak key=value; repeatable.")
+    p.add_argument(
+        "--agent-env",
+        action="append",
+        default=[],
+        help="Harbor --ae KEY=VALUE; repeatable. An environment variable for the agent's sandbox, installation "
+        "included (e.g. UV_EXCLUDE_NEWER=2026-01-20T00:00:00Z, to resolve an in-sandbox agent's dependencies "
+        "as of that date).",
+    )
     for flag in ("temperature", "top-p", "top-k", "min-p", "repetition-penalty"):
         p.add_argument("--" + flag, default=None, help="Sampling setting of the model, or 'none' to leave it out.")
     p.add_argument("--sampling-profile", default=None, help="Profile of the sampling config (e.g. greedy).")
@@ -295,12 +307,79 @@ def tunnel_base_url() -> str:
     return f"http://127.0.0.1:{DEFAULT_POD_PORT}/v1"
 
 
+# In-sandbox agents that take the endpoint from OPENAI_BASE_URL (harbor_env sets it) and reject an
+# api_base kwarg ("Unknown option 'api_base'").
+AGENTS_WITHOUT_API_BASE_KWARG = ("opencode",)
+
+
 def tunnel_agent_kwargs(args: argparse.Namespace, kwargs: List[str]) -> List[str]:
     """With --model-tunnel the agent in the sandbox calls the model at the tunnel's end, unless the
-    user's own --agent-kwarg names an api_base."""
-    if args.model_tunnel and not any(kv.startswith("api_base=") for kv in kwargs):
+    user's own --agent-kwarg names an api_base (or the agent takes its endpoint from the environment)."""
+    if (
+        args.model_tunnel
+        and args.agent not in AGENTS_WITHOUT_API_BASE_KWARG
+        and not any(kv.startswith("api_base=") for kv in kwargs)
+    ):
         return kwargs + [f"api_base={tunnel_base_url()}"]
     return kwargs
+
+
+# OpenCode's provider "openai" is hard-wired to the Responses API (`t.responses is not a function` with the
+# chat-completions SDK, and the server rejects the Responses history), so the model is registered under
+# its own provider id, served through @ai-sdk/openai-compatible (chat completions).
+OPENCODE_PROVIDER = "local"
+
+
+def opencode_kwargs(args: argparse.Namespace, kwargs: List[str]) -> List[str]:
+    """OpenCode's --ak entries: the user's own, plus an `opencode_config` registering the served model
+    under OPENCODE_PROVIDER at the endpoint the agent calls (the tunnel's end, else --api-base-url), with
+    the context and output limits of a `model_info` kwarg (max_input_tokens, max_output_tokens) if there
+    is one: the same kwarg the other agents take, which OpenCode itself rejects, so it is not passed on.
+    The user's own opencode_config replaces the generated one."""
+    info = next((json.loads(kv.partition("=")[2]) for kv in kwargs if kv.startswith("model_info=")), {})
+    kwargs = [kv for kv in kwargs if not kv.startswith("model_info=")]
+    if any(kv.startswith("opencode_config=") for kv in kwargs):
+        return kwargs
+    limit = {key: info[src] for key, src in (("context", "max_input_tokens"), ("output", "max_output_tokens")) if src in info}
+    config = {
+        "provider": {
+            OPENCODE_PROVIDER: {
+                "npm": "@ai-sdk/openai-compatible",
+                "options": {
+                    "baseURL": tunnel_base_url() if args.model_tunnel else args.api_base_url,
+                    "apiKey": "{env:OPENAI_API_KEY}",
+                },
+                "models": {args.model: {"limit": limit} if limit else {}},
+            }
+        }
+    }
+    return kwargs + ["opencode_config=" + json.dumps(config, separators=(",", ":"))]
+
+
+def openhands_kwargs(args, kwargs, explicit, values, thinking_values, chosen) -> List[str]:
+    """OpenHands' --ak entries: the same sampling profile and reasoning effort as terminus-2 gets, as the
+    kwargs OpenHands reads (temperature, top_p, reasoning_effort: its LLM_TEMPERATURE, LLM_TOP_P and
+    LLM_REASONING_EFFORT). It has no way to carry the other samplers or a chat-template switch, so
+    those are refused. Over the sampling defaults the user's own --agent-kwarg wins; the sampling flags
+    win over both; the thinking flags win over the user's own."""
+    from scripts.common import sampling
+
+    unsupported = [n for n in sampling.SAMPLERS if n in values and n not in ("temperature", "top_p")]
+    unsupported += [k for k in thinking_values if k != "reasoning_effort"]
+    if unsupported:
+        raise ValueError(
+            f"the openhands agent takes only temperature, top_p and reasoning_effort, not {', '.join(unsupported)}"
+        )
+    for name in ("temperature", "top_p"):
+        if name in explicit:
+            kwargs.pop(name, None)
+        if name in values and name not in kwargs:
+            kwargs[name] = str(values[name])
+    if "reasoning_effort" in thinking_values:
+        kwargs["reasoning_effort"] = thinking_values["reasoning_effort"]
+    if chosen and (warning := sampling.greedy_warning(values)):
+        print(warning, file=sys.stderr)
+    return tunnel_agent_kwargs(args, [f"{key}={value}" for key, value in kwargs.items()])
 
 
 def agent_kwargs(args: argparse.Namespace) -> List[str]:
@@ -308,8 +387,8 @@ def agent_kwargs(args: argparse.Namespace) -> List[str]:
 
     terminus-2 reads `temperature` and `llm_kwargs` (extra LLM call kwargs); everything but the
     temperature goes in llm_kwargs' extra_body, which the OpenAI-compatible server reads. Over the
-    sampling defaults the user's own --agent-kwarg wins; the sampling flags win over both. Other
-    agents are not wired: they get no defaults, and refuse the flags.
+    sampling defaults the user's own --agent-kwarg wins; the sampling flags win over both. openhands gets the
+    same profile through openhands_kwargs; other agents are not wired: they get no defaults, and refuse the flags.
 
     The thinking flags (scripts/common/thinking.py) add terminus-2's `reasoning_effort` kwarg and the
     chat-template kwargs in llm_kwargs' extra_body; they win over the user's own --agent-kwarg.
@@ -328,12 +407,14 @@ def agent_kwargs(args: argparse.Namespace) -> List[str]:
         }
         chosen = bool(explicit or args.sampling_profile or args.sampling_config)
         thinking_values = thinking.resolve(args.enable_thinking, args.reasoning_effort)
-        if args.gold or args.agent != "terminus-2":
+        if args.gold or args.agent not in ("terminus-2", "openhands"):
             if chosen or thinking_values:
                 raise ValueError(
-                    "the sampling and thinking flags apply to a model run with the terminus-2 agent; "
+                    "the sampling and thinking flags apply to a model run with the terminus-2 or openhands agent; "
                     "for another agent pass --agent-kwarg yourself"
                 )
+            if args.agent == "opencode" and not args.gold:
+                return tunnel_agent_kwargs(args, opencode_kwargs(args, list(args.agent_kwarg)))
             return tunnel_agent_kwargs(args, list(args.agent_kwarg))
         values = sampling.resolve(
             "harbor",
@@ -343,6 +424,8 @@ def agent_kwargs(args: argparse.Namespace) -> List[str]:
             enable_thinking=args.enable_thinking,
             reasoning_effort=args.reasoning_effort,
         )
+        if args.agent == "openhands":
+            return openhands_kwargs(args, kwargs, explicit, values, thinking_values, chosen)
         if "temperature" in explicit:
             kwargs.pop("temperature", None)
         if "temperature" in values and "temperature" not in kwargs:
@@ -395,10 +478,13 @@ def harbor_command(args: argparse.Namespace, name: str, jobs_dir: Path) -> List[
     if args.gold:
         cmd += ["-a", "oracle"]
     else:
-        cmd += ["-a", args.agent, "-m", f"openai/{args.model}"]
+        provider = OPENCODE_PROVIDER if args.agent == "opencode" else "openai"
+        cmd += ["-a", args.agent, "-m", f"{provider}/{args.model}"]
     cmd += ["-n", str(args.max_concurrency), "-k", str(args.attempts), "--timeout-multiplier", str(args.timeout_multiplier)]
     for kv in agent_kwargs(args):
         cmd += ["--ak", kv]
+    for kv in args.agent_env:
+        cmd += ["--ae", kv]
     cmd += ["--env", ENVIRONMENTS[args.sandbox]]
     return cmd
 
