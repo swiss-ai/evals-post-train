@@ -22,6 +22,13 @@ JUDGE_LLM = "openai/openai/gpt-oss-120b"  # the tau2 user and retail's NL-assert
 JUDGE_BASE = "http://helper:8080/v1"  # where it is reached (--helper-url), whatever serves the agent
 
 
+def without_results_dir(suite):
+    """A copy of `suite` writing to the default logs/ layout: the tests of the row flags don't depend on where results go."""
+    suite = copy.deepcopy(suite)
+    suite.pop("results_dir", None)
+    return suite
+
+
 def with_inspect_row(suite):
     """A copy of `suite` with one inspect row first: the shipped chonk_sft has none (GPQA Diamond runs in lm-eval now),
     so the inspect paths of suites/flags.py are exercised with this probe."""
@@ -241,7 +248,7 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(qwen_lm_eval[qwen_lm_eval.index("--api-model-name") + 1], "qwen")
 
     def test_tau2_rows_are_one_sbatch_per_domain_with_the_agents_thinking_flags(self):
-        suite = suites.load(SUITE)
+        suite = without_results_dir(suites.load(SUITE))
         rows = {(r["setup"], r["label"]): r["argv"] for r in suites.commands(
             suite, {"chonk-lc-16k-v0.2-sft": "chonk", "qwen3-32b-thinking": "qwen"}, api_base_url="http://x/v1",
             limit=2, qos="highprio", partition="highprio", helper_url=JUDGE_BASE)}
@@ -273,7 +280,7 @@ class SuiteTests(unittest.TestCase):
             self.assertNotIn("--wandb-project", row["argv"])
 
     def test_sbatch_rows_write_to_their_own_log_dir(self):
-        suite = suites.load(SUITE)
+        suite = without_results_dir(suites.load(SUITE))
         flag = {"inspect": "--out-dir", "evalscope": "--out-dir", "harbor": "--out-dir", "bfcl": "--out-dir", "tau2": "--out-dir"}
         seen = set()
         for row in suites.commands(suite, {"chonk-lc-16k-v0.2-sft": "chonk"}, helper_url=JUDGE_BASE):
@@ -306,8 +313,20 @@ class SuiteTests(unittest.TestCase):
             for flag in sorted(wanted):
                 self.assertRegex(text, rf"(?m)^\s*(?:--[a-z-]+\|)*{flag}[|)]", f"{framework} does not parse {flag}")
 
-    def test_bfcl_rows_run_the_custom_runner(self):
+    def test_results_dir_holds_results_and_slurm_files(self):
         suite = suites.load(SUITE)
+        root = suite["results_dir"]
+        for row in suites.commands(suite, {"chonk-lc-16k-v0.2-sft": "chonk"}, helper_url=JUDGE_BASE):
+            argv = row["argv"]
+            if row["framework"] == "lm_eval":
+                self.assertEqual(argv[argv.index("--logs-root") + 1], f"{root}/lm_eval")
+                continue
+            self.assertIn(f"--output={root}/slurm/%x_%j.out", argv)
+            self.assertIn(f"--error={root}/slurm/%x_%j.err", argv)
+            self.assertTrue(argv[argv.index("--out-dir") + 1].startswith(f"{root}/{row['framework']}/chonk/"))
+
+    def test_bfcl_rows_run_the_custom_runner(self):
+        suite = without_results_dir(suites.load(SUITE))
         rows = {r["label"]: r["argv"] for r in suites.commands(
             suite, {"chonk-lc-16k-v0.2-sft": "chonk"}, api_base_url="http://x/v1", limit=2, qos="highprio", helper_url=JUDGE_BASE)}
         for label, version in (("BFCL v3", "v3"), ("BFCL v4", "v4")):
