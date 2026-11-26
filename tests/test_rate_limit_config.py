@@ -10,7 +10,7 @@ def test_launcher_passes_api_and_judge_rate_limits():
 
     assert "--api-requests-per-minute" in launcher
     assert "--judge-requests-per-minute" in launcher
-    assert "requests_per_minute=$API_REQUESTS_PER_MINUTE" in evaluate
+    assert "requests_per_minute=" in (REPO_ROOT / "scripts" / "lm_eval_harness" / "model_args.py").read_text()
     assert "export JUDGE_REQUESTS_PER_MINUTE" in evaluate
     assert "export JUDGE_MODEL_PREFIX" in evaluate
 
