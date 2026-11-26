@@ -334,10 +334,12 @@ def opencode_kwargs(args: argparse.Namespace, kwargs: List[str]) -> List[str]:
     """OpenCode's --ak entries: the user's own, plus an `opencode_config` registering the served model
     under OPENCODE_PROVIDER at the endpoint the agent calls (the tunnel's end, else --api-base-url), with
     the context and output limits of a `model_info` kwarg (max_input_tokens, max_output_tokens) if there
-    is one. The user's own opencode_config replaces it."""
+    is one: the same kwarg the other agents take, which OpenCode itself rejects, so it is not passed on.
+    The user's own opencode_config replaces the generated one."""
+    info = next((json.loads(kv.partition("=")[2]) for kv in kwargs if kv.startswith("model_info=")), {})
+    kwargs = [kv for kv in kwargs if not kv.startswith("model_info=")]
     if any(kv.startswith("opencode_config=") for kv in kwargs):
         return kwargs
-    info = next((json.loads(kv.partition("=")[2]) for kv in kwargs if kv.startswith("model_info=")), {})
     limit = {key: info[src] for key, src in (("context", "max_input_tokens"), ("output", "max_output_tokens")) if src in info}
     config = {
         "provider": {

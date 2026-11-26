@@ -86,6 +86,7 @@ class RunArgsTest(unittest.TestCase):
             self.assertEqual(cfg["npm"], "@ai-sdk/openai-compatible")
             oc_info = run.parse_args(base + ["--sandbox", "opensandbox", "--model-tunnel", "--agent", "opencode",
                                              "--agent-kwarg", 'model_info={"max_input_tokens": 32768, "max_output_tokens": 16384}'])
+            self.assertFalse([k for k in run.agent_kwargs(oc_info) if k.startswith("model_info=")])
             limit = json.loads([k for k in run.agent_kwargs(oc_info) if k.startswith("opencode_config=")][0].partition("=")[2])
             self.assertEqual(list(limit["provider"]["local"]["models"].values())[0], {"limit": {"context": 32768, "output": 16384}})
             self.assertEqual(run.harbor_env(oc)["OPENAI_BASE_URL"], "http://127.0.0.1:8000/v1")
