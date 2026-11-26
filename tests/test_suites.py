@@ -157,6 +157,10 @@ class SuiteTests(unittest.TestCase):
         self.assertIn(pin.split("@ ", 1)[1], launch["pre_launch_cmds"])
         self.assertIn("--no-deps --force-reinstall", launch["pre_launch_cmds"])
         self.assertEqual(suites.launch_for(suite, THINK)["pre_launch_cmds"], "")  # no install named
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(suites.schema, "REPO_ROOT", Path(tmp)):
+            (Path(tmp) / "reqs.txt").write_text("# a comment\n\n-r other.txt\n")
+            with self.assertRaisesRegex(ValueError, "pip option"):
+                suites.install_command(["reqs.txt"])
         with self.assertRaisesRegex(ValueError, "no launch block"):
             suites.launch_for(suite, "apertus-1.5-8b-thinking")
         launch = suites.launch_for(suite, THINK)

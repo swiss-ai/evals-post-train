@@ -197,6 +197,8 @@ def install_command(files):
         for line in (REPO_ROOT / name).read_text().splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     ]
+    if option := next((spec for spec in specs if spec.startswith("-")), None):
+        raise ValueError(f"launch.install: {option!r} is a pip option, only requirement lines are installed")
     if not specs:
         return ""
     return "pip install -q --no-deps --force-reinstall --ignore-requires-python " + shlex.join(specs)
