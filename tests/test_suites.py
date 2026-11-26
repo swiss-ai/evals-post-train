@@ -50,7 +50,7 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(suites.flags_for(suite, THINK, "aime24_think"),
                          ["--chat-template", "--tokenizer", "/capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/Apertus-v1.5-70B",
                           "--thinking", "--think-start-token", "<|inner_prefix|>", "--think-end-token", "<|inner_suffix|>",
-                          "--api-num-concurrent", "256", "--max-length", "262144", "--repeats", "4"])
+                          "--api-num-concurrent", "64", "--api-request-timeout", "21600", "--max-length", "262144", "--repeats", "4"])
         self.assertNotIn("--repeats", suites.flags_for(suite, THINK, "minerva_math500_think"))
 
     def test_swe_bench_agent_network_is_pinned_to_the_allowlist(self):
@@ -77,11 +77,18 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(windows, [window.get(name, 262144)], name)
 
     def test_apertus_15_70b_runs_with_high_client_concurrency_on_every_lm_eval_row(self):
-        # Its two replicas sit idle at the launcher's default of 8.
+        # Its two replicas sit idle at the launcher's default of 8; 256 overflowed their KV cache on GPQA.
         suite = suites.load(SUITE)
         flags = suites.flags_for(suite, THINK, "ifbench_think")
-        self.assertEqual(flags[flags.index("--api-num-concurrent") + 1], "256")
+        self.assertEqual(flags[flags.index("--api-num-concurrent") + 1], "64")
         self.assertNotIn("--api-num-concurrent", suites.flags_for(suite, "apertus-1.5-8b-thinking", "ifbench_think"))
+
+    def test_apertus_15_70b_waits_longer_than_an_hour_for_a_request(self):
+        # Its generation budget is the 262144-token window: a request cut at 3600 s restarts from scratch and the run fails.
+        suite = suites.load(SUITE)
+        flags = suites.flags_for(suite, THINK, "gpqa_diamond_think")
+        self.assertEqual(flags[flags.index("--api-request-timeout") + 1], "21600")
+        self.assertNotIn("--api-request-timeout", suites.flags_for(suite, "apertus-1.5-8b-thinking", "gpqa_diamond_think"))
 
     def test_setup_sets_window_and_format(self):
         suite = suites.load("apertus2/chonk_sft")

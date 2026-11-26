@@ -28,7 +28,7 @@ FLAGS = (
     "TRACK_THINKING_METRICS", "LOG_LENGTH_METRICS", "REASONING_EFFORT", "REPEATS_FLAG", "REPEAT_METRIC_FLAG",
     "CHAT_FORMAT_FLAG", "PREFILL_MODE_FLAG", "ANSWER_FRAME_FLAG", "CUSTOM_TOKENIZER", "MAX_LENGTH", "BOS_FLAG",
     "CHAT_TEMPLATE_OVERRIDE", "API_ENDPOINT_FLAG", "API_BASE_URL_FLAG", "API_MODEL_NAME_FLAG",
-    "API_MAX_RETRIES_FLAG", "API_NUM_CONCURRENT_FLAG", "API_REQUESTS_PER_MINUTE_FLAG",
+    "API_MAX_RETRIES_FLAG", "API_NUM_CONCURRENT_FLAG", "API_REQUEST_TIMEOUT_FLAG", "API_REQUESTS_PER_MINUTE_FLAG",
     "JUDGE_REQUESTS_PER_MINUTE_FLAG", "SAMPLING_TEMPERATURE_FLAG", "SAMPLING_TOP_P_FLAG", "SAMPLING_TOP_K_FLAG",
     "SAMPLING_MIN_P_FLAG", "SAMPLING_REPETITION_PENALTY_FLAG", "SAMPLING_PROFILE_FLAG", "SAMPLING_CONFIG_FLAG",
     "TRUST_REMOTE_CODE_FLAG", "MODEL_PATH",
@@ -36,7 +36,7 @@ FLAGS = (
 AMBIENT = (
     "TOKENIZER", "BOS", "ENABLE_THINKING", "API_CHAT_ENDPOINT", "CHAT_FORMAT", "PREFILL_MODE", "ANSWER_FRAME",
     "EVAL_REPEAT_CONFIG", "API_BASE_URL", "API_MODEL_NAME", "API_REQUESTS_PER_MINUTE", "API_MAX_RETRIES",
-    "API_NUM_CONCURRENT", "JUDGE_REQUESTS_PER_MINUTE", "JUDGE_MODEL_PREFIX", "USER",
+    "API_NUM_CONCURRENT", "API_REQUEST_TIMEOUT", "JUDGE_REQUESTS_PER_MINUTE", "JUDGE_MODEL_PREFIX", "USER",
 )
 INPUTS = FLAGS + AMBIENT
 
@@ -253,7 +253,8 @@ def check_endpoint(flags, get, out):
     if not (get("API_MODEL_NAME_FLAG") or get("API_MODEL_NAME")):
         raise Refused("--api-model-name <name> is required (or an exported API_MODEL_NAME)")
     for flag, value in (("--api-max-retries", get("API_MAX_RETRIES_FLAG")),
-                        ("--api-num-concurrent", get("API_NUM_CONCURRENT_FLAG"))):
+                        ("--api-num-concurrent", get("API_NUM_CONCURRENT_FLAG")),
+                        ("--api-request-timeout", get("API_REQUEST_TIMEOUT_FLAG"))):
         if value and not re.match(r"^[1-9][0-9]*$", value):
             raise Refused("%s must be a positive integer (got '%s')" % (flag, value))
     chat_endpoint = get("API_CHAT_ENDPOINT")
@@ -276,6 +277,7 @@ def resolve_ambient(get, out):
     settings = (("API_REQUESTS_PER_MINUTE", get("API_REQUESTS_PER_MINUTE_FLAG") or get("API_REQUESTS_PER_MINUTE")),
                 ("API_MAX_RETRIES", get("API_MAX_RETRIES_FLAG") or get("API_MAX_RETRIES")),
                 ("API_NUM_CONCURRENT", get("API_NUM_CONCURRENT_FLAG") or get("API_NUM_CONCURRENT")),
+                ("API_REQUEST_TIMEOUT", get("API_REQUEST_TIMEOUT_FLAG") or get("API_REQUEST_TIMEOUT")),
                 ("JUDGE_REQUESTS_PER_MINUTE", get("JUDGE_REQUESTS_PER_MINUTE_FLAG") or get("JUDGE_REQUESTS_PER_MINUTE")),
                 ("JUDGE_MODEL_PREFIX", get("JUDGE_MODEL_PREFIX") or get("USER")))
     out.variables.update(dict(settings))

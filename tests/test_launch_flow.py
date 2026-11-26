@@ -311,6 +311,20 @@ class LaunchFlowTests(unittest.TestCase):
         )
         self.assertIn("API max retries: 20, concurrent requests: 4", output)
 
+    def test_api_request_timeout_reaches_the_openai_run(self) -> None:
+        output = _dry_run(
+            "single", "--task", "hellaswag", "--api-base-url", "http://localhost:8000",
+            "--api-model-name", "test-model", "--api-request-timeout", "21600",
+        )
+        self.assertIn("API request timeout: 21600 s", output)
+
+    def test_api_request_timeout_defaults_to_the_sbatchs_own(self) -> None:
+        output = _dry_run(
+            "single", "--task", "hellaswag", "--api-base-url", "http://localhost:8000",
+            "--api-model-name", "test-model",
+        )
+        self.assertIn("API request timeout: 3600 (default) s", output)
+
     def test_api_retry_and_concurrency_default_to_the_sbatchs_own(self) -> None:
         output = _dry_run(
             "single", "--task", "hellaswag", "--api-base-url", "http://localhost:8000",
@@ -319,7 +333,7 @@ class LaunchFlowTests(unittest.TestCase):
         self.assertIn("API max retries: 3 (default), concurrent requests: 8 (default)", output)
 
     def test_api_retry_and_concurrency_must_be_positive_integers(self) -> None:
-        for flag, value in (("--api-max-retries", "many"), ("--api-num-concurrent", "0")):
+        for flag, value in (("--api-max-retries", "many"), ("--api-num-concurrent", "0"), ("--api-request-timeout", "soon")):
             with tempfile.TemporaryDirectory() as tmp:
                 completed = _launch(
                     "single", "--task", "hellaswag", "--api-base-url", "http://localhost:8000",

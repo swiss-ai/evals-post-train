@@ -141,6 +141,8 @@ class EndpointTests(unittest.TestCase):
     def test_the_endpoint_flags_are_checked_and_exported(self):
         self.assertIn("--api-max-retries must be a positive integer", refused(API_MAX_RETRIES_FLAG="0"))
         self.assertIn("--api-num-concurrent must be a positive integer", refused(API_NUM_CONCURRENT_FLAG="many"))
+        self.assertIn("--api-request-timeout must be a positive integer", refused(API_REQUEST_TIMEOUT_FLAG="soon"))
+        self.assertEqual(resolve(API_REQUEST_TIMEOUT_FLAG="21600").exports["API_REQUEST_TIMEOUT"], "21600")
         self.assertIn("--api-endpoint must be", refused(API_ENDPOINT_FLAG="responses"))
         chat = resolve(API_ENDPOINT_FLAG="chat-completions", API_MAX_RETRIES_FLAG="20")
         self.assertEqual(chat.exports["API_CHAT_ENDPOINT"], "true")
@@ -152,8 +154,10 @@ class EndpointTests(unittest.TestCase):
 
     def test_a_flag_wins_over_the_ambient_variable(self):
         out = launch_args.resolve({**BASE, "API_REQUESTS_PER_MINUTE_FLAG": "30", "API_REQUESTS_PER_MINUTE": "5",
+                                   "API_REQUEST_TIMEOUT_FLAG": "7200", "API_REQUEST_TIMEOUT": "3600",
                                    "JUDGE_MODEL_PREFIX": "", "USER": "me"})
         self.assertEqual(out.exports["API_REQUESTS_PER_MINUTE"], "30")
+        self.assertEqual(out.exports["API_REQUEST_TIMEOUT"], "7200")
         self.assertEqual(out.exports["JUDGE_MODEL_PREFIX"], "me")
 
 
