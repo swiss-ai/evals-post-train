@@ -127,6 +127,16 @@ scripts/inspect_ai/run_inspect_eval.sh --task scripts/aaii/aa_lcr.py \
   --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
   --model-role grader=openai-api/swissai/CSCS-Inference/swiss-ai/Apertus-v1.5-8B --limit 1
 
+# AgentClinic (scripts/inspect_ai/tasks/agentclinic.py; see the module docstring). The model
+# under test is the doctor in a simulated clinic dialogue (at most 20 turns); a fixed helper
+# model plays the patient, the measurement reader and the moderator that judges the
+# diagnosis, so compare models with the same helper. `dataset` is medqa (107 cases, the
+# paper's) or medqa_ext (215). A gateway helper is rate-limited and a case takes up to ~20
+# helper calls, so keep --limit small for a smoke test:
+scripts/inspect_ai/run_inspect_eval.sh --task scripts/inspect_ai/tasks/agentclinic.py \
+  --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B --api-base-url https://api.swissai.svc.cscs.ch/v1 \
+  --task-arg helper_model=openai-api/swissai/CSCS-Inference/zai-org/GLM-5.3 --limit 2
+
 # CritPt (scripts/aaii/aa_critpt.py, research-level physics reasoning; see the module docstring
 # for the two-step reasoning-then-parse protocol and why grading happens in an Inspect Hook).
 # No grader role: grading is a fixed external HTTP server (Artificial Analysis's
