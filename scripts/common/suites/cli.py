@@ -1,6 +1,7 @@
 """`python -m scripts.common.suites`: list, show, plan, flags and run."""
 
 import argparse
+import os
 import shlex
 import subprocess
 import sys
@@ -88,6 +89,8 @@ def main(argv=None):
                             args.qos, args.partition, fetch=args.submit, helper_url=args.helper_url)
             print(f"{len(rows)} launches: {len(models)} model{'s' * (len(models) != 1)} x "
                   f"{len(suite['benchmarks'])} benchmarks", file=sys.stderr)
+            if args.submit and suite.get("results_dir"):
+                os.makedirs(os.path.join(suite["results_dir"], "slurm"), exist_ok=True)
             for row in rows:
                 print(shlex.join(row["argv"]))
                 if args.submit:

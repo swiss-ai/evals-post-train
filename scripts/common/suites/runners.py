@@ -25,11 +25,11 @@ class Runner:
         self.sampling_profile, self.api_model_name = sampling_profile, api_model_name
         self.sbatch, self.subcommand = sbatch, list(subcommand)
 
-    def argv(self, scheduling, task, rest):
+    def argv(self, scheduling, task, rest, sbatch_flags=()):
         """The command: the script, then the benchmark, then `rest`."""
         benchmark = [self.task_flag, self.task_value(task)]
         if self.sbatch:
-            return ["sbatch", *scheduling["equals"], self.script, *benchmark, *rest]
+            return ["sbatch", *scheduling["equals"], *sbatch_flags, self.script, *benchmark, *rest]
         return ["bash", self.script, *self.subcommand, *benchmark, *rest, *scheduling["flags"]]
 
 
@@ -54,8 +54,11 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
     api_model_name only applies to lm_eval, which takes the served name separately from the model; qos and
     partition go to the launcher or to sbatch. Every launch but tau2's uploads to the W&B project named after the
     suite (the tau2 runner has no upload), and all but lm_eval's write to logs/<framework>/<suite>/<served name>/<task>
-    (lm_eval's logs already sit under the project). A flag may carry `{helper_url}`: the endpoint of a helper model
-    launched alongside (tau2's simulated user and judge), which the caller names with helper_url.
+    (lm_eval's logs already sit under the project). If the suite has a `results_dir`, results go to
+    <results_dir>/<framework>/<served name>/<task> (lm_eval: --logs-root <results_dir>/lm_eval) and the sbatch
+    runners' Slurm files to <results_dir>/slurm/%x_%j.{out,err}; the caller creates that directory.
+    A flag may carry `{helper_url}`: the endpoint of a helper model launched alongside (tau2's simulated user
+    and judge), which the caller names with helper_url.
     Returns [{"setup", "label", "framework", "argv"}]."""
     scheduling = {"flags": (["--qos", qos] if qos else []) + (["--partition", partition] if partition else []),
                   "equals": ([f"--qos={qos}"] if qos else []) + ([f"--partition={partition}"] if partition else [])}
@@ -82,8 +85,16 @@ def commands(suite, models, api_base_url=None, api_model_name=None, limit=None, 
                 rest += ["--api-model-name", api_model_name or served]
             if runner.sampling_profile:
                 rest += ["--sampling-profile", sampling_for(suite, setup_name, bench["task"])]
-            if runner.out_flag:
+            results_dir = suite.get("results_dir")
+            sbatch_flags = []
+            if results_dir:
+                if runner.out_flag:
+                    rest += [runner.out_flag, f"{results_dir}/{framework}/{served}/{bench['task']}"]
+                else:
+                    rest += ["--logs-root", f"{results_dir}/{framework}"]
+                sbatch_flags = [f"--output={results_dir}/slurm/%x_%j.out", f"--error={results_dir}/slurm/%x_%j.err"]
+            elif runner.out_flag:
                 rest += [runner.out_flag, f"logs/{framework}/{suite['name']}/{served}/{bench['task']}"]
-            argv = runner.argv(scheduling, bench["task"], [*rest, *flags])
+            argv = runner.argv(scheduling, bench["task"], [*rest, *flags], sbatch_flags)
             rows.append({"setup": setup_name, "label": bench["label"], "framework": framework, "argv": argv})
     return rows
