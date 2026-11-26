@@ -324,6 +324,36 @@ def tunnel_agent_kwargs(args: argparse.Namespace, kwargs: List[str]) -> List[str
     return kwargs
 
 
+# OpenCode's provider "openai" is hard-wired to the Responses API (`t.responses is not a function` with the
+# chat-completions SDK, and the server rejects the Responses history), so the model is registered under
+# its own provider id, served through @ai-sdk/openai-compatible (chat completions).
+OPENCODE_PROVIDER = "local"
+
+
+def opencode_kwargs(args: argparse.Namespace, kwargs: List[str]) -> List[str]:
+    """OpenCode's --ak entries: the user's own, plus an `opencode_config` registering the served model
+    under OPENCODE_PROVIDER at the endpoint the agent calls (the tunnel's end, else --api-base-url), with
+    the context and output limits of a `model_info` kwarg (max_input_tokens, max_output_tokens) if there
+    is one. The user's own opencode_config replaces it."""
+    if any(kv.startswith("opencode_config=") for kv in kwargs):
+        return kwargs
+    info = next((json.loads(kv.partition("=")[2]) for kv in kwargs if kv.startswith("model_info=")), {})
+    limit = {key: info[src] for key, src in (("context", "max_input_tokens"), ("output", "max_output_tokens")) if src in info}
+    config = {
+        "provider": {
+            OPENCODE_PROVIDER: {
+                "npm": "@ai-sdk/openai-compatible",
+                "options": {
+                    "baseURL": tunnel_base_url() if args.model_tunnel else args.api_base_url,
+                    "apiKey": "{env:OPENAI_API_KEY}",
+                },
+                "models": {args.model: {"limit": limit} if limit else {}},
+            }
+        }
+    }
+    return kwargs + ["opencode_config=" + json.dumps(config, separators=(",", ":"))]
+
+
 def openhands_kwargs(args, kwargs, explicit, values, thinking_values, chosen) -> List[str]:
     """OpenHands' --ak entries: the same sampling profile and reasoning effort as terminus-2 gets, as the
     kwargs OpenHands reads (temperature, top_p, reasoning_effort: its LLM_TEMPERATURE, LLM_TOP_P and
@@ -381,6 +411,8 @@ def agent_kwargs(args: argparse.Namespace) -> List[str]:
                     "the sampling and thinking flags apply to a model run with the terminus-2 or openhands agent; "
                     "for another agent pass --agent-kwarg yourself"
                 )
+            if args.agent == "opencode" and not args.gold:
+                return tunnel_agent_kwargs(args, opencode_kwargs(args, list(args.agent_kwarg)))
             return tunnel_agent_kwargs(args, list(args.agent_kwarg))
         values = sampling.resolve(
             "harbor",
@@ -444,7 +476,8 @@ def harbor_command(args: argparse.Namespace, name: str, jobs_dir: Path) -> List[
     if args.gold:
         cmd += ["-a", "oracle"]
     else:
-        cmd += ["-a", args.agent, "-m", f"openai/{args.model}"]
+        provider = OPENCODE_PROVIDER if args.agent == "opencode" else "openai"
+        cmd += ["-a", args.agent, "-m", f"{provider}/{args.model}"]
     cmd += ["-n", str(args.max_concurrency), "-k", str(args.attempts), "--timeout-multiplier", str(args.timeout_multiplier)]
     for kv in agent_kwargs(args):
         cmd += ["--ak", kv]
