@@ -11,7 +11,7 @@ SUITES_DIR = Path(__file__).resolve().parents[3] / "configs" / "suites"
 FRAMEWORKS = ("lm_eval", "inspect", "evalscope", "harbor", "tau2", "bfcl")
 VIA = ("flag", "task")
 LAUNCH_KEYS = ("model_path", "environment", "nodes", "time", "framework_args")
-LAUNCH_OPTIONAL = ("env",)
+LAUNCH_OPTIONAL = ("env", "install")
 # What scripts/direct_serving/job.py sets itself on the serving command.
 LAUNCH_OWN_FLAGS = ("--model", "--served-model-name", "--host", "--port")
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -48,6 +48,13 @@ def _launch(where, launch):
     for key in ("model_path", "environment"):
         if not isinstance(launch[key], str) or not launch[key]:
             raise ValueError(f"{where}: launch.{key} must be a non-empty string")
+    install = launch.get("install", [])
+    if not isinstance(install, list) or not all(isinstance(f, str) for f in install):
+        raise ValueError(f"{where}: launch.install must be a list of requirements files")
+    for name in install:
+        path = Path(name)
+        if path.is_absolute() or ".." in path.parts or path.parent != Path("requirements") or not (REPO_ROOT / path).is_file():
+            raise ValueError(f"{where}: launch.install {name!r} must be a file directly in requirements/")
     _positive_int(f"{where} launch.nodes", launch["nodes"])
     if not isinstance(launch["time"], str) or not re.fullmatch(r"\d+:[0-5]\d:[0-5]\d", launch["time"]):
         raise ValueError(f"{where}: launch.time must be HH:MM:SS (got {launch['time']!r})")
@@ -180,16 +187,35 @@ def setup(suite, name):
     return suite["setups"][name]
 
 
+def install_command(files):
+    """The shell command that installs what `launch.install` names on a serving node: the
+    requirement lines of those files (comments and blanks left out), without their dependencies
+    (the serving image has them) and over the image's copy. Empty for no files."""
+    specs = [
+        line.strip()
+        for name in files
+        for line in (REPO_ROOT / name).read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if option := next((spec for spec in specs if spec.startswith("-")), None):
+        raise ValueError(f"launch.install: {option!r} is a pip option, only requirement lines are installed")
+    if not specs:
+        return ""
+    return "pip install -q --no-deps --force-reinstall --ignore-requires-python " + shlex.join(specs)
+
+
 def launch_for(suite, setup_name):
     """How a setup's model is served, for scripts/direct_serving/job.py: its launch block, the
     EDF as an absolute path and the setup's `serving` arguments appended to the framework
-    arguments (a string). ValueError when the setup has no launch block."""
+    arguments (a string), and `pre_launch_cmds`: what its `install` files need on every serving node
+    (empty without any). ValueError when the setup has no launch block."""
     chosen = setup(suite, setup_name)
     if "launch" not in chosen:
         raise ValueError(f"setup {setup_name!r} has no launch block")
     launch = chosen["launch"]
     return {
         **launch,
+        "pre_launch_cmds": install_command(launch.get("install", [])),
         "environment": str(REPO_ROOT / launch["environment"]),
         "framework_args": shlex.join([*launch["framework_args"], *chosen.get("serving", [])]),
     }

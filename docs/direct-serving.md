@@ -54,12 +54,11 @@ A [suite](suites.md) setup with a `launch` block says how its model is served: `
 
 ```bash
 scripts/direct_serving/job.sh --suite apertus2/chonk_sft --setup chonk-lc-16k-v0.2-sft \
-  --pre-launch-cmds "<install the apertus-common plugin>" \
   --eval 'scripts/inspect_ai/run_inspect_eval.sh --task gsm8k --model chonk-lc-16k-v0.2-sft --api-base-url "$EVAL_API_BASE_URL" --limit 5' \
   --submit
 ```
 
-The Chonk setups' `serving` arguments need the `apertus-common` plugin, which the Apertus 2 image does not contain. Pass its install as `--pre-launch-cmds` ([how](thinking.md#apertus-2-on-v1chatcompletions-temporary)); without it the server exits at start-up with `invalid tool call parser: apertus2`.
+The Chonk setups' `serving` arguments need the `apertus-common` plugin, which the Apertus 2 image does not contain. Their launch block's `install` (`requirements/apertus2.txt`, the commit lm-eval uses too) installs it on every serving node, so there is nothing to pass; a launch without `--suite` has to pass the install as `--pre-launch-cmds` ([how](thinking.md#apertus-2-on-v1chatcompletions-temporary)), or the server exits at start-up with `invalid tool call parser: apertus2`.
 
 ## Options
 

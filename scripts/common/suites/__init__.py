@@ -45,10 +45,10 @@ from scripts.common.suites.cli import main, plan
 from scripts.common.suites.flags import fetch_tokenizer, flags_for, sampling_for, tokenizer_dir
 from scripts.common.suites.runners import RUNNERS, Runner, commands
 from scripts.common.suites.schema import (
-    FRAMEWORKS, REPO_ROOT, SUITES_DIR, benchmark, launch_for, load, setup, validate,
+    FRAMEWORKS, REPO_ROOT, SUITES_DIR, benchmark, install_command, launch_for, load, setup, validate,
 )
 
 __all__ = [
     "FRAMEWORKS", "REPO_ROOT", "RUNNERS", "Runner", "SUITES_DIR", "benchmark", "commands", "fetch_tokenizer",
-    "flags_for", "launch_for", "load", "main", "plan", "sampling_for", "setup", "tokenizer_dir", "validate",
+    "flags_for", "install_command", "launch_for", "load", "main", "plan", "sampling_for", "setup", "tokenizer_dir", "validate",
 ]

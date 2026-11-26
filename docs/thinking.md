@@ -36,6 +36,7 @@ the reply. That is the vLLM plugin of `apertus-common` (PRs #5, #7 and #9, merge
 1. **Serve the model with the plugin.** The `vllm-apertus2-cuda` image does not contain it, so every
    node installs the pinned commit (`requirements/apertus2.txt`) from GitHub before `vllm serve`
    (compute nodes reach it), and the server gets the four `apertus2` options.
+   A suite setup (`--suite`/`--setup` of `scripts/direct_serving/job.py`) does this itself through its launch block's `install`.
    With model-launch's `sml advanced`, for a launch like `examples/clariden/cli/swiss-ai/apertus2/chonk/`:
 
    ```bash
