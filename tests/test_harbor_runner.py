@@ -125,6 +125,27 @@ class HarborCommandTest(unittest.TestCase):
         aks = self._aks("--agent-kwarg", "temperature=0.2", "--temperature", "0.9", "--agent-kwarg", "model_info={}")
         self.assertEqual(aks, ["model_info={}", "temperature=0.9", 'llm_kwargs={"extra_body":{"top_p":0.95}}'])
 
+    def test_openhands_gets_the_same_sampling_and_effort_as_its_own_kwargs(self):
+        base = ["--benchmark", "swe_bench_openhands", "--model", "m", "--api-base-url", "http://10.0.0.5:8080/v1",
+                "--out-dir", "w", "--sandbox", "opensandbox", "--agent", "openhands", "--model-tunnel", "--chisel-dir", "/c",
+                "--agent-kwarg", "version=1.2.0", "--reasoning-effort", "high"]
+        with mock.patch.dict(os.environ, {"OPENSANDBOX_API_KEY": "k"}):
+            # the default profile (temperature 0.6, top_p 0.95), the effort, the tunnel's api_base
+            self.assertEqual(run.agent_kwargs(run.parse_args(base)),
+                             ["version=1.2.0", "temperature=0.6", "top_p=0.95", "reasoning_effort=high",
+                              "api_base=http://127.0.0.1:8000/v1"])
+            # the sampling flags win over the profile, their own kwarg over the profile but not over the flags
+            self.assertEqual(run.agent_kwargs(run.parse_args(base + ["--temperature", "0.2", "--top-p", "none"]))[1:3],
+                             ["temperature=0.2", "reasoning_effort=high"])
+            # what OpenHands cannot carry is refused, not dropped
+            for bad in (["--top-k", "20"], ["--enable-thinking"]):
+                with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                    run.agent_kwargs(run.parse_args(base + bad))
+
+    def test_openhands_benchmarks_are_the_same_datasets_under_their_own_names(self):
+        for name in ("swe_bench", "terminal_bench_2"):
+            self.assertEqual(run.BENCHMARKS[f"{name}_openhands"], run.BENCHMARKS[name])
+
     def test_other_agents_and_gold_runs_take_no_sampling(self):
         args = run.parse_args(
             ["--benchmark", "terminal_bench_2", "--model", "m", "--api-base-url", "https://x/v1", "--out-dir", "w",

@@ -122,6 +122,10 @@ BENCHMARKS: Dict[str, Dict[str, Any]] = {
         "missing_reward_is_zero": True,
     },
 }
+# The datasets an agent that runs inside the sandbox (OpenHands) is compared on, under a second name: its
+# summary entry, W&B metrics and work directory then sit next to terminus-2's instead of replacing them.
+for _name in ("swe_bench", "terminal_bench_2"):
+    BENCHMARKS[f"{_name}_openhands"] = dict(BENCHMARKS[_name])
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -311,13 +315,39 @@ def tunnel_agent_kwargs(args: argparse.Namespace, kwargs: List[str]) -> List[str
     return kwargs
 
 
+def openhands_kwargs(args, kwargs, explicit, values, thinking_values, chosen) -> List[str]:
+    """OpenHands' --ak entries: the same sampling profile and reasoning effort as terminus-2 gets, as the
+    kwargs OpenHands reads (temperature, top_p, reasoning_effort: its LLM_TEMPERATURE, LLM_TOP_P and
+    LLM_REASONING_EFFORT). It has no way to carry the other samplers or a chat-template switch, so
+    those are refused. Over the sampling defaults the user's own --agent-kwarg wins; the sampling flags
+    win over both; the thinking flags win over the user's own."""
+    from scripts.common import sampling
+
+    unsupported = [n for n in sampling.SAMPLERS if n in values and n not in ("temperature", "top_p")]
+    unsupported += [k for k in thinking_values if k != "reasoning_effort"]
+    if unsupported:
+        raise ValueError(
+            f"the openhands agent takes only temperature, top_p and reasoning_effort, not {', '.join(unsupported)}"
+        )
+    for name in ("temperature", "top_p"):
+        if name in explicit:
+            kwargs.pop(name, None)
+        if name in values and name not in kwargs:
+            kwargs[name] = str(values[name])
+    if "reasoning_effort" in thinking_values:
+        kwargs["reasoning_effort"] = thinking_values["reasoning_effort"]
+    if chosen and (warning := sampling.greedy_warning(values)):
+        print(warning, file=sys.stderr)
+    return tunnel_agent_kwargs(args, [f"{key}={value}" for key, value in kwargs.items()])
+
+
 def agent_kwargs(args: argparse.Namespace) -> List[str]:
     """The --ak entries: the user's own, plus the model's sampling and thinking settings.
 
     terminus-2 reads `temperature` and `llm_kwargs` (extra LLM call kwargs); everything but the
     temperature goes in llm_kwargs' extra_body, which the OpenAI-compatible server reads. Over the
-    sampling defaults the user's own --agent-kwarg wins; the sampling flags win over both. Other
-    agents are not wired: they get no defaults, and refuse the flags.
+    sampling defaults the user's own --agent-kwarg wins; the sampling flags win over both. openhands gets the
+    same profile through openhands_kwargs; other agents are not wired: they get no defaults, and refuse the flags.
 
     The thinking flags (scripts/common/thinking.py) add terminus-2's `reasoning_effort` kwarg and the
     chat-template kwargs in llm_kwargs' extra_body; they win over the user's own --agent-kwarg.
@@ -336,10 +366,10 @@ def agent_kwargs(args: argparse.Namespace) -> List[str]:
         }
         chosen = bool(explicit or args.sampling_profile or args.sampling_config)
         thinking_values = thinking.resolve(args.enable_thinking, args.reasoning_effort)
-        if args.gold or args.agent != "terminus-2":
+        if args.gold or args.agent not in ("terminus-2", "openhands"):
             if chosen or thinking_values:
                 raise ValueError(
-                    "the sampling and thinking flags apply to a model run with the terminus-2 agent; "
+                    "the sampling and thinking flags apply to a model run with the terminus-2 or openhands agent; "
                     "for another agent pass --agent-kwarg yourself"
                 )
             return tunnel_agent_kwargs(args, list(args.agent_kwarg))
@@ -351,6 +381,8 @@ def agent_kwargs(args: argparse.Namespace) -> List[str]:
             enable_thinking=args.enable_thinking,
             reasoning_effort=args.reasoning_effort,
         )
+        if args.agent == "openhands":
+            return openhands_kwargs(args, kwargs, explicit, values, thinking_values, chosen)
         if "temperature" in explicit:
             kwargs.pop("temperature", None)
         if "temperature" in values and "temperature" not in kwargs:
