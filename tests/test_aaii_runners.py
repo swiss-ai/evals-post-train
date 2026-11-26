@@ -30,8 +30,8 @@ class GdpvalTest(unittest.TestCase):
                 (venv / name).write_text("#!/bin/sh\nexit 3\n")
                 (venv / name).chmod(0o755)
             result = run(
-                "run_gdpval.sh", "--model", "m", "--sandbox-backend", "local", "--num-tasks", "1",
-                "--no-grade", "--workdir", os.path.join(d, "work"),
+                "run_gdpval.sh", "--model", "m", "--sandbox-backend", "local", "--limit", "1",
+                "--no-grade", "--out-dir", os.path.join(d, "work"),
                 HOME=d, EVAL_PREBUILT_ENV="1", GDPVAL_VENV=str(venv.parent),
             )
         self.assertEqual(result.returncode, 3, result.stdout + result.stderr)

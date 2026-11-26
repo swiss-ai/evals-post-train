@@ -28,7 +28,7 @@ class ScriptTest(unittest.TestCase):
     def test_help_documents_the_options(self):
         result = run("--help")
         self.assertEqual(result.returncode, 0)
-        for flag in ("--version", "--api-base-url", "--workdir", "--num-tasks", "--test-category", "--reasoning-effort",
+        for flag in ("--version", "--api-base-url", "--out-dir", "--limit", "--test-category", "--reasoning-effort",
                      "--request-timeout"):
             self.assertIn(flag, result.stdout)
 

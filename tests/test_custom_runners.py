@@ -71,7 +71,7 @@ class RetrievalDefaultTest(unittest.TestCase):
             ref.write_text("v2.0.0 " + "a" * 40 + "\n")
             subprocess.run(
                 ["bash", "scripts/custom/run_tau2_bench.sh", "--domain", domain, "--model", "m", "--api-base-url", "http://x/v1",
-                 "--workdir", f"{d}/work", *extra],
+                 "--out-dir", f"{d}/work", *extra],
                 cwd=REPO, capture_output=True, text=True, timeout=60,
                 env={"PATH": "/usr/bin:/bin", "HOME": d, "EVAL_PREBUILT_ENV": "1",
                      "TAU2_UPSTREAM_DIR": str(root), "TAU2_UPSTREAM_REF_FILE": str(ref)},
@@ -106,7 +106,7 @@ class LlmArgsTest(unittest.TestCase):
             ref.write_text("v2.0.0 " + "a" * 40 + "\n")
             subprocess.run(
                 ["bash", "scripts/custom/run_tau2_bench.sh", "--domain", "retail", "--model", "m", "--api-base-url", "http://x/v1",
-                 "--workdir", f"{d}/work", *extra],
+                 "--out-dir", f"{d}/work", *extra],
                 cwd=REPO, capture_output=True, text=True, timeout=60,
                 env={"PATH": "/usr/bin:/bin", "HOME": d, "EVAL_PREBUILT_ENV": "1", "TARGET_API_KEY": secret,
                      "TAU2_UPSTREAM_DIR": str(root), "TAU2_UPSTREAM_REF_FILE": str(ref)},
@@ -170,7 +170,7 @@ class JudgeTest(unittest.TestCase):
             ref.write_text("v2.0.0 " + "a" * 40 + "\n")
             result = subprocess.run(
                 ["bash", "scripts/custom/run_tau2_bench.sh", "--domain", "retail", "--model", "m", *base,
-                 "--workdir", f"{d}/work", *extra],
+                 "--out-dir", f"{d}/work", *extra],
                 cwd=REPO, capture_output=True, text=True, timeout=60,
                 env={"PATH": "/usr/bin:/bin", "HOME": d, "EVAL_PREBUILT_ENV": "1", "TARGET_API_KEY": "sk-test-secret-1234",
                      "TAU2_UPSTREAM_DIR": str(root), "TAU2_UPSTREAM_REF_FILE": str(ref), **(env_extra or {})},
@@ -326,7 +326,7 @@ class RelativeWorkdirTest(unittest.TestCase):
             ref.write_text("v2.0.0 " + "a" * 40 + "\n")
             subprocess.run(
                 ["bash", "scripts/custom/run_tau2_bench.sh", "--domain", "retail", "--model", "m", "--api-base-url", "http://x/v1",
-                 "--workdir", os.path.relpath(f"{d}/work", REPO)],
+                 "--out-dir", os.path.relpath(f"{d}/work", REPO)],
                 cwd=REPO, capture_output=True, text=True, timeout=60,
                 env={"PATH": "/usr/bin:/bin", "HOME": d, "EVAL_PREBUILT_ENV": "1",
                      "TAU2_UPSTREAM_DIR": str(root), "TAU2_UPSTREAM_REF_FILE": str(ref)},
@@ -354,7 +354,7 @@ class SummaryTest(unittest.TestCase):
             ref.write_text("v2.0.0 " + "a" * 40 + "\n")
             return subprocess.run(
                 ["bash", "scripts/custom/run_tau2_bench.sh", "--domain", "retail", "--model", "m", "--api-base-url", "http://x/v1",
-                 "--workdir", f"{d}/work", "--save-to", "t", *extra],
+                 "--out-dir", f"{d}/work", "--save-to", "t", *extra],
                 cwd=REPO, capture_output=True, text=True, timeout=60,
                 env={"PATH": "/usr/bin:/bin", "HOME": d, "EVAL_PREBUILT_ENV": "1",
                      "TAU2_UPSTREAM_DIR": str(root), "TAU2_UPSTREAM_REF_FILE": str(ref)},
@@ -365,13 +365,13 @@ class SummaryTest(unittest.TestCase):
         return {"task_id": task, "termination_reason": why, "reward_info": {"reward": reward} if reward is not None else None}
 
     def test_a_complete_result_exits_zero(self):
-        result = self._run([self._sim("0", 1.0), self._sim("1", 0.0)], "--num-tasks", "2")
+        result = self._run([self._sim("0", 1.0), self._sim("1", 0.0)], "--limit", "2")
         self.assertEqual(result.returncode, 0, result.stderr)
         summary = json.loads(result.stdout[result.stdout.index("{"):])
         self.assertEqual((summary["avg_reward"], summary["n_unscored"], summary["n_missing"]), (0.5, 0, 0))
 
     def test_a_task_without_a_reward_is_reported_and_fails_the_run(self):
-        result = self._run([self._sim("0", 1.0), self._sim("2", None, "infrastructure_error")], "--num-tasks", "2")
+        result = self._run([self._sim("0", 1.0), self._sim("2", None, "infrastructure_error")], "--limit", "2")
         self.assertEqual(result.returncode, 1)
         self.assertIn('"n_unscored": 1', result.stdout)
         self.assertIn("task 2: no reward (infrastructure_error)", result.stderr)
@@ -384,7 +384,7 @@ class SummaryTest(unittest.TestCase):
             return {**self._sim(task, None, "infrastructure_error"), "info": {"error": error}}
 
         # the model's empty reply is a failed task, over all of them: 1 of 3 passed, and the run is complete
-        result = self._run([self._sim("0", 1.0), self._sim("1", 0.0), failed("2", empty)], "--num-tasks", "3")
+        result = self._run([self._sim("0", 1.0), self._sim("1", 0.0), failed("2", empty)], "--limit", "3")
         self.assertEqual(result.returncode, 0, result.stderr)
         summary = json.loads(result.stdout[result.stdout.index("{"):])
         self.assertEqual((summary["pass^1"], summary["n_agent_failures"], summary["n_unscored"]), (1 / 3, 1, 0))
@@ -393,7 +393,7 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(summary["excluding_agent_failures"]["pass^1"], 0.5)
 
         # the judge's (or the user simulator's, or a server's) is not the model's: not counted, and the run fails
-        result = self._run([self._sim("0", 1.0), failed("1", judge), failed("2", empty)], "--num-tasks", "3")
+        result = self._run([self._sim("0", 1.0), failed("1", judge), failed("2", empty)], "--limit", "3")
         self.assertEqual(result.returncode, 1)
         summary = json.loads(result.stdout[result.stdout.index("{"):])
         self.assertEqual((summary["pass^1"], summary["n_agent_failures"], summary["n_unscored"]), (0.5, 1, 1))
@@ -411,7 +411,7 @@ class SummaryTest(unittest.TestCase):
                              "error_traceback": trace}}
 
         # the model under test overflowed its own window: a failed task, reward 0, the run is complete
-        result = self._run([self._sim("0", 1.0), overflow("1", agent_trace)], "--num-tasks", "2")
+        result = self._run([self._sim("0", 1.0), overflow("1", agent_trace)], "--limit", "2")
         self.assertEqual(result.returncode, 0, result.stderr)
         summary = json.loads(result.stdout[result.stdout.index("{"):])
         self.assertEqual((summary["pass^1"], summary["n_agent_failures"], summary["n_unscored"]), (0.5, 1, 0))
@@ -419,7 +419,7 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(summary["excluding_agent_failures"]["pass^1"], 1.0)
 
         # the same error from the user simulator's or the judge's window is not the model's: not counted, the run fails
-        result = self._run([self._sim("0", 1.0), overflow("1", user_trace), overflow("2", judge_trace)], "--num-tasks", "3")
+        result = self._run([self._sim("0", 1.0), overflow("1", user_trace), overflow("2", judge_trace)], "--limit", "3")
         self.assertEqual(result.returncode, 1)
         summary = json.loads(result.stdout[result.stdout.index("{"):])
         self.assertEqual((summary["pass^1"], summary["n_agent_failures"], summary["n_unscored"]), (1.0, 0, 2))
@@ -429,10 +429,10 @@ class SummaryTest(unittest.TestCase):
 
         # an overflow record without a traceback (an older results file) is not assumed to be the model's
         bare = {**self._sim("1", None, "infrastructure_error"), "info": {"error": "ContextWindowExceededError", "error_type": "ContextWindowExceededError"}}
-        self.assertEqual(self._run([self._sim("0", 1.0), bare], "--num-tasks", "2").returncode, 1)
+        self.assertEqual(self._run([self._sim("0", 1.0), bare], "--limit", "2").returncode, 1)
 
     def test_a_simulation_missing_from_the_file_fails_the_run(self):
-        result = self._run([self._sim("0", 1.0)], "--num-tasks", "3")
+        result = self._run([self._sim("0", 1.0)], "--limit", "3")
         self.assertEqual(result.returncode, 1)
         self.assertIn("2 of 3 simulations are not in results.json", result.stderr)
 

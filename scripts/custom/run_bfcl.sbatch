@@ -19,7 +19,7 @@
 # Usage:
 #   sbatch [-p debug -t 1:00:00] scripts/custom/run_bfcl.sbatch <run_bfcl.sh args...>
 # e.g. a smoke test:
-#   sbatch -p debug -t 1:00:00 scripts/custom/run_bfcl.sbatch --version v3 --model m --api-base-url http://host:8000/v1 --num-tasks 2
+#   sbatch -p debug -t 1:00:00 scripts/custom/run_bfcl.sbatch --version v3 --model m --api-base-url http://host:8000/v1 --limit 2
 
 set -e
 

@@ -60,7 +60,7 @@
 #                               its reasoning_effort kwarg; they win over your own --agent-kwarg of the same name.
 #                               so terminus-2 knows a served model's context window.
 #   --name <name>              Run name (default: derived from --model).
-#   --work-dir <path>          Output dir (default: logs/harbor/<name>): jobs/<benchmark>/ (Harbor's
+#   --out-dir <path>          Output dir (default: logs/harbor/<name>): jobs/<benchmark>/ (Harbor's
 #                               trials) and summary.json.
 #   --sandbox docker|k8s|opensandbox  See above.
 #   --limit <n>                 A random subset of n tasks per benchmark (seeded, 42); a fraction < 1 is a
@@ -135,7 +135,7 @@ while (( $# > 0 )); do
     case "$1" in
         --model) MODEL=$2; shift 2 ;;
         --name) NAME=$2; shift 2 ;;
-        --work-dir) WORK_DIR=$2; shift 2 ;;
+        --out-dir) WORK_DIR=$2; shift 2 ;;
         --sandbox) SANDBOX=$2; shift 2 ;;
         --api-base-url) API_BASE_URL=$2; shift 2 ;;
         --gold) GOLD=1; shift ;;
@@ -222,7 +222,7 @@ else
 fi
 
 mkdir -p "$WORK_DIR"
-CMD=("$PY" -m scripts.harbor.run "${MODEL_ARGS[@]}" --work-dir "$WORK_DIR" --sandbox "$SANDBOX"
+CMD=("$PY" -m scripts.harbor.run "${MODEL_ARGS[@]}" --out-dir "$WORK_DIR" --sandbox "$SANDBOX"
      ${RUN_ARGS[@]+"${RUN_ARGS[@]}"})
 echo "Running: ${CMD[*]}"
 # In the background with SIGTERM passed on, so that a stopped run (e.g. the sbatch's time-limit
@@ -241,7 +241,7 @@ echo "Done. Scores and run metadata: $WORK_DIR/summary.json"
 
 if (( WANDB_UPLOAD )) && [[ -f "$WORK_DIR/summary.json" ]]; then
     UPLOAD_CMD=("$PY" -m scripts.results.update_wandb_harbor --entity "$WANDB_ENTITY"
-                --project "$WANDB_PROJECT" --name "$NAME" --work-dir "$WORK_DIR")
+                --project "$WANDB_PROJECT" --name "$NAME" --out-dir "$WORK_DIR")
     echo ""
     echo "Uploading results to wandb"
     echo "Running: ${UPLOAD_CMD[*]}"

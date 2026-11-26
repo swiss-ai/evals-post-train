@@ -22,9 +22,16 @@ JUDGE_LLM = "openai/openai/gpt-oss-120b"  # the tau2 user and retail's NL-assert
 JUDGE_BASE = "http://helper:8080/v1"  # where it is reached (--helper-url), whatever serves the agent
 
 
+def without_results_dir(suite):
+    """A copy of `suite` writing to the default logs/ layout: the tests of the row flags don't depend on where results go."""
+    suite = copy.deepcopy(suite)
+    suite.pop("results_dir", None)
+    return suite
+
+
 def with_inspect_row(suite):
     """A copy of `suite` with one inspect row first: the shipped chonk_sft has none (GPQA Diamond runs in lm-eval now),
-    so the inspect paths of suites.py are exercised with this probe."""
+    so the inspect paths of suites/flags.py are exercised with this probe."""
     suite = copy.deepcopy(suite)
     suite["benchmarks"].insert(0, {"label": "Inspect probe", "task": "gpqa_diamond", "framework": "inspect",
                                    "repeats": {"n": 4, "via": "task"}, "metric": {"label": "mean@4", "key": None}})
@@ -226,7 +233,7 @@ class SuiteTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"EVAL_ENV_CACHE_ROOT": str(cache)}):
                 path = suites.fetch_tokenizer(spec)
                 self.assertTrue((path / "tokenizer.json").is_file())
-                with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("fetched twice")):
+                with mock.patch.object(subprocess, "run", side_effect=AssertionError("fetched twice")):
                     self.assertEqual(suites.fetch_tokenizer(spec), path)
                 with self.assertRaisesRegex(ValueError, "could not fetch"):
                     suites.fetch_tokenizer({**spec, "revision": "0" * 40})
@@ -248,7 +255,7 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(qwen_lm_eval[qwen_lm_eval.index("--api-model-name") + 1], "qwen")
 
     def test_tau2_rows_are_one_sbatch_per_domain_with_the_agents_thinking_flags(self):
-        suite = suites.load(SUITE)
+        suite = without_results_dir(suites.load(SUITE))
         rows = {(r["setup"], r["label"]): r["argv"] for r in suites.commands(
             suite, {"chonk-lc-16k-v0.2-sft": "chonk", "qwen3-32b-thinking": "qwen"}, api_base_url="http://x/v1",
             limit=2, qos="highprio", partition="highprio", helper_url=JUDGE_BASE)}
@@ -257,8 +264,8 @@ class SuiteTests(unittest.TestCase):
             argv = rows["chonk-lc-16k-v0.2-sft", f"tau2-bench {domain}"]
             self.assertEqual(argv, ["sbatch", "--qos=highprio", "--partition=highprio", "scripts/custom/run_tau2_bench.sbatch",
                                     "--domain", domain, "--model", "chonk", "--api-base-url", "http://x/v1",
-                                    "--num-tasks", "2", "--sampling-profile", suites.sampling_for(suite, "chonk-lc-16k-v0.2-sft", domain),
-                                    "--workdir", f"logs/tau2/{suite['name']}/chonk/{domain}",
+                                    "--limit", "2", "--sampling-profile", suites.sampling_for(suite, "chonk-lc-16k-v0.2-sft", domain),
+                                    "--out-dir", f"logs/tau2/{suite['name']}/chonk/{domain}",
                                     "--reasoning-effort", "high", "--user-llm", JUDGE_LLM, "--user-api-base-url", JUDGE_BASE, "--user-llm-args", USER_LLM_ARGS]
                              + (["--retrieval-config", "bm25"] if domain == "banking_knowledge" else [])
                              + (["--judge-llm", JUDGE_LLM, "--judge-api-base-url", JUDGE_BASE, "--judge-llm-args", USER_LLM_ARGS] if domain in ("airline", "retail") else []))
@@ -280,8 +287,8 @@ class SuiteTests(unittest.TestCase):
             self.assertNotIn("--wandb-project", row["argv"])
 
     def test_sbatch_rows_write_to_their_own_log_dir(self):
-        suite = suites.load(SUITE)
-        flag = {"inspect": "--logs-dir", "evalscope": "--work-dir", "harbor": "--work-dir", "bfcl": "--workdir", "tau2": "--workdir"}
+        suite = without_results_dir(suites.load(SUITE))
+        flag = {"inspect": "--out-dir", "evalscope": "--out-dir", "harbor": "--out-dir", "bfcl": "--out-dir", "tau2": "--out-dir"}
         seen = set()
         for row in suites.commands(suite, {"chonk-lc-16k-v0.2-sft": "chonk"}, helper_url=JUDGE_BASE):
             argv = row["argv"]
@@ -300,8 +307,33 @@ class SuiteTests(unittest.TestCase):
             seen.add(expected)
         self.assertIn(f"logs/bfcl/{suite['name']}/chonk/bfcl_v4", seen)
 
-    def test_bfcl_rows_run_the_custom_runner(self):
+    def test_every_runner_takes_the_flags_the_suite_passes_it(self):
+        # suites.RUNNERS is the one place the runners differ; the scripts must agree with it.
+        repo = Path(__file__).resolve().parents[1]
+        for framework, runner in suites.RUNNERS.items():
+            text = (repo / runner.script).with_suffix(".sh").read_text()  # the .sbatch files forward to the .sh
+            wanted = {"--model", "--api-base-url", "--limit", runner.task_flag}
+            wanted |= {runner.out_flag} if runner.out_flag else set()
+            wanted |= {"--wandb-project", "--no-wandb"} if runner.wandb else set()
+            wanted |= {"--sampling-profile"} if runner.sampling_profile else set()
+            wanted |= {"--api-model-name"} if runner.api_model_name else set()
+            for flag in sorted(wanted):
+                self.assertRegex(text, rf"(?m)^\s*(?:--[a-z-]+\|)*{flag}[|)]", f"{framework} does not parse {flag}")
+
+    def test_results_dir_holds_results_and_slurm_files(self):
         suite = suites.load(SUITE)
+        root = suite["results_dir"]
+        for row in suites.commands(suite, {"chonk-lc-16k-v0.2-sft": "chonk"}, helper_url=JUDGE_BASE):
+            argv = row["argv"]
+            if row["framework"] == "lm_eval":
+                self.assertEqual(argv[argv.index("--logs-root") + 1], f"{root}/lm_eval")
+                continue
+            self.assertIn(f"--output={root}/slurm/%x_%j.out", argv)
+            self.assertIn(f"--error={root}/slurm/%x_%j.err", argv)
+            self.assertTrue(argv[argv.index("--out-dir") + 1].startswith(f"{root}/{row['framework']}/chonk/"))
+
+    def test_bfcl_rows_run_the_custom_runner(self):
+        suite = without_results_dir(suites.load(SUITE))
         rows = {r["label"]: r["argv"] for r in suites.commands(
             suite, {"chonk-lc-16k-v0.2-sft": "chonk"}, api_base_url="http://x/v1", limit=2, qos="highprio", helper_url=JUDGE_BASE)}
         for label, version in (("BFCL v3", "v3"), ("BFCL v4", "v4")):
@@ -310,14 +342,13 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(argv[argv.index("--version") + 1], version)
             self.assertEqual(argv[argv.index("--model") + 1], "chonk")
             self.assertEqual(argv[argv.index("--api-base-url") + 1], "http://x/v1")
-            self.assertEqual(argv[argv.index("--num-tasks") + 1], "2")
+            self.assertEqual(argv[argv.index("--limit") + 1], "2")
             self.assertEqual(argv[argv.index("--sampling-profile") + 1], "thinking")
             self.assertEqual(argv[argv.index("--reasoning-effort") + 1], "high")
             self.assertEqual(argv[argv.index("--wandb-project") + 1], suite["name"])
-            self.assertNotIn("--limit", argv)
 
     def test_run_prints_by_default_and_checks_its_arguments(self):
-        with mock.patch.object(suites.subprocess, "run", side_effect=AssertionError("submitted")), \
+        with mock.patch.object(subprocess, "run", side_effect=AssertionError("submitted")), \
                 mock.patch("sys.stderr", new=io.StringIO()) as err:
             self.assertEqual(suites.main(["run", SUITE, "--model", f"{THINK}=m", "--model", "qwen3-32b-thinking=q", "--helper-url", JUDGE_BASE]), 0)
         self.assertIn("86 launches: 2 models x 43 benchmarks", err.getvalue())

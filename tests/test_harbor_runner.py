@@ -24,35 +24,35 @@ if HAS_OPENSANDBOX:
 class RunArgsTest(unittest.TestCase):
     def test_model_or_gold_required(self):
         with self.assertRaises(SystemExit):
-            run.parse_args(["--benchmark", "swe_bench", "--work-dir", "w", "--sandbox", "docker"])
-        args = run.parse_args(["--benchmark", "swe_bench,terminal_bench_4", "--gold", "--work-dir", "w", "--sandbox", "k8s"])
+            run.parse_args(["--benchmark", "swe_bench", "--out-dir", "w", "--sandbox", "docker"])
+        args = run.parse_args(["--benchmark", "swe_bench,terminal_bench_4", "--gold", "--out-dir", "w", "--sandbox", "k8s"])
         self.assertEqual(args.benchmarks, ["swe_bench", "terminal_bench_4"])
 
     def test_unknown_benchmark(self):
         with self.assertRaises(SystemExit):
-            run.parse_args(["--benchmark", "swe_bench_v2", "--gold", "--work-dir", "w", "--sandbox", "docker"])
+            run.parse_args(["--benchmark", "swe_bench_v2", "--gold", "--out-dir", "w", "--sandbox", "docker"])
 
     def test_wildcard_allowlist_benchmarks_refuse_k8s(self):
         for name in ("senior_swe_bench",):
             with self.assertRaises(SystemExit):
-                run.parse_args(["--benchmark", name, "--gold", "--work-dir", "w", "--sandbox", "k8s"])
-            run.parse_args(["--benchmark", name, "--gold", "--work-dir", "w", "--sandbox", "docker"])
+                run.parse_args(["--benchmark", name, "--gold", "--out-dir", "w", "--sandbox", "k8s"])
+            run.parse_args(["--benchmark", name, "--gold", "--out-dir", "w", "--sandbox", "docker"])
             with mock.patch.dict(os.environ, {"OPENSANDBOX_API_KEY": "k"}):
-                run.parse_args(["--benchmark", name, "--gold", "--work-dir", "w", "--sandbox", "opensandbox"])
+                run.parse_args(["--benchmark", name, "--gold", "--out-dir", "w", "--sandbox", "opensandbox"])
 
     def test_senior_swe_bench_model_runs_need_a_grader_key(self):
-        model = ["--benchmark", "senior_swe_bench", "--model", "m", "--api-base-url", "u", "--work-dir", "w", "--sandbox", "docker"]
+        model = ["--benchmark", "senior_swe_bench", "--model", "m", "--api-base-url", "u", "--out-dir", "w", "--sandbox", "docker"]
         with mock.patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
                 run.parse_args(model)
             # --gold checks environments and tests, without the judges.
-            run.parse_args(["--benchmark", "senior_swe_bench", "--gold", "--work-dir", "w", "--sandbox", "docker"])
+            run.parse_args(["--benchmark", "senior_swe_bench", "--gold", "--out-dir", "w", "--sandbox", "docker"])
         for key in ("ANTHROPIC_API_KEY", "PORTKEY_API_KEY"):
             with mock.patch.dict(os.environ, {key: "k"}, clear=True):
                 run.parse_args(model)
 
     def test_model_tunnel_is_for_in_sandbox_agents_on_opensandbox(self):
-        base = ["--benchmark", "swe_bench", "--model", "m", "--api-base-url", "http://10.0.0.5:8080/v1", "--work-dir", "w",
+        base = ["--benchmark", "swe_bench", "--model", "m", "--api-base-url", "http://10.0.0.5:8080/v1", "--out-dir", "w",
                 "--chisel-dir", "/c"]
         with mock.patch.dict(os.environ, {"OPENSANDBOX_API_KEY": "k"}):
             for bad in (["--sandbox", "opensandbox", "--model-tunnel"],  # terminus-2 calls the model from the node
@@ -84,7 +84,7 @@ class RunArgsTest(unittest.TestCase):
 class HarborCommandTest(unittest.TestCase):
     def test_model_run_on_k8s(self):
         args = run.parse_args(
-            ["--benchmark", "terminal_bench_2", "--model", "org/m", "--api-base-url", "https://x/v1", "--work-dir", "w",
+            ["--benchmark", "terminal_bench_2", "--model", "org/m", "--api-base-url", "https://x/v1", "--out-dir", "w",
              "--sandbox", "k8s", "--limit", "2", "--task", "fix-*", "--agent-kwarg", "temperature=0"]
         )
         cmd = run.harbor_command(args, "terminal_bench_2", Path("w/jobs"))
@@ -95,7 +95,7 @@ class HarborCommandTest(unittest.TestCase):
 
     def _aks(self, *extra):
         args = run.parse_args(
-            ["--benchmark", "terminal_bench_2", "--model", "org/m", "--api-base-url", "https://x/v1", "--work-dir", "w",
+            ["--benchmark", "terminal_bench_2", "--model", "org/m", "--api-base-url", "https://x/v1", "--out-dir", "w",
              "--sandbox", "k8s", *extra]
         )
         cmd = run.harbor_command(args, "terminal_bench_2", Path("w/jobs"))
@@ -120,13 +120,13 @@ class HarborCommandTest(unittest.TestCase):
 
     def test_other_agents_and_gold_runs_take_no_sampling(self):
         args = run.parse_args(
-            ["--benchmark", "terminal_bench_2", "--model", "m", "--api-base-url", "https://x/v1", "--work-dir", "w",
+            ["--benchmark", "terminal_bench_2", "--model", "m", "--api-base-url", "https://x/v1", "--out-dir", "w",
              "--sandbox", "k8s", "--agent", "mini-swe-agent"]
         )
         self.assertEqual(run.agent_kwargs(args), [])
         for extra in (["--agent", "mini-swe-agent", "--temperature", "0.5"], ["--gold", "--temperature", "0.5"]):
             args = run.parse_args(["--benchmark", "terminal_bench_2", "--model", "m", "--api-base-url", "https://x/v1",
-                                   "--work-dir", "w", "--sandbox", "k8s", *extra])
+                                   "--out-dir", "w", "--sandbox", "k8s", *extra])
             with self.assertRaises(SystemExit):
                 run.agent_kwargs(args)
 
@@ -135,7 +135,7 @@ class HarborCommandTest(unittest.TestCase):
             self._aks("--top-p", "7")
 
     def test_gold_on_docker(self):
-        args = run.parse_args(["--benchmark", "terminal_bench_2", "--gold", "--work-dir", "w", "--sandbox", "docker"])
+        args = run.parse_args(["--benchmark", "terminal_bench_2", "--gold", "--out-dir", "w", "--sandbox", "docker"])
         cmd = run.harbor_command(args, "terminal_bench_2", Path("w/jobs"))
         self.assertIn("oracle", cmd)
         self.assertEqual(cmd[cmd.index("--env") + 1], run.DOCKER_ENVIRONMENT)
@@ -147,7 +147,7 @@ class HarborCommandTest(unittest.TestCase):
                 Path(cmd[cmd.index("--output-dir") + 1], f"task-{i}").mkdir(parents=True, exist_ok=True)
 
         with tempfile.TemporaryDirectory() as w:
-            args = run.parse_args(["--benchmark", "multi_swe_bench", "--gold", "--work-dir", w, "--sandbox", "docker", "--limit", "3"])
+            args = run.parse_args(["--benchmark", "multi_swe_bench", "--gold", "--out-dir", w, "--sandbox", "docker", "--limit", "3"])
             with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(run.subprocess, "run", side_effect=generate_all) as sub, \
                     mock.patch.object(run, "download_dataset", return_value=Path("/hf/msb")) as download:
                 cmd = run.harbor_command(args, "multi_swe_bench", Path(w, "jobs"))
@@ -180,7 +180,7 @@ class HarborCommandTest(unittest.TestCase):
             self.assertEqual(len(list(Path(w).iterdir())), 3)  # ceil(2.5)
 
     def test_limit_values(self):
-        base = ["--benchmark", "terminal_bench_2", "--gold", "--work-dir", "w", "--sandbox", "docker"]
+        base = ["--benchmark", "terminal_bench_2", "--gold", "--out-dir", "w", "--sandbox", "docker"]
         self.assertEqual(run.parse_args(base + ["--limit", "3"]).limit, 3)
         self.assertEqual(run.parse_args(base + ["--limit", "0.5"]).limit, 0.5)
         for bad in (["--limit", "0"], ["--limit", "2.5"], ["--limit", "0.5", "--task", "x"]):
@@ -193,7 +193,7 @@ class HarborCommandTest(unittest.TestCase):
                 Path(cmd[cmd.index("-o") + 1], "terminal-bench", f"t{i}").mkdir(parents=True, exist_ok=True)
 
         with tempfile.TemporaryDirectory() as w:
-            args = run.parse_args(["--benchmark", "terminal_bench_2", "--gold", "--work-dir", w, "--sandbox", "docker", "--limit", "4"])
+            args = run.parse_args(["--benchmark", "terminal_bench_2", "--gold", "--out-dir", w, "--sandbox", "docker", "--limit", "4"])
             with mock.patch.object(run.subprocess, "run", side_effect=download):
                 cmd = run.harbor_command(args, "terminal_bench_2", Path(w, "jobs"))
             tasks = Path(cmd[cmd.index("-p") + 1])
@@ -207,7 +207,7 @@ class HarborCommandTest(unittest.TestCase):
 
         patch = mock.Mock()
         with tempfile.TemporaryDirectory() as w:
-            args = run.parse_args(["--benchmark", "aider_polyglot", "--gold", "--work-dir", w, "--sandbox", "docker",
+            args = run.parse_args(["--benchmark", "aider_polyglot", "--gold", "--out-dir", w, "--sandbox", "docker",
                                    "--task", "polyglot_rust_*"])
             with mock.patch.object(run.subprocess, "run", side_effect=download) as sub, \
                     mock.patch.dict(run.BENCHMARKS["aider_polyglot"], patch_tasks=patch):
@@ -227,7 +227,7 @@ class HarborCommandTest(unittest.TestCase):
         for name in ("swe_bench", "swe_bench_pro"):
             self.assertEqual(run.BENCHMARKS[name]["agent_allowlist"], "swe_bench")
         with tempfile.TemporaryDirectory() as w:
-            args = run.parse_args(["--benchmark", "swe_bench", "--gold", "--work-dir", w, "--sandbox", "docker"])
+            args = run.parse_args(["--benchmark", "swe_bench", "--gold", "--out-dir", w, "--sandbox", "docker"])
             self.assertEqual(args.agent_network, "allowlist")
             self.assertEqual([p.__name__ for p in run.task_patches(args, "swe_bench")], ["patch_agent_egress"])
             with mock.patch.object(run.subprocess, "run", side_effect=download), \
@@ -237,7 +237,7 @@ class HarborCommandTest(unittest.TestCase):
             make.assert_called_with("swe_bench")
             egress.assert_called_once_with(Path(w, "tasks", "swe_bench", "swebench-verified"))
             self.assertNotIn("-d", cmd)
-            public = run.parse_args(["--benchmark", "swe_bench", "--gold", "--work-dir", w, "--sandbox", "docker",
+            public = run.parse_args(["--benchmark", "swe_bench", "--gold", "--out-dir", w, "--sandbox", "docker",
                                      "--agent-network", "public"])
             self.assertEqual(run.task_patches(public, "swe_bench"), [])
             cmd = run.harbor_command(public, "swe_bench", Path(w, "jobs"))
@@ -257,7 +257,7 @@ class HarborCommandTest(unittest.TestCase):
                     run.adapter_command("other-adapter")
 
     def test_model_env(self):
-        args = run.parse_args(["--benchmark", "swe_bench", "--model", "m", "--api-base-url", "https://x/v1", "--work-dir", "w",
+        args = run.parse_args(["--benchmark", "swe_bench", "--model", "m", "--api-base-url", "https://x/v1", "--out-dir", "w",
                                "--sandbox", "docker"])
         with mock.patch.dict(os.environ, {"EVAL_MODEL_API_KEY": "k"}, clear=True), mock.patch.object(run.platform, "machine", return_value="arm64"):
             env = run.harbor_env(args)
@@ -419,7 +419,7 @@ class MainTest(unittest.TestCase):
             timer = threading.Timer(1.0, os.kill, (os.getpid(), signal.SIGTERM))
             timer.start()
             try:
-                code = run.main(["--benchmark", "swe_bench,terminal_bench_2,deep_swe", "--gold", "--work-dir", d,
+                code = run.main(["--benchmark", "swe_bench,terminal_bench_2,deep_swe", "--gold", "--out-dir", d,
                                  "--sandbox", "docker"])
             finally:
                 timer.cancel()
@@ -629,7 +629,7 @@ class DockerfileReplayTest(unittest.TestCase):
 
 
 class OpenSandboxRunTest(unittest.TestCase):
-    ARGS = ["--benchmark", "terminal_bench_2", "--gold", "--work-dir", "w", "--sandbox", "opensandbox"]
+    ARGS = ["--benchmark", "terminal_bench_2", "--gold", "--out-dir", "w", "--sandbox", "opensandbox"]
 
     def test_needs_an_api_key(self):
         with mock.patch.dict(os.environ, {"OPENSANDBOX_API_KEY": ""}), self.assertRaises(SystemExit):
@@ -661,7 +661,7 @@ class OpenSandboxRunTest(unittest.TestCase):
             mock.patch.object(run, "delete_leftover_sandboxes") as delete,
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            work_dir = ["--work-dir", d]
+            work_dir = ["--out-dir", d]
             code = run.main([*self.ARGS, *work_dir])
             summary = json.loads((Path(d) / "summary.json").read_text())
         self.assertEqual(code, 0)

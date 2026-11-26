@@ -20,13 +20,13 @@
 #                               scripts/secrets.env, as in run_inspect_eval.sh).
 #
 # Options:
-#   --workdir <path>           Results (<workdir>/result), scores (<workdir>/score) and summary.json
+#   --out-dir <path>           Results (<workdir>/result), scores (<workdir>/score) and summary.json
 #                               (default: logs/bfcl/<model>-<version>). Rerunning with the same workdir resumes:
 #                               bfcl-eval skips the entries it already has.
 #   --num-threads <n>          Parallel requests (default: 32).
 #   --request-timeout <s>      Seconds per request (default: 3600; the OpenAI SDK's own 600 cuts off a few long
 #                               thinking answers per run).
-#   --num-tasks <n>            Only the first n entries of each category (a smoke test); scores then cover
+#   --limit <n>            Only the first n entries of each category (a smoke test); scores then cover
 #                               that subset and are not the leaderboard's.
 #   --test-category <name>     Replace the version's categories (repeatable; bfcl-eval's names or groups).
 #   --temperature V, --top-p V, --top-k V, --min-p V, --repetition-penalty V
@@ -49,7 +49,7 @@
 #
 # Example (smoke test against a CSCS-served model):
 #   scripts/custom/run_bfcl.sh --version v3 --model CSCS-Inference/swiss-ai/Apertus-v1.5-8B \
-#     --api-base-url https://api.swissai.svc.cscs.ch/v1 --num-tasks 2
+#     --api-base-url https://api.swissai.svc.cscs.ch/v1 --limit 2
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
@@ -78,10 +78,10 @@ while (( $# > 0 )); do
         --version) VERSION=$2; shift 2 ;;
         --model) MODEL=$2; shift 2 ;;
         --api-base-url) API_BASE_URL=$2; shift 2 ;;
-        --workdir) WORKDIR=$2; shift 2 ;;
+        --out-dir) WORKDIR=$2; shift 2 ;;
         --num-threads) NUM_THREADS=$2; shift 2 ;;
         --request-timeout) REQUEST_TIMEOUT=$2; shift 2 ;;
-        --num-tasks) NUM_TASKS=$2; shift 2 ;;
+        --limit) NUM_TASKS=$2; shift 2 ;;
         --test-category) CATEGORY_ARGS+=(--test-category "$2"); shift 2 ;;
         --temperature|--top-p|--top-k|--min-p|--repetition-penalty)
             SAMPLING_ARGS+=("$1" "$2"); shift 2 ;;
@@ -145,13 +145,13 @@ else
     locked_venv requirements/bfcl-runtime.lock 3.11 requirements/bfcl-eval.txt || die "Installing requirements/bfcl-runtime.lock failed."
 fi
 
-ARGS=(--version "$VERSION" --model "$MODEL" --api-base-url "$API_BASE_URL" --workdir "$WORKDIR"
+ARGS=(--version "$VERSION" --model "$MODEL" --api-base-url "$API_BASE_URL" --out-dir "$WORKDIR"
       --llm-args "$LLM_ARGS" --num-threads "$NUM_THREADS" --request-timeout "$REQUEST_TIMEOUT")
-[[ -z "$NUM_TASKS" ]] || ARGS+=(--num-tasks "$NUM_TASKS")
+[[ -z "$NUM_TASKS" ]] || ARGS+=(--limit "$NUM_TASKS")
 (( ${#CATEGORY_ARGS[@]} == 0 )) || ARGS+=("${CATEGORY_ARGS[@]}")
 
 echo "+ python -m scripts.custom.bfcl --version $VERSION --model $MODEL --api-base-url $API_BASE_URL" \
-     "--workdir $WORKDIR --num-threads $NUM_THREADS ${NUM_TASKS:+--num-tasks $NUM_TASKS} (llm args not shown)"
+     "--out-dir $WORKDIR --num-threads $NUM_THREADS ${NUM_TASKS:+--limit $NUM_TASKS} (llm args not shown)"
 # Written at the end of the run: one left by an earlier run here must not be taken (and uploaded) for this one's.
 rm -f "$WORKDIR/summary.json"
 PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" "$LOCKED_VENV/bin/python" -m scripts.custom.bfcl "${ARGS[@]}"
@@ -160,5 +160,5 @@ if (( WANDB_UPLOAD )); then
     echo ""
     echo "Uploading results to wandb"
     PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" "$LOCKED_VENV/bin/python" -m scripts.results.update_wandb_bfcl \
-        --entity "$WANDB_ENTITY" --project "$WANDB_PROJECT" --name "$NAME" --work-dir "$WORKDIR"
+        --entity "$WANDB_ENTITY" --project "$WANDB_PROJECT" --name "$NAME" --out-dir "$WORKDIR"
 fi

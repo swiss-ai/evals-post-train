@@ -59,7 +59,7 @@
 #                              .out/.err logs read like lm-eval-harness's; pass `-- --display
 #                              <mode>` to override (e.g. --display none).
 #   --name <name>              Run name, used for the log directory (default: derived from --model).
-#   --logs-dir <path>          Where Inspect writes .eval log files (default: logs/inspect/<name>).
+#   --out-dir <path>          Where Inspect writes .eval log files (default: logs/inspect/<name>).
 #   --sandbox <type>           Override the tasks' sandbox (Inspect's --sandbox): docker, local or
 #                              opensandbox. opensandbox runs each sample's sandbox as a Kata
 #                              microVM through an OpenSandbox server
@@ -109,7 +109,7 @@
 #   would otherwise hold inspect-evals back.
 #
 # Results are NOT viewed at https://inspect.aisi.org.uk/ -- that site is Inspect's
-# documentation. Logs land in --logs-dir as .eval files; view them with:
+# documentation. Logs land in --out-dir as .eval files; view them with:
 #   inspect view --log-dir <logs-dir>
 #
 # Example (tau2-bench retail domain, smoke test):
@@ -155,7 +155,7 @@ while (( $# > 0 )); do
         --task-arg) TASK_ARGS+=("$2"); shift 2 ;;
         --limit) LIMIT=$2; shift 2 ;;
         --eval-set) EVAL_SET=1; shift ;;
-        --logs-dir) LOGS_DIR=$2; shift 2 ;;
+        --out-dir) LOGS_DIR=$2; shift 2 ;;
         --sandbox) SANDBOX=$2; shift 2 ;;
         --api-base-url) API_BASE_URL=$2; shift 2 ;;
         --wandb-entity) WANDB_ENTITY=$2; shift 2 ;;
