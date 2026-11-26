@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from scripts.common import suites
+from scripts.common.suites import REPO_ROOT
 
 SUITE = "apertus2/chonk_sft"
 THINK = "apertus-1.5-70b-thinking"
@@ -150,6 +151,12 @@ class SuiteTests(unittest.TestCase):
         self.assertTrue(Path(launch["environment"]).is_file())  # the EDF it names ships in this repo
         self.assertIn("--data-parallel-backend ray", launch["framework_args"])
         self.assertTrue(launch["framework_args"].endswith("--tool-call-parser apertus2"))  # the setup's serving
+        # The plugin the server needs comes from the pin lm-eval uses, not from the launcher's caller.
+        pin = next(l for l in (REPO_ROOT / "requirements/apertus2.txt").read_text().splitlines() if l.startswith("apertus-common"))
+        self.assertEqual(launch["pre_launch_cmds"], suites.install_command(["requirements/apertus2.txt"]))
+        self.assertIn(pin.split("@ ", 1)[1], launch["pre_launch_cmds"])
+        self.assertIn("--no-deps --force-reinstall", launch["pre_launch_cmds"])
+        self.assertEqual(suites.launch_for(suite, THINK)["pre_launch_cmds"], "")  # no install named
         with self.assertRaisesRegex(ValueError, "no launch block"):
             suites.launch_for(suite, "apertus-1.5-8b-thinking")
         launch = suites.launch_for(suite, THINK)
@@ -168,6 +175,9 @@ class SuiteTests(unittest.TestCase):
             (lambda launch: launch.update(env={"A B": "1"}), "launch.env"),
             (lambda launch: launch.update(env={"A": 1}), "launch.env"),
             (lambda launch: launch.update(extra=1), "launch must be an object"),
+            (lambda launch: launch.update(install="requirements/apertus2.txt"), "launch.install"),
+            (lambda launch: launch.update(install=["requirements/nope.txt"]), "directly in requirements/"),
+            (lambda launch: launch.update(install=["../x.txt"]), "directly in requirements/"),
         ):
             suite = copy.deepcopy(base)
             mutate(suite["setups"]["chonk-lc-16k-v0.2-sft"]["launch"])

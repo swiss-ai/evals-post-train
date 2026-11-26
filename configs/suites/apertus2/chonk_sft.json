@@ -219,6 +219,7 @@
       "launch": {
         "model_path": "/capstor/store/cscs/swissai/infra01/hf-checkpoints/swiss-ai/chonk-lc-16k-v0.2-sft",
         "environment": "containers/env_vllm_apertus2.toml",
+        "install": ["requirements/apertus2.txt"],
         "nodes": 2,
         "time": "24:00:00",
         "env": {"VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1"},
@@ -242,6 +243,7 @@
       "launch": {
         "model_path": "/capstor/store/cscs/swissai/infra01/hf-checkpoints/chonk-lc-16k-v0.1-ep1/iter_0019374",
         "environment": "containers/env_vllm_apertus2.toml",
+        "install": ["requirements/apertus2.txt"],
         "nodes": 2,
         "time": "24:00:00",
         "env": {"VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1"},

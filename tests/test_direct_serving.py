@@ -331,6 +331,13 @@ class MainTests(unittest.TestCase):
 
         self.assertIn("echo prepare-the-node", script)
 
+    def test_a_setups_install_is_run_on_the_serving_nodes_before_the_users_commands(self) -> None:
+        script = self._render_main(self._suite_argv("--pre-launch-cmds", "echo prepare-the-node"))
+
+        install = "pip install -q --no-deps --force-reinstall --ignore-requires-python 'apertus-common @ git+"
+        self.assertIn(install, script)
+        self.assertLess(script.index(install), script.index("echo prepare-the-node"))
+
     def test_every_serving_node_gets_a_ray_temp_dir_of_its_own_job(self) -> None:
         script = self._render_main(self._suite_argv("--pre-launch-cmds", "echo prepare-the-node"))
 
@@ -343,7 +350,9 @@ class MainTests(unittest.TestCase):
                 "--eval-image-commit", "abc123", "--eval", "echo hi", "--pre-launch-cmds", "echo prepare-the-node"]  # fmt: skip
         script = self._render_main(argv)
 
-        self.assertIn("export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1; echo prepare-the-node", script)
+        # env first, then the setup's install, then the user's own commands
+        self.assertIn("export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1; pip install -q --no-deps", script)
+        self.assertIn("; echo prepare-the-node", script)
         self.assertIn("--max-model-len 262144", script)
 
     def test_suite_and_setup_go_together_and_a_model_is_needed_without_them(self) -> None:
