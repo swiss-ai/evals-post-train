@@ -78,6 +78,10 @@ class RunArgsTest(unittest.TestCase):
             own = run.parse_args(base + ["--sandbox", "opensandbox", "--model-tunnel", "--agent", "openhands",
                                          "--agent-kwarg", "api_base=http://x/v1"])
             self.assertEqual([k for k in run.agent_kwargs(own) if k.startswith("api_base")], ["api_base=http://x/v1"])
+            # opencode takes the endpoint from OPENAI_BASE_URL and rejects an api_base kwarg
+            oc = run.parse_args(base + ["--sandbox", "opensandbox", "--model-tunnel", "--agent", "opencode"])
+            self.assertEqual(run.agent_kwargs(oc), [])
+            self.assertEqual(run.harbor_env(oc)["OPENAI_BASE_URL"], "http://127.0.0.1:8000/v1")
             plain = run.parse_args(base[:-2] + ["--sandbox", "opensandbox"])
             self.assertNotIn("HARBOR_MODEL_TUNNEL_TARGET", run.harbor_env(plain))
             self.assertEqual(run.harbor_env(plain)["OPENAI_BASE_URL"], "http://10.0.0.5:8080/v1")

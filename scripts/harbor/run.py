@@ -307,10 +307,19 @@ def tunnel_base_url() -> str:
     return f"http://127.0.0.1:{DEFAULT_POD_PORT}/v1"
 
 
+# In-sandbox agents that take the endpoint from OPENAI_BASE_URL (harbor_env sets it) and reject an
+# api_base kwarg ("Unknown option 'api_base'").
+AGENTS_WITHOUT_API_BASE_KWARG = ("opencode",)
+
+
 def tunnel_agent_kwargs(args: argparse.Namespace, kwargs: List[str]) -> List[str]:
     """With --model-tunnel the agent in the sandbox calls the model at the tunnel's end, unless the
-    user's own --agent-kwarg names an api_base."""
-    if args.model_tunnel and not any(kv.startswith("api_base=") for kv in kwargs):
+    user's own --agent-kwarg names an api_base (or the agent takes its endpoint from the environment)."""
+    if (
+        args.model_tunnel
+        and args.agent not in AGENTS_WITHOUT_API_BASE_KWARG
+        and not any(kv.startswith("api_base=") for kv in kwargs)
+    ):
         return kwargs + [f"api_base={tunnel_base_url()}"]
     return kwargs
 
