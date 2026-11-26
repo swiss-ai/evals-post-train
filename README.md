@@ -49,6 +49,13 @@ Every evaluation needs a served model. Either use one that is already deployed, 
 
 A model already behind an OpenAI-compatible endpoint, here the CSCS serving API (`https://api.swissai.svc.cscs.ch/v1`; a server you started yourself works the same, passed by its own URL). Nothing is launched: the commands only send requests. The CSCS serving key is read from `scripts/secrets.env` (see [Credentials](#credentials)).
 
+A personal key from [ui.inference.cscs.ch](https://ui.inference.cscs.ch) works against the CSCS inference API, `https://api.inference.cscs.ch/v1` (model ids like `swiss-ai/Apertus-v1.5-70B-thinking`, see `GET /v1/models`), not against the URL above. The scripts do not read `CSCS_SERVING_API_PERSONAL` themselves; pass it as `TARGET_API_KEY`, e.g. for Inspect (the lm-eval launcher takes it from `CSCS_SERVING_API`):
+
+```bash
+TARGET_API_KEY="$CSCS_SERVING_API_PERSONAL" scripts/inspect_ai/run_inspect_eval.sh --task gsm8k \
+  --model swiss-ai/Apertus-v1.5-70B-thinking --api-base-url https://api.inference.cscs.ch/v1 --limit 5 --no-wandb
+```
+
 **lm-evaluation-harness**: GSM8K with chain of thought, 5 samples. `--model` is also the tokenizer's name, so it must be a Hugging Face name or a path; `--api-model-name` is the name the endpoint serves the model under.
 
 ```bash
